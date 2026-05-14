@@ -1,0 +1,100 @@
+{
+  "type": "object",
+  "required": [
+    "session_id",
+    "date",
+    "source_agent",
+    "project",
+    "user_intent",
+    "summary",
+    "reusable_facts",
+    "decisions",
+    "files_touched",
+    "commands_and_tools",
+    "problems",
+    "final_state",
+    "unresolved_tasks",
+    "tags",
+    "redaction_notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": { "type": "string" },
+    "date": { "type": "string" },
+    "source_agent": { "type": "string" },
+    "project": { "type": "string" },
+    "repository": { "type": "string" },
+    "user_intent": { "type": "string" },
+    "summary": { "type": "string" },
+    "reusable_facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fact", "scope", "confidence"],
+        "additionalProperties": false,
+        "properties": {
+          "fact": { "type": "string" },
+          "scope": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["decision", "rationale", "alternatives_rejected", "confidence"],
+        "additionalProperties": false,
+        "properties": {
+          "decision": { "type": "string" },
+          "rationale": { "type": "string" },
+          "alternatives_rejected": { "type": "array", "items": { "type": "string" } },
+          "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+        }
+      }
+    },
+    "files_touched": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "action", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "action": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "commands_and_tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "outcome", "relevance"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "outcome": { "type": "string" },
+          "relevance": { "type": "string" }
+        }
+      }
+    },
+    "problems": { "type": "array", "items": { "type": "string" } },
+    "final_state": { "type": "string" },
+    "unresolved_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task", "priority", "suggested_next_action"],
+        "additionalProperties": false,
+        "properties": {
+          "task": { "type": "string" },
+          "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+          "suggested_next_action": { "type": "string" }
+        }
+      }
+    },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "redaction_notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

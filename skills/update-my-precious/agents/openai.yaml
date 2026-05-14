@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update My Precious"
+  short_description: "Archive new agent session records"
+  default_prompt: "Use $update-my-precious to scan recent session records and update the private memory archive."

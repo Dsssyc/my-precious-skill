@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using My Precious"
+  short_description: "Search private agent session archives"
+  default_prompt: "Use $using-my-precious to find relevant prior agent-session context before answering."

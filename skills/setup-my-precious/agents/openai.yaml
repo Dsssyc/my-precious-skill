@@ -1,0 +1,4 @@
+interface:
+  display_name: "Setup My Precious"
+  short_description: "Create private agent memory archives"
+  default_prompt: "Use $setup-my-precious to configure a private agent session memory archive."

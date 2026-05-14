@@ -1,0 +1,25 @@
+# local staging
+.staging/
+.tmp/
+.cache/
+__pycache__/
+*.pyc
+
+# raw transcripts should not be committed by default
+raw/
+*.raw.jsonl
+*.raw.json
+*.unredacted.*
+*.secret.*
+
+# local credentials
+.env
+.env.*
+auth.json
+*.pem
+*.key
+*.p12
+
+# local databases and caches
+memory.sqlite
+memory.sqlite-*

@@ -1,0 +1,108 @@
+# Using My Precious Skill Design
+
+## Purpose
+
+This repository is the development home for reusable agent-session memory
+skills and deployment templates. It should not store real session memories.
+
+The separate deployment repository is responsible for private archive data,
+scheduled ingestion, summarization, indexes, and Git synchronization.
+
+## Repository Boundary
+
+`my-precious-skill` contains:
+
+- the installable `setup-my-precious` setup-path skill
+- the installable `update-my-precious` write-path skill
+- the installable `using-my-precious` read-path skill
+- generic search tooling
+- archive format references
+- deployment-repo templates
+- tests and examples that use synthetic data only
+- reusable utilities and templates that do not contain private memory data
+
+The private deployment repository contains:
+
+- real `sessions/`, `daily/`, and `index/` data
+- ingestion and summarization configuration
+- local scheduling such as launchd or cron
+- Git remotes and credentials managed outside source files
+
+`setup-my-precious` performs runtime setup actions against the private
+deployment repository. It may create a local folder, initialize Git, connect a
+private remote, and prepare scheduling only after a concrete archive command
+exists. It must not run recurring jobs from this development repository.
+
+`update-my-precious` performs on-demand write-path actions against the private
+deployment repository. It scans a source record directory, uses the current
+project path as the high-water-mark key, archives only records newer than the
+latest timestamp already archived for that project, and writes searchable
+summaries plus short redacted evidence snippets.
+
+## Generality
+
+The skills are intentionally agent-neutral. A compatible archive may be
+produced by any runtime that can provide summarized sessions, evidence snippets,
+and JSONL indexes.
+
+## Components
+
+- `skills/using-my-precious/SKILL.md`: tells future agents when and how to
+  search memory.
+- `skills/using-my-precious/scripts/search_memory.py`: dependency-free
+  fallback search script bundled with the skill.
+- `skills/using-my-precious/references/archive-format.md`: stable archive
+  contract for compatible deployment repos.
+- `skills/setup-my-precious/SKILL.md`: asks the user how to store the archive
+  and scaffolds a local or hosted-Git-backed deployment repository.
+- `skills/setup-my-precious/scripts/setup_memory_archive.py`: copies the
+  bundled archive template and optionally initializes Git/remote hosting.
+- `skills/update-my-precious/SKILL.md`: archives new source records for the
+  current project into the deployment repository.
+- `skills/update-my-precious/scripts/update_memory_archive.py`: generic
+  incremental updater keyed by `project_path` and source-record timestamps,
+  with deterministic summary rendering, source maps, daily summaries, JSONL
+  indexes, and default refusal for source records that match secret patterns.
+- `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
+  launchd or cron scheduler configuration without installing it.
+- `templates/agent-memory-repo/`: starter private archive repository layout.
+
+## Environment Contract
+
+Agents locate a deployment repository using these variables in order:
+
+1. `AGENT_SESSION_MEMORY_REPO`
+2. `AGENT_MEMORY_REPO`
+
+If none are set, tools may try `~/repos/agent-memory`.
+
+## Non-Goals
+
+- Do not commit real raw transcripts to this repository.
+- Do not run scheduled archive jobs from this repository.
+- Do not add vector search before JSONL and Markdown search are reliable.
+- Do not store user-specific scheduler config, credentials, or generated memory
+  data in this repository.
+
+## Implementation Phases
+
+1. Build the generic setup, write-path, and read-path skills.
+2. Add a deployment repository template with privacy-first defaults.
+3. Add synthetic tests for setup, update, search, and archive-format assumptions.
+4. Later, implement source-agent-specific archive writers in the deployment
+   repository or as optional adapters.
+
+## Acceptance Criteria
+
+- All skills validate as skills.
+- The search script works against a synthetic archive.
+- The setup script creates a synthetic local archive.
+- The update script archives only source records newer than the latest
+  timestamp for the same project path.
+- The update script generates searchable summaries and refuses likely-secret
+  source records by default.
+- The update script writes `source-map.json`, daily summaries, and JSONL indexes.
+- The template can render scheduler configuration without enabling recurring
+  jobs.
+- The template repository contains no real memory data.
+- The design keeps skill development separate from private deployment.

@@ -1,0 +1,77 @@
+# Using My Precious Archive Format
+
+This reference defines the minimum deployment-repo contract expected by the
+`using-my-precious` skill. The format is intentionally agent-neutral.
+
+## Repository Shape
+
+```text
+agent-memory/
+  AGENTS.md
+  INDEX.md
+  index/
+    sessions.jsonl
+    decisions.jsonl
+    unresolved.jsonl
+    projects.jsonl
+    files.jsonl
+    tags.jsonl
+  sessions/
+    YYYY/MM/DD/<stable-session-directory>/
+      summary.md
+      meta.json
+      evidence.md
+      redactions.md
+      source-map.json
+  daily/
+    YYYY/YYYY-MM-DD.md
+  tools/
+    search_memory.py
+```
+
+## Stable Fields
+
+`index/sessions.jsonl` should contain one JSON object per session:
+
+```json
+{"date":"2026-05-14","session_id":"...","source_agent":"agent","project":"...","title":"...","tags":["..."],"summary_path":"sessions/.../summary.md","evidence_path":"sessions/.../evidence.md","unresolved_count":0}
+```
+
+`index/decisions.jsonl` should contain one JSON object per decision:
+
+```json
+{"date":"2026-05-14","source_agent":"agent","project":"...","decision":"...","rationale":"...","summary_path":"sessions/.../summary.md","confidence":"high"}
+```
+
+`index/unresolved.jsonl` should contain one JSON object per follow-up:
+
+```json
+{"date":"2026-05-14","source_agent":"agent","project":"...","task":"...","priority":"medium","summary_path":"sessions/.../summary.md"}
+```
+
+## Summary Requirements
+
+Each `summary.md` should describe:
+
+- user intent
+- context recovered
+- reusable facts
+- decisions made
+- files and code touched
+- commands and tools used
+- problems encountered
+- final state
+- unresolved tasks
+- search tags
+
+Do not include hidden reasoning chains. Summarize visible interaction, tool
+results, decisions, and final outcomes.
+
+## Privacy Requirements
+
+- Raw transcripts are not part of the default committed archive.
+- Redaction runs before summarization.
+- `redactions.md` records categories and counts, not original secrets.
+- Evidence snippets should be short and only support important claims.
+- Archives may include multiple source agents, but all entries must state
+  `source_agent` when known.
