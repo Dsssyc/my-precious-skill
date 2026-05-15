@@ -37,6 +37,7 @@ The repository includes generic setup, update, search, and scheduler-template to
 
 ```text
 my-precious-skill/
+  AGENTS.md
   README.md
   README.zh-CN.md
   docs/
