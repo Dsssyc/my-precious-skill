@@ -49,6 +49,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertTrue((target / "tools/update_memory_archive.py").exists())
             self.assertTrue((target / "tools/run_memory_updates.py").exists())
             self.assertTrue((target / "tools/render_scheduler.py").exists())
+            self.assertTrue((target / "tools/sync_memory_archive.py").exists())
             self.assertTrue((target / "schemas/session_summary.schema.json").exists())
             self.assertIn("Archive ready:", result.stdout)
             self.assertIn("AGENT_SESSION_MEMORY_REPO", result.stdout)
@@ -310,6 +311,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
                     "launchd",
                     "--schedule",
                     "daily",
+                    "--allow-redacted-secrets",
                     "--output",
                     str(rendered),
                 ],
@@ -322,8 +324,52 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             payload = plistlib.loads(rendered.read_bytes())
             self.assertIn(str((target / "tools/run_memory_updates.py").resolve()), payload["ProgramArguments"])
             self.assertIn(str(source_dir.resolve()), payload["ProgramArguments"])
+            self.assertIn("--allow-redacted-secrets", payload["ProgramArguments"])
             self.assertNotIn("--project-path", payload["ProgramArguments"])
             self.assertNotIn(str((target / "tools/update_memory_archive.py").resolve()), payload["ProgramArguments"])
+
+    def test_render_scheduler_can_render_agent_native_prompt(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            source_dir.mkdir(parents=True)
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(target), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            rendered = root / "agent-native.txt"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(target / "tools/render_scheduler.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--backend",
+                    "agent-native",
+                    "--allow-redacted-secrets",
+                    "--push-after-update",
+                    "--output",
+                    str(rendered),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            prompt = rendered.read_text(encoding="utf-8")
+            self.assertIn("Use exactly one working directory", prompt)
+            self.assertIn(str(target.resolve()), prompt)
+            self.assertIn("--allow-redacted-secrets", prompt)
+            self.assertIn("tools/sync_memory_archive.py --push", prompt)
 
     def test_render_scheduler_refuses_global_schedule_without_runner(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

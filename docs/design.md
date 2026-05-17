@@ -66,10 +66,14 @@ and JSONL indexes.
   with deterministic summary rendering, source maps, daily summaries, JSONL
   indexes, and default refusal for source records that match secret patterns.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
-  launchd or cron scheduler configuration without installing it.
+  launchd or cron scheduler configuration and agent-native automation prompts
+  without installing or enabling them.
 - `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
   bootstraps an empty project registry by scanning source records for project
   paths, then invokes the per-project updater for each enabled project.
+- `templates/agent-memory-repo/tools/sync_memory_archive.py`: safe Git sync
+  helper that stages only generated archive paths and refuses unexpected files
+  or unredacted key-like values.
 - `templates/agent-memory-repo/`: starter private archive repository layout.
 
 ## Scheduling Model
@@ -84,6 +88,10 @@ scheduled work.
 `config/projects.jsonl` is runtime configuration, while `index/projects.jsonl`
 is a generated archive index. Disabled projects in `config/projects.jsonl` must
 remain disabled even if source records still mention them.
+
+Agent-native automations should use exactly one working directory: the private
+deployment repository. Multiple working directories can create multiple
+concurrent automation conversations for the same scheduled job.
 
 ## Environment Contract
 
@@ -139,5 +147,10 @@ If none are set, tools may try `~/repos/agent-memory`.
 - The update script writes `source-map.json`, daily summaries, and JSONL indexes.
 - The template can render global-runner and single-project scheduler
   configuration without enabling recurring jobs.
+- The template can render agent-native automation prompts that use one working
+  directory, run the global updater, verify search, and call the safe Git sync
+  helper.
+- The safe Git sync helper refuses non-archive changes, unredacted key-like
+  values, and whitespace errors before committing or pushing.
 - The template repository contains no real memory data.
 - The design keeps skill development separate from private deployment.

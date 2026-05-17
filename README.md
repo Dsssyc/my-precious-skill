@@ -31,7 +31,7 @@ the agent can use `$using-my-precious` to search a private session memory archiv
 
 `using-my-precious` is the read-path skill. It only requires a deployment repository with stable Markdown summaries and JSONL indexes.
 
-The repository includes generic setup, update, search, and scheduler-template tooling. Source-specific ingestion adapters and repository synchronization still belong in the private deployment repository or optional adapters.
+The repository includes generic setup, update, search, safe Git-sync, and scheduler-template tooling. Source-specific ingestion adapters, credentials, enabled schedules, and private generated data still belong in the private deployment repository or optional adapters.
 
 ## Repository Layout
 
@@ -73,10 +73,12 @@ my-precious-skill/
       tools/update_memory_archive.py
       tools/run_memory_updates.py
       tools/render_scheduler.py
+      tools/sync_memory_archive.py
   tests/
     test_search_memory.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
+    test_sync_memory_archive.py
     test_update_memory_archive.py
 ```
 
@@ -189,12 +191,17 @@ Run a global update from a shared source record directory:
 ```bash
 python ~/repos/agent-memory/tools/run_memory_updates.py \
   --memory-repo ~/repos/agent-memory \
-  --source-dir /path/to/session-records
+  --source-dir /path/to/session-records \
+  --allow-redacted-secrets
 ```
 
 If `config/projects.jsonl` is empty, the runner scans source records for project
 metadata such as `cwd` or `project_path`, registers discovered projects, and
 then updates each enabled project.
+
+`--allow-redacted-secrets` keeps secret detection enabled but permits archive
+entries after recognized secret patterns are redacted. Omit it when a human
+should inspect secret-like source records before anything is written.
 
 Update memory from a source record directory:
 
@@ -251,6 +258,35 @@ python ~/repos/agent-memory/tools/render_scheduler.py \
 Add `--project-path /path/to/project` only when you want one scheduler per
 project instead of the global runner.
 
+Render an agent-native automation prompt:
+
+```bash
+python ~/repos/agent-memory/tools/render_scheduler.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records \
+  --backend agent-native \
+  --allow-redacted-secrets \
+  --push-after-update \
+  --output ~/repos/agent-memory/.tmp/agent-native-update.txt
+```
+
+Agent-native automations should use the deployment repository as their only
+working directory. Multiple working directories can create multiple concurrent
+automation conversations.
+
+Safely commit and push generated archive updates:
+
+```bash
+python ~/repos/agent-memory/tools/sync_memory_archive.py \
+  --memory-repo ~/repos/agent-memory \
+  --push
+```
+
+The sync helper only stages archive paths (`INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, and `sessions/`). It refuses
+tool/script edits, unredacted key-like values, and whitespace errors before
+committing.
+
 ## Archive Contract
 
 A compatible deployment repository should expose:
@@ -283,6 +319,8 @@ skills/using-my-precious/references/archive-format.md
 - Optional project-metadata requirement for shared source record directories.
 - Global update runner that bootstraps an empty project registry from source records.
 - Reviewable scheduler template generator for launchd and cron formats.
+- Agent-native automation prompt rendering with a single working directory.
+- Safe Git sync helper for generated archive updates.
 - Private deployment repository template.
 - Synthetic setup, update, global-runner, and search tests.
 
@@ -295,7 +333,7 @@ This repository should provide reusable, non-private building blocks:
 - deployment repository templates
 - generic search tools
 - reusable setup helpers
-- reusable archive pipeline components such as redaction, rendering, indexing, validation, global update running, scheduler-template generation, and source-adapter interfaces
+- reusable archive pipeline components such as redaction, rendering, indexing, validation, global update running, safe Git sync, scheduler-template generation, and source-adapter interfaces
 
 `$setup-my-precious` should perform runtime setup actions after asking the user:
 
@@ -306,7 +344,7 @@ This repository should provide reusable, non-private building blocks:
 - initialize Git when requested
 - write the archive location to `~/.config/my-precious/config.json`
 - report an optional `AGENT_SESSION_MEMORY_REPO` current-shell override
-- optionally configure a recurring archive job, but only after a concrete archive command exists in the deployment repository
+- optionally configure a recurring archive job, but only after concrete archive and sync commands exist in the deployment repository
 
 The private deployment repository should contain user-specific state and operations:
 
@@ -341,7 +379,8 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/search_memory.py \
-  templates/agent-memory-repo/tools/render_scheduler.py
+  templates/agent-memory-repo/tools/render_scheduler.py \
+  templates/agent-memory-repo/tools/sync_memory_archive.py
 ```
 
 ## Security Boundary

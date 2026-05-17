@@ -80,7 +80,14 @@ The updater should:
    python "$MEMORY_REPO/tools/search_memory.py" "<project or topic query>"
    ```
 
-8. If the deployment repository is Git-backed, show the diff and ask before committing or pushing unless the user already requested that.
+8. If the deployment repository is Git-backed, show the diff and ask before committing or pushing unless the user already requested that. If automatic commit/push was requested and the deployment repository includes it, run:
+
+   ```bash
+   python "$MEMORY_REPO/tools/sync_memory_archive.py" --push
+   ```
+
+   This helper should stage only generated archive paths and refuse tool/script
+   edits, unredacted key-like values, or whitespace errors.
 
 ## Privacy Rules
 

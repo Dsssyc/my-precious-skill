@@ -246,6 +246,7 @@ def run_project_update(
     dry_run: bool,
     max_records: int | None,
     patterns: tuple[str, ...],
+    allow_redacted_secrets: bool,
 ) -> int:
     project_path = str(project["project_path"])
     source_dir = Path(str(project.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -267,6 +268,8 @@ def run_project_update(
         command.extend(["--max-records", str(max_records)])
     for pattern in patterns:
         command.extend(["--pattern", pattern])
+    if allow_redacted_secrets:
+        command.append("--allow-redacted-secrets")
     if dry_run:
         command.append("--dry-run")
 
@@ -285,6 +288,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-dir", required=True, help="Shared source record directory to scan")
     parser.add_argument("--pattern", action="append", help="Discovery glob pattern; may be repeated")
     parser.add_argument("--max-records", type=int, help="Maximum records to archive per project")
+    parser.add_argument(
+        "--allow-redacted-secrets",
+        action="store_true",
+        help="Allow per-project updates to archive records with detected secrets after redaction",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Discover and run project updates without writing records")
     return parser.parse_args(argv)
 
@@ -316,7 +324,15 @@ def main(argv: list[str] | None = None) -> int:
     failures = 0
     updated = 0
     for project in runnable:
-        returncode = run_project_update(memory_repo, project, source_dir, args.dry_run, args.max_records, patterns)
+        returncode = run_project_update(
+            memory_repo,
+            project,
+            source_dir,
+            args.dry_run,
+            args.max_records,
+            patterns,
+            args.allow_redacted_secrets,
+        )
         if returncode:
             failures += 1
         else:

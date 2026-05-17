@@ -87,7 +87,8 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/search_memory.py \
-  templates/agent-memory-repo/tools/render_scheduler.py
+  templates/agent-memory-repo/tools/render_scheduler.py \
+  templates/agent-memory-repo/tools/sync_memory_archive.py
 ```
 
 Remove generated caches before committing:

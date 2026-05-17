@@ -22,7 +22,8 @@ Run the global updater against a shared source record directory:
 
 ```bash
 python tools/run_memory_updates.py \
-  --source-dir /path/to/session-records
+  --source-dir /path/to/session-records \
+  --allow-redacted-secrets
 ```
 
 The global updater reads `config/projects.jsonl`, scans the source directory
@@ -44,6 +45,10 @@ source records newer than the latest timestamp already archived for that
 project. It prefers timestamps embedded in source records, then timestamps in
 file names, and finally file modification time.
 
+`--allow-redacted-secrets` keeps secret detection enabled but allows records to
+be archived after recognized patterns have been redacted. Omit it when a human
+should inspect secret-like source records before any archive entry is written.
+
 If `source-dir` contains records from multiple projects, add
 `--require-project-metadata` so records without explicit project path metadata
 are skipped.
@@ -63,6 +68,34 @@ python tools/render_scheduler.py \
 Omit `--project-path` for the global runner. Add `--project-path` only when
 rendering a scheduler for one specific project.
 
+Render an agent-native automation prompt with a single working directory:
+
+```bash
+python tools/render_scheduler.py \
+  --source-dir /path/to/session-records \
+  --backend agent-native \
+  --allow-redacted-secrets \
+  --push-after-update \
+  --output .tmp/agent-native-update.txt
+```
+
+Agent-native automation should use the memory repository as its only working
+directory. Multiple working directories may create multiple concurrent
+automation conversations.
+
+## Safe Git Sync
+
+After an update, commit and optionally push generated archive changes:
+
+```bash
+python tools/sync_memory_archive.py --push
+```
+
+The sync helper refuses to proceed when non-archive paths changed, when
+generated archive files still contain recognized key-like values, or when
+`git diff --cached --check` fails. Expected archive paths are limited to
+`INDEX.md`, `config/projects.jsonl`, `index/`, `daily/`, and `sessions/`.
+
 ## Archive Data
 
 Expected generated data:
@@ -80,5 +113,6 @@ Expected generated data:
 - Raw transcripts are not committed by default.
 - Source records matching secret patterns are refused by default.
 - Redaction runs before summarization and evidence rendering.
+- Git sync refuses tool/script changes and unredacted key-like values.
 - Credentials must never be committed.
 - Keep this repository private.

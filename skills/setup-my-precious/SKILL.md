@@ -101,6 +101,20 @@ Ask only what is needed, one step at a time:
 
    This renders a global runner by default. Add `--project-path "$PROJECT_PATH"`
    only for a single-project schedule.
+   For agent-native recurring tasks, render a prompt instead:
+
+   ```bash
+   python "$MEMORY_REPO/tools/render_scheduler.py" \
+     --source-dir "$SOURCE_RECORD_DIR" \
+     --backend agent-native \
+     --allow-redacted-secrets \
+     --push-after-update \
+     --output "$MEMORY_REPO/.tmp/agent-native-update.txt"
+   ```
+
+   Agent-native recurring tasks should use the deployment repository as their
+   only working directory. Do not configure multiple working directories for
+   one recurring memory update.
 
    Install or enable scheduler configuration only with explicit user approval.
 
@@ -114,6 +128,8 @@ Ask only what is needed, one step at a time:
   project metadata.
 - Prefer generating a reviewable scheduler file or command before loading/enabling it.
 - Use `tools/render_scheduler.py` when the deployment repository includes it.
+- Use `tools/sync_memory_archive.py --push` for requested automatic Git upload
+  instead of hand-staging files in automation prompts.
 - Logs should go outside the skill development repository.
 - Do not place credentials in scheduler files; rely on the user's existing environment or credential helper.
 
@@ -133,7 +149,7 @@ Ask only what is needed, one step at a time:
 A successful setup leaves the user with:
 
 - a local archive directory
-- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/run_memory_updates.py`, and `tools/render_scheduler.py`
+- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, and `tools/sync_memory_archive.py`
 - a Git repository when requested
 - an optional private remote when requested and supported
 - a local archive-location config at `~/.config/my-precious/config.json` unless skipped

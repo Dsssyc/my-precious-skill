@@ -227,6 +227,63 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             self.assertEqual(len(session_rows), 1)
             self.assertEqual(session_rows[0]["project_path"], str(project_path.resolve()))
 
+    def test_run_memory_updates_can_allow_redacted_secret_records(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_path = root / "project-secret"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            fake_key = "sk-" + ("notreal" * 4)
+            (source_dir / "secret.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": f"Store memory but redact {fake_key}.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--allow-redacted-secrets",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Projects updated: 1", result.stdout)
+            summary_paths = list((memory_repo / "sessions").glob("**/summary.md"))
+            self.assertEqual(len(summary_paths), 1)
+            entry_dir = summary_paths[0].parent
+            combined = "\n".join(path.read_text(encoding="utf-8") for path in entry_dir.glob("*"))
+            self.assertNotIn(fake_key, combined)
+            self.assertIn("openai_key", (entry_dir / "redactions.md").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
