@@ -12,7 +12,24 @@ unresolved work, reusable facts, and user preferences.
 python tools/search_memory.py "<query>"
 ```
 
+The setup skill records this repository in
+`~/.config/my-precious/config.json` by default. `AGENT_SESSION_MEMORY_REPO` can
+still be used as a current-shell or scheduler override.
+
 ## Update Now
+
+Run the global updater against a shared source record directory:
+
+```bash
+python tools/run_memory_updates.py \
+  --source-dir /path/to/session-records
+```
+
+The global updater reads `config/projects.jsonl`, scans the source directory
+for project metadata, registers newly discovered projects, and then runs the
+per-project updater for each enabled project. An empty project registry is
+valid; the first run bootstraps it from source records that contain project
+paths such as `cwd` or `project_path`.
 
 Archive new source records for a project:
 
@@ -27,6 +44,10 @@ source records newer than the latest timestamp already archived for that
 project. It prefers timestamps embedded in source records, then timestamps in
 file names, and finally file modification time.
 
+If `source-dir` contains records from multiple projects, add
+`--require-project-metadata` so records without explicit project path metadata
+are skipped.
+
 ## Render Scheduler Config
 
 Generate reviewable scheduler configuration without installing it:
@@ -34,11 +55,13 @@ Generate reviewable scheduler configuration without installing it:
 ```bash
 python tools/render_scheduler.py \
   --source-dir /path/to/session-records \
-  --project-path /path/to/project \
   --backend launchd \
   --schedule daily \
   --output .tmp/agent-memory.plist
 ```
+
+Omit `--project-path` for the global runner. Add `--project-path` only when
+rendering a scheduler for one specific project.
 
 ## Archive Data
 
@@ -50,6 +73,7 @@ Expected generated data:
 - `sessions/YYYY/MM/DD/.../source-map.json`
 - `daily/YYYY/YYYY-MM-DD.md`
 - `index/*.jsonl`
+- `config/projects.jsonl`
 
 ## Security
 

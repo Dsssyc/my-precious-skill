@@ -33,6 +33,11 @@ PROJECT_PATH_KEYS = {
     "repo_path",
     "repository_path",
 }
+CONFIG_CANDIDATES = (
+    "MY_PRECIOUS_CONFIG",
+    "AGENT_SESSION_MEMORY_CONFIG",
+)
+DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 REDACTION_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
     "bearer_token": re.compile(r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+"),
@@ -99,13 +104,42 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
         if value:
             candidates.append(value)
     candidates.append(str(Path(__file__).resolve().parents[1]))
+    candidates.extend(configured_memory_repos())
     candidates.append(os.getcwd())
     candidates.append("~/repos/agent-memory")
     for candidate in candidates:
         path = Path(candidate).expanduser()
         if path.exists() and (path / "index").exists() and (path / "sessions").exists():
             return path.resolve()
-    raise SystemExit("No memory repository found. Pass --memory-repo or set AGENT_SESSION_MEMORY_REPO.")
+    raise SystemExit(
+        "No memory repository found. Run setup-my-precious, pass --memory-repo, "
+        "or set AGENT_SESSION_MEMORY_REPO."
+    )
+
+
+def configured_memory_repos() -> list[str]:
+    config_paths: list[str] = []
+    for name in CONFIG_CANDIDATES:
+        value = os.environ.get(name)
+        if value:
+            config_paths.append(value)
+    config_paths.append(str(DEFAULT_CONFIG_PATH))
+
+    repos: list[str] = []
+    for candidate in config_paths:
+        path = Path(candidate).expanduser()
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get("memory_repo")
+        if isinstance(value, str) and value.strip():
+            repos.append(value)
+    return repos
 
 
 def iter_jsonl(path: Path) -> Iterable[dict]:
@@ -124,9 +158,10 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
                 yield value
 
 
-def latest_archived_timestamp(memory_repo: Path, project_path: Path) -> datetime | None:
+def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datetime | None, set[str]]:
     project_key = str(project_path.resolve())
     latest: datetime | None = None
+    archived_hashes: set[str] = set()
 
     for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
         if record.get("project_path") != project_key:
@@ -143,11 +178,19 @@ def latest_archived_timestamp(memory_repo: Path, project_path: Path) -> datetime
             continue
         if meta.get("project_path") != project_key:
             continue
+        source_hash = meta.get("source_record_sha256")
+        if isinstance(source_hash, str) and source_hash:
+            archived_hashes.add(source_hash)
         for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
             parsed = parse_timestamp(meta.get(key))
             if parsed and (latest is None or parsed > latest):
                 latest = parsed
 
+    return latest, archived_hashes
+
+
+def latest_archived_timestamp(memory_repo: Path, project_path: Path) -> datetime | None:
+    latest, _ = archived_project_state(memory_repo, project_path)
     return latest
 
 
@@ -175,14 +218,32 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
                 yield json.loads(raw_line)
             except json.JSONDecodeError:
                 continue
-    elif path.suffix == ".json":
+        return
+
+    if path.suffix == ".json":
         try:
             yield json.loads(text)
         except json.JSONDecodeError:
             return
+        return
+
+    try:
+        yield json.loads(text)
+        return
+    except json.JSONDecodeError:
+        pass
+
+    for raw_line in text.splitlines():
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            yield json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
 
 
-def record_matches_project(path: Path, text: str, project_path: Path) -> bool:
+def record_matches_project(path: Path, text: str, project_path: Path, require_project_metadata: bool = False) -> bool:
     discovered_paths: list[Path] = []
     for value in iter_source_json_values(path, text):
         for key, child in walk_json_values(value):
@@ -191,7 +252,7 @@ def record_matches_project(path: Path, text: str, project_path: Path) -> bool:
                 if candidate.is_absolute():
                     discovered_paths.append(candidate.resolve())
     if not discovered_paths:
-        return True
+        return not require_project_metadata
     project_key = project_path.resolve()
     return any(candidate == project_key for candidate in discovered_paths)
 
@@ -221,14 +282,21 @@ def timestamp_from_filename(path: Path) -> datetime | None:
     return None
 
 
+def direct_timestamp_candidates(value: object) -> Iterable[datetime]:
+    if isinstance(value, dict):
+        for key in TIMESTAMP_KEYS:
+            parsed = parse_timestamp(value.get(key))
+            if parsed:
+                yield parsed
+    elif isinstance(value, list):
+        for item in value:
+            yield from direct_timestamp_candidates(item)
+
+
 def source_timestamp(path: Path, text: str) -> datetime:
     candidates: list[datetime] = []
     for value in iter_source_json_values(path, text):
-        for key, child in walk_json_values(value):
-            if key in TIMESTAMP_KEYS:
-                parsed = parse_timestamp(child)
-                if parsed:
-                    candidates.append(parsed)
+        candidates.extend(direct_timestamp_candidates(value))
     filename_timestamp = timestamp_from_filename(path)
     if filename_timestamp:
         candidates.append(filename_timestamp)
@@ -244,21 +312,33 @@ def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterabl
                 yield path
 
 
-def discover_records(source_dir: Path, patterns: tuple[str, ...], after: datetime | None, project_path: Path) -> list[SourceRecord]:
+def discover_records(
+    source_dir: Path,
+    patterns: tuple[str, ...],
+    after: datetime | None,
+    project_path: Path,
+    archived_hashes: set[str] | None = None,
+    require_project_metadata: bool = False,
+) -> list[SourceRecord]:
     records: list[SourceRecord] = []
     seen: set[Path] = set()
+    archived_hashes = archived_hashes or set()
     for path in iter_candidate_files(source_dir, patterns):
         path = path.resolve()
         if path in seen:
             continue
         seen.add(path)
         text = read_record_text(path)
-        if not record_matches_project(path, text, project_path):
+        if not record_matches_project(path, text, project_path, require_project_metadata):
             continue
         updated_at = source_timestamp(path, text)
-        if after is not None and updated_at <= after:
-            continue
-        records.append(SourceRecord(path=path, updated_at=updated_at, sha256=sha256_file(path)))
+        source_hash = sha256_file(path)
+        if after is not None:
+            if updated_at < after:
+                continue
+            if updated_at == after and source_hash in archived_hashes:
+                continue
+        records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash))
     return sorted(records, key=lambda item: (item.updated_at, item.path.as_posix()))
 
 
@@ -688,6 +768,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-records", type=int, default=50, help="Maximum records to archive in one run")
     parser.add_argument("--max-excerpt-bytes", type=int, default=12000, help="Deprecated compatibility option; raw excerpts are not copied by default")
     parser.add_argument("--allow-redacted-secrets", action="store_true", help="Archive records with detected secret patterns after redaction")
+    parser.add_argument(
+        "--require-project-metadata",
+        action="store_true",
+        help="Only archive source records that explicitly identify the current project path",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show records that would be archived")
     return parser.parse_args(argv)
 
@@ -705,8 +790,15 @@ def main(argv: list[str] | None = None) -> int:
     if source_dir == project_path:
         print("warning: source-dir equals project-path; ensure this directory contains session records, not general source files", file=sys.stderr)
 
-    latest = latest_archived_timestamp(memory_repo, project_path)
-    records = discover_records(source_dir, patterns, latest, project_path)
+    latest, archived_hashes = archived_project_state(memory_repo, project_path)
+    records = discover_records(
+        source_dir,
+        patterns,
+        latest,
+        project_path,
+        archived_hashes,
+        require_project_metadata=args.require_project_metadata,
+    )
     if args.max_records >= 0:
         records = records[: args.max_records]
 

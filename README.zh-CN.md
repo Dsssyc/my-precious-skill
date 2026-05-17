@@ -63,6 +63,7 @@ my-precious-skill/
       INDEX.md
       README.md
       .gitignore
+      config/
       index/
       daily/
       sessions/
@@ -70,34 +71,26 @@ my-precious-skill/
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
+      tools/run_memory_updates.py
       tools/render_scheduler.py
   tests/
     test_search_memory.py
+    test_run_memory_updates.py
     test_setup_memory_archive.py
     test_update_memory_archive.py
 ```
 
-## 安装 skill
+## 把这个仓库交给 agent
 
-选择兼容 agent runtime 的 user-level skills 目录，然后把三个 skill 文件夹复制进去：
+把这个 GitHub 仓库地址交给支持 skill 仓库的 agent：
 
-```bash
-REPO="/path/to/my-precious-skill"
-SKILLS_DIR="/path/to/agent/skills"
-
-mkdir -p "$SKILLS_DIR"
-rsync -a --delete \
-  "$REPO/skills/setup-my-precious/" \
-  "$SKILLS_DIR/setup-my-precious/"
-rsync -a --delete \
-  "$REPO/skills/update-my-precious/" \
-  "$SKILLS_DIR/update-my-precious/"
-rsync -a --delete \
-  "$REPO/skills/using-my-precious/" \
-  "$SKILLS_DIR/using-my-precious/"
+```text
+https://github.com/Dsssyc/my-precious-skill
 ```
 
-安装后重启当前 agent session，让 runtime 重新发现 skill。
+这个仓库在 `skills/` 下提供 `setup-my-precious`、`update-my-precious`
+和 `using-my-precious`。具备 skill repository 支持的 agent 或 installer
+可以从仓库地址发现它们。
 
 ## 使用 skill
 
@@ -135,13 +128,22 @@ $using-my-precious 根据我的历史 agent memory，找一下之前为什么不
 $using-my-precious 查找之前关于生产事故排查的上下文
 ```
 
-skill 会按以下顺序寻找私有部署仓库：
+`$setup-my-precious` 默认会把 archive 位置写入
+`~/.config/my-precious/config.json`。环境变量只是当前 shell 和自动化任务的
+override，不应该是主要 setup 机制。
+在平台支持的情况下，config 文件会用私有文件权限写入。
 
-1. `AGENT_SESSION_MEMORY_REPO`
-2. `AGENT_MEMORY_REPO`
-3. `~/repos/agent-memory`
+工具会按以下顺序寻找私有部署仓库：
 
-推荐在 shell 配置中固定：
+1. 显式命令参数，例如 `--repo` 或 `--memory-repo`
+2. `AGENT_SESSION_MEMORY_REPO`
+3. `AGENT_MEMORY_REPO`
+4. 当脚本从部署仓库内运行时，使用同仓库位置
+5. `MY_PRECIOUS_CONFIG` 或 `AGENT_SESSION_MEMORY_CONFIG`
+6. `~/.config/my-precious/config.json`
+7. `~/repos/agent-memory`
+
+可选的当前 shell override：
 
 ```bash
 export AGENT_SESSION_MEMORY_REPO="$HOME/repos/agent-memory"
@@ -164,12 +166,13 @@ cd "$MEMORY_REPO"
 git init
 ```
 
-如果使用私有 Git 托管仓库，用你常用的托管工作流创建并推送这个部署仓库。不要把凭证写入仓库文件、shell 历史、日志或生成的摘要。
+如果使用私有 Git 托管仓库，用你常用的托管工作流创建并推送这个部署仓库。不要把凭证写入仓库文件、shell 历史、日志或生成的摘要。如果本地 archive 文件夹已经有 Git history，先审查历史再 push；setup helper 默认会拒绝发布已有历史，除非显式传入 `--allow-existing-history`。
 
 部署仓库才应该保存真实数据：
 
 ```text
 agent-memory/
+  config/projects.jsonl
   index/*.jsonl
   daily/YYYY/YYYY-MM-DD.md
   sessions/YYYY/MM/DD/<session>/summary.md
@@ -180,6 +183,18 @@ agent-memory/
 
 ## 直接使用部署仓库
 
+从共享 source record 目录执行全域更新：
+
+```bash
+python ~/repos/agent-memory/tools/run_memory_updates.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records
+```
+
+如果 `config/projects.jsonl` 是空的，runner 会扫描 source records，读取
+`cwd`、`project_path` 等项目元数据，自动注册发现到的项目，然后更新每个
+enabled project。
+
 从 source record 目录更新记忆：
 
 ```bash
@@ -187,6 +202,15 @@ python ~/repos/agent-memory/tools/update_memory_archive.py \
   --memory-repo ~/repos/agent-memory \
   --source-dir /path/to/session-records \
   --project-path /path/to/project
+```
+
+如果 source record 目录混有多个项目的记录，要求记录显式带有项目元数据：
+
+```bash
+python ~/repos/agent-memory/tools/update_memory_archive.py \
+  --source-dir /path/to/session-records \
+  --project-path /path/to/project \
+  --require-project-metadata
 ```
 
 不用 agent，也可以直接运行搜索脚本：
@@ -211,11 +235,26 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --include-evidence
 ```
 
+渲染默认全域 scheduler：
+
+```bash
+python ~/repos/agent-memory/tools/render_scheduler.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records \
+  --backend launchd \
+  --schedule daily \
+  --output ~/repos/agent-memory/.tmp/agent-memory.plist
+```
+
+只有在你想为单个项目单独配置 scheduler 时，才添加
+`--project-path /path/to/project`。
+
 ## 归档格式约定
 
 部署仓库应提供：
 
 - `INDEX.md`：人类和 agent 可读的总览。
+- `config/projects.jsonl`：全域 runner 使用的可选项目注册表。
 - `index/sessions.jsonl`：每个 session 一行。
 - `index/decisions.jsonl`：每个可复用决策一行。
 - `index/unresolved.jsonl`：每个未完成任务一行。
@@ -239,9 +278,11 @@ skills/using-my-precious/references/archive-format.md
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。
 - searchable summary、短 evidence snippet、source-map、daily summary 和 JSONL index 生成。
 - 默认拒绝疑似 secret source records 的安全检查。
+- 面向共享 source record 目录的可选 project metadata 强制检查。
+- 可从 source records 自举空项目注册表的全域 update runner。
 - 面向 launchd 和 cron 格式的 reviewable scheduler template generator。
 - 私有部署仓库模板。
-- setup、update 和 search 的合成测试。
+- setup、update、global-runner 和 search 的合成测试。
 
 ## 职责归属
 
@@ -252,7 +293,7 @@ skills/using-my-precious/references/archive-format.md
 - 部署仓库模板。
 - 通用搜索工具。
 - 可复用 setup helpers。
-- 可复用的归档流水线组件，例如 redaction、rendering、indexing、validation、scheduler-template generation 和 source-adapter interfaces。
+- 可复用的归档流水线组件，例如 redaction、rendering、indexing、validation、global update running、scheduler-template generation 和 source-adapter interfaces。
 
 `$setup-my-precious` 被触发后，应该在询问用户后执行这些运行期 setup 动作：
 
@@ -261,12 +302,14 @@ skills/using-my-precious/references/archive-format.md
 - 需要时创建/连接私有 Git 托管仓库。
 - 复制部署模板。
 - 需要时初始化 Git。
-- 告诉用户应导出的 `AGENT_SESSION_MEMORY_REPO` 值。
+- 把 archive 位置写入 `~/.config/my-precious/config.json`。
+- 告诉用户可选的 `AGENT_SESSION_MEMORY_REPO` 当前 shell override。
 - 在部署仓库已有具体 archive command 之后，可选配置 recurring archive job。
 
 私有部署仓库应该保存用户相关状态和运行期操作：
 
 - 生成的 `sessions/`、`daily/` 和 `index/` 数据。
+- `config/projects.jsonl` 中的项目注册状态。
 - 从已归档 session timestamps 派生出的项目级 high-water marks。
 - 本地配置和日志。
 - 配置好的 remotes。
@@ -274,14 +317,6 @@ skills/using-my-precious/references/archive-format.md
 - 特定来源的 ingestion settings。
 
 部署仓库不应该提交 raw transcripts、credentials、cookies、private keys 或未脱敏数据。
-
-## 可选扩展
-
-后续可在这个基础上继续增强：
-
-- 更多 redaction patterns 和 fixtures。
-- archive validation utility。
-- source-specific summarizer adapters。
 
 属于 `$setup-my-precious` 运行期 setup 的工作：
 
@@ -302,6 +337,7 @@ python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/using-my-precious/scripts/search_memory.py \
+  templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/render_scheduler.py

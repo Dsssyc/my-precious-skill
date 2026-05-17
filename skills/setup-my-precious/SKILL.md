@@ -10,7 +10,7 @@ Use `using-my-precious` later to search the archive.
 
 ## Core Boundary
 
-Set up the archive repository and environment contract only.
+Set up the archive repository and location-discovery contract only.
 Do not summarize sessions, schedule recurring jobs, upload raw transcripts, or create memory entries in this skill.
 
 ## Required Questions
@@ -27,6 +27,8 @@ Ask only what is needed, one step at a time:
 3. If the user chose a remote repository, ask for the repository name.
    - Accept either `name` or `owner/name`.
    - Default visibility should be private.
+   - If the target folder already has Git history, review that history before
+     allowing it to be pushed to a hosted repository.
 
 4. Ask before overwriting a non-empty existing directory unless the user explicitly asks to reuse it.
 
@@ -56,13 +58,29 @@ Ask only what is needed, one step at a time:
      --private
    ```
 
-4. Tell the user to point search tools at the archive:
+   If the target already has reviewed Git history that should be published,
+   rerun with `--allow-existing-history`. Do not use that flag unless the
+   existing commits were inspected for raw transcripts and secrets.
+
+4. Confirm that setup wrote the archive location config. The default config path is:
+
+   ```text
+   ~/.config/my-precious/config.json
+   ```
+
+   This config is the default persistent discovery mechanism for future
+   `using-my-precious` and `update-my-precious` runs.
+
+5. Tell the user the current-shell override only when useful:
 
    ```bash
    export AGENT_SESSION_MEMORY_REPO="$MEMORY_REPO"
    ```
 
-5. Verify search works:
+   Do not edit shell startup files or agent runtime config unless the user
+   explicitly asks for persistent environment-variable configuration.
+
+6. Verify search works:
 
    ```bash
    python "$MEMORY_REPO/tools/search_memory.py" "memory"
@@ -70,17 +88,19 @@ Ask only what is needed, one step at a time:
 
    A new empty archive may return no hits; that is acceptable if the command runs.
 
-6. If the user requests scheduling, first verify the archive command exists and runs manually.
+7. If the user requests scheduling, first verify the archive command exists and runs manually.
    Then render reviewable scheduler configuration:
 
    ```bash
    python "$MEMORY_REPO/tools/render_scheduler.py" \
      --source-dir "$SOURCE_RECORD_DIR" \
-     --project-path "$PROJECT_PATH" \
      --backend launchd \
      --schedule daily \
      --output "$MEMORY_REPO/.tmp/agent-memory.plist"
    ```
+
+   This renders a global runner by default. Add `--project-path "$PROJECT_PATH"`
+   only for a single-project schedule.
 
    Install or enable scheduler configuration only with explicit user approval.
 
@@ -89,6 +109,9 @@ Ask only what is needed, one step at a time:
 - Treat scheduling as a runtime setup action, not as a development-repo side effect.
 - Do not enable a recurring job unless the deployment repository has a concrete archive command.
 - Ask for the scheduler backend: local timer system, cron-like scheduler, or a compatible agent-native recurring task when the runtime supports one.
+- Prefer global scheduling through `tools/run_memory_updates.py`; it can
+  bootstrap an empty `config/projects.jsonl` by scanning source records for
+  project metadata.
 - Prefer generating a reviewable scheduler file or command before loading/enabling it.
 - Use `tools/render_scheduler.py` when the deployment repository includes it.
 - Logs should go outside the skill development repository.
@@ -99,6 +122,9 @@ Ask only what is needed, one step at a time:
 - Prefer private repositories.
 - Do not write tokens, passwords, cookies, or private keys into files.
 - Use the user's existing Git authentication, Git credential helper, hosted-Git CLI, or available repository tools.
+- Refuse to push preexisting Git history unless the user explicitly confirms
+  it has been reviewed; the setup script requires `--allow-existing-history`
+  for that case.
 - If no remote creation tool is available, create the local repository and tell the user the exact remote-add command to run after creating the remote manually.
 - Do not push raw transcripts by default.
 
@@ -107,7 +133,8 @@ Ask only what is needed, one step at a time:
 A successful setup leaves the user with:
 
 - a local archive directory
-- `INDEX.md`, `AGENTS.md`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, and `tools/render_scheduler.py`
+- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/run_memory_updates.py`, and `tools/render_scheduler.py`
 - a Git repository when requested
 - an optional private remote when requested and supported
-- an `AGENT_SESSION_MEMORY_REPO` value the user can export
+- a local archive-location config at `~/.config/my-precious/config.json` unless skipped
+- an optional `AGENT_SESSION_MEMORY_REPO` current-shell override

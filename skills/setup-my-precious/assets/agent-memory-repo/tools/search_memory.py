@@ -21,6 +21,11 @@ DEFAULT_REPO_CANDIDATES = (
     "AGENT_SESSION_MEMORY_REPO",
     "AGENT_MEMORY_REPO",
 )
+CONFIG_CANDIDATES = (
+    "MY_PRECIOUS_CONFIG",
+    "AGENT_SESSION_MEMORY_CONFIG",
+)
+DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 
 
 @dataclass
@@ -46,6 +51,31 @@ def unique_tokens(text: str) -> list[str]:
     return out
 
 
+def configured_memory_repos() -> list[str]:
+    config_paths: list[str] = []
+    for name in CONFIG_CANDIDATES:
+        value = os.environ.get(name)
+        if value:
+            config_paths.append(value)
+    config_paths.append(str(DEFAULT_CONFIG_PATH))
+
+    repos: list[str] = []
+    for candidate in config_paths:
+        path = Path(candidate).expanduser()
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get("memory_repo")
+        if isinstance(value, str) and value.strip():
+            repos.append(value)
+    return repos
+
+
 def resolve_repo(repo_arg: str | None) -> Path:
     candidates: list[str] = []
     if repo_arg:
@@ -55,6 +85,7 @@ def resolve_repo(repo_arg: str | None) -> Path:
         if value:
             candidates.append(value)
     candidates.append(str(Path(__file__).resolve().parents[1]))
+    candidates.extend(configured_memory_repos())
     candidates.append(os.getcwd())
     candidates.append("~/repos/agent-memory")
 
@@ -64,8 +95,8 @@ def resolve_repo(repo_arg: str | None) -> Path:
             return repo.resolve()
 
     raise SystemExit(
-        "No agent memory archive found. Set AGENT_SESSION_MEMORY_REPO "
-        "or pass --repo /path/to/archive."
+        "No agent memory archive found. Run setup-my-precious, set "
+        "AGENT_SESSION_MEMORY_REPO, or pass --repo /path/to/archive."
     )
 
 
@@ -132,6 +163,21 @@ def record_search_text(record: dict) -> str:
     return "\n".join(parts)
 
 
+def safe_index_record_path(repo: Path, index_path: Path, path_text: object) -> Path:
+    if not isinstance(path_text, str) or not path_text.strip():
+        return index_path
+    candidate = Path(path_text)
+    if not candidate.is_absolute():
+        candidate = repo / candidate
+    try:
+        repo_resolved = repo.resolve()
+        resolved = candidate.resolve(strict=False)
+        relative = resolved.relative_to(repo_resolved)
+    except (OSError, ValueError):
+        return index_path
+    return repo / relative
+
+
 def collect_index_hits(repo: Path, query_tokens: list[str]) -> list[Hit]:
     hits: list[Hit] = []
     for index_path in sorted((repo / "index").glob("*.jsonl")):
@@ -140,8 +186,7 @@ def collect_index_hits(repo: Path, query_tokens: list[str]) -> list[Hit]:
             score, matched = score_text(query_tokens, text, weight=4)
             if not score:
                 continue
-            path_text = record.get("summary_path") or record.get("path") or str(index_path.relative_to(repo))
-            path = repo / str(path_text)
+            path = safe_index_record_path(repo, index_path, record.get("summary_path") or record.get("path"))
             why = [f"index:{index_path.name}", f"matched:{', '.join(matched)}"]
             hits.append(Hit(path=path, score=score + 10, source="index", why=why, title=display_title(record)))
     return hits

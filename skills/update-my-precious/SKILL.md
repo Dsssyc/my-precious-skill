@@ -7,6 +7,9 @@ description: Immediately scan recent agent session/source records and update the
 
 Use this skill for an on-demand memory update. It writes new summarized archive entries.
 Use `setup-my-precious` first if no archive repository exists. Use `using-my-precious` later to search.
+For scheduled or broad multi-project refreshes, prefer the deployment
+repository's `tools/run_memory_updates.py`; this skill is the single-project
+on-demand path.
 
 ## Core Boundary
 
@@ -19,7 +22,7 @@ Do not upload credentials, cookies, private keys, or unredacted source records.
 Resolve or ask for:
 
 1. `MEMORY_REPO`
-   - Prefer `AGENT_SESSION_MEMORY_REPO`, then `AGENT_MEMORY_REPO`, then `~/repos/agent-memory`.
+   - Prefer an explicit path, then `AGENT_SESSION_MEMORY_REPO`, then `AGENT_MEMORY_REPO`, then setup config (`MY_PRECIOUS_CONFIG`, `AGENT_SESSION_MEMORY_CONFIG`, or `~/.config/my-precious/config.json`), then `~/repos/agent-memory`.
 
 2. `PROJECT_PATH`
    - Default to the current working directory.
@@ -28,6 +31,7 @@ Resolve or ask for:
 3. `SOURCE_RECORD_DIR`
    - The folder containing session/source records for the current project.
    - Do not blindly scan the whole project root unless the user explicitly says the records are stored there.
+   - If this folder is shared by multiple projects, add `--require-project-metadata` so unscoped records are skipped.
 
 ## Update Rule
 
@@ -82,6 +86,7 @@ The updater should:
 
 - Redact before writing excerpts.
 - Keep evidence short.
+- Use `--require-project-metadata` for shared source record directories.
 - Treat generated summaries as reviewable artifacts.
 - Do not store raw source records unless the user explicitly asks and the archive is configured for safe raw storage.
 - If a source file appears to contain secrets, stop and ask before proceeding.

@@ -20,13 +20,23 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             memory_repo = root / "agent-memory"
+            config_path = root / "my-precious-config.json"
             source_dir = root / "records"
             project_path = root / "project"
             source_dir.mkdir()
             project_path.mkdir()
 
             subprocess.run(
-                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local"],
+                [
+                    sys.executable,
+                    str(setup_script),
+                    "--path",
+                    str(memory_repo),
+                    "--mode",
+                    "local",
+                    "--config-path",
+                    str(config_path),
+                ],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -41,7 +51,11 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
             set_mtime(source, "2026-05-14T10:00:00Z")
 
-            update_script = memory_repo / "tools/update_memory_archive.py"
+            update_script = Path("skills/update-my-precious/scripts/update_memory_archive.py").resolve()
+            env = os.environ.copy()
+            env["MY_PRECIOUS_CONFIG"] = str(config_path)
+            env.pop("AGENT_SESSION_MEMORY_REPO", None)
+            env.pop("AGENT_MEMORY_REPO", None)
             subprocess.run(
                 [
                     sys.executable,
@@ -53,6 +67,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     "--project",
                     "project",
                 ],
+                env=env,
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -60,7 +75,8 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
 
             search_result = subprocess.run(
-                [sys.executable, str(memory_repo / "tools/search_memory.py"), "migration plan"],
+                [sys.executable, str(Path("skills/using-my-precious/scripts/search_memory.py").resolve()), "migration plan"],
+                env=env,
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -96,7 +112,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             project_path.mkdir()
 
             subprocess.run(
-                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local"],
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -140,7 +156,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             project_path.mkdir()
 
             subprocess.run(
-                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local"],
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -195,7 +211,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             project_path.mkdir()
 
             subprocess.run(
-                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local"],
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -278,7 +294,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             project_b.mkdir()
 
             subprocess.run(
-                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local"],
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -412,6 +428,214 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
             self.assertIn("Records selected: 0", result.stdout)
 
+    def test_update_memory_archive_can_require_project_metadata(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            scoped = source_dir / "scoped.jsonl"
+            unscoped = source_dir / "unscoped.jsonl"
+            scoped.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Scoped record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            unscoped.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T11:00:00Z",
+                        "role": "user",
+                        "content": "Unscoped record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(scoped, "2026-05-14T10:00:00Z")
+            set_mtime(unscoped, "2026-05-14T11:00:00Z")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                    "--require-project-metadata",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertIn("Records selected: 1", result.stdout)
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertIn("scoped.jsonl", rows[0]["title"])
+
+    def test_update_memory_archive_ignores_nested_dates_for_source_timestamp(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source = source_dir / "nested-date.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": {"date": "2030-01-01T00:00:00Z", "text": "nested date is domain content"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T08:00:00Z")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(rows[0]["source_updated_at"], "2026-05-14T10:00:00Z")
+
+    def test_update_memory_archive_does_not_skip_same_timestamp_after_max_records(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            for idx in range(3):
+                source = source_dir / f"same-{idx}.jsonl"
+                source.write_text(
+                    json.dumps(
+                        {
+                            "timestamp": "2026-05-14T10:00:00Z",
+                            "cwd": str(project_path),
+                            "role": "user",
+                            "content": f"same timestamp {idx}",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                set_mtime(source, "2026-05-14T10:00:00Z")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                    "--max-records",
+                    "2",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertIn("Records selected: 1", result.stdout)
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(len(rows), 3)
+
     def test_update_memory_archive_keeps_project_high_water_separate(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
@@ -427,7 +651,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             project_b.mkdir()
 
             subprocess.run(
-                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local"],
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

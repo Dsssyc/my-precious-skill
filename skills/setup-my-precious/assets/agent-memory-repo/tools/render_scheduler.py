@@ -8,11 +8,44 @@ not install, load, or enable scheduled jobs.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import plistlib
 import shlex
 import sys
 from pathlib import Path
+
+
+CONFIG_CANDIDATES = (
+    "MY_PRECIOUS_CONFIG",
+    "AGENT_SESSION_MEMORY_CONFIG",
+)
+DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
+
+
+def configured_memory_repos() -> list[str]:
+    config_paths: list[str] = []
+    for name in CONFIG_CANDIDATES:
+        value = os.environ.get(name)
+        if value:
+            config_paths.append(value)
+    config_paths.append(str(DEFAULT_CONFIG_PATH))
+
+    repos: list[str] = []
+    for candidate in config_paths:
+        path = Path(candidate).expanduser()
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get("memory_repo")
+        if isinstance(value, str) and value.strip():
+            repos.append(value)
+    return repos
 
 
 def resolve_memory_repo(repo_arg: str | None) -> Path:
@@ -24,13 +57,17 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
         if value:
             candidates.append(value)
     candidates.append(str(Path(__file__).resolve().parents[1]))
+    candidates.extend(configured_memory_repos())
     candidates.append(os.getcwd())
     candidates.append("~/repos/agent-memory")
     for candidate in candidates:
         repo = Path(candidate).expanduser()
         if repo.exists() and (repo / "tools" / "update_memory_archive.py").exists():
             return repo.resolve()
-    raise SystemExit("No memory repository found. Pass --memory-repo or set AGENT_SESSION_MEMORY_REPO.")
+    raise SystemExit(
+        "No memory repository found. Run setup-my-precious, pass --memory-repo, "
+        "or set AGENT_SESSION_MEMORY_REPO."
+    )
 
 
 def interval_seconds(schedule: str) -> int:
@@ -41,9 +78,18 @@ def interval_seconds(schedule: str) -> int:
     raise SystemExit(f"unsupported schedule: {schedule}")
 
 
-def launchd_plist(memory_repo: Path, source_dir: Path, project_path: Path, schedule: str, label: str) -> bytes:
-    log_dir = memory_repo / ".tmp" / "logs"
-    program_arguments = [
+def archive_program_arguments(memory_repo: Path, source_dir: Path, project_path: Path | None) -> list[str]:
+    if project_path is None:
+        return [
+            "/usr/bin/env",
+            "python3",
+            str(memory_repo / "tools" / "run_memory_updates.py"),
+            "--memory-repo",
+            str(memory_repo),
+            "--source-dir",
+            str(source_dir),
+        ]
+    return [
         "/usr/bin/env",
         "python3",
         str(memory_repo / "tools" / "update_memory_archive.py"),
@@ -54,9 +100,37 @@ def launchd_plist(memory_repo: Path, source_dir: Path, project_path: Path, sched
         "--project-path",
         str(project_path),
     ]
+
+
+def shell_archive_command(memory_repo: Path, source_dir: Path, project_path: Path | None) -> list[str]:
+    if project_path is None:
+        return [
+            f"AGENT_SESSION_MEMORY_REPO={shlex.quote(str(memory_repo))}",
+            shlex.quote(sys.executable),
+            shlex.quote(str(memory_repo / "tools" / "run_memory_updates.py")),
+            "--memory-repo",
+            shlex.quote(str(memory_repo)),
+            "--source-dir",
+            shlex.quote(str(source_dir)),
+        ]
+    return [
+        f"AGENT_SESSION_MEMORY_REPO={shlex.quote(str(memory_repo))}",
+        shlex.quote(sys.executable),
+        shlex.quote(str(memory_repo / "tools" / "update_memory_archive.py")),
+        "--memory-repo",
+        shlex.quote(str(memory_repo)),
+        "--source-dir",
+        shlex.quote(str(source_dir)),
+        "--project-path",
+        shlex.quote(str(project_path)),
+    ]
+
+
+def launchd_plist(memory_repo: Path, source_dir: Path, project_path: Path | None, schedule: str, label: str) -> bytes:
+    log_dir = memory_repo / ".tmp" / "logs"
     payload = {
         "Label": label,
-        "ProgramArguments": program_arguments,
+        "ProgramArguments": archive_program_arguments(memory_repo, source_dir, project_path),
         "StartInterval": interval_seconds(schedule),
         "WorkingDirectory": str(memory_repo),
         "EnvironmentVariables": {
@@ -68,7 +142,7 @@ def launchd_plist(memory_repo: Path, source_dir: Path, project_path: Path, sched
     return plistlib.dumps(payload, sort_keys=True)
 
 
-def cron_line(memory_repo: Path, source_dir: Path, project_path: Path, schedule: str) -> str:
+def cron_line(memory_repo: Path, source_dir: Path, project_path: Path | None, schedule: str) -> str:
     when = "0 * * * *" if schedule == "hourly" else "0 9 * * *"
     log_dir = memory_repo / ".tmp" / "logs"
     command = " ".join(
@@ -76,15 +150,7 @@ def cron_line(memory_repo: Path, source_dir: Path, project_path: Path, schedule:
             "cd",
             shlex.quote(str(memory_repo)),
             "&&",
-            f"AGENT_SESSION_MEMORY_REPO={shlex.quote(str(memory_repo))}",
-            shlex.quote(sys.executable),
-            shlex.quote(str(memory_repo / "tools" / "update_memory_archive.py")),
-            "--memory-repo",
-            shlex.quote(str(memory_repo)),
-            "--source-dir",
-            shlex.quote(str(source_dir)),
-            "--project-path",
-            shlex.quote(str(project_path)),
+            *shell_archive_command(memory_repo, source_dir, project_path),
             ">>",
             shlex.quote(str(log_dir / "update.out.log")),
             "2>>",
@@ -94,11 +160,22 @@ def cron_line(memory_repo: Path, source_dir: Path, project_path: Path, schedule:
     return f"{when} {command}\n"
 
 
+def validate_archive_command(memory_repo: Path, project_path: Path | None) -> None:
+    if project_path is None:
+        runner = memory_repo / "tools" / "run_memory_updates.py"
+        if not runner.exists():
+            raise SystemExit(f"global scheduler requires {runner}")
+        return
+    updater = memory_repo / "tools" / "update_memory_archive.py"
+    if not updater.exists():
+        raise SystemExit(f"single-project scheduler requires {updater}")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--memory-repo", help="Path to the private memory repository")
     parser.add_argument("--source-dir", required=True, help="Directory containing source records to scan")
-    parser.add_argument("--project-path", required=True, help="Project path used as the high-water-mark key")
+    parser.add_argument("--project-path", help="Optional single project path; omit to run the global project runner")
     parser.add_argument("--backend", choices=("launchd", "cron"), default="launchd", help="Scheduler format to render")
     parser.add_argument("--schedule", choices=("hourly", "daily"), default="daily", help="Run frequency")
     parser.add_argument("--label", default="com.agent-memory.update", help="launchd label")
@@ -110,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     memory_repo = resolve_memory_repo(args.memory_repo)
     source_dir = Path(args.source_dir).expanduser().resolve()
-    project_path = Path(args.project_path).expanduser().resolve()
+    project_path = Path(args.project_path).expanduser().resolve() if args.project_path else None
+    validate_archive_command(memory_repo, project_path)
     (memory_repo / ".tmp" / "logs").mkdir(parents=True, exist_ok=True)
 
     if args.backend == "launchd":

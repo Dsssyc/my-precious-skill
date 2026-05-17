@@ -9,6 +9,8 @@ This reference defines the minimum deployment-repo contract expected by the
 agent-memory/
   AGENTS.md
   INDEX.md
+  config/
+    projects.jsonl
   index/
     sessions.jsonl
     decisions.jsonl
@@ -27,7 +29,13 @@ agent-memory/
     YYYY/YYYY-MM-DD.md
   tools/
     search_memory.py
+    update_memory_archive.py
+    run_memory_updates.py
+    render_scheduler.py
 ```
+
+`config/projects.jsonl` is runtime configuration for broad scheduled updates.
+It is distinct from generated read indexes under `index/`.
 
 ## Stable Fields
 

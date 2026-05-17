@@ -63,6 +63,7 @@ my-precious-skill/
       INDEX.md
       README.md
       .gitignore
+      config/
       index/
       daily/
       sessions/
@@ -70,34 +71,26 @@ my-precious-skill/
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
+      tools/run_memory_updates.py
       tools/render_scheduler.py
   tests/
     test_search_memory.py
+    test_run_memory_updates.py
     test_setup_memory_archive.py
     test_update_memory_archive.py
 ```
 
-## Install The Skill
+## Point An Agent At This Repository
 
-Choose the user-level skills directory for your compatible agent runtime, then copy all three skill folders into it:
+Give this repository URL to an agent that supports skill repositories:
 
-```bash
-REPO="/path/to/my-precious-skill"
-SKILLS_DIR="/path/to/agent/skills"
-
-mkdir -p "$SKILLS_DIR"
-rsync -a --delete \
-  "$REPO/skills/setup-my-precious/" \
-  "$SKILLS_DIR/setup-my-precious/"
-rsync -a --delete \
-  "$REPO/skills/update-my-precious/" \
-  "$SKILLS_DIR/update-my-precious/"
-rsync -a --delete \
-  "$REPO/skills/using-my-precious/" \
-  "$SKILLS_DIR/using-my-precious/"
+```text
+https://github.com/Dsssyc/my-precious-skill
 ```
 
-Restart the agent session after installation so the runtime can discover the new skill.
+The repository contains the `setup-my-precious`, `update-my-precious`, and
+`using-my-precious` skills under `skills/`. A capable agent or skill installer
+can discover them from the repository URL.
 
 ## Use The Skill
 
@@ -135,13 +128,23 @@ $using-my-precious search my historical agent memory for why raw transcripts sho
 $using-my-precious find previous context about the production incident investigation
 ```
 
-The skill locates the private deployment repository in this order:
+`$setup-my-precious` records the archive location in
+`~/.config/my-precious/config.json` by default. The environment variable is an
+override for current shells and automation, not the primary setup mechanism.
+The config file is written with private file permissions when the platform
+supports them.
 
-1. `AGENT_SESSION_MEMORY_REPO`
-2. `AGENT_MEMORY_REPO`
-3. `~/repos/agent-memory`
+The tools locate the private deployment repository in this order:
 
-Recommended shell configuration:
+1. explicit command argument such as `--repo` or `--memory-repo`
+2. `AGENT_SESSION_MEMORY_REPO`
+3. `AGENT_MEMORY_REPO`
+4. a colocated deployment repository when the script runs from one
+5. `MY_PRECIOUS_CONFIG` or `AGENT_SESSION_MEMORY_CONFIG`
+6. `~/.config/my-precious/config.json`
+7. `~/repos/agent-memory`
+
+Optional current-shell override:
 
 ```bash
 export AGENT_SESSION_MEMORY_REPO="$HOME/repos/agent-memory"
@@ -164,12 +167,13 @@ cd "$MEMORY_REPO"
 git init
 ```
 
-If using a private hosted Git repository, create it with your normal Git hosting workflow and push this deployment repository there. Keep credentials out of repository files, shell history, logs, and generated summaries.
+If using a private hosted Git repository, create it with your normal Git hosting workflow and push this deployment repository there. Keep credentials out of repository files, shell history, logs, and generated summaries. If the local archive folder already has Git history, review it before pushing; the setup helper refuses to publish preexisting history unless `--allow-existing-history` is explicitly passed.
 
 The deployment repository is where real memory data belongs:
 
 ```text
 agent-memory/
+  config/projects.jsonl
   index/*.jsonl
   daily/YYYY/YYYY-MM-DD.md
   sessions/YYYY/MM/DD/<session>/summary.md
@@ -180,6 +184,18 @@ agent-memory/
 
 ## Use The Deployment Repository Directly
 
+Run a global update from a shared source record directory:
+
+```bash
+python ~/repos/agent-memory/tools/run_memory_updates.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records
+```
+
+If `config/projects.jsonl` is empty, the runner scans source records for project
+metadata such as `cwd` or `project_path`, registers discovered projects, and
+then updates each enabled project.
+
 Update memory from a source record directory:
 
 ```bash
@@ -187,6 +203,16 @@ python ~/repos/agent-memory/tools/update_memory_archive.py \
   --memory-repo ~/repos/agent-memory \
   --source-dir /path/to/session-records \
   --project-path /path/to/project
+```
+
+For shared source directories that contain records from multiple projects,
+require explicit project metadata:
+
+```bash
+python ~/repos/agent-memory/tools/update_memory_archive.py \
+  --source-dir /path/to/session-records \
+  --project-path /path/to/project \
+  --require-project-metadata
 ```
 
 Search without invoking an agent:
@@ -211,11 +237,26 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --include-evidence
 ```
 
+Render a default global scheduler:
+
+```bash
+python ~/repos/agent-memory/tools/render_scheduler.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records \
+  --backend launchd \
+  --schedule daily \
+  --output ~/repos/agent-memory/.tmp/agent-memory.plist
+```
+
+Add `--project-path /path/to/project` only when you want one scheduler per
+project instead of the global runner.
+
 ## Archive Contract
 
 A compatible deployment repository should expose:
 
 - `INDEX.md`: overview for humans and agents.
+- `config/projects.jsonl`: optional project registry used by the global runner.
 - `index/sessions.jsonl`: one row per session.
 - `index/decisions.jsonl`: one row per reusable decision.
 - `index/unresolved.jsonl`: one row per follow-up task.
@@ -239,9 +280,11 @@ skills/using-my-precious/references/archive-format.md
 - Incremental update script keyed by project path and source/session timestamp.
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.
+- Optional project-metadata requirement for shared source record directories.
+- Global update runner that bootstraps an empty project registry from source records.
 - Reviewable scheduler template generator for launchd and cron formats.
 - Private deployment repository template.
-- Synthetic setup, update, and search tests.
+- Synthetic setup, update, global-runner, and search tests.
 
 ## Responsibility Map
 
@@ -252,7 +295,7 @@ This repository should provide reusable, non-private building blocks:
 - deployment repository templates
 - generic search tools
 - reusable setup helpers
-- reusable archive pipeline components such as redaction, rendering, indexing, validation, scheduler-template generation, and source-adapter interfaces
+- reusable archive pipeline components such as redaction, rendering, indexing, validation, global update running, scheduler-template generation, and source-adapter interfaces
 
 `$setup-my-precious` should perform runtime setup actions after asking the user:
 
@@ -261,7 +304,8 @@ This repository should provide reusable, non-private building blocks:
 - optionally create/connect a private hosted Git repository
 - copy the deployment template
 - initialize Git when requested
-- report the `AGENT_SESSION_MEMORY_REPO` value to export
+- write the archive location to `~/.config/my-precious/config.json`
+- report an optional `AGENT_SESSION_MEMORY_REPO` current-shell override
 - optionally configure a recurring archive job, but only after a concrete archive command exists in the deployment repository
 
 The private deployment repository should contain user-specific state and operations:
@@ -274,14 +318,6 @@ The private deployment repository should contain user-specific state and operati
 - source-specific ingestion settings
 
 The deployment repository should not commit raw transcripts, credentials, cookies, private keys, or unredacted data.
-
-## Optional Extensions
-
-Further reusable work can build on this base:
-
-- additional redaction patterns and fixtures
-- archive validation utility
-- source-specific summarizer adapters
 
 Runtime setup work that belongs in `$setup-my-precious`:
 
@@ -302,6 +338,7 @@ python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/using-my-precious/scripts/search_memory.py \
+  templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/render_scheduler.py

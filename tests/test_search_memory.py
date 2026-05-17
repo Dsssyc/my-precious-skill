@@ -44,6 +44,33 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
         self.assertIn("index:sessions.jsonl", result.stdout)
 
+    def test_search_memory_does_not_return_index_paths_outside_archive(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions").mkdir()
+            (repo / "index/sessions.jsonl").write_text(
+                '{"date":"2026-05-14","source_agent":"agent",'
+                '"project":"agent-memory","title":"Escape path memory",'
+                '"summary_path":"../outside/secret.md",'
+                '"summary":"archive path should stay inside repository"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(script), "escape path", "--repo", str(repo)],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("index/sessions.jsonl", result.stdout)
+        self.assertNotIn("../outside/secret.md", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

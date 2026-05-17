@@ -17,14 +17,20 @@ debugging context:
 
 When the user asks to update memory now:
 
-1. Identify the project path and source record directory.
-2. Run `python tools/update_memory_archive.py --source-dir "<records>" --project-path "<project>" --dry-run`.
+1. For broad refreshes, run `python tools/run_memory_updates.py --source-dir "<records>" --dry-run`.
+2. For a single project, run `python tools/update_memory_archive.py --source-dir "<records>" --project-path "<project>" --dry-run`.
 3. If the selected records look correct, rerun without `--dry-run`.
 4. If the updater refuses records because secret patterns were found, inspect the source records before deciding whether to rerun with `--allow-redacted-secrets`.
 5. Review generated summaries before committing or pushing.
 
+When `config/projects.jsonl` is empty, the global runner should scan source
+records for project metadata and register discovered projects before updating.
+Disabled projects in `config/projects.jsonl` must stay disabled even if source
+records still mention them.
+
 When the user asks to configure scheduling:
 
-1. Verify `tools/update_memory_archive.py` works manually first.
-2. Render scheduler config with `python tools/render_scheduler.py --source-dir "<records>" --project-path "<project>" --backend launchd --schedule daily --output ".tmp/agent-memory.plist"`.
-3. Show the rendered config and ask before loading, installing, or enabling any recurring job.
+1. Verify `tools/run_memory_updates.py` works manually first for global scheduling, or `tools/update_memory_archive.py` for a single-project schedule.
+2. Render global scheduler config with `python tools/render_scheduler.py --source-dir "<records>" --backend launchd --schedule daily --output ".tmp/agent-memory.plist"`.
+3. Add `--project-path "<project>"` only when rendering a single-project scheduler.
+4. Show the rendered config and ask before loading, installing, or enabling any recurring job.

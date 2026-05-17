@@ -24,6 +24,8 @@ scheduled ingestion, summarization, indexes, and Git synchronization.
 The private deployment repository contains:
 
 - real `sessions/`, `daily/`, and `index/` data
+- `config/projects.jsonl`, the runtime project registry used by scheduled
+  global updates
 - ingestion and summarization configuration
 - local scheduling such as launchd or cron
 - Git remotes and credentials managed outside source files
@@ -65,14 +67,43 @@ and JSONL indexes.
   indexes, and default refusal for source records that match secret patterns.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration without installing it.
+- `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
+  bootstraps an empty project registry by scanning source records for project
+  paths, then invokes the per-project updater for each enabled project.
 - `templates/agent-memory-repo/`: starter private archive repository layout.
+
+## Scheduling Model
+
+Default scheduled updates should call `tools/run_memory_updates.py`, not the
+single-project updater. The runner reads `config/projects.jsonl`, scans the
+shared source-record directory for project metadata, registers newly discovered
+projects, and updates each enabled project. This avoids a bootstrap deadlock
+where an empty deployment repository has no project registry and therefore no
+scheduled work.
+
+`config/projects.jsonl` is runtime configuration, while `index/projects.jsonl`
+is a generated archive index. Disabled projects in `config/projects.jsonl` must
+remain disabled even if source records still mention them.
 
 ## Environment Contract
 
-Agents locate a deployment repository using these variables in order:
+`setup-my-precious` writes the archive location to
+`~/.config/my-precious/config.json` by default. Environment variables are
+overrides for current shells, automation, or hosted runtimes.
+The config file should be written with private file permissions when the local
+platform supports them.
 
-1. `AGENT_SESSION_MEMORY_REPO`
-2. `AGENT_MEMORY_REPO`
+GitHub-backed setup should refuse to publish preexisting Git history unless the
+user explicitly confirms that history has been reviewed.
+
+Agents locate a deployment repository using these inputs in order:
+
+1. explicit command argument
+2. `AGENT_SESSION_MEMORY_REPO`
+3. `AGENT_MEMORY_REPO`
+4. colocated deployment repository when the script runs from one
+5. `MY_PRECIOUS_CONFIG` or `AGENT_SESSION_MEMORY_CONFIG`
+6. `~/.config/my-precious/config.json`
 
 If none are set, tools may try `~/repos/agent-memory`.
 
@@ -101,8 +132,12 @@ If none are set, tools may try `~/repos/agent-memory`.
   timestamp for the same project path.
 - The update script generates searchable summaries and refuses likely-secret
   source records by default.
+- The update script can require explicit project metadata when scanning shared
+  source record directories.
+- The global runner can bootstrap an empty project registry from source records
+  and respects disabled registry entries.
 - The update script writes `source-map.json`, daily summaries, and JSONL indexes.
-- The template can render scheduler configuration without enabling recurring
-  jobs.
+- The template can render global-runner and single-project scheduler
+  configuration without enabling recurring jobs.
 - The template repository contains no real memory data.
 - The design keeps skill development separate from private deployment.
