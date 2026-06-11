@@ -22,7 +22,7 @@ Do not upload credentials, cookies, private keys, or unredacted source records.
 Resolve or ask for:
 
 1. `MEMORY_REPO`
-   - Prefer an explicit path, then `AGENT_SESSION_MEMORY_REPO`, then `AGENT_MEMORY_REPO`, then setup config (`MY_PRECIOUS_CONFIG`, `AGENT_SESSION_MEMORY_CONFIG`, or `~/.config/my-precious/config.json`), then `~/repos/agent-memory`.
+   - Prefer an explicit path, then the colocated deployment repository when the tool runs from one, then `AGENT_SESSION_MEMORY_REPO`, then `AGENT_MEMORY_REPO`, then setup config (`MY_PRECIOUS_CONFIG`, `AGENT_SESSION_MEMORY_CONFIG`, or `~/.config/my-precious/config.json`), then `~/repos/agent-memory`.
 
 2. `PROJECT_PATH`
    - Default to the current working directory.

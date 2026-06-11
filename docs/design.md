@@ -107,9 +107,9 @@ user explicitly confirms that history has been reviewed.
 Agents locate a deployment repository using these inputs in order:
 
 1. explicit command argument
-2. `AGENT_SESSION_MEMORY_REPO`
-3. `AGENT_MEMORY_REPO`
-4. colocated deployment repository when the script runs from one
+2. colocated deployment repository when the script runs from one
+3. `AGENT_SESSION_MEMORY_REPO`
+4. `AGENT_MEMORY_REPO`
 5. `MY_PRECIOUS_CONFIG` or `AGENT_SESSION_MEMORY_CONFIG`
 6. `~/.config/my-precious/config.json`
 

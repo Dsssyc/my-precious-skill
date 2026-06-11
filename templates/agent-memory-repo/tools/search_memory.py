@@ -80,11 +80,11 @@ def resolve_repo(repo_arg: str | None) -> Path:
     candidates: list[str] = []
     if repo_arg:
         candidates.append(repo_arg)
+    candidates.append(str(Path(__file__).resolve().parents[1]))
     for name in DEFAULT_REPO_CANDIDATES:
         value = os.environ.get(name)
         if value:
             candidates.append(value)
-    candidates.append(str(Path(__file__).resolve().parents[1]))
     candidates.extend(configured_memory_repos())
     candidates.append(os.getcwd())
     candidates.append("~/repos/agent-memory")
@@ -156,7 +156,7 @@ def record_search_text(record: dict) -> str:
         value = record.get(key)
         if isinstance(value, str):
             parts.append(value)
-    for key in ("tags", "files_touched"):
+    for key in ("tags", "files_touched", "reusable_facts", "decisions", "unresolved_tasks"):
         value = record.get(key)
         if isinstance(value, list):
             parts.extend(str(item) for item in value)

@@ -29,11 +29,11 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
     candidates: list[str] = []
     if repo_arg:
         candidates.append(repo_arg)
+    candidates.append(str(Path(__file__).resolve().parents[1]))
     for env_name in ("AGENT_SESSION_MEMORY_REPO", "AGENT_MEMORY_REPO"):
         value = os.environ.get(env_name)
         if value:
             candidates.append(value)
-    candidates.append(str(Path(__file__).resolve().parents[1]))
     candidates.append(os.getcwd())
     for candidate in candidates:
         repo = Path(candidate).expanduser()

@@ -55,6 +55,21 @@ class SourceRecord:
     sha256: str
 
 
+@dataclass
+class MemoryEvent:
+    kind: str
+    text: str
+
+
+NOISE_MARKERS = (
+    "session_meta",
+    "response_item",
+    "event_msg",
+    "base_instructions",
+    "model_context_window",
+)
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -99,11 +114,11 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
     candidates = []
     if repo_arg:
         candidates.append(repo_arg)
+    candidates.append(str(Path(__file__).resolve().parents[1]))
     for env_name in ("AGENT_SESSION_MEMORY_REPO", "AGENT_MEMORY_REPO"):
         value = os.environ.get(env_name)
         if value:
             candidates.append(value)
-    candidates.append(str(Path(__file__).resolve().parents[1]))
     candidates.extend(configured_memory_repos())
     candidates.append(os.getcwd())
     candidates.append("~/repos/agent-memory")
@@ -367,57 +382,100 @@ def clip(text: str, limit: int = 240) -> str:
     return text[: limit - 3].rstrip() + "..."
 
 
-def value_to_line(value: object) -> str:
-    if isinstance(value, dict):
-        role = value.get("role") or value.get("type") or value.get("source") or "record"
-        content = value.get("content") or value.get("text") or value.get("message") or value.get("summary")
-        if isinstance(content, list):
-            content = " ".join(str(item) for item in content)
-        if isinstance(content, (dict, list)):
-            content = json.dumps(content, ensure_ascii=False, sort_keys=True)
-        if isinstance(content, str) and content.strip():
-            return f"{role}: {content}"
-        return f"{role}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}"
+def is_noisy_text(text: object) -> bool:
+    if not isinstance(text, str):
+        return True
+    lowered = text.lower()
+    return any(marker in lowered for marker in NOISE_MARKERS)
+
+
+def extract_text(value: object) -> str:
+    if isinstance(value, str):
+        return clip(value)
     if isinstance(value, list):
-        return " ".join(value_to_line(item) for item in value)
-    return str(value)
+        return clip(" ".join(part for item in value if (part := extract_text(item))))
+    if isinstance(value, dict):
+        for key in ("text", "message", "summary", "output", "content"):
+            if key in value:
+                text = extract_text(value.get(key))
+                if text:
+                    return text
+    return ""
 
 
-def extract_source_lines(path: Path, text: str) -> list[str]:
-    lines: list[str] = []
-    if path.suffix == ".jsonl":
-        for raw_line in text.splitlines():
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            try:
-                lines.append(value_to_line(json.loads(raw_line)))
-            except json.JSONDecodeError:
-                lines.append(raw_line)
-    elif path.suffix == ".json":
+def command_from_arguments(arguments: object) -> str:
+    value = arguments
+    if isinstance(arguments, str):
         try:
-            value = json.loads(text)
+            value = json.loads(arguments)
         except json.JSONDecodeError:
-            lines.extend(text.splitlines())
-        else:
-            if isinstance(value, list):
-                lines.extend(value_to_line(item) for item in value)
-            else:
-                lines.append(value_to_line(value))
-    else:
-        lines.extend(text.splitlines())
-    return [clip(line) for line in lines if compact_whitespace(line)]
+            return clip(arguments)
+    if isinstance(value, dict):
+        for key in ("cmd", "command", "script"):
+            text = extract_text(value.get(key))
+            if text:
+                return text
+        return clip(json.dumps(value, ensure_ascii=False, sort_keys=True))
+    return extract_text(value)
 
 
-def select_lines(lines: list[str], pattern: str, limit: int = 5) -> list[str]:
-    regex = re.compile(pattern, re.IGNORECASE)
-    selected: list[str] = []
-    for line in lines:
-        if regex.search(line):
-            selected.append(line)
-            if len(selected) >= limit:
-                break
-    return selected
+def events_from_value(value: object) -> list[MemoryEvent]:
+    if isinstance(value, list):
+        events: list[MemoryEvent] = []
+        for item in value:
+            events.extend(events_from_value(item))
+        return events
+    if not isinstance(value, dict):
+        text = extract_text(value)
+        return [MemoryEvent("record", text)] if text else []
+
+    event_type = str(value.get("type") or "")
+    if event_type in {"session_meta", "turn_context"}:
+        return []
+
+    payload = value.get("payload")
+    body = payload if isinstance(payload, dict) else value
+    body_type = str(body.get("type") or event_type)
+
+    # Status-stream messages are useful during a live turn but too noisy for
+    # long-term memory indexes. Durable outcomes still appear in assistant
+    # response items and final messages.
+    if event_type == "event_msg":
+        return []
+
+    if body_type == "function_call":
+        name = extract_text(body.get("name")) or "tool"
+        command = command_from_arguments(body.get("arguments"))
+        text = f"{name}: {command}" if command else name
+        return [MemoryEvent("command", clip(text))]
+
+    if body_type == "function_call_output":
+        text = extract_text(body.get("output"))
+        return [MemoryEvent("command_output", text)] if text else []
+
+    role = str(body.get("role") or value.get("role") or "").lower()
+    text = extract_text(body.get("content")) or extract_text(body.get("text")) or extract_text(body.get("message"))
+    if not text:
+        return []
+    if role in {"user", "human"}:
+        return [MemoryEvent("user", text)]
+    if role == "assistant":
+        return [MemoryEvent("assistant", text)]
+    return [MemoryEvent("record", text)]
+
+
+def extract_source_events(path: Path, text: str) -> list[MemoryEvent]:
+    events: list[MemoryEvent] = []
+    parsed_any = False
+    for value in iter_source_json_values(path, text):
+        parsed_any = True
+        events.extend(events_from_value(value))
+    if not parsed_any:
+        for line in text.splitlines():
+            line = clip(line)
+            if line:
+                events.append(MemoryEvent("record", line))
+    return [event for event in events if event.text and not is_noisy_text(event.text)]
 
 
 def bullet_list(items: list[str], fallback: str) -> str:
@@ -426,19 +484,126 @@ def bullet_list(items: list[str], fallback: str) -> str:
     return "".join(f"- {item}\n" for item in items)
 
 
-def summarize_lines(lines: list[str], project_name: str) -> dict[str, object]:
-    user_lines = select_lines(lines, r"^(user|human|request|prompt)\s*:", limit=3)
+def is_process_update(text: str) -> bool:
+    lowered = text.lower()
+    prefixes = (
+        "i am ",
+        "i'm ",
+        "i will ",
+        "i’ll ",
+        "next i",
+        "now i",
+        "i checked ",
+        "i found ",
+        "我先",
+        "我会",
+        "现在",
+        "下一步",
+    )
+    return lowered.startswith(prefixes)
+
+
+def event_texts(events: list[MemoryEvent], kinds: set[str] | None = None) -> list[str]:
+    texts: list[str] = []
+    for event in events:
+        if kinds is not None and event.kind not in kinds:
+            continue
+        if event.text not in texts:
+            texts.append(event.text)
+    return texts
+
+
+def select_event_texts(
+    events: list[MemoryEvent],
+    pattern: str,
+    *,
+    kinds: set[str] | None = None,
+    limit: int = 5,
+    skip_process: bool = True,
+) -> list[str]:
+    regex = re.compile(pattern, re.IGNORECASE)
+    selected: list[str] = []
+    for text in event_texts(events, kinds):
+        if skip_process and is_process_update(text):
+            continue
+        if is_noisy_text(text):
+            continue
+        if regex.search(text):
+            selected.append(text)
+            if len(selected) >= limit:
+                break
+    return selected
+
+
+def extract_tags(project_name: str, texts: list[str]) -> list[str]:
+    tags = ["agent-memory", "my-precious", slugify(project_name)]
+    stop_words = {
+        "this",
+        "that",
+        "with",
+        "from",
+        "will",
+        "should",
+        "would",
+        "could",
+        "need",
+        "root",
+        "cause",
+        "final",
+        "state",
+        "archive",
+        "memory",
+    }
+    for text in texts:
+        if is_noisy_text(text):
+            continue
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{3,}", text.lower()):
+            token = token.strip("._-")
+            if not token or token in stop_words or token in tags:
+                continue
+            tags.append(token[:48])
+            if len(tags) >= 16:
+                return tags
+    return tags
+
+
+def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, object]:
+    user_lines = event_texts(events, {"user"})
     if not user_lines:
-        user_lines = lines[:2]
-    decisions = select_lines(lines, r"\b(decision|decide|decided|choose|chosen|use|selected|决定|选择)\b", limit=5)
-    problems = select_lines(lines, r"\b(error|failed|failure|blocked|exception|traceback|problem|issue|bug|失败|错误|阻塞)\b", limit=5)
-    unresolved = select_lines(lines, r"\b(todo|next|follow[- ]?up|unresolved|remaining|later|下一步|后续|未完成)\b", limit=5)
-    commands = select_lines(lines, r"(^|\s)(python|uv|git|npm|pnpm|yarn|cargo|go|pytest|make|rg|sed|awk)\b|`[^`]+`", limit=5)
-    facts = select_lines(lines, r"\b(prefer|must|should|require|constraint|convention|policy|rule|约定|偏好|必须|应该)\b", limit=5)
+        user_lines = event_texts(events, {"record"})[:2]
+    assistant_lines = event_texts(events, {"assistant", "record"})
+    decisions = select_event_texts(
+        events,
+        r"\b(decision|decide|decided|chosen|selected|root cause|原因|决定|选择)\b",
+        kinds={"assistant", "record"},
+        limit=5,
+    )
+    problems = select_event_texts(
+        events,
+        r"\b(error|failed|failure|blocked|exception|traceback|problem|issue|bug|importerror|失败|错误|阻塞)\b",
+        kinds={"assistant", "record", "command_output"},
+        limit=5,
+        skip_process=False,
+    )
+    unresolved = select_event_texts(
+        events,
+        r"\b(todo|follow[- ]?up|unresolved|remaining|still need|not completed|后续|未完成)\b",
+        kinds={"assistant", "record"},
+        limit=5,
+    )
+    commands = event_texts(events, {"command"})[:5]
+    facts = select_event_texts(
+        events,
+        r"\b(root cause|verified|must|should|require|requires|constraint|convention|policy|rule|prefer|expected|原因|验证|约定|偏好|必须|应该)\b",
+        kinds={"assistant", "record"},
+        limit=5,
+    )
+    if not facts:
+        facts = [text for text in assistant_lines if not is_process_update(text)][:3]
     evidence = []
     for group in (user_lines, decisions, facts, problems, unresolved):
         for line in group:
-            if line not in evidence:
+            if line not in evidence and not is_noisy_text(line):
                 evidence.append(line)
             if len(evidence) >= 6:
                 break
@@ -446,28 +611,33 @@ def summarize_lines(lines: list[str], project_name: str) -> dict[str, object]:
             break
 
     user_intent = user_lines[0] if user_lines else f"Archive source record for {project_name}."
+    final_state = ""
+    for text in reversed(assistant_lines):
+        if not is_process_update(text):
+            final_state = text
+            break
     summary_items = []
-    for line in [*user_lines[:2], *decisions[:2], *facts[:2]]:
+    for line in [user_intent, *decisions[:1], *facts[:1], final_state]:
         if line not in summary_items:
             summary_items.append(line)
     summary = " ".join(summary_items) if summary_items else f"Archived source record for {project_name}."
-    tags = ["agent-memory", "my-precious", slugify(project_name)]
-    for line in lines[:20]:
-        for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", line.lower()):
-            if token not in tags and len(tags) < 12:
-                tags.append(token)
+    context = []
+    for line in [user_intent, *facts[:2], *problems[:1], final_state]:
+        if line and line not in context and not is_noisy_text(line):
+            context.append(line)
 
     return {
         "user_intent": user_intent,
         "summary": summary,
-        "context": lines[:5],
+        "context": context[:5],
         "facts": facts,
         "decisions": decisions,
         "problems": problems,
         "unresolved": unresolved,
         "commands": commands,
         "evidence": evidence,
-        "tags": tags,
+        "tags": extract_tags(project_name, [summary, *user_lines, *facts, *decisions, *problems, *commands]),
+        "final_state": final_state or summary,
     }
 
 
@@ -490,8 +660,8 @@ def write_record(
 
     source_text = read_record_text(record.path)
     redacted_text, redaction_counts = redact_text(source_text)
-    source_lines = extract_source_lines(record.path, redacted_text)
-    summary_data = summarize_lines(source_lines, project_name)
+    source_events = extract_source_events(record.path, redacted_text)
+    summary_data = summarize_events(source_events, project_name)
     archived_at = utc_now()
     rel_summary = destination.relative_to(memory_repo) / "summary.md"
     rel_evidence = destination.relative_to(memory_repo) / "evidence.md"
@@ -536,7 +706,7 @@ def write_record(
 {bullet_list(summary_data["problems"], "No problems were detected automatically.")}
 
 ## Final State
-{summary_data["summary"]}
+{summary_data["final_state"]}
 
 ## Unresolved Tasks
 {bullet_list(summary_data["unresolved"], "Review this generated summary and refine it if the source record needs higher fidelity.")}
@@ -580,6 +750,7 @@ Policy: short redacted snippets only; raw source records are not copied by defau
         "evidence_policy": "short_redacted_snippets",
         "user_intent": summary_data["user_intent"],
         "summary": summary_data["summary"],
+        "reusable_facts": summary_data["facts"],
         "tags": summary_data["tags"],
         "decisions": summary_data["decisions"],
         "unresolved_tasks": summary_data["unresolved"],
@@ -642,6 +813,7 @@ def rebuild_indexes(memory_repo: Path) -> None:
             "title": f"{row.get('project', '')}: {Path(str(row.get('source_record', ''))).name}",
             "user_intent": row.get("user_intent", ""),
             "summary": row.get("summary", ""),
+            "reusable_facts": row.get("reusable_facts", []),
             "summary_path": row.get("summary_path", ""),
             "evidence_path": row.get("evidence_path", ""),
             "source_updated_at": row.get("source_updated_at", ""),
@@ -680,13 +852,19 @@ def rebuild_indexes(memory_repo: Path) -> None:
         unresolved_tasks = row.get("unresolved_tasks", []) if isinstance(row.get("unresolved_tasks"), list) else []
         tags = row.get("tags", []) if isinstance(row.get("tags"), list) else []
         for decision in decisions:
+            if is_noisy_text(decision):
+                continue
             decision_lines.append(json.dumps({**common, "decision": decision, "confidence": "medium"}, sort_keys=True))
         for task in unresolved_tasks:
+            if is_noisy_text(task):
+                continue
             unresolved_lines.append(json.dumps({**common, "task": task, "priority": "medium"}, sort_keys=True))
         source_record = row.get("source_record")
         if isinstance(source_record, str) and source_record:
             file_lines.append(json.dumps({**common, "path": source_record, "action": "archived-source-record"}, sort_keys=True))
         for tag in tags:
+            if is_noisy_text(tag):
+                continue
             tag_lines.append(json.dumps({**common, "tag": tag}, sort_keys=True))
     (index_dir / "decisions.jsonl").write_text("\n".join(decision_lines) + ("\n" if decision_lines else ""), encoding="utf-8")
     (index_dir / "unresolved.jsonl").write_text("\n".join(unresolved_lines) + ("\n" if unresolved_lines else ""), encoding="utf-8")

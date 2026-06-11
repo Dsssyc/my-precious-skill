@@ -16,6 +16,10 @@ The setup skill records this repository in
 `~/.config/my-precious/config.json` by default. `AGENT_SESSION_MEMORY_REPO` can
 still be used as a current-shell or scheduler override.
 
+When these tools run from inside a deployment repository, they default to that
+colocated repository. Pass `--repo` or `--memory-repo` to target a different
+archive explicitly.
+
 ## Update Now
 
 Run the global updater against a shared source record directory:

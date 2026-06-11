@@ -18,9 +18,9 @@ It does not create summaries, schedule archive jobs, upload transcripts, or read
 Prefer these locations in order:
 
 1. explicit repository path if the user provided one
-2. `AGENT_SESSION_MEMORY_REPO`
-3. `AGENT_MEMORY_REPO`
-4. colocated deployment repository when the script runs from one
+2. colocated deployment repository when the script runs from one
+3. `AGENT_SESSION_MEMORY_REPO`
+4. `AGENT_MEMORY_REPO`
 5. `MY_PRECIOUS_CONFIG` or `AGENT_SESSION_MEMORY_CONFIG`
 6. `~/.config/my-precious/config.json`
 7. `~/repos/agent-memory`

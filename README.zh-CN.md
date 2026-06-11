@@ -138,9 +138,9 @@ override，不应该是主要 setup 机制。
 工具会按以下顺序寻找私有部署仓库：
 
 1. 显式命令参数，例如 `--repo` 或 `--memory-repo`
-2. `AGENT_SESSION_MEMORY_REPO`
-3. `AGENT_MEMORY_REPO`
-4. 当脚本从部署仓库内运行时，使用同仓库位置
+2. 当脚本从部署仓库内运行时，使用同仓库位置
+3. `AGENT_SESSION_MEMORY_REPO`
+4. `AGENT_MEMORY_REPO`
 5. `MY_PRECIOUS_CONFIG` 或 `AGENT_SESSION_MEMORY_CONFIG`
 6. `~/.config/my-precious/config.json`
 7. `~/repos/agent-memory`

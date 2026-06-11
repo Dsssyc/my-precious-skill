@@ -139,9 +139,9 @@ supports them.
 The tools locate the private deployment repository in this order:
 
 1. explicit command argument such as `--repo` or `--memory-repo`
-2. `AGENT_SESSION_MEMORY_REPO`
-3. `AGENT_MEMORY_REPO`
-4. a colocated deployment repository when the script runs from one
+2. a colocated deployment repository when the script runs from one
+3. `AGENT_SESSION_MEMORY_REPO`
+4. `AGENT_MEMORY_REPO`
 5. `MY_PRECIOUS_CONFIG` or `AGENT_SESSION_MEMORY_CONFIG`
 6. `~/.config/my-precious/config.json`
 7. `~/repos/agent-memory`

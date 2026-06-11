@@ -100,6 +100,203 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertTrue((summary_path.parent / "source-map.json").exists())
             self.assertTrue((memory_repo / "daily/2026/2026-05-14.md").exists())
 
+    def test_update_memory_archive_extracts_codex_sessions_without_event_noise(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "gridmen"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source = source_dir / "rollout.jsonl"
+            events = [
+                {
+                    "type": "session_meta",
+                    "timestamp": "2026-06-02T21:20:48Z",
+                    "payload": {
+                        "cwd": str(project_path),
+                        "base_instructions": {"text": "You are Codex, a coding agent based on GPT-5."},
+                    },
+                },
+                {
+                    "type": "event_msg",
+                    "timestamp": "2026-06-02T21:20:49Z",
+                    "payload": {"message": "I am checking backend startup logs before changing code."},
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-06-02T21:20:50Z",
+                    "payload": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "Gridmen backend crashes on GDAL import; figure out what is going on.",
+                            }
+                        ],
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-06-02T21:20:51Z",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "arguments": json.dumps({"cmd": "python - <<'PY'\nfrom osgeo import _gdal\nPY"}),
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-06-02T21:20:52Z",
+                    "payload": {
+                        "type": "function_call_output",
+                        "output": "ImportError: dlopen(... libx265.215.dylib)",
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-06-02T21:20:53Z",
+                    "payload": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "Root cause: Homebrew libheif still expected libx265.215.dylib; "
+                                    "reinstalling Python packages will not fix the GDAL startup crash."
+                                ),
+                            }
+                        ],
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-06-02T21:20:54Z",
+                    "payload": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Final state: verified with direct osgeo._gdal import and Homebrew linkage checks.",
+                            }
+                        ],
+                    },
+                },
+            ]
+            source.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+            set_mtime(source, "2026-06-02T21:20:54Z")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "gridmen",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            row = json.loads((memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()[0])
+            self.assertIn("gdal import", row["user_intent"].lower())
+            self.assertIn("libx265.215.dylib", row["summary"])
+            self.assertIn("homebrew", " ".join(row["tags"]).lower())
+            self.assertNotIn("session_meta", json.dumps(row))
+            self.assertNotIn("response_item", json.dumps(row))
+            self.assertNotIn("event_msg", json.dumps(row))
+            self.assertNotIn("base_instructions", json.dumps(row))
+
+            summary_path = memory_repo / row["summary_path"]
+            combined = "\n".join(
+                (summary_path.parent / name).read_text(encoding="utf-8")
+                for name in ("summary.md", "evidence.md", "meta.json")
+            )
+            self.assertIn("Gridmen backend crashes on GDAL import", combined)
+            self.assertIn("Homebrew libheif still expected libx265.215.dylib", combined)
+            self.assertIn("direct osgeo._gdal import", combined)
+            self.assertNotIn("session_meta", combined)
+            self.assertNotIn("response_item", combined)
+            self.assertNotIn("event_msg", combined)
+            self.assertNotIn("base_instructions", combined)
+
+            decision_index = (memory_repo / "index/decisions.jsonl").read_text(encoding="utf-8")
+            self.assertIn("Homebrew libheif", decision_index)
+            self.assertNotIn("response_item", decision_index)
+
+    def test_update_memory_archive_prefers_colocated_repo_over_configured_repo(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            local_repo = root / "local-agent-memory"
+            configured_repo = root / "configured-agent-memory"
+            config_path = root / "my-precious-config.json"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            for repo in (local_repo, configured_repo):
+                subprocess.run(
+                    [sys.executable, str(setup_script), "--path", str(repo), "--mode", "local", "--skip-config"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+            config_path.write_text(json.dumps({"memory_repo": str(configured_repo)}) + "\n", encoding="utf-8")
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": "Archive this in the colocated repository."}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            env = os.environ.copy()
+            env["MY_PRECIOUS_CONFIG"] = str(config_path)
+            env.pop("AGENT_SESSION_MEMORY_REPO", None)
+            env.pop("AGENT_MEMORY_REPO", None)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(local_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                env=env,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertTrue((local_repo / "index/sessions.jsonl").exists())
+            self.assertFalse((configured_repo / "index/sessions.jsonl").exists())
+
     def test_update_memory_archive_refuses_secret_records_by_default(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

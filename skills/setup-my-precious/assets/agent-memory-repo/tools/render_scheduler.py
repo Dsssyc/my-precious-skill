@@ -53,11 +53,11 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
     candidates = []
     if repo_arg:
         candidates.append(repo_arg)
+    candidates.append(str(Path(__file__).resolve().parents[1]))
     for env_name in ("AGENT_SESSION_MEMORY_REPO", "AGENT_MEMORY_REPO"):
         value = os.environ.get(env_name)
         if value:
             candidates.append(value)
-    candidates.append(str(Path(__file__).resolve().parents[1]))
     candidates.extend(configured_memory_repos())
     candidates.append(os.getcwd())
     candidates.append("~/repos/agent-memory")
