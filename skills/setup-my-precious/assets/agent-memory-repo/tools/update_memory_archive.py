@@ -1739,6 +1739,9 @@ def index_title_from_meta(row: dict[str, object]) -> str:
     source_record = str(row.get("source_record", ""))
     project = str(row.get("project", ""))
     fallback = f"{project}: {Path(source_record).name}" if source_record else project
+    explicit_title = clean_title_candidate(str(row.get("title", "")))
+    if title_quality_score(explicit_title) > -10_000:
+        return explicit_title
     return memory_title(
         {
             "summary": row.get("summary", ""),
