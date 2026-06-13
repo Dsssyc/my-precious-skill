@@ -227,6 +227,101 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             self.assertEqual(len(session_rows), 1)
             self.assertEqual(session_rows[0]["project_path"], str(project_path.resolve()))
 
+    def test_run_memory_updates_can_rewrite_existing_project_archives(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_path = root / "project-backfill"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            source = source_dir / "rewrite.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Backfill this project with clean extracted memory.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stale_dir = memory_repo / "sessions/2026/05/14/stale-backfill"
+            stale_dir.mkdir(parents=True)
+            (stale_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "session_id": stale_dir.name,
+                        "source_agent": "agent",
+                        "project": "project-backfill",
+                        "project_path": str(project_path.resolve()),
+                        "source_record": str(source.resolve()),
+                        "source_record_sha256": "oldhash",
+                        "source_updated_at": "2026-05-14T09:00:00Z",
+                        "summary_path": "sessions/2026/05/14/stale-backfill/summary.md",
+                        "evidence_path": "sessions/2026/05/14/stale-backfill/evidence.md",
+                        "archive_status": "summarized",
+                        "redaction_status": "none",
+                        "contains_raw_transcript": False,
+                        "evidence_policy": "short_redacted_snippets",
+                        "user_intent": "session_meta: stale",
+                        "summary": "response_item: stale",
+                        "reusable_facts": [],
+                        "tags": ["session_meta"],
+                        "decisions": [],
+                        "unresolved_tasks": [],
+                        "redaction_counts": {},
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (stale_dir / "summary.md").write_text("session_meta: stale\n", encoding="utf-8")
+            (stale_dir / "evidence.md").write_text("response_item: stale\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--rewrite-existing",
+                    "--max-records",
+                    "-1",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Existing entries removed: 1", result.stdout)
+            self.assertFalse(stale_dir.exists())
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 1)
+            self.assertIn("Backfill this project", session_rows[0]["user_intent"])
+            self.assertNotIn("session_meta", json.dumps(session_rows[0]))
+
     def test_run_memory_updates_can_allow_redacted_secret_records(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

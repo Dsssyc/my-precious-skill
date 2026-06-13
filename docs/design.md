@@ -37,9 +37,10 @@ exists. It must not run recurring jobs from this development repository.
 
 `update-my-precious` performs on-demand write-path actions against the private
 deployment repository. It scans a source record directory, uses the current
-project path as the high-water-mark key, archives only records newer than the
-latest timestamp already archived for that project, and writes searchable
-summaries plus short redacted evidence snippets.
+project path as the project scope and high-water-mark key, archives records
+newer than the latest timestamp already archived for that project, refreshes a
+previously archived source record when its current source hash changes, and
+writes searchable summaries plus short redacted evidence snippets.
 
 ## Generality
 
@@ -136,8 +137,9 @@ If none are set, tools may try `~/repos/agent-memory`.
 - All skills validate as skills.
 - The search script works against a synthetic archive.
 - The setup script creates a synthetic local archive.
-- The update script archives only source records newer than the latest
-  timestamp for the same project path.
+- The update script archives source records newer than the latest timestamp for
+  the same project path and refreshes previously archived source records whose
+  source hash changed.
 - The update script generates searchable summaries and refuses likely-secret
   source records by default.
 - The update script can require explicit project metadata when scanning shared

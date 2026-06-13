@@ -51,6 +51,28 @@ def unique_tokens(text: str) -> list[str]:
     return out
 
 
+def compact_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def clip(text: str, limit: int = 180) -> str:
+    text = compact_whitespace(text)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def is_generic_source_title(text: str) -> bool:
+    lowered = text.lower().strip()
+    if not lowered:
+        return True
+    if re.search(r"\brollout-\d{4}-\d{2}-\d{2}t", lowered):
+        return True
+    if re.search(r"\.(?:jsonl|json|log|txt|md)\b", lowered) and ":" in lowered:
+        return True
+    return False
+
+
 def configured_memory_repos() -> list[str]:
     config_paths: list[str] = []
     for name in CONFIG_CANDIDATES:
@@ -125,42 +147,163 @@ def score_text(query_tokens: list[str], text: str, *, weight: int = 1) -> tuple[
         count = haystack.count(token)
         if count:
             matched.append(token)
-            score += min(count, 5) * weight
+            score += min(count, 5) * weight * token_importance(token)
     return score, matched
 
 
-def display_title(record: dict) -> str:
-    for key in ("title", "decision", "task", "summary", "user_intent"):
-        value = record.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def token_importance(token: str) -> int:
+    if any(ord(char) > 127 for char in token):
+        return 5
+    if "_" in token or "." in token or "-" in token:
+        return 4
+    if any(char.isdigit() for char in token) and len(token) >= 6:
+        return 4
+    if len(token) >= 10:
+        return 3
+    if len(token) >= 7:
+        return 2
+    return 1
+
+
+def specific_query_tokens(query_tokens: list[str]) -> list[str]:
+    return [token for token in query_tokens if token_importance(token) >= 4]
+
+
+def important_query_tokens(query_tokens: list[str]) -> list[str]:
+    return [
+        token
+        for token in query_tokens
+        if token_importance(token) >= 2 or (any(char.isdigit() for char in token) and len(token) >= 3)
+    ]
+
+
+def iter_record_field_texts(record: dict, key: str) -> Iterable[str]:
+    value = record.get(key)
+    if isinstance(value, str) and value.strip():
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            text = str(item).strip()
+            if text:
+                yield text
+
+
+def display_title(record: dict, query_tokens: list[str] | None = None) -> str:
+    query_tokens = query_tokens or []
+    if isinstance(record.get("summary"), str) and isinstance(record.get("title"), str):
+        title = record["title"].strip()
+        if title and not is_generic_source_title(title):
+            return clip(title)
+    candidates: list[tuple[int, int, str]] = []
+    title_fields = (
+        ("decision", 70),
+        ("task", 65),
+        ("summary", 60),
+        ("reusable_facts", 55),
+        ("decisions", 55),
+        ("unresolved_tasks", 50),
+        ("user_intent", 45),
+        ("title", 30),
+    )
+    for key, priority in title_fields:
+        for text in iter_record_field_texts(record, key):
+            if key == "title" and is_generic_source_title(text):
+                continue
+            match_score, matched = score_text(query_tokens, text, weight=1) if query_tokens else (0, [])
+            if query_tokens and key != "title" and not matched:
+                continue
+            candidates.append((match_score, priority, clip(text)))
+    if candidates:
+        return max(candidates, key=lambda item: (item[0], item[1], len(item[2])))[2]
+
+    for text in iter_record_field_texts(record, "title"):
+        return clip(text)
     return ""
 
 
-def record_search_text(record: dict) -> str:
-    parts: list[str] = []
-    for key in (
-        "date",
-        "source_agent",
-        "project",
-        "repository",
-        "title",
-        "decision",
-        "rationale",
-        "task",
-        "summary",
-        "user_intent",
-        "summary_path",
-        "evidence_path",
-    ):
-        value = record.get(key)
-        if isinstance(value, str):
-            parts.append(value)
-    for key in ("tags", "files_touched", "reusable_facts", "decisions", "unresolved_tasks"):
-        value = record.get(key)
-        if isinstance(value, list):
-            parts.extend(str(item) for item in value)
-    return "\n".join(parts)
+def result_title_quality(text: str) -> int:
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return -10_000
+    score = 0
+    if len(compacted) <= 120:
+        score += 20
+    elif len(compacted) > 180:
+        score -= 20
+    if re.search(r"\b(root cause|decision|proxy|socks5|spurious|libx265|libheif|_gdal)\b|根因|原因|代理|记忆索引|高质量", compacted, re.IGNORECASE):
+        score += 30
+    if re.search(r"\b(?:dry run|live update|source record|secret gate|subagent)\b|默认 secret gate|产生新写入", compacted, re.IGNORECASE):
+        score -= 80
+    if is_generic_source_title(compacted):
+        score -= 100
+    return score
+
+
+def score_index_record(query_tokens: list[str], record: dict) -> tuple[int, list[str]]:
+    field_weights = (
+        ("decision", 14),
+        ("decisions", 14),
+        ("task", 12),
+        ("summary", 12),
+        ("reusable_facts", 12),
+        ("unresolved_tasks", 10),
+        ("user_intent", 7),
+        ("title", 5),
+        ("rationale", 5),
+        ("project", 3),
+        ("repository", 3),
+        ("tags", 2),
+        ("files_touched", 2),
+        ("source_agent", 1),
+        ("summary_path", 1),
+        ("evidence_path", 1),
+        ("date", 1),
+    )
+    score = 0
+    matched_tokens: list[str] = []
+    structured_match_count = 0
+    for key, weight in field_weights:
+        field_weight = weight
+        field_matched: set[str] = set()
+        for text in iter_record_field_texts(record, key):
+            if key == "title" and is_generic_source_title(text):
+                field_weight = 1
+            field_score, matched = score_text(query_tokens, text, weight=field_weight)
+            if field_score:
+                score += field_score
+                field_matched.update(matched)
+                for token in matched:
+                    if token not in matched_tokens:
+                        matched_tokens.append(token)
+        if field_matched and key in {"decision", "decisions", "task", "summary", "reusable_facts", "unresolved_tasks"}:
+            structured_match_count += len(field_matched)
+    if matched_tokens:
+        matched_importance = sum(token_importance(token) for token in set(matched_tokens))
+        score += matched_importance * 6
+        if len(matched_tokens) == len(query_tokens):
+            score += 20
+        if structured_match_count >= 2:
+            score += 20 + structured_match_count * 3
+        specific_tokens = specific_query_tokens(query_tokens)
+        matched_specific = [token for token in specific_tokens if token in matched_tokens]
+        if matched_specific:
+            score += sum(token_importance(token) for token in matched_specific) * 25
+            missing_specific = [token for token in specific_tokens if token not in matched_tokens]
+            if missing_specific:
+                score = max(1, score // (2 + len(missing_specific)))
+        elif specific_tokens:
+            score = max(1, score // 8)
+        important_tokens = important_query_tokens(query_tokens)
+        if len(important_tokens) >= 2:
+            matched_important = [token for token in important_tokens if token in matched_tokens]
+            required = max(1, (len(important_tokens) + 1) // 2)
+            if len(matched_important) >= required:
+                score += sum(token_importance(token) for token in matched_important) * 12
+                score += len(matched_important) * 8
+            else:
+                missing_required = required - len(matched_important)
+                score = max(1, score // (2 + missing_required * 2))
+    return score, matched_tokens
 
 
 def safe_index_record_path(repo: Path, index_path: Path, path_text: object) -> Path:
@@ -182,13 +325,12 @@ def collect_index_hits(repo: Path, query_tokens: list[str]) -> list[Hit]:
     hits: list[Hit] = []
     for index_path in sorted((repo / "index").glob("*.jsonl")):
         for record in iter_jsonl(index_path):
-            text = record_search_text(record)
-            score, matched = score_text(query_tokens, text, weight=4)
+            score, matched = score_index_record(query_tokens, record)
             if not score:
                 continue
             path = safe_index_record_path(repo, index_path, record.get("summary_path") or record.get("path"))
             why = [f"index:{index_path.name}", f"matched:{', '.join(matched)}"]
-            hits.append(Hit(path=path, score=score + 10, source="index", why=why, title=display_title(record)))
+            hits.append(Hit(path=path, score=score + 10, source="index", why=why, title=display_title(record, query_tokens)))
     return hits
 
 
@@ -247,7 +389,7 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
             continue
         current.score += hit.score
         current.why.extend(reason for reason in hit.why if reason not in current.why)
-        if not current.title and hit.title:
+        if hit.title and (not current.title or result_title_quality(hit.title) > result_title_quality(current.title)):
             current.title = hit.title
         if current.source != hit.source:
             current.source = "mixed"

@@ -85,6 +85,8 @@ python3 -m py_compile \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
+  templates/agent-memory-repo/tools/audit_memory_archive.py \
+  templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/render_scheduler.py \

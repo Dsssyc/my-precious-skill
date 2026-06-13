@@ -27,7 +27,7 @@ the agent can use `$using-my-precious` to search a private session memory archiv
 
 `setup-my-precious` is the setup-path skill. It asks how the archive should be stored, scaffolds a local archive folder, and can connect it to a private hosted Git repository when requested.
 
-`update-my-precious` is the write-path skill. It scans a source record directory, uses the current project path as the high-water-mark key, and writes only records newer than the latest archived timestamp for that project.
+`update-my-precious` is the write-path skill. It scans a source record directory, uses the current project path as the project scope, writes records newer than the latest archived timestamp for that project, and refreshes a previously archived source record when its source hash changes.
 
 `using-my-precious` is the read-path skill. It only requires a deployment repository with stable Markdown summaries and JSONL indexes.
 
@@ -72,9 +72,12 @@ my-precious-skill/
       tools/search_memory.py
       tools/update_memory_archive.py
       tools/run_memory_updates.py
+      tools/audit_memory_archive.py
+      tools/backfill_memory_archive.py
       tools/render_scheduler.py
       tools/sync_memory_archive.py
   tests/
+    test_audit_memory_archive.py
     test_search_memory.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
@@ -199,6 +202,19 @@ If `config/projects.jsonl` is empty, the runner scans source records for project
 metadata such as `cwd` or `project_path`, registers discovered projects, and
 then updates each enabled project.
 
+For a deliberate historical repair pass, add `--rewrite-existing`. That mode
+rebuilds matching source records and replaces older archive entries for the
+same project/source record; it is not the normal incremental path.
+
+For broad repair of entries already present in the archive, prefer the
+meta-driven backfill tool:
+
+```bash
+python ~/repos/agent-memory/tools/backfill_memory_archive.py \
+  --memory-repo ~/repos/agent-memory \
+  --allow-redacted-secrets
+```
+
 `--allow-redacted-secrets` keeps secret detection enabled but permits archive
 entries after recognized secret patterns are redacted. Omit it when a human
 should inspect secret-like source records before anything is written.
@@ -220,6 +236,13 @@ python ~/repos/agent-memory/tools/update_memory_archive.py \
   --source-dir /path/to/session-records \
   --project-path /path/to/project \
   --require-project-metadata
+```
+
+Audit generated archive quality:
+
+```bash
+python ~/repos/agent-memory/tools/audit_memory_archive.py \
+  --memory-repo ~/repos/agent-memory
 ```
 
 Search without invoking an agent:
@@ -284,8 +307,8 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 
 The sync helper only stages archive paths (`INDEX.md`,
 `config/projects.jsonl`, `index/`, `daily/`, and `sessions/`). It refuses
-tool/script edits, unredacted key-like values, and whitespace errors before
-committing.
+tool/script edits, archive audit findings, unredacted key-like values, and
+whitespace errors before committing.
 
 ## Archive Contract
 
@@ -318,6 +341,9 @@ skills/using-my-precious/references/archive-format.md
 - Secret-pattern detection that refuses risky source records by default.
 - Optional project-metadata requirement for shared source record directories.
 - Global update runner that bootstraps an empty project registry from source records.
+- Backfill mode for deliberately rewriting existing source-record entries.
+- Meta-driven backfill tool for repairing existing archive entries without repeated full source scans.
+- Archive audit tool for wrapper-field noise, process-update text, and key-like values.
 - Reviewable scheduler template generator for launchd and cron formats.
 - Agent-native automation prompt rendering with a single working directory.
 - Safe Git sync helper for generated archive updates.
@@ -349,7 +375,7 @@ This repository should provide reusable, non-private building blocks:
 The private deployment repository should contain user-specific state and operations:
 
 - generated `sessions/`, `daily/`, and `index/` data
-- project-specific high-water marks derived from archived session timestamps
+- project-specific high-water marks and source-record hash freshness state
 - local config and logs
 - configured remotes
 - active scheduled jobs or scheduler config
@@ -377,6 +403,8 @@ python3 -m py_compile \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
+  templates/agent-memory-repo/tools/audit_memory_archive.py \
+  templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/render_scheduler.py \

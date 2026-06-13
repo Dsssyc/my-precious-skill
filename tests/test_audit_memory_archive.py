@@ -1,0 +1,562 @@
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+class AuditMemoryArchiveTests(unittest.TestCase):
+    def test_audit_memory_archive_flags_noise_and_secrets_without_leaking_values(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            fake_key = "sk-" + ("notreal" * 4)
+            entry_dir = memory_repo / "sessions/2026/05/14/noisy"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    f"session_meta: wrapper noise must not ship. Do not leak {fake_key}.\n"
+                    "I confirmed the branch and commit range before checking files.\n"
+                ),
+                encoding="utf-8",
+            )
+            (entry_dir / "evidence.md").write_text(
+                "Chunk ID: abc123\nWall time: 4.89 seconds\nOriginal token count: 436\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=noise", combined)
+            self.assertIn("category=process_update", combined)
+            self.assertIn("category=openai_key", combined)
+            self.assertIn("sessions/2026/05/14/noisy/summary.md", combined)
+            self.assertNotIn(fake_key, combined)
+
+    def test_audit_memory_archive_allows_redaction_count_labels(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/redacted"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Clean summary.\n", encoding="utf-8")
+            (entry_dir / "redactions.md").write_text("- cookie: 2\n- openai_key: 1\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_audit_memory_archive_flags_embedded_process_updates(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/process"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "The dry run exited cleanly and selected three records. "
+                    "I’m proceeding with the actual update now.\n"
+                    "尾段正在处理多个 project_path 共享同一 source record 的情况。继续等待进程退出。\n"
+                    "Using `using-superpowers` as requested, so I’ll also use `brainstorming` lightly.\n"
+                    "根因已经比较明确。现在我检查 Cargo workspace 边界。\n"
+                    "这里 process_update 不是旧 wrapper 污染，而是过程句进入了 reusable/problem/unresolved。\n"
+                    "第二轮已经接近上一轮耗时，继续等最终输出。\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=process_update", combined)
+            self.assertIn("sessions/2026/05/14/process/summary.md", combined)
+
+    def test_audit_memory_archive_allows_user_intent_with_wozhengzai(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/04/24/user-intent"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "## User Intent\n"
+                    "我正在为这个仓库对应的论文写4.4节，你现在作为一个专业的水动力，计算机和GIS\n\n"
+                    "## Reusable Facts\n"
+                    "- `4.4` 应该是 case-specific：Gei Wai 情景如何构建，以及它带来了什么水动力响应。\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_audit_memory_archive_flags_skill_and_chinese_process_updates(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/skill-process"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "Using `using-superpowers` as requested, so I’ll also use `brainstorming` lightly.\n"
+                    "根因已经比较明确。现在我检查 Cargo workspace 边界。\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=process_update", combined)
+            self.assertIn("sessions/2026/05/14/skill-process/summary.md", combined)
+
+    def test_audit_memory_archive_flags_process_update_jargon_without_other_process_phrases(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/process-jargon"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "这里 process_update 不是旧 wrapper 污染，而是过程句进入了 reusable/problem/unresolved。\n"
+                    "第二轮已经接近上一轮耗时，继续等最终输出。\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=process_update", combined)
+            self.assertIn("sessions/2026/05/14/process-jargon/summary.md", combined)
+
+    def test_audit_memory_archive_flags_placeholder_titles_and_noisy_tags(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/weak-index"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "# Session: 这个skill总结的记忆摘要在/Users/soku/Desktop/agents/agent-memory这个目录下\n"
+                    "## Decisions Made\n"
+                    "- No decisions were detected automatically.\n"
+                    "## Unresolved Tasks\n"
+                    "- No unresolved tasks were detected automatically.\n"
+                    "## Search Tags\n"
+                    "my-precious-skill, secret-pattern, subagent, codespace, templates, agent-memory-repo, task, you, using-superpowers, codex_home\n"
+                    "## Reusable Facts\n"
+                    "- Actual update completed. **Command Status** - `update_memory_archive.py`: exit 0\n"
+                    "- The implementation has meaningful improvements: unit tests pass, archive audit passes, skill validators pass, py_compile passed, template/script sync checks passed.\n"
+                    "<oai-mem-citation>\n"
+                    "<citation_entries>\n"
+                    "MEMORY.md:30-51|note=[memory archive workflow gates and expected archive surfaces]\n"
+                    "</citation_entries>\n"
+                    "</oai-mem-citation>\n"
+                ),
+                encoding="utf-8",
+            )
+            (entry_dir / "evidence.md").write_text(
+                "- No specific evidence snippets were selected automatically.\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/sessions.jsonl").write_text(
+                '{"title":"# Files mentioned by the user: /Users/soku/.codex/attachments/pasted-text.txt",'
+                '"summary_path":"sessions/2026/05/14/weak-index/summary.md"}\n',
+                encoding="utf-8",
+            )
+            (memory_repo / "index/tags.jsonl").write_text(
+                '{"tag":"codespace","summary_path":"sessions/2026/05/14/weak-index/summary.md"}\n'
+                '{"tag":"agent-memory-repo","summary_path":"sessions/2026/05/14/weak-index/summary.md"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=placeholder", combined)
+            self.assertIn("category=raw_title", combined)
+            self.assertIn("category=noisy_tag", combined)
+            self.assertIn("category=noise", combined)
+            self.assertIn("category=process_update", combined)
+
+    def test_audit_memory_archive_flags_archive_source_record_placeholders_and_redaction_categories(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/12/archive-source-record"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "# Session: Archive source record for my-precious-skill\n\n"
+                    "## User Intent\n"
+                    "Archive source record for my-precious-skill.\n\n"
+                    "## Reusable Facts\n"
+                    "- bearer_token, cookie, openai_key\n\n"
+                    "## Final State\n"
+                    "Archived source record for my-precious-skill.\n\n"
+                    "## Search Tags\n"
+                    "my-precious-skill, bearer_token, openai_key, latest, generic\n"
+                ),
+                encoding="utf-8",
+            )
+            (memory_repo / "index/sessions.jsonl").write_text(
+                (
+                    '{"title":"Archive source record for my-precious-skill",'
+                    '"summary":"Archived source record for my-precious-skill.",'
+                    '"user_intent":"Archive source record for my-precious-skill.",'
+                    '"reusable_facts":["bearer_token, cookie, openai_key"],'
+                    '"tags":["my-precious-skill","bearer_token","openai_key","latest","generic"],'
+                    '"summary_path":"sessions/2026/06/12/archive-source-record/summary.md"}\n'
+                ),
+                encoding="utf-8",
+            )
+            (memory_repo / "index/tags.jsonl").write_text(
+                '{"tag":"bearer_token","summary_path":"sessions/2026/06/12/archive-source-record/summary.md"}\n'
+                '{"tag":"latest","summary_path":"sessions/2026/06/12/archive-source-record/summary.md"}\n',
+                encoding="utf-8",
+            )
+            (entry_dir / "redactions.md").write_text("- openai_key: 1\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=placeholder", combined)
+            self.assertIn("category=redaction_category", combined)
+            self.assertIn("category=noisy_tag", combined)
+            self.assertNotIn("openai_key: 1", combined)
+
+    def test_audit_memory_archive_flags_low_signal_fragments_and_run_status(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/low-signal"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "## Reusable Facts\n"
+                    "- 验证结果：\n"
+                    "- 但阻塞点很明确：\n"
+                    "- 但这次 subagent 的 $update-my-precious 没有产生新写入：dry run 选中 1 条记录，"
+                    "live update 被默认 secret gate 拒绝，原因是 source record 命中 cookie=33。\n"
+                    "- 这个skill总结的记忆摘要在\n"
+                    "- 结论：**只能算部分符合；按你的记忆索引目标，不能算最终验收通过。\n"
+                    "## Search Tags\n"
+                    "dry, live, update, secret, gate, cookie, meta, user, intent, facts\n"
+                ),
+                encoding="utf-8",
+            )
+            (memory_repo / "index/tags.jsonl").write_text(
+                '{"tag":"dry","summary_path":"sessions/2026/05/14/low-signal/summary.md"}\n'
+                '{"tag":"secret","summary_path":"sessions/2026/05/14/low-signal/summary.md"}\n'
+                '{"tag":"facts","summary_path":"sessions/2026/05/14/low-signal/summary.md"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=low_signal", combined)
+            self.assertIn("category=process_update", combined)
+            self.assertIn("category=noisy_tag", combined)
+            self.assertIn("sessions/2026/05/14/low-signal/summary.md", combined)
+
+    def test_audit_memory_archive_flags_objective_wrappers_and_search_verification_status(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/12/wrapper-status"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "## User Intent\n"
+                    "The objective below is user-provided data.\n\n"
+                    "<objective>\n"
+                    "## My request for Codex:\n\n"
+                    "## Reusable Facts\n"
+                    "- 验证已跑：unit tests pass, archive audit passed.\n"
+                    "- `libx265 libheif _gdal osgeo` 第一命中是 Gridmen/GDAL 根因 summary。\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=noise", combined)
+            self.assertIn("category=low_signal", combined)
+            self.assertIn("sessions/2026/06/12/wrapper-status/summary.md", combined)
+
+    def test_audit_memory_archive_flags_incomplete_fragments_and_broken_markdown(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/incomplete"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                (
+                    "## User Intent\n"
+                    "这个skill总结的记忆摘要在\n\n"
+                    "## Reusable Facts\n"
+                    "- **阻塞原因**\n"
+                    "- Future messages should adhere to the following personality:\n"
+                    "- 结论：**只能算部分符合；按你的记忆索引目标，不能算最终验收通过。\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=low_signal", combined)
+            self.assertIn("sessions/2026/05/14/incomplete/summary.md", combined)
+
+    def test_audit_memory_archive_does_not_cross_match_jsonl_metadata_fields(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/durable-dry-run"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                "Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration.\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/sessions.jsonl").write_text(
+                (
+                    '{"title":"Rule porter dry-run migration preview",'
+                    '"summary":"Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration.",'
+                    '"reusable_facts":["Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration."],'
+                    '"source_record":"/Users/soku/.codex/sessions/rollout.jsonl",'
+                    '"summary_path":"sessions/2026/05/14/durable-dry-run/summary.md"}\n'
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_audit_memory_archive_does_not_flag_chinese_now_user_requests(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/chinese-request"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(
+                "现在我希望当前程序同样能去除白色背景。\n现在有个问题就是主界面返回后点位会偏移。\n下一步要验证持久化坐标是否被覆盖。\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

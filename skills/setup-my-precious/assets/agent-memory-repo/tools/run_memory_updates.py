@@ -247,6 +247,7 @@ def run_project_update(
     max_records: int | None,
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
+    rewrite_existing: bool,
 ) -> int:
     project_path = str(project["project_path"])
     source_dir = Path(str(project.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -270,6 +271,8 @@ def run_project_update(
         command.extend(["--pattern", pattern])
     if allow_redacted_secrets:
         command.append("--allow-redacted-secrets")
+    if rewrite_existing:
+        command.append("--rewrite-existing")
     if dry_run:
         command.append("--dry-run")
 
@@ -292,6 +295,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--allow-redacted-secrets",
         action="store_true",
         help="Allow per-project updates to archive records with detected secrets after redaction",
+    )
+    parser.add_argument(
+        "--rewrite-existing",
+        action="store_true",
+        help="Rebuild matching source records and replace older archive entries for each project/source record",
     )
     parser.add_argument("--dry-run", action="store_true", help="Discover and run project updates without writing records")
     return parser.parse_args(argv)
@@ -332,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
             args.max_records,
             patterns,
             args.allow_redacted_secrets,
+            args.rewrite_existing,
         )
         if returncode:
             failures += 1

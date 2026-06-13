@@ -118,6 +118,24 @@ def scan_for_secrets(repo: Path) -> list[tuple[str, str, int]]:
     return hits
 
 
+def run_archive_audit(repo: Path) -> int:
+    audit_script = repo / "tools" / "audit_memory_archive.py"
+    if not audit_script.exists():
+        return 0
+    result = subprocess.run(
+        [sys.executable, str(audit_script), "--memory-repo", str(repo)],
+        cwd=repo,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        print("Refusing to sync because archive audit failed.", file=sys.stderr)
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+    return result.returncode
+
+
 def existing_allowed_roots(repo: Path) -> list[str]:
     return [root for root in ALLOWED_ROOTS if (repo / root).exists()]
 
@@ -156,6 +174,10 @@ def main(argv: list[str] | None = None) -> int:
         if len(secret_hits) > 50:
             print(f"- ... and {len(secret_hits) - 50} more", file=sys.stderr)
         return 1
+
+    audit_status = run_archive_audit(repo)
+    if audit_status:
+        return audit_status
 
     if not allowed:
         print("No memory archive changes to sync.")
