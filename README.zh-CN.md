@@ -264,6 +264,20 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --include-evidence
 ```
 
+为当前项目提高相关记录排序，同时保留跨项目命中：
+
+```bash
+python ~/repos/agent-memory/tools/search_memory.py \
+  "FastDB lifetime boundary" \
+  --project-path /path/to/current/project
+```
+
+搜索脚本使用无依赖的 hybrid lexical 排序，覆盖 JSONL 索引、summary 文件和
+可选 evidence 文件。排序会提高 decision、reusable facts、unresolved tasks、
+summary、user intent 等高信号字段的权重，奖励精确短语和重要 literal token，
+并输出 `why:` 行，帮助 agent 判断命中来自结构化字段、短语匹配、重要 token
+覆盖，还是当前项目上下文。
+
 渲染默认全域 scheduler：
 
 ```bash
@@ -330,7 +344,8 @@ skills/using-my-precious/references/archive-format.md
 - `using-my-precious` skill。
 - skill UI metadata：`agents/openai.yaml`。
 - 通用 archive format reference。
-- 零依赖搜索脚本。
+- 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
+  boost 和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。
 - searchable summary、短 evidence snippet、source-map、daily summary 和 JSONL index 生成。
 - 默认拒绝疑似 secret source records 的安全检查。

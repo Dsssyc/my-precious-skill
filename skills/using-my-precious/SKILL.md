@@ -37,19 +37,32 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    python "$MEMORY_REPO/tools/search_memory.py" "<query>"
    ```
 
+   When the current task is tied to a local project, pass the project path so
+   search can boost matching `project_path`, `cwd`, `repository`, or project
+   records without hiding cross-project hits:
+
+   ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --project-path "$PWD"
+   ```
+
 2. If the deployment repo has no search tool, use the bundled script:
 
    ```bash
    python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO"
    ```
 
-3. Open the top matching `summary.md` files first.
+3. Read the result `why:` line. Prefer hits that cite high-signal reasons such
+   as `field:decision`, `field:summary`, `phrase:<query phrase>`,
+   `important-token-coverage`, or `project-context` over hits that only match
+   broad tags or paths.
 
-4. Open `evidence.md` only when the summary is insufficient or the user asks for stronger support.
+4. Open the top matching `summary.md` files first.
 
-5. Answer from the archive evidence, and mention the archive paths used.
+5. Open `evidence.md` only when the summary is insufficient or the user asks for stronger support.
 
-6. If search returns no relevant result, say that explicitly instead of inferring historical facts.
+6. Answer from the archive evidence, and mention the archive paths used.
+
+7. If search returns no relevant result, say that explicitly instead of inferring historical facts.
 
 ## Privacy Rules
 

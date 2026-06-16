@@ -37,6 +37,33 @@ class Hit:
     title: str = ""
 
 
+HIGH_SIGNAL_FIELDS = {
+    "decision",
+    "decisions",
+    "task",
+    "summary",
+    "reusable_facts",
+    "unresolved_tasks",
+    "user_intent",
+}
+CONTEXT_FIELDS = ("project_path", "cwd", "repository", "project")
+GENERIC_SEARCH_TOKENS = {
+    "agent",
+    "archive",
+    "entry",
+    "memory",
+    "project",
+    "review",
+    "session",
+    "source",
+    "summary",
+    "task",
+    "test",
+    "update",
+    "workflow",
+}
+
+
 def tokenize(text: str) -> list[str]:
     return [token.lower() for token in re.findall(r"[\w.-]+", text) if token.strip()]
 
@@ -177,6 +204,109 @@ def important_query_tokens(query_tokens: list[str]) -> list[str]:
     ]
 
 
+def query_phrases(query_tokens: list[str]) -> list[str]:
+    phrases: list[str] = []
+    for length in range(4, 1, -1):
+        if len(query_tokens) < length:
+            continue
+        for idx in range(0, len(query_tokens) - length + 1):
+            phrase = " ".join(query_tokens[idx : idx + length])
+            if phrase not in phrases:
+                phrases.append(phrase)
+    return phrases
+
+
+def phrase_score(phrase: str) -> int:
+    return sum(token_importance(token) for token in phrase.split()) * 18
+
+
+def add_reason(reasons: list[str], reason: str) -> None:
+    if reason not in reasons:
+        reasons.append(reason)
+
+
+def project_context_terms(project_path: str | None) -> list[str]:
+    if not project_path:
+        return []
+    text = str(Path(project_path).expanduser())
+    terms = [text.lower()]
+    basename = Path(text).name.lower()
+    if basename and basename not in terms:
+        terms.append(basename)
+    return terms
+
+
+def context_query_token_set(context_terms: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for term in context_terms:
+        tokens.update(tokenize(term))
+    return tokens
+
+
+def non_context_query_tokens(query_tokens: list[str], context_terms: list[str] | None = None) -> list[str]:
+    context_tokens = context_query_token_set(context_terms or [])
+    return [token for token in query_tokens if token not in context_tokens]
+
+
+def should_keep_match(query_tokens: list[str], matched_tokens: list[str], context_terms: list[str] | None = None) -> bool:
+    content_tokens = non_context_query_tokens(query_tokens, context_terms)
+    important_tokens = important_query_tokens(content_tokens)
+    if not important_tokens:
+        return True
+    return any(token in matched_tokens for token in important_tokens)
+
+
+def record_context_values(record: dict) -> list[str]:
+    values: list[str] = []
+    for key in CONTEXT_FIELDS:
+        for text in iter_record_field_texts(record, key):
+            lowered = text.lower()
+            if lowered and lowered not in values:
+                values.append(lowered)
+    return values
+
+
+def project_context_match(record: dict, context_terms: list[str]) -> bool:
+    if not context_terms:
+        return False
+    values = record_context_values(record)
+    if not values:
+        return False
+    for value in values:
+        value_path_name = Path(value).name.lower()
+        for term in context_terms:
+            term_name = Path(term).name.lower()
+            if value == term or value.endswith(f"/{term_name}") or term.endswith(f"/{value_path_name}"):
+                return True
+            if value_path_name and value_path_name == term_name:
+                return True
+            if key_like_project_match(value, term_name):
+                return True
+    return False
+
+
+def search_quality_noise_reason(record: dict) -> str:
+    parts: list[str] = []
+    for key in ("title", "summary", "user_intent", "decision", "task"):
+        parts.extend(iter_record_field_texts(record, key))
+    combined = compact_whitespace(" ".join(parts)).lower()
+    if not combined:
+        return ""
+    if re.search(
+        r"\b(?:good hit|top hit|ranked first|search verification|search example|memory-quality|expected title|actual title)\b",
+        combined,
+    ):
+        return "quality-penalty:search-verification"
+    if re.search(r"\b(?:captures?|should include|should rank|result stdout|assertin)\b", combined):
+        if re.search(r"\b(?:search|hit|title|rank|query|result)\b", combined):
+            return "quality-penalty:search-verification"
+    return ""
+
+
+def key_like_project_match(value: str, term_name: str) -> bool:
+    return bool(term_name and re.search(rf"(^|[/\s:_-]){re.escape(term_name)}($|[/\s:_-])", value))
+
+
 def iter_record_field_texts(record: dict, key: str) -> Iterable[str]:
     value = record.get(key)
     if isinstance(value, str) and value.strip():
@@ -239,7 +369,7 @@ def result_title_quality(text: str) -> int:
     return score
 
 
-def score_index_record(query_tokens: list[str], record: dict) -> tuple[int, list[str]]:
+def score_index_record(query_tokens: list[str], record: dict, context_terms: list[str] | None = None) -> tuple[int, list[str], list[str]]:
     field_weights = (
         ("decision", 14),
         ("decisions", 14),
@@ -262,6 +392,11 @@ def score_index_record(query_tokens: list[str], record: dict) -> tuple[int, list
     score = 0
     matched_tokens: list[str] = []
     structured_match_count = 0
+    structured_matched_tokens: set[str] = set()
+    reasons: list[str] = []
+    phrases = query_phrases(query_tokens)
+    phrase_matches = 0
+    content_query_tokens = non_context_query_tokens(query_tokens, context_terms)
     for key, weight in field_weights:
         field_weight = weight
         field_matched: set[str] = set()
@@ -272,10 +407,21 @@ def score_index_record(query_tokens: list[str], record: dict) -> tuple[int, list
             if field_score:
                 score += field_score
                 field_matched.update(matched)
+                if key in HIGH_SIGNAL_FIELDS:
+                    structured_matched_tokens.update(matched)
+                    add_reason(reasons, f"field:{key}")
                 for token in matched:
                     if token not in matched_tokens:
                         matched_tokens.append(token)
-        if field_matched and key in {"decision", "decisions", "task", "summary", "reusable_facts", "unresolved_tasks"}:
+                lowered = text.lower()
+                for phrase in phrases:
+                    if phrase_matches >= 3:
+                        break
+                    if phrase in lowered:
+                        score += phrase_score(phrase) * max(1, field_weight // 4)
+                        phrase_matches += 1
+                        add_reason(reasons, f"phrase:{phrase}")
+        if field_matched and key in HIGH_SIGNAL_FIELDS:
             structured_match_count += len(field_matched)
     if matched_tokens:
         matched_importance = sum(token_importance(token) for token in set(matched_tokens))
@@ -284,7 +430,7 @@ def score_index_record(query_tokens: list[str], record: dict) -> tuple[int, list
             score += 20
         if structured_match_count >= 2:
             score += 20 + structured_match_count * 3
-        specific_tokens = specific_query_tokens(query_tokens)
+        specific_tokens = specific_query_tokens(content_query_tokens)
         matched_specific = [token for token in specific_tokens if token in matched_tokens]
         if matched_specific:
             score += sum(token_importance(token) for token in matched_specific) * 25
@@ -293,17 +439,35 @@ def score_index_record(query_tokens: list[str], record: dict) -> tuple[int, list
                 score = max(1, score // (2 + len(missing_specific)))
         elif specific_tokens:
             score = max(1, score // 8)
-        important_tokens = important_query_tokens(query_tokens)
-        if len(important_tokens) >= 2:
+        important_tokens = important_query_tokens(content_query_tokens)
+        if important_tokens:
             matched_important = [token for token in important_tokens if token in matched_tokens]
             required = max(1, (len(important_tokens) + 1) // 2)
             if len(matched_important) >= required:
                 score += sum(token_importance(token) for token in matched_important) * 12
                 score += len(matched_important) * 8
+                add_reason(reasons, "important-token-coverage")
             else:
                 missing_required = required - len(matched_important)
                 score = max(1, score // (2 + missing_required * 2))
-    return score, matched_tokens
+        low_signal_only = not structured_matched_tokens
+        broad_only = low_signal_only and all(token in GENERIC_SEARCH_TOKENS for token in matched_tokens)
+        if low_signal_only:
+            score = max(1, score // 4)
+            add_reason(reasons, "low-signal-only")
+        if broad_only and any(token not in GENERIC_SEARCH_TOKENS for token in query_tokens):
+            score = max(1, score // 4)
+            add_reason(reasons, "broad-field-only")
+    if structured_matched_tokens and project_context_match(record, context_terms or []):
+        score += 1200
+        add_reason(reasons, "project-context")
+    quality_reason = search_quality_noise_reason(record)
+    if quality_reason:
+        add_reason(reasons, quality_reason)
+        return 0, matched_tokens, reasons
+    if matched_tokens and not should_keep_match(query_tokens, matched_tokens, context_terms):
+        return 0, matched_tokens, reasons
+    return score, matched_tokens, reasons
 
 
 def safe_index_record_path(repo: Path, index_path: Path, path_text: object) -> Path:
@@ -321,15 +485,15 @@ def safe_index_record_path(repo: Path, index_path: Path, path_text: object) -> P
     return repo / relative
 
 
-def collect_index_hits(repo: Path, query_tokens: list[str]) -> list[Hit]:
+def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:
     hits: list[Hit] = []
     for index_path in sorted((repo / "index").glob("*.jsonl")):
         for record in iter_jsonl(index_path):
-            score, matched = score_index_record(query_tokens, record)
+            score, matched, reasons = score_index_record(query_tokens, record, context_terms)
             if not score:
                 continue
             path = safe_index_record_path(repo, index_path, record.get("summary_path") or record.get("path"))
-            why = [f"index:{index_path.name}", f"matched:{', '.join(matched)}"]
+            why = [f"index:{index_path.name}", *reasons, f"matched:{', '.join(matched)}"]
             hits.append(Hit(path=path, score=score + 10, source="index", why=why, title=display_title(record, query_tokens)))
     return hits
 
@@ -362,6 +526,10 @@ def collect_markdown_hits(repo: Path, query_tokens: list[str], include_evidence:
         score, matched = score_text(query_tokens, text, weight=weight)
         if not score:
             continue
+        if not should_keep_match(query_tokens, matched):
+            continue
+        if search_quality_noise_reason({"summary": text}):
+            continue
         title = ""
         for line in text.splitlines():
             if line.startswith("# "):
@@ -387,7 +555,7 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
         if current is None:
             merged[key] = hit
             continue
-        current.score += hit.score
+        current.score = max(current.score, hit.score) + duplicate_hit_bonus(hit)
         current.why.extend(reason for reason in hit.why if reason not in current.why)
         if hit.title and (not current.title or result_title_quality(hit.title) > result_title_quality(current.title)):
             current.title = hit.title
@@ -398,6 +566,15 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
         key=lambda item: (item.score, item.path.as_posix()),
         reverse=True,
     )
+
+
+def duplicate_hit_bonus(hit: Hit) -> int:
+    """Give tiny corroboration credit without letting duplicate rows dominate."""
+    if "low-signal-only" in hit.why:
+        return 0
+    if not any(reason.startswith("field:") for reason in hit.why):
+        return min(5, max(1, hit.score // 50))
+    return min(12, max(1, hit.score // 25))
 
 
 def format_hit(repo: Path, hit: Hit, idx: int) -> str:
@@ -431,6 +608,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Search evidence.md files as well as summaries and indexes",
     )
+    parser.add_argument(
+        "--project-path",
+        help="Optional current project path used to boost matching archive records",
+    )
     args = parser.parse_args(argv)
 
     query_tokens = unique_tokens(args.query)
@@ -438,10 +619,11 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("query must contain at least one searchable token")
 
     repo = resolve_repo(args.repo)
+    context_terms = project_context_terms(args.project_path)
     hits = merge_hits(
         repo,
         [
-            *collect_index_hits(repo, query_tokens),
+            *collect_index_hits(repo, query_tokens, context_terms),
             *collect_markdown_hits(repo, query_tokens, args.include_evidence),
         ],
     )

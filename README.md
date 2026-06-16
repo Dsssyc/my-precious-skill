@@ -267,6 +267,21 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --include-evidence
 ```
 
+Boost records for the current project while keeping cross-project hits visible:
+
+```bash
+python ~/repos/agent-memory/tools/search_memory.py \
+  "FastDB lifetime boundary" \
+  --project-path /path/to/current/project
+```
+
+Search uses dependency-free hybrid lexical ranking over JSONL indexes, summary
+files, and optional evidence files. The ranker weights high-signal fields such
+as decisions, reusable facts, unresolved tasks, summaries, and user intent;
+rewards exact query phrases and important literal tokens; and prints a `why:`
+line so agents can tell whether a hit came from a structured field, phrase
+match, important token coverage, or project context.
+
 Render a default global scheduler:
 
 ```bash
@@ -335,7 +350,8 @@ skills/using-my-precious/references/archive-format.md
 - `using-my-precious` skill.
 - Skill UI metadata in `agents/openai.yaml`.
 - Generic archive format reference.
-- Dependency-free search script.
+- Dependency-free hybrid lexical search script with field weighting, phrase
+  coverage, optional project-context boost, and explainable result reasons.
 - Incremental update script keyed by project path and source/session timestamp.
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.

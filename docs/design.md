@@ -53,7 +53,10 @@ and JSONL indexes.
 - `skills/using-my-precious/SKILL.md`: tells future agents when and how to
   search memory.
 - `skills/using-my-precious/scripts/search_memory.py`: dependency-free
-  fallback search script bundled with the skill.
+  fallback search script bundled with the skill. It uses hybrid lexical ranking
+  over JSONL indexes, summaries, and optional evidence files, with explicit
+  reasons for structured-field matches, exact phrase coverage, important token
+  coverage, and optional current-project context.
 - `skills/using-my-precious/references/archive-format.md`: stable archive
   contract for compatible deployment repos.
 - `skills/setup-my-precious/SKILL.md`: asks the user how to store the archive
@@ -120,7 +123,8 @@ If none are set, tools may try `~/repos/agent-memory`.
 
 - Do not commit real raw transcripts to this repository.
 - Do not run scheduled archive jobs from this repository.
-- Do not add vector search before JSONL and Markdown search are reliable.
+- Do not add vector search before JSONL and Markdown hybrid lexical search are
+  reliable and explainable.
 - Do not store user-specific scheduler config, credentials, or generated memory
   data in this repository.
 

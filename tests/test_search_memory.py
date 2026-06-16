@@ -389,6 +389,628 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("title: cc switch这个软件是否能设置代理？", result.stdout)
         self.assertNotIn("title: cc switch这个软件是否能设置代理？ 可以。", result.stdout)
 
+    def test_search_memory_explains_structured_phrase_match(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/12/good").mkdir(parents=True)
+            (repo / "sessions/2026/06/12/noisy").mkdir(parents=True)
+            (repo / "sessions/2026/06/12/good/summary.md").write_text("# Session: good\n", encoding="utf-8")
+            (repo / "sessions/2026/06/12/noisy/summary.md").write_text("# Session: noisy\n", encoding="utf-8")
+            (repo / "index/decisions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-12",
+                        "project": "c-two",
+                        "decision": "C-Two work follows a review-fix-re-review loop before completion.",
+                        "summary_path": "sessions/2026/06/12/good/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-12",
+                        "project": "misc",
+                        "title": "Broad review loop notes",
+                        "summary": "review loop review loop review loop review loop review loop",
+                        "tags": ["review", "loop"],
+                        "summary_path": "sessions/2026/06/12/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "review-fix-re-review loop",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/12/good/summary.md", first_hit)
+        self.assertIn("field:decision", first_hit)
+        self.assertIn("phrase:review-fix-re-review loop", first_hit)
+
+    def test_search_memory_project_path_boost_breaks_tie(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/c-two").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/other").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/c-two/summary.md").write_text("# Session: c-two\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/other/summary.md").write_text("# Session: other\n", encoding="utf-8")
+            shared_summary = "FastDB FdbViewOwner invalidate lifetime boundary review."
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "unrelated",
+                        "project_path": "/tmp/other-project",
+                        "summary": shared_summary,
+                        "summary_path": "sessions/2026/06/13/other/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                        "summary": shared_summary,
+                        "summary_path": "sessions/2026/06/13/c-two/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "FastDB FdbViewOwner invalidate lifetime",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/c-two/summary.md", first_hit)
+        self.assertIn("project-context", first_hit)
+
+    def test_search_memory_project_context_does_not_promote_context_only_noise(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/good").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/noisy").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/good/summary.md").write_text("# Session: good\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/noisy/summary.md").write_text("# Session: noisy\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "gridmen",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/gridmen",
+                        "summary": "PatchEdit stale closure root cause affects selectTab and pickingTab mode restoration.",
+                        "summary_path": "sessions/2026/06/13/good/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                        "summary": "Generic project update with no patch editor details.",
+                        "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/decisions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "decision": "A stale C-Two relay loop was reviewed.",
+                        "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/tags.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "tag": "c-two",
+                        "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "PatchEdit stale closure selectTab c-two",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/good/summary.md", first_hit)
+        self.assertNotIn("project-context", first_hit)
+
+    def test_search_memory_project_token_does_not_satisfy_specific_coverage(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/good").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/noisy").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/good/summary.md").write_text("# Session: good\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/noisy/summary.md").write_text("# Session: noisy\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "gridmen",
+                        "summary": "PatchEdit stale closure selectTab mode restoration regression.",
+                        "summary_path": "sessions/2026/06/13/good/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                        "summary": "A stale C-Two relay loop was reviewed.",
+                        "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "PatchEdit stale closure selectTab c-two",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/good/summary.md", first_hit)
+
+    def test_search_memory_project_only_match_is_not_important_token_coverage(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/project-only").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/project-only/summary.md").write_text("# Session: project only\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                        "summary": "Generic project housekeeping.",
+                        "summary_path": "sessions/2026/06/13/project-only/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "c-two",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("low-signal-only", result.stdout)
+        self.assertNotIn("important-token-coverage", result.stdout)
+
+    def test_search_memory_duplicate_low_signal_rows_do_not_outrank_content_hit(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/content").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/noisy").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/content/summary.md").write_text("# Session: content\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/noisy/summary.md").write_text("# Session: noisy\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "gridmen",
+                        "summary": "PatchEdit stale closure selectTab mode restoration regression.",
+                        "summary_path": "sessions/2026/06/13/content/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                        "summary": "A stale C-Two relay loop was reviewed.",
+                        "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            for index_name, key in (("decisions", "decision"), ("unresolved", "task"), ("tags", "tag"), ("files", "path")):
+                (repo / f"index/{index_name}.jsonl").write_text(
+                    "".join(
+                        json.dumps(
+                            {
+                                "date": "2026-06-13",
+                                "project": "c-two",
+                                key: f"stale c-two loop {idx}",
+                                "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                        for idx in range(8)
+                    ),
+                    encoding="utf-8",
+                )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "PatchEdit stale closure selectTab c-two",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/content/summary.md", first_hit)
+
+    def test_search_memory_penalizes_search_verification_memory_entries(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/real").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/verification").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/real/summary.md").write_text("# Session: real\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/verification/summary.md").write_text(
+                "# Session: verification\n", encoding="utf-8"
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "my-precious-skill",
+                        "title": "Good hit: captures libx265.215.dylib _gdal osgeo search verification.",
+                        "summary": "Search verification example says top hit captured libx265.215.dylib _gdal osgeo.",
+                        "summary_path": "sessions/2026/06/13/verification/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "gridmen",
+                        "title": "GDAL import fails on missing libx265.215.dylib",
+                        "summary": "Root cause: Homebrew libheif references missing libx265.215.dylib during _gdal import.",
+                        "summary_path": "sessions/2026/06/13/real/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "libx265.215.dylib _gdal osgeo",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/real/summary.md", first_hit)
+
+    def test_search_memory_filters_search_verification_only_entries(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/verification").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/verification/summary.md").write_text(
+                "# Session: verification\n", encoding="utf-8"
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "my-precious-skill",
+                        "title": "Expected title to include PatchEdit stale closure selectTab",
+                        "summary": "Search verification result stdout mentions PatchEdit stale closure selectTab.",
+                        "summary_path": "sessions/2026/06/13/verification/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "PatchEdit stale closure selectTab",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("No memory hits for: PatchEdit stale closure selectTab", result.stdout)
+
+    def test_search_memory_project_context_can_beat_external_archive_noise(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/gridmen").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/noise").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/gridmen/summary.md").write_text("# Session: gridmen\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/noise/summary.md").write_text("# Session: noise\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "my-precious-skill",
+                        "summary": "A memory-quality note mentions libx265.215.dylib _gdal osgeo as a search example.",
+                        "summary_path": "sessions/2026/06/13/noise/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "gridmen",
+                        "project_path": "/Users/soku/Desktop/codespace/WorldInProgress/gridmen",
+                        "summary": "Root cause: Homebrew libheif references missing libx265.215.dylib during _gdal import.",
+                        "summary_path": "sessions/2026/06/13/gridmen/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "libx265.215.dylib _gdal osgeo",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/gridmen",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/gridmen/summary.md", first_hit)
+
+    def test_search_memory_filters_low_signal_hits_when_important_terms_are_missing(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/noisy").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/noisy/summary.md").write_text(
+                "# Session: noisy\n"
+                "A stale relay review happened in another project.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "c-two",
+                        "summary": "A stale relay review happened in another project.",
+                        "summary_path": "sessions/2026/06/13/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "PatchEdit stale closure selectTab",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("No memory hits for: PatchEdit stale closure selectTab", result.stdout)
+
+    def test_search_memory_explains_important_token_coverage(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/14/specific").mkdir(parents=True)
+            (repo / "sessions/2026/06/14/specific/summary.md").write_text("# Session: specific\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-14",
+                        "project": "gridmen",
+                        "title": "GDAL startup failure",
+                        "summary": "GDAL import failed because libheif referenced missing libx265.215.dylib.",
+                        "summary_path": "sessions/2026/06/14/specific/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "GDAL libx265.215.dylib",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("important-token-coverage", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
