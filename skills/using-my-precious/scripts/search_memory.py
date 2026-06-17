@@ -35,6 +35,11 @@ class Hit:
     source: str
     why: list[str]
     title: str = ""
+    layer: str = ""
+    scope: str = ""
+    text: str = ""
+    drill_paths: tuple[str, ...] = ()
+    raw_refs: tuple[str, ...] = ()
 
 
 HIGH_SIGNAL_FIELDS = {
@@ -42,6 +47,9 @@ HIGH_SIGNAL_FIELDS = {
     "decisions",
     "task",
     "summary",
+    "text",
+    "rationale",
+    "topic",
     "reusable_facts",
     "unresolved_tasks",
     "user_intent",
@@ -371,18 +379,23 @@ def result_title_quality(text: str) -> int:
 
 def score_index_record(query_tokens: list[str], record: dict, context_terms: list[str] | None = None) -> tuple[int, list[str], list[str]]:
     field_weights = (
+        ("text", 15),
         ("decision", 14),
         ("decisions", 14),
         ("task", 12),
         ("summary", 12),
         ("reusable_facts", 12),
         ("unresolved_tasks", 10),
+        ("rationale", 8),
         ("user_intent", 7),
+        ("topic", 6),
+        ("scope", 6),
         ("title", 5),
-        ("rationale", 5),
+        ("layer", 4),
         ("project", 3),
         ("repository", 3),
         ("tags", 2),
+        ("memory_id", 1),
         ("files_touched", 2),
         ("source_agent", 1),
         ("summary_path", 1),
@@ -485,9 +498,134 @@ def safe_index_record_path(repo: Path, index_path: Path, path_text: object) -> P
     return repo / relative
 
 
+def safe_repo_relative_path(repo: Path, path_text: object) -> str:
+    if not isinstance(path_text, str) or not path_text.strip():
+        return ""
+    candidate = Path(path_text)
+    if not candidate.is_absolute():
+        candidate = repo / candidate
+    try:
+        repo_resolved = repo.resolve()
+        resolved = candidate.resolve(strict=False)
+        relative = resolved.relative_to(repo_resolved)
+    except (OSError, ValueError):
+        return ""
+    return relative.as_posix()
+
+
+def unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            out.append(value)
+    return tuple(out)
+
+
+def iter_ref_paths(value: object) -> Iterable[str]:
+    if isinstance(value, str) and value.strip():
+        yield value.strip()
+    elif isinstance(value, dict):
+        path = value.get("path")
+        if isinstance(path, str) and path.strip():
+            yield path.strip()
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_ref_paths(item)
+
+
+def iter_raw_ref_anchors(value: object) -> Iterable[str]:
+    if isinstance(value, str) and value.strip():
+        yield value.strip()
+    elif isinstance(value, dict):
+        path = value.get("path")
+        if not isinstance(path, str) or not path.strip():
+            return
+        anchor = value.get("anchor")
+        if isinstance(anchor, str) and anchor.strip():
+            yield f"{path.strip()}#{anchor.strip()}"
+        else:
+            yield path.strip()
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_raw_ref_anchors(item)
+
+
+def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
+    paths: list[str] = []
+    for path in iter_ref_paths(record.get("derived_from")):
+        safe_path = safe_repo_relative_path(repo, path)
+        if safe_path:
+            paths.append(safe_path)
+    for path in iter_ref_paths(record.get("evidence_refs")):
+        safe_path = safe_repo_relative_path(repo, path)
+        if safe_path:
+            paths.append(safe_path)
+    return unique_ordered(paths)
+
+
+def memory_hit_path(repo: Path, memory_id: str, line_no: int) -> Path:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", memory_id).strip("._")
+    if not safe_id:
+        safe_id = f"line-{line_no}"
+    return repo / "index" / "memories.jsonl" / safe_id[:120]
+
+
+def collect_memory_hits(
+    repo: Path,
+    query_tokens: list[str],
+    context_terms: list[str] | None = None,
+    scope: str = "all",
+) -> list[Hit]:
+    hits: list[Hit] = []
+    index_path = repo / "index" / "memories.jsonl"
+    for line_no, record in enumerate(iter_jsonl(index_path), 1):
+        layer = str(record.get("layer") or "")
+        if scope != "all" and layer != scope:
+            continue
+        score, matched, reasons = score_index_record(query_tokens, record, context_terms)
+        if not score:
+            continue
+        text = compact_whitespace(str(record.get("text") or ""))
+        title = clip(text or display_title(record, query_tokens))
+        memory_id = str(record.get("memory_id") or "")
+        source_kind = str(record.get("source") or "")
+        confidence = str(record.get("confidence") or "")
+        support_count = record.get("support_count")
+        why = [f"index:{index_path.name}"]
+        if layer:
+            why.append(f"layer:{layer}")
+        if source_kind:
+            why.append(f"source:{source_kind}")
+        if confidence:
+            why.append(f"confidence:{confidence}")
+        if isinstance(support_count, int) or isinstance(support_count, str):
+            why.append(f"support_count:{support_count}")
+        why.extend(reasons)
+        why.append(f"matched:{', '.join(matched)}")
+        hits.append(
+            Hit(
+                path=memory_hit_path(repo, memory_id, line_no),
+                score=score + 30,
+                source="memory",
+                why=why,
+                title=title,
+                layer=layer,
+                scope=str(record.get("scope") or ""),
+                text=text,
+                drill_paths=memory_drill_paths(repo, record),
+                raw_refs=unique_ordered(iter_raw_ref_anchors(record.get("raw_refs"))),
+            )
+        )
+    return hits
+
+
 def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:
     hits: list[Hit] = []
     for index_path in sorted((repo / "index").glob("*.jsonl")):
+        if index_path.name == "memories.jsonl":
+            continue
         for record in iter_jsonl(index_path):
             score, matched, reasons = score_index_record(query_tokens, record, context_terms)
             if not score:
@@ -559,6 +697,10 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
         current.why.extend(reason for reason in hit.why if reason not in current.why)
         if hit.title and (not current.title or result_title_quality(hit.title) > result_title_quality(current.title)):
             current.title = hit.title
+        if hit.text and not current.text:
+            current.text = hit.text
+        current.drill_paths = unique_ordered((*current.drill_paths, *hit.drill_paths))
+        current.raw_refs = unique_ordered((*current.raw_refs, *hit.raw_refs))
         if current.source != hit.source:
             current.source = "mixed"
     return sorted(
@@ -577,7 +719,42 @@ def duplicate_hit_bonus(hit: Hit) -> int:
     return min(12, max(1, hit.score // 25))
 
 
-def format_hit(repo: Path, hit: Hit, idx: int) -> str:
+def is_evidence_drill_path(path: str) -> bool:
+    return Path(path).name == "evidence.md"
+
+
+def memory_drill_paths_for_depth(hit: Hit, depth: str) -> tuple[str, ...]:
+    if depth in ("evidence", "source"):
+        return hit.drill_paths
+    return tuple(path for path in hit.drill_paths if not is_evidence_drill_path(path))
+
+
+def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
+    layer = hit.layer or "memory"
+    title = clip(hit.text or hit.title or "Untitled memory", 160)
+    why = "; ".join(hit.why)
+    lines = [
+        f"{idx}. [{layer}] {title}",
+        f"   score: {hit.score}",
+        "   source: memory",
+    ]
+    if hit.scope:
+        lines.append(f"   scope: {hit.scope}")
+    lines.append(f"   why: {why}")
+    drill_paths = memory_drill_paths_for_depth(hit, depth)
+    if drill_paths:
+        lines.append("   drill:")
+        lines.extend(f"     - {path}" for path in drill_paths)
+    if depth == "source" and hit.raw_refs:
+        lines.append("   source anchors:")
+        lines.extend(f"     - {raw_ref}" for raw_ref in hit.raw_refs)
+    lines.append("   next: use drill paths for supporting sessions and evidence")
+    return "\n".join(lines)
+
+
+def format_hit(repo: Path, hit: Hit, idx: int, depth: str = "memory") -> str:
+    if hit.source == "memory":
+        return format_memory_hit(hit, idx, depth)
     try:
         rel = hit.path.relative_to(repo)
     except ValueError:
@@ -612,7 +789,18 @@ def main(argv: list[str] | None = None) -> int:
         "--depth",
         choices=("memory", "session", "evidence", "source"),
         default="memory",
-        help="Compatibility depth selector; evidence and source include evidence.md files",
+        help="Recall depth: memory nodes, sessions, evidence snippets, or source anchors",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=("all", "global", "domain", "project"),
+        default="all",
+        help="Memory node layer to search; not applied to legacy session fallback",
+    )
+    parser.add_argument(
+        "--legacy-sessions",
+        action="store_true",
+        help="Bypass memory nodes and use the legacy session/index/markdown search path",
     )
     parser.add_argument(
         "--project-path",
@@ -627,13 +815,20 @@ def main(argv: list[str] | None = None) -> int:
     repo = resolve_repo(args.repo)
     context_terms = project_context_terms(args.project_path)
     include_evidence = args.include_evidence or args.depth in ("evidence", "source")
-    hits = merge_hits(
-        repo,
-        [
-            *collect_index_hits(repo, query_tokens, context_terms),
-            *collect_markdown_hits(repo, query_tokens, include_evidence),
-        ],
-    )
+    memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope)
+    session_hits = [
+        *collect_index_hits(repo, query_tokens, context_terms),
+        *collect_markdown_hits(repo, query_tokens, include_evidence),
+    ]
+    if args.legacy_sessions:
+        selected_hits = session_hits
+    elif memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
+        selected_hits = [*memory_hits, *session_hits]
+    elif memory_hits:
+        selected_hits = memory_hits
+    else:
+        selected_hits = session_hits
+    hits = merge_hits(repo, selected_hits)
 
     if not hits:
         print(f"No memory hits for: {args.query}")
@@ -643,7 +838,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Archive: {repo}")
     print()
     for idx, hit in enumerate(hits[: args.limit], 1):
-        print(format_hit(repo, hit, idx))
+        print(format_hit(repo, hit, idx, args.depth))
         print()
     return 0
 

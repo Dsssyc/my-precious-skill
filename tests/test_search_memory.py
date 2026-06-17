@@ -117,6 +117,270 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertIn("sessions/2026/05/14/example/evidence.md", result.stdout)
 
+    def test_search_memory_prefers_memory_nodes_by_default(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/permission"
+            session_dir.mkdir(parents=True)
+            summary_path = session_dir / "summary.md"
+            evidence_path = session_dir / "evidence.md"
+            summary_path.write_text(
+                "# Session: Permission Prompt Preference\n\n"
+                "The user said 授权后不要反复请求权限.\n",
+                encoding="utf-8",
+            )
+            evidence_path.write_text(
+                "# Evidence\n\n"
+                "Supporting snippet for 授权后不要反复请求权限.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_permission_prompt",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "permission-prompts",
+                        "text": "授权后不要反复请求权限。",
+                        "rationale": "Explicit memory requested by the user.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/permission/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/permission/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-17",
+                        "project": "agent-memory",
+                        "summary": "授权后不要反复请求权限 should be respected by future agents.",
+                        "summary_path": "sessions/2026/06/17/permission/summary.md",
+                        "evidence_path": "sessions/2026/06/17/permission/evidence.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(script), "授权后不要反复请求权限", "--repo", str(repo)],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("[global]", first_hit)
+        self.assertIn("source: memory", first_hit)
+        self.assertIn("source:explicit", first_hit)
+        self.assertIn("drill:", first_hit)
+        self.assertIn("sessions/2026/06/17/permission/summary.md", first_hit)
+        self.assertNotIn("sessions/2026/06/17/permission/evidence.md", first_hit)
+
+    def test_search_memory_depth_source_shows_source_anchors_without_raw_content(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/source"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Source Anchors\n", encoding="utf-8")
+            raw_path = repo / "records/private.jsonl"
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text("FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_source_anchor",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-depth",
+                        "text": "Source depth can report anchors without copying raw content.",
+                        "rationale": "Source-depth recall needs provenance without raw transcript exposure.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/source/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [{"path": str(raw_path), "anchor": "message:42"}],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source-depth anchors",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("/records/private.jsonl#message:42", result.stdout)
+        self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
+
+    def test_search_memory_scope_global_filters_memory_layers(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/17/global").mkdir(parents=True)
+            (repo / "sessions/2026/06/17/project").mkdir(parents=True)
+            (repo / "sessions/2026/06/17/global/summary.md").write_text("# Session: global\n", encoding="utf-8")
+            (repo / "sessions/2026/06/17/project/summary.md").write_text("# Session: project\n", encoding="utf-8")
+            rows = [
+                {
+                    "memory_id": "mem_global_recall_scope",
+                    "layer": "global",
+                    "scope": "global",
+                    "topic": "recall-scope",
+                    "text": "Recall scope token belongs to the global memory.",
+                    "rationale": "Global node should remain visible with --scope global.",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 2,
+                    "derived_from": ["sessions/2026/06/17/global/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                },
+                {
+                    "memory_id": "mem_project_recall_scope",
+                    "layer": "project",
+                    "scope": "/tmp/project",
+                    "topic": "recall-scope",
+                    "text": "Recall scope token belongs to the project memory.",
+                    "rationale": "Project node should be filtered by --scope global.",
+                    "source": "automatic",
+                    "confidence": "medium",
+                    "support_count": 1,
+                    "derived_from": ["sessions/2026/06/17/project/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "recall scope token",
+                    "--repo",
+                    str(repo),
+                    "--scope",
+                    "global",
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("[global] Recall scope token belongs to the global memory.", result.stdout)
+        self.assertNotIn("project memory", result.stdout)
+        self.assertNotIn("sessions/2026/06/17/project/summary.md", result.stdout)
+
+    def test_search_memory_legacy_sessions_uses_old_session_results(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/legacy"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Legacy Result\n\nlegacy fallback token appears here.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_legacy_override",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "legacy",
+                        "text": "legacy fallback token appears in a memory node too.",
+                        "rationale": "Default search should prefer this unless legacy mode is requested.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/legacy/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-17",
+                        "project": "agent-memory",
+                        "title": "Legacy session result",
+                        "summary": "legacy fallback token appears in the old session index.",
+                        "summary_path": "sessions/2026/06/17/legacy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "legacy fallback token",
+                    "--repo",
+                    str(repo),
+                    "--legacy-sessions",
+                    "--scope",
+                    "global",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("sessions/2026/06/17/legacy/summary.md", result.stdout)
+        self.assertIn("index:sessions.jsonl", result.stdout)
+        self.assertNotIn("source: memory", result.stdout)
+
     def test_search_memory_does_not_return_index_paths_outside_archive(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
