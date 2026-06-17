@@ -17,6 +17,7 @@ ALLOWED_ROOTS = (
     "INDEX.md",
     "config/projects.jsonl",
     "index",
+    "memories",
     "daily",
     "sessions",
 )
@@ -392,6 +393,7 @@ def extract_quality_text(relative: str, line: str) -> str:
         "index/decisions.jsonl": ("decision",),
         "index/unresolved.jsonl": ("task",),
         "index/tags.jsonl": ("tag",),
+        "index/memories.jsonl": ("text", "rationale", "topic", "scope", "tags"),
     }
     keys = keys_by_file.get(relative)
     if not keys:
@@ -405,6 +407,13 @@ def extract_quality_text(relative: str, line: str) -> str:
         elif isinstance(item, list):
             parts.extend(str(child) for child in item if isinstance(child, (str, int, float)))
     return "\n".join(parts)
+
+
+def quality_text_segments(text: str) -> tuple[str, ...]:
+    segments = [text]
+    if "\n" in text:
+        segments.extend(line for line in text.splitlines() if line.strip())
+    return tuple(segments)
 
 
 def is_redaction_category_text(text: str) -> bool:
@@ -470,6 +479,7 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
     lines = text.splitlines()
     for line_number, line in enumerate(lines, start=1):
         quality_line = extract_quality_text(relative, line)
+        quality_segments = quality_text_segments(quality_line)
         for category, pattern in SECRET_PATTERNS.items():
             if pattern.search(line):
                 findings.append(Finding(relative, line_number, category))
@@ -480,7 +490,7 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
             findings.append(Finding(relative, line_number, "placeholder"))
         if RAW_TITLE_PATTERN.search(line):
             findings.append(Finding(relative, line_number, "raw_title"))
-        if LOW_SIGNAL_PATTERN.search(quality_line) or is_incomplete_memory_fragment(quality_line):
+        if any(LOW_SIGNAL_PATTERN.search(segment) or is_incomplete_memory_fragment(segment) for segment in quality_segments):
             findings.append(Finding(relative, line_number, "low_signal"))
         if not relative.endswith("/redactions.md") and is_redaction_category_text(quality_line):
             findings.append(Finding(relative, line_number, "redaction_category"))
@@ -504,8 +514,88 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
             tags = [tag.strip().lower() for tag in re.split(r"[, ]+", line) if tag.strip()]
             if any(tag in NOISY_TAGS or tag.endswith(".py") for tag in tags):
                 findings.append(Finding(relative, line_number, "noisy_tag"))
-        if check_process_updates and PROCESS_UPDATE_PATTERN.search(quality_line):
+        if check_process_updates and any(PROCESS_UPDATE_PATTERN.search(segment) for segment in quality_segments):
             findings.append(Finding(relative, line_number, "process_update"))
+    return findings
+
+
+def iter_memory_index_rows(repo: Path) -> Iterable[tuple[int, dict]]:
+    path = repo / "index" / "memories.jsonl"
+    if not path.exists():
+        return
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            yield line_number, {"__invalid_json__": True}
+            continue
+        if isinstance(value, dict):
+            yield line_number, value
+        else:
+            yield line_number, {"__invalid_json__": True}
+
+
+def safe_existing_archive_ref(repo: Path, path_text: str) -> bool:
+    if not path_text:
+        return False
+    raw_relative = PurePosixPath(path_text)
+    if raw_relative.is_absolute() or ".." in raw_relative.parts:
+        return False
+    candidate = repo / path_text
+    try:
+        candidate.resolve(strict=False).relative_to(repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return candidate.exists()
+
+
+def audit_memory_references(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    required_fields = {
+        "memory_id",
+        "layer",
+        "scope",
+        "topic",
+        "text",
+        "rationale",
+        "source",
+        "confidence",
+        "persistence",
+        "support_count",
+        "first_seen",
+        "last_seen",
+        "derived_from",
+        "evidence_refs",
+        "raw_refs",
+        "supersedes",
+        "superseded_by",
+        "tags",
+    }
+    for line_number, row in iter_memory_index_rows(repo):
+        if row.get("__invalid_json__"):
+            findings.append(Finding("index/memories.jsonl", line_number, "invalid_json"))
+            continue
+        missing = required_fields.difference(row)
+        if missing:
+            findings.append(Finding("index/memories.jsonl", line_number, "invalid_memory_node"))
+            continue
+        derived_from = row.get("derived_from", [])
+        if not isinstance(derived_from, list):
+            findings.append(Finding("index/memories.jsonl", line_number, "invalid_memory_node"))
+        else:
+            for path_text in derived_from:
+                if not isinstance(path_text, str) or not safe_existing_archive_ref(repo, path_text):
+                    findings.append(Finding("index/memories.jsonl", line_number, "broken_memory_ref"))
+        evidence_refs = row.get("evidence_refs", [])
+        if not isinstance(evidence_refs, list):
+            findings.append(Finding("index/memories.jsonl", line_number, "invalid_memory_node"))
+        else:
+            for ref in evidence_refs:
+                path_text = ref.get("path") if isinstance(ref, dict) else ""
+                if not isinstance(path_text, str) or not safe_existing_archive_ref(repo, path_text):
+                    findings.append(Finding("index/memories.jsonl", line_number, "broken_memory_ref"))
     return findings
 
 
@@ -513,6 +603,7 @@ def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     findings: list[Finding] = []
     for path in sorted(iter_archive_files(repo)):
         findings.extend(scan_file(repo, path, check_process_updates))
+    findings.extend(audit_memory_references(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 
 

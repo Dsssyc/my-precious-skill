@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -353,6 +354,277 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("category=redaction_category", combined)
             self.assertIn("category=noisy_tag", combined)
             self.assertNotIn("openai_key: 1", combined)
+
+    def test_audit_memory_archive_flags_broken_memory_references(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "index").mkdir(exist_ok=True)
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_broken",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "agent-workflow",
+                        "text": "Broken reference should be caught.",
+                        "rationale": "Audit must validate drilldown paths.",
+                        "source": "automatic",
+                        "confidence": "medium",
+                        "persistence": "normal",
+                        "support_count": 1,
+                        "first_seen": "2026-06-05T10:00:00Z",
+                        "last_seen": "2026-06-05T10:00:00Z",
+                        "derived_from": ["sessions/2026/06/05/missing/summary.md"],
+                        "evidence_refs": [{"path": "sessions/2026/06/05/missing/evidence.md", "quote_id": "ev_001"}],
+                        "raw_refs": [],
+                        "supersedes": [],
+                        "superseded_by": None,
+                        "tags": ["audit"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("category=broken_memory_ref", combined)
+        self.assertIn("index/memories.jsonl", combined)
+
+    def test_audit_memory_archive_allows_valid_memory_references_without_raw_ref_files(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/valid-memory"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for layered recall evidence.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for layered recall.\n", encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_valid",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "agent-workflow",
+                        "text": "Valid references should pass audit.",
+                        "rationale": "Audit should allow existing archive drilldown paths.",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "persistence": "normal",
+                        "support_count": 1,
+                        "first_seen": "2026-06-05T10:00:00Z",
+                        "last_seen": "2026-06-05T10:00:00Z",
+                        "derived_from": ["sessions/2026/06/05/valid-memory/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/05/valid-memory/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1"}],
+                        "supersedes": [],
+                        "superseded_by": None,
+                        "tags": ["audit"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_audit_memory_archive_flags_invalid_memory_node_rows(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "index/memories.jsonl").write_text(
+                "{invalid json}\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_missing",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "agent-workflow",
+                        "text": "This row is missing required fields.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=invalid_json", combined)
+            self.assertIn("category=invalid_memory_node", combined)
+            self.assertIn("index/memories.jsonl", combined)
+
+    def test_audit_memory_archive_scans_memory_root_files(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "memories/global.jsonl").write_text(
+                '{"text":"session_meta should be audited in memory root files."}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=noise", combined)
+            self.assertIn("memories/global.jsonl", combined)
+
+    def test_audit_memory_archive_applies_quality_patterns_to_memory_text_fields(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/quality-memory"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for quality filtering memory.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for quality filtering memory.\n", encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "memory_id": "mem_quality_process",
+                                "layer": "global",
+                                "scope": "global",
+                                "topic": "agent-workflow",
+                                "text": "I confirmed the branch and commit range before checking files.",
+                                "rationale": "Audit should apply quality filtering to memory nodes.",
+                                "source": "automatic",
+                                "confidence": "medium",
+                                "persistence": "normal",
+                                "support_count": 1,
+                                "first_seen": "2026-06-05T10:00:00Z",
+                                "last_seen": "2026-06-05T10:00:00Z",
+                                "derived_from": ["sessions/2026/06/05/quality-memory/summary.md"],
+                                "evidence_refs": [
+                                    {"path": "sessions/2026/06/05/quality-memory/evidence.md", "quote_id": "ev_001"}
+                                ],
+                                "raw_refs": [],
+                                "supersedes": [],
+                                "superseded_by": None,
+                                "tags": ["audit"],
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "memory_id": "mem_quality_low_signal",
+                                "layer": "global",
+                                "scope": "global",
+                                "topic": "agent-workflow",
+                                "text": "DONE",
+                                "rationale": "Audit should apply quality filtering to memory nodes.",
+                                "source": "automatic",
+                                "confidence": "medium",
+                                "persistence": "normal",
+                                "support_count": 1,
+                                "first_seen": "2026-06-05T10:00:00Z",
+                                "last_seen": "2026-06-05T10:00:00Z",
+                                "derived_from": ["sessions/2026/06/05/quality-memory/summary.md"],
+                                "evidence_refs": [
+                                    {"path": "sessions/2026/06/05/quality-memory/evidence.md", "quote_id": "ev_001"}
+                                ],
+                                "raw_refs": [],
+                                "supersedes": [],
+                                "superseded_by": None,
+                                "tags": ["audit"],
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=low_signal", combined)
+            self.assertIn("category=process_update", combined)
+            self.assertIn("index/memories.jsonl", combined)
 
     def test_audit_memory_archive_flags_low_signal_fragments_and_run_status(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
