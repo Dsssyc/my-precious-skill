@@ -76,6 +76,17 @@ EXPLICIT_MEMORY_PATTERNS = (
     re.compile(r"记住这个\s*[:：]\s*(?P<text>.+)$"),
     re.compile(r"强制记忆\s*[:：]\s*(?P<text>.+)$"),
 )
+EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
+    r"(?i)[,;，；]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
+    r"(?:现在|然后|接下来|顺便|再|请|帮我))"
+)
+SENSITIVE_EXPLICIT_MEMORY_MARKERS = (
+    "[redacted_",
+    "authorization:",
+    "bearer",
+    "cookie:",
+    "private key",
+)
 
 
 @dataclass
@@ -2026,6 +2037,24 @@ def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, s
                 yield text, rationale
 
 
+def clean_explicit_memory_text(text: str) -> str:
+    match = EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY.search(text)
+    if match:
+        text = text[: match.start()]
+    return normalize_memory_text(text)
+
+
+def is_sensitive_explicit_memory_text(text: str) -> bool:
+    lowered = text.lower()
+    if any(marker in lowered for marker in SENSITIVE_EXPLICIT_MEMORY_MARKERS):
+        return True
+    for label in REDACTION_CATEGORY_LABELS:
+        label_text = str(label).lower()
+        if label_text in lowered or label_text.replace("_", " ") in lowered:
+            return True
+    return False
+
+
 def extract_explicit_memory_texts(events: list[MemoryEvent]) -> list[str]:
     texts: list[str] = []
     for event in events:
@@ -2037,7 +2066,13 @@ def extract_explicit_memory_texts(events: list[MemoryEvent]) -> list[str]:
             if not match:
                 continue
             text = normalize_memory_text(match.group("text"))
-            if text and not is_noisy_text(text) and text not in texts:
+            text = clean_explicit_memory_text(text)
+            if (
+                text
+                and not is_noisy_text(text)
+                and not is_sensitive_explicit_memory_text(text)
+                and text not in texts
+            ):
                 texts.append(text)
     return texts
 
@@ -2201,12 +2236,44 @@ def memory_node_sort_key(node: dict) -> tuple[bool, str, str, str, str]:
     )
 
 
+def explicit_memory_content_key(node: dict) -> tuple[str, str, str, str] | None:
+    if node.get("source") != "explicit":
+        return None
+    text = normalize_memory_text(str(node.get("text", ""))).lower()
+    if not text:
+        return None
+    return (
+        str(node.get("source", "")),
+        str(node.get("layer", "")),
+        str(node.get("scope", "")),
+        text,
+    )
+
+
 def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
     by_id: dict[str, dict] = {}
-    for node in [*load_existing_explicit_memory_nodes(memory_repo), *nodes]:
+    by_content: dict[tuple[str, str, str, str], dict] = {}
+
+    def add_node(node: dict, *, prefer_same_content: bool) -> None:
         memory_id = node.get("memory_id")
-        if isinstance(memory_id, str) and memory_id:
-            by_id[memory_id] = node
+        if not isinstance(memory_id, str) or not memory_id:
+            return
+        content_key = explicit_memory_content_key(node)
+        if content_key is not None:
+            existing = by_content.get(content_key)
+            if existing is not None:
+                if not prefer_same_content:
+                    return
+                existing_id = existing.get("memory_id")
+                if isinstance(existing_id, str):
+                    by_id.pop(existing_id, None)
+            by_content[content_key] = node
+        by_id[memory_id] = node
+
+    for node in load_existing_explicit_memory_nodes(memory_repo):
+        add_node(node, prefer_same_content=False)
+    for node in nodes:
+        add_node(node, prefer_same_content=True)
     return sorted(by_id.values(), key=memory_node_sort_key)
 
 

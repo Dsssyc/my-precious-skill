@@ -25,6 +25,47 @@ def load_update_module():
 
 
 class UpdateMemoryArchiveTests(unittest.TestCase):
+    def test_extract_explicit_memory_texts_trims_task_tail(self):
+        module = load_update_module()
+
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember: prefer concise answers, now review the failing tests",
+                    )
+                ]
+            ),
+            ["prefer concise answers"],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "记住这个：已经授权后不要反复请求权限确认，然后检查测试",
+                    )
+                ]
+            ),
+            ["已经授权后不要反复请求权限确认"],
+        )
+
+    def test_extract_explicit_memory_texts_rejects_redacted_sensitive_directives(self):
+        module = load_update_module()
+
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember: Authorization: Bearer [REDACTED_BEARER_TOKEN]",
+                    )
+                ]
+            ),
+            [],
+        )
+
     def test_build_memory_nodes_promotes_cross_project_reusable_fact_to_domain(self):
         module = load_update_module()
         rows = [
@@ -363,6 +404,105 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
                 ],
             )
+
+    def test_update_memory_archive_dedupes_existing_explicit_node_by_text(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            text = "Prefer concise answers."
+            preserved_node = {
+                "memory_id": "mem_manual_duplicate_text",
+                "layer": "global",
+                "scope": "global",
+                "topic": "agent-workflow",
+                "text": text,
+                "rationale": "Manual explicit memory with a legacy id.",
+                "source": "explicit",
+                "confidence": "high",
+                "persistence": "sticky",
+                "support_count": 1,
+                "first_seen": "2026-06-01T10:00:00Z",
+                "last_seen": "2026-06-01T10:00:00Z",
+                "derived_from": ["sessions/synthetic/summary.md"],
+                "evidence_refs": [{"path": "sessions/synthetic/evidence.md", "quote_id": "ev_explicit_001"}],
+                "raw_refs": [{"path": "synthetic/source.jsonl", "anchor": "explicit_memory"}],
+                "supersedes": [],
+                "superseded_by": None,
+                "tags": ["agent-workflow", "synthetic"],
+            }
+            (memory_repo / "memories/explicit.jsonl").write_text(
+                json.dumps(preserved_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            source = source_dir / "explicit.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": f"Please remember: {text}"}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-06-06T10:00:00Z")
+
+            update_script = Path("skills/update-my-precious/scripts/update_memory_archive.py").resolve()
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "layered",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            expected_id = module.memory_id_for("global", "global", text, "explicit")
+            explicit_rows = [
+                json.loads(line)
+                for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            explicit_matches = [
+                row
+                for row in explicit_rows
+                if module.normalize_memory_text(row["text"]).lower() == module.normalize_memory_text(text).lower()
+            ]
+            self.assertEqual(len(explicit_matches), 1)
+            self.assertEqual(explicit_matches[0]["memory_id"], expected_id)
+
+            index_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            index_matches = [
+                row
+                for row in index_rows
+                if row["source"] == "explicit"
+                and module.normalize_memory_text(row["text"]).lower() == module.normalize_memory_text(text).lower()
+            ]
+            self.assertEqual(len(index_matches), 1)
+            self.assertEqual(index_matches[0]["memory_id"], expected_id)
 
     def test_update_memory_archive_extracts_codex_sessions_without_event_noise(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
