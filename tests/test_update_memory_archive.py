@@ -214,6 +214,91 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertTrue((memory_repo / "memories/projects.jsonl").exists())
             self.assertIn("Hybrid lexical search", (memory_repo / "memories/projects.jsonl").read_text(encoding="utf-8"))
 
+    def test_update_memory_archive_preserves_existing_explicit_memory_nodes(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            explicit_node = {
+                "memory_id": "mem_explicit_preserve_001",
+                "layer": "global",
+                "scope": "global",
+                "topic": "agent-workflow",
+                "text": "Prefer concise synthetic release notes for demo projects.",
+                "rationale": "Synthetic explicit memory seeded for preservation regression.",
+                "source": "explicit",
+                "confidence": "high",
+                "persistence": "sticky",
+                "support_count": 1,
+                "first_seen": "2026-06-01T10:00:00Z",
+                "last_seen": "2026-06-01T10:00:00Z",
+                "derived_from": ["sessions/synthetic/summary.md"],
+                "evidence_refs": [{"path": "sessions/synthetic/evidence.md", "quote_id": "ev_explicit_001"}],
+                "raw_refs": [{"path": "synthetic/source.jsonl", "anchor": "explicit_memory"}],
+                "supersedes": [],
+                "superseded_by": None,
+                "tags": ["agent-workflow", "synthetic"],
+            }
+            (memory_repo / "memories/explicit.jsonl").write_text(
+                json.dumps(explicit_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                '{"role":"user","content":"Need searchable memory nodes for layered recall."}\n'
+                '{"role":"assistant","content":"Decision: Hybrid lexical search should explain field matches and important token coverage."}\n',
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-06-05T10:00:00Z")
+
+            update_script = Path("skills/update-my-precious/scripts/update_memory_archive.py").resolve()
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "layered",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            explicit_rows = [
+                json.loads(line)
+                for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(explicit_rows, [explicit_node])
+
+            index_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertIn(explicit_node, index_rows)
+            self.assertTrue(any("Hybrid lexical search" in row["text"] for row in index_rows))
+
     def test_update_memory_archive_extracts_codex_sessions_without_event_noise(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

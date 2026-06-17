@@ -2112,7 +2112,36 @@ def collect_meta(memory_repo: Path) -> list[dict]:
     return rows
 
 
-def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> None:
+def load_existing_explicit_memory_nodes(memory_repo: Path) -> list[dict]:
+    nodes: list[dict] = []
+    for node in iter_jsonl(memory_repo / "memories" / "explicit.jsonl"):
+        memory_id = node.get("memory_id")
+        if node.get("source") == "explicit" and isinstance(memory_id, str) and memory_id:
+            nodes.append(node)
+    return nodes
+
+
+def memory_node_sort_key(node: dict) -> tuple[bool, str, str, str, str]:
+    return (
+        node.get("source") != "automatic",
+        str(node.get("layer", "")),
+        str(node.get("scope", "")),
+        str(node.get("topic", "")),
+        str(node.get("memory_id", "")),
+    )
+
+
+def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
+    by_id: dict[str, dict] = {}
+    for node in [*load_existing_explicit_memory_nodes(memory_repo), *nodes]:
+        memory_id = node.get("memory_id")
+        if isinstance(memory_id, str) and memory_id:
+            by_id[memory_id] = node
+    return sorted(by_id.values(), key=memory_node_sort_key)
+
+
+def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
+    nodes = merge_existing_explicit_memory_nodes(memory_repo, nodes)
     memories_dir = memory_repo / "memories"
     memories_dir.mkdir(parents=True, exist_ok=True)
     by_layer: dict[str, list[dict]] = {"global": [], "domain": [], "project": []}
@@ -2133,6 +2162,7 @@ def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> None:
         "\n".join(explicit_lines) + ("\n" if explicit_lines else ""),
         encoding="utf-8",
     )
+    return nodes
 
 
 def rebuild_indexes(memory_repo: Path) -> None:
@@ -2140,7 +2170,7 @@ def rebuild_indexes(memory_repo: Path) -> None:
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
     memory_nodes = build_memory_nodes(rows)
-    write_memory_nodes(memory_repo, memory_nodes)
+    memory_nodes = write_memory_nodes(memory_repo, memory_nodes)
 
     sessions_lines: list[str] = []
     project_latest: dict[str, dict] = {}
