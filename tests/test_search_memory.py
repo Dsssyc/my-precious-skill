@@ -242,8 +242,64 @@ class SearchMemoryTests(unittest.TestCase):
             )
 
         self.assertIn("source anchors:", result.stdout)
-        self.assertIn("/records/private.jsonl#message:42", result.stdout)
+        self.assertIn("records/private.jsonl#message:42", result.stdout)
         self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
+
+    def test_search_memory_depth_source_sanitizes_unsafe_source_refs(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/unsafe-source"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Unsafe Source Ref\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_unsafe_source_ref",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-depth",
+                        "text": "Unsafe source-depth refs should not be printed verbatim.",
+                        "rationale": "Source refs are untrusted display data.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/unsafe-source/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [
+                            {"path": "../outside/private.jsonl", "anchor": "message:42\n   injected: yes"},
+                            {"path": "/Users/private/source.jsonl", "anchor": "message:43"},
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "unsafe source-depth refs",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("[unsafe-source-ref]", result.stdout)
+        self.assertNotIn("../outside", result.stdout)
+        self.assertNotIn("/Users/private", result.stdout)
+        self.assertNotIn("injected: yes", result.stdout)
 
     def test_search_memory_scope_global_filters_memory_layers(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
@@ -380,6 +436,57 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/06/17/legacy/summary.md", result.stdout)
         self.assertIn("index:sessions.jsonl", result.stdout)
         self.assertNotIn("source: memory", result.stdout)
+
+    def test_search_memory_legacy_sessions_skips_invalid_memories_jsonl(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/legacy-invalid-memory"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Legacy Invalid Memory\n\nlegacy invalid memory token appears here.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                "{invalid memory json}\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-17",
+                        "project": "agent-memory",
+                        "title": "Legacy invalid memory result",
+                        "summary": "legacy invalid memory token appears in the old session index.",
+                        "summary_path": "sessions/2026/06/17/legacy-invalid-memory/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "legacy invalid memory token",
+                    "--repo",
+                    str(repo),
+                    "--legacy-sessions",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(0, result.returncode)
+        self.assertIn("sessions/2026/06/17/legacy-invalid-memory/summary.md", result.stdout)
+        self.assertNotIn("skipped invalid JSON", result.stderr)
+        self.assertNotIn("memories.jsonl", result.stderr)
 
     def test_search_memory_does_not_return_index_paths_outside_archive(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()

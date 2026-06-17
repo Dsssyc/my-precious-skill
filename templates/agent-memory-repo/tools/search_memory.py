@@ -26,6 +26,7 @@ CONFIG_CANDIDATES = (
     "AGENT_SESSION_MEMORY_CONFIG",
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
+UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
 
 
 @dataclass
@@ -535,21 +536,41 @@ def iter_ref_paths(value: object) -> Iterable[str]:
             yield from iter_ref_paths(item)
 
 
-def iter_raw_ref_anchors(value: object) -> Iterable[str]:
-    if isinstance(value, str) and value.strip():
-        yield value.strip()
+def has_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def sanitize_raw_ref(repo: Path, value: object) -> str:
+    if isinstance(value, str):
+        path_text = value.strip()
+        anchor_text = ""
     elif isinstance(value, dict):
         path = value.get("path")
-        if not isinstance(path, str) or not path.strip():
-            return
+        if not isinstance(path, str):
+            return UNSAFE_SOURCE_REF
+        path_text = path.strip()
         anchor = value.get("anchor")
-        if isinstance(anchor, str) and anchor.strip():
-            yield f"{path.strip()}#{anchor.strip()}"
-        else:
-            yield path.strip()
-    elif isinstance(value, list):
-        for item in value:
-            yield from iter_raw_ref_anchors(item)
+        anchor_text = anchor.strip() if isinstance(anchor, str) else ""
+    else:
+        return UNSAFE_SOURCE_REF
+    if not path_text or has_control_chars(path_text) or has_control_chars(anchor_text):
+        return UNSAFE_SOURCE_REF
+    safe_path = safe_repo_relative_path(repo, path_text)
+    if not safe_path:
+        return UNSAFE_SOURCE_REF
+    if anchor_text:
+        return f"{safe_path}#{anchor_text}"
+    return safe_path
+
+
+def sanitized_raw_refs(repo: Path, value: object) -> tuple[str, ...]:
+    if isinstance(value, list):
+        refs = [sanitize_raw_ref(repo, item) for item in value]
+    elif value:
+        refs = [sanitize_raw_ref(repo, value)]
+    else:
+        refs = []
+    return unique_ordered(refs)
 
 
 def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
@@ -615,7 +636,7 @@ def collect_memory_hits(
                 scope=str(record.get("scope") or ""),
                 text=text,
                 drill_paths=memory_drill_paths(repo, record),
-                raw_refs=unique_ordered(iter_raw_ref_anchors(record.get("raw_refs"))),
+                raw_refs=sanitized_raw_refs(repo, record.get("raw_refs")),
             )
         )
     return hits
@@ -815,19 +836,20 @@ def main(argv: list[str] | None = None) -> int:
     repo = resolve_repo(args.repo)
     context_terms = project_context_terms(args.project_path)
     include_evidence = args.include_evidence or args.depth in ("evidence", "source")
-    memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope)
     session_hits = [
         *collect_index_hits(repo, query_tokens, context_terms),
         *collect_markdown_hits(repo, query_tokens, include_evidence),
     ]
     if args.legacy_sessions:
         selected_hits = session_hits
-    elif memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
-        selected_hits = [*memory_hits, *session_hits]
-    elif memory_hits:
-        selected_hits = memory_hits
     else:
-        selected_hits = session_hits
+        memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope)
+        if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
+            selected_hits = [*memory_hits, *session_hits]
+        elif memory_hits:
+            selected_hits = memory_hits
+        else:
+            selected_hits = session_hits
     hits = merge_hits(repo, selected_hits)
 
     if not hits:
