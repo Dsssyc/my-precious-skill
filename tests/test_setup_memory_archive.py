@@ -58,6 +58,30 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertEqual(config["memory_repo"], str(target.resolve()))
             self.assertEqual(config["version"], 1)
 
+    def test_setup_template_includes_layered_memory_shape(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertTrue((memory_repo / "schemas/memory_node.schema.json").exists())
+            self.assertTrue((memory_repo / "memories/global.jsonl").exists())
+            self.assertTrue((memory_repo / "memories/domains.jsonl").exists())
+            self.assertTrue((memory_repo / "memories/projects.jsonl").exists())
+            self.assertTrue((memory_repo / "memories/explicit.jsonl").exists())
+            self.assertEqual((memory_repo / "memories/global.jsonl").read_text(encoding="utf-8"), "")
+            self.assertEqual((memory_repo / "memories/domains.jsonl").read_text(encoding="utf-8"), "")
+            self.assertEqual((memory_repo / "memories/projects.jsonl").read_text(encoding="utf-8"), "")
+            self.assertEqual((memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8"), "")
+
     def test_write_config_uses_private_permissions(self):
         module = load_setup_module()
 

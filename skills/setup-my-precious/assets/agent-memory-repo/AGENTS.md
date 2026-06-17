@@ -6,10 +6,10 @@ When a task depends on previous conversations, old decisions, unresolved tasks,
 project history, implementation rationale, user preferences, or historical
 debugging context:
 
-1. Start with `INDEX.md` and `index/sessions.jsonl`.
-2. Run `python tools/search_memory.py "<query>"` when shell access is available.
-3. Open the most relevant `sessions/YYYY/MM/DD/.../summary.md` files.
-4. Open `evidence.md` only when the summary is insufficient.
+1. Run `python tools/search_memory.py "<query>"` to start with high-level memory nodes.
+2. Use `--depth session` when the high-level memory is insufficient.
+3. Use `--depth evidence` when a claim needs supporting snippets.
+4. Use `--depth source` only when the user explicitly asks for source reachability and a security review passes.
 5. Do not infer historical facts without checking the archive.
 6. Mention the archive file paths used as evidence.
 7. Never request or expose raw transcripts unless the user explicitly asks and a security review passes.

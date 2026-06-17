@@ -8,17 +8,18 @@ unresolved work, reusable facts, and user preferences.
 
 ## Search
 
+Search starts with high-level memory nodes and can drill down into supporting
+sessions and evidence:
+
 ```bash
 python tools/search_memory.py "<query>"
+python tools/search_memory.py "<query>" --depth session
+python tools/search_memory.py "<query>" --depth evidence
 ```
 
-The setup skill records this repository in
-`~/.config/my-precious/config.json` by default. `AGENT_SESSION_MEMORY_REPO` can
-still be used as a current-shell or scheduler override.
-
-When these tools run from inside a deployment repository, they default to that
-colocated repository. Pass `--repo` or `--memory-repo` to target a different
-archive explicitly.
+Use `--depth source` only when source anchors are needed and the user has
+explicitly asked for raw-source reachability. The command reports source
+anchors; it does not copy raw transcripts into the archive.
 
 ## Update Now
 
@@ -147,6 +148,11 @@ Expected archive paths are limited to
 
 Expected generated data:
 
+- `memories/global.jsonl`
+- `memories/domains.jsonl`
+- `memories/projects.jsonl`
+- `memories/explicit.jsonl`
+- `index/memories.jsonl`
 - `sessions/YYYY/MM/DD/.../summary.md`
 - `sessions/YYYY/MM/DD/.../evidence.md`
 - `sessions/YYYY/MM/DD/.../meta.json`
