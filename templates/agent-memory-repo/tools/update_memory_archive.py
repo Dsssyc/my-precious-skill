@@ -77,7 +77,7 @@ EXPLICIT_MEMORY_PATTERNS = (
     re.compile(r"强制记忆\s*[:：]\s*(?P<text>.+)$"),
 )
 EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
-    r"(?i)[,;，；]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
+    r"(?i)[,;.!?，；。！？]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
     r"(?:现在|然后|接下来|顺便|再|请|帮我))"
 )
 SENSITIVE_EXPLICIT_MEMORY_MARKERS = (

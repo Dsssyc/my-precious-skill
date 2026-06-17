@@ -50,6 +50,72 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             ),
             ["已经授权后不要反复请求权限确认"],
         )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember: prefer concise answers. Now review the failing tests",
+                    )
+                ]
+            ),
+            ["prefer concise answers"],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember: prefer concise answers! Then review the failing tests",
+                    )
+                ]
+            ),
+            ["prefer concise answers"],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember: prefer concise answers? Next review the failing tests",
+                    )
+                ]
+            ),
+            ["prefer concise answers"],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "记住这个：已经授权后不要反复请求权限确认。然后检查测试",
+                    )
+                ]
+            ),
+            ["已经授权后不要反复请求权限确认"],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "记住这个：已经授权后不要反复请求权限确认。接下来检查测试",
+                    )
+                ]
+            ),
+            ["已经授权后不要反复请求权限确认"],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember: prefer concise answers. Include rationale when useful.",
+                    )
+                ]
+            ),
+            ["prefer concise answers. Include rationale when useful."],
+        )
 
     def test_extract_explicit_memory_texts_rejects_redacted_sensitive_directives(self):
         module = load_update_module()
