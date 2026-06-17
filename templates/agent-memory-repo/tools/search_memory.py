@@ -609,6 +609,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Search evidence.md files as well as summaries and indexes",
     )
     parser.add_argument(
+        "--depth",
+        choices=("memory", "session", "evidence", "source"),
+        default="memory",
+        help="Compatibility depth selector; evidence and source include evidence.md files",
+    )
+    parser.add_argument(
         "--project-path",
         help="Optional current project path used to boost matching archive records",
     )
@@ -620,11 +626,12 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = resolve_repo(args.repo)
     context_terms = project_context_terms(args.project_path)
+    include_evidence = args.include_evidence or args.depth in ("evidence", "source")
     hits = merge_hits(
         repo,
         [
             *collect_index_hits(repo, query_tokens, context_terms),
-            *collect_markdown_hits(repo, query_tokens, args.include_evidence),
+            *collect_markdown_hits(repo, query_tokens, include_evidence),
         ],
     )
 

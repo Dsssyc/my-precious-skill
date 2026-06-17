@@ -142,7 +142,8 @@ The sync helper refuses to proceed when non-archive paths changed, when
 generated archive files still contain recognized key-like values, when archive
 audit finds low-quality index text, or when `git diff --cached --check` fails.
 Expected archive paths are limited to
-`INDEX.md`, `config/projects.jsonl`, `index/`, `daily/`, and `sessions/`.
+`INDEX.md`, `config/projects.jsonl`, `index/`, `memories/`, `daily/`, and
+`sessions/`.
 
 ## Archive Data
 

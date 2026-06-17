@@ -45,6 +45,78 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
         self.assertIn("index:sessions.jsonl", result.stdout)
 
+    def test_search_memory_accepts_depth_session_for_summary_hits(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/05/14/example").mkdir(parents=True)
+
+            (repo / "sessions/2026/05/14/example/summary.md").write_text(
+                "# Session: Layered Search\n\n"
+                "Normal session summary remains searchable with depth session.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                '{"date":"2026-05-14","source_agent":"agent",'
+                '"project":"agent-memory","title":"Layered search compatibility",'
+                '"summary":"Normal session summary remains searchable.",'
+                '"summary_path":"sessions/2026/05/14/example/summary.md"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "normal session summary",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "session",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
+
+    def test_search_memory_depth_evidence_searches_evidence_markdown(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/05/14/example"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Evidence Depth\n", encoding="utf-8")
+            (session_dir / "evidence.md").write_text(
+                "# Evidence\n\n"
+                "Supporting snippet mentions layered-evidence-depth-token.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "layered-evidence-depth-token",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "evidence",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("sessions/2026/05/14/example/evidence.md", result.stdout)
+
     def test_search_memory_does_not_return_index_paths_outside_archive(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

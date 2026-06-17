@@ -16,6 +16,7 @@ ALLOWED_ROOTS = (
     "INDEX.md",
     "config/projects.jsonl",
     "index",
+    "memories",
     "daily",
     "sessions",
 )
