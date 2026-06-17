@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import subprocess
@@ -13,7 +14,65 @@ def set_mtime(path: Path, stamp: str) -> None:
     os.utime(path, (dt.timestamp(), dt.timestamp()))
 
 
+def load_update_module():
+    script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+    spec = importlib.util.spec_from_file_location("update_memory_archive_under_test", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class UpdateMemoryArchiveTests(unittest.TestCase):
+    def test_build_memory_nodes_promotes_cross_project_reusable_fact_to_domain(self):
+        module = load_update_module()
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "/records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [
+                    "Hybrid lexical search should explain field matches and important token coverage."
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["search", "memory"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "/records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [
+                    "Hybrid lexical search should explain field matches and important token coverage."
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["search", "memory"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0]["layer"], "domain")
+        self.assertEqual(nodes[0]["scope"], "domain:memory-retrieval")
+        self.assertEqual(nodes[0]["source"], "automatic")
+        self.assertEqual(nodes[0]["confidence"], "high")
+        self.assertEqual(nodes[0]["support_count"], 2)
+        self.assertEqual(nodes[0]["derived_from"], [
+            "sessions/2026/06/01/alpha/summary.md",
+            "sessions/2026/06/02/beta/summary.md",
+        ])
+
     def test_update_memory_archive_creates_searchable_summary(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -101,6 +160,59 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("Draft summary generated", summary_text)
             self.assertTrue((summary_path.parent / "source-map.json").exists())
             self.assertTrue((memory_repo / "daily/2026/2026-05-14.md").exists())
+
+    def test_update_memory_archive_writes_memory_files_and_index(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                '{"role":"user","content":"Need searchable memory nodes for layered recall."}\n'
+                '{"role":"assistant","content":"Decision: Hybrid lexical search should explain field matches and important token coverage."}\n',
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-06-03T10:00:00Z")
+
+            update_script = Path("skills/update-my-precious/scripts/update_memory_archive.py").resolve()
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "layered",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertTrue((memory_repo / "index/memories.jsonl").exists())
+            memory_index = (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8")
+            self.assertIn("Hybrid lexical search", memory_index)
+            self.assertTrue((memory_repo / "memories/projects.jsonl").exists())
+            self.assertIn("Hybrid lexical search", (memory_repo / "memories/projects.jsonl").read_text(encoding="utf-8"))
 
     def test_update_memory_archive_extracts_codex_sessions_without_event_noise(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

@@ -48,6 +48,28 @@ REDACTION_PATTERNS = {
     "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 }
 REDACTION_CATEGORY_LABELS = frozenset(REDACTION_PATTERNS)
+MEMORY_LAYER_FILES = {
+    "global": "global.jsonl",
+    "domain": "domains.jsonl",
+    "project": "projects.jsonl",
+}
+MEMORY_TOPIC_HINTS = (
+    ("memory-retrieval", ("memory", "recall", "retrieval", "search", "index", "archive")),
+    ("agent-workflow", ("agent", "codex", "skill", "permission", "authorization", "workflow")),
+    ("python-packaging", ("python", "pip", "package", "venv", "wheel", "import")),
+    ("frontend-qa", ("frontend", "browser", "playwright", "viewport", "layout", "css")),
+    ("git-workflow", ("git", "commit", "branch", "worktree", "merge", "sync")),
+)
+GLOBAL_MEMORY_HINTS = (
+    "user prefers",
+    "user wants",
+    "the user prefers",
+    "the user wants",
+    "用户希望",
+    "用户偏好",
+    "不要反复",
+    "强制记忆",
+)
 
 
 @dataclass
@@ -61,6 +83,21 @@ class SourceRecord:
 class MemoryEvent:
     kind: str
     text: str
+
+
+@dataclass(frozen=True)
+class MemoryCandidate:
+    text: str
+    rationale: str
+    source: str
+    topic: str
+    project: str
+    project_path: str
+    summary_path: str
+    evidence_path: str
+    source_record: str
+    source_updated_at: str
+    tags: tuple[str, ...]
 
 
 NOISE_MARKERS = (
@@ -1929,6 +1966,139 @@ See `evidence.md` for short redacted snippets that support the summary.
     return destination
 
 
+def normalize_memory_text(text: str) -> str:
+    return compact_whitespace(text).strip(" -")
+
+
+def memory_topic(text: str, tags: Iterable[str]) -> str:
+    lowered = " ".join([text, *tags]).lower()
+    for topic, hints in MEMORY_TOPIC_HINTS:
+        if any(hint in lowered for hint in hints):
+            return topic
+    return "general"
+
+
+def automatic_memory_layer(candidate: MemoryCandidate, support_projects: set[str]) -> str:
+    lowered = candidate.text.lower()
+    if any(hint in lowered for hint in GLOBAL_MEMORY_HINTS):
+        return "global"
+    if len(support_projects) >= 2:
+        return "domain"
+    return "project"
+
+
+def memory_scope(layer: str, candidate: MemoryCandidate) -> str:
+    if layer == "global":
+        return "global"
+    if layer == "domain":
+        return f"domain:{candidate.topic}"
+    project_key = candidate.project_path or candidate.project
+    return f"project:{project_key}"
+
+
+def memory_id_for(layer: str, scope: str, text: str, source: str) -> str:
+    key = f"{layer}\n{scope}\n{source}\n{normalize_memory_text(text).lower()}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return f"mem_{digest[:16]}"
+
+
+def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, str]]:
+    fields = (
+        ("reusable_facts", "Reusable fact from archived session."),
+        ("decisions", "Decision captured in archived session."),
+        ("unresolved_tasks", "Unresolved task captured in archived session."),
+    )
+    for key, rationale in fields:
+        value = row.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            text = normalize_memory_text(str(item))
+            if text and not is_noisy_text(text):
+                yield text, rationale
+
+
+def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
+    candidates: list[MemoryCandidate] = []
+    for row in rows:
+        tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
+        for text, rationale in iter_memory_candidate_texts(row):
+            candidates.append(
+                MemoryCandidate(
+                    text=text,
+                    rationale=rationale,
+                    source="automatic",
+                    topic=memory_topic(text, tags),
+                    project=str(row.get("project", "")),
+                    project_path=str(row.get("project_path", "")),
+                    summary_path=str(row.get("summary_path", "")),
+                    evidence_path=str(row.get("evidence_path", "")),
+                    source_record=str(row.get("source_record", "")),
+                    source_updated_at=str(row.get("source_updated_at", "")),
+                    tags=tags,
+                )
+            )
+    return candidates
+
+
+def build_memory_nodes(rows: list[dict]) -> list[dict]:
+    grouped: dict[str, list[MemoryCandidate]] = {}
+    for candidate in memory_candidates_from_meta(rows):
+        key = normalize_memory_text(candidate.text).lower()
+        grouped.setdefault(key, []).append(candidate)
+
+    nodes: list[dict] = []
+    for normalized_text in sorted(grouped):
+        candidates = grouped[normalized_text]
+        first = candidates[0]
+        support_projects = {
+            candidate.project_path or candidate.project
+            for candidate in candidates
+            if candidate.project_path or candidate.project
+        }
+        layer = automatic_memory_layer(first, support_projects)
+        scope = memory_scope(layer, first)
+        seen_times = sorted(candidate.source_updated_at for candidate in candidates if candidate.source_updated_at)
+        derived_from = sorted({candidate.summary_path for candidate in candidates if candidate.summary_path})
+        evidence_refs = [
+            {"path": path, "quote_id": f"ev_{idx:03d}"}
+            for idx, path in enumerate(
+                sorted({candidate.evidence_path for candidate in candidates if candidate.evidence_path}),
+                1,
+            )
+        ]
+        raw_refs = [
+            {"path": path, "anchor": "source_record"}
+            for path in sorted({candidate.source_record for candidate in candidates if candidate.source_record})
+        ]
+        confidence = "high" if len(candidates) >= 2 or layer == "global" else "medium"
+        tags = sorted({tag for candidate in candidates for tag in candidate.tags if tag} | {first.topic})
+        text = first.text
+        nodes.append(
+            {
+                "memory_id": memory_id_for(layer, scope, text, first.source),
+                "layer": layer,
+                "scope": scope,
+                "topic": first.topic,
+                "text": text,
+                "rationale": first.rationale,
+                "source": first.source,
+                "confidence": confidence,
+                "persistence": "normal",
+                "support_count": len(candidates),
+                "first_seen": seen_times[0] if seen_times else "",
+                "last_seen": seen_times[-1] if seen_times else "",
+                "derived_from": derived_from,
+                "evidence_refs": evidence_refs,
+                "raw_refs": raw_refs,
+                "supersedes": [],
+                "superseded_by": None,
+                "tags": tags,
+            }
+        )
+    return nodes
+
+
 def collect_meta(memory_repo: Path) -> list[dict]:
     rows: list[dict] = []
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
@@ -1942,10 +2112,35 @@ def collect_meta(memory_repo: Path) -> list[dict]:
     return rows
 
 
+def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> None:
+    memories_dir = memory_repo / "memories"
+    memories_dir.mkdir(parents=True, exist_ok=True)
+    by_layer: dict[str, list[dict]] = {"global": [], "domain": [], "project": []}
+    explicit_nodes: list[dict] = []
+    for node in nodes:
+        layer = str(node.get("layer", "project"))
+        if node.get("source") == "explicit":
+            explicit_nodes.append(node)
+        if layer in by_layer:
+            by_layer[layer].append(node)
+
+    for layer, file_name in MEMORY_LAYER_FILES.items():
+        lines = [json.dumps(node, sort_keys=True) for node in by_layer[layer]]
+        (memories_dir / file_name).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+    explicit_lines = [json.dumps(node, sort_keys=True) for node in explicit_nodes]
+    (memories_dir / "explicit.jsonl").write_text(
+        "\n".join(explicit_lines) + ("\n" if explicit_lines else ""),
+        encoding="utf-8",
+    )
+
+
 def rebuild_indexes(memory_repo: Path) -> None:
     index_dir = memory_repo / "index"
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
+    memory_nodes = build_memory_nodes(rows)
+    write_memory_nodes(memory_repo, memory_nodes)
 
     sessions_lines: list[str] = []
     project_latest: dict[str, dict] = {}
@@ -2017,6 +2212,11 @@ def rebuild_indexes(memory_repo: Path) -> None:
     (index_dir / "unresolved.jsonl").write_text("\n".join(unresolved_lines) + ("\n" if unresolved_lines else ""), encoding="utf-8")
     (index_dir / "files.jsonl").write_text("\n".join(file_lines) + ("\n" if file_lines else ""), encoding="utf-8")
     (index_dir / "tags.jsonl").write_text("\n".join(tag_lines) + ("\n" if tag_lines else ""), encoding="utf-8")
+    memory_lines = [json.dumps(node, sort_keys=True) for node in memory_nodes]
+    (index_dir / "memories.jsonl").write_text(
+        "\n".join(memory_lines) + ("\n" if memory_lines else ""),
+        encoding="utf-8",
+    )
 
     recent = rows[:10]
     index_md = "# Agent Memory Index\n\n## How To Search\n\n```bash\npython tools/search_memory.py \"<query>\"\n```\n\n## Recent Sessions\n\n"
