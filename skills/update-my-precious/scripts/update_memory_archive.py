@@ -70,6 +70,12 @@ GLOBAL_MEMORY_HINTS = (
     "不要反复",
     "强制记忆",
 )
+EXPLICIT_MEMORY_PATTERNS = (
+    re.compile(r"(?i)\bremember this\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"(?i)\bplease remember\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"记住这个\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"强制记忆\s*[:：]\s*(?P<text>.+)$"),
+)
 
 
 @dataclass
@@ -1853,6 +1859,7 @@ def write_record(
     redacted_text, redaction_counts = redact_text(source_text)
     source_events = extract_source_events(record.path, redacted_text)
     summary_data = summarize_events(source_events, project_name)
+    explicit_memories = extract_explicit_memory_texts(source_events)
     if not has_durable_summary_content(summary_data):
         shutil.rmtree(destination)
         return None
@@ -1935,6 +1942,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "reusable_facts": summary_data["facts"],
         "tags": summary_data["tags"],
         "decisions": summary_data["decisions"],
+        "explicit_memories": explicit_memories,
         "unresolved_tasks": summary_data["unresolved"],
         "redaction_counts": redaction_counts,
     }
@@ -2018,6 +2026,53 @@ def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, s
                 yield text, rationale
 
 
+def extract_explicit_memory_texts(events: list[MemoryEvent]) -> list[str]:
+    texts: list[str] = []
+    for event in events:
+        if event.kind != "user":
+            continue
+        compacted = compact_whitespace(event.text)
+        for pattern in EXPLICIT_MEMORY_PATTERNS:
+            match = pattern.search(compacted)
+            if not match:
+                continue
+            text = normalize_memory_text(match.group("text"))
+            if text and not is_noisy_text(text) and text not in texts:
+                texts.append(text)
+    return texts
+
+
+def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
+    tags = [str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float))]
+    topic = memory_topic(text, tags)
+    source_updated_at = str(row.get("source_updated_at", ""))
+    summary_path = str(row.get("summary_path", ""))
+    evidence_path = str(row.get("evidence_path", ""))
+    source_record = str(row.get("source_record", ""))
+    layer = "global"
+    scope = "global"
+    return {
+        "memory_id": memory_id_for(layer, scope, text, "explicit"),
+        "layer": layer,
+        "scope": scope,
+        "topic": topic,
+        "text": text,
+        "rationale": "Explicit memory requested by the user or governing prompt.",
+        "source": "explicit",
+        "confidence": "high",
+        "persistence": "sticky",
+        "support_count": 1,
+        "first_seen": source_updated_at,
+        "last_seen": source_updated_at,
+        "derived_from": [summary_path] if summary_path else [],
+        "evidence_refs": [{"path": evidence_path, "quote_id": "ev_explicit_001"}] if evidence_path else [],
+        "raw_refs": [{"path": source_record, "anchor": "explicit_memory"}] if source_record else [],
+        "supersedes": [],
+        "superseded_by": None,
+        "tags": sorted(set([*tags, topic, "explicit-memory"])),
+    }
+
+
 def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
     candidates: list[MemoryCandidate] = []
     for row in rows:
@@ -2096,6 +2151,21 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
                 "tags": tags,
             }
         )
+    existing_ids = {str(node["memory_id"]) for node in nodes}
+    for row in rows:
+        explicit_texts = row.get("explicit_memories", [])
+        if not isinstance(explicit_texts, list):
+            continue
+        for text_value in explicit_texts:
+            text = normalize_memory_text(str(text_value))
+            if not text:
+                continue
+            node = explicit_memory_node(text, row)
+            if node["memory_id"] in existing_ids:
+                continue
+            nodes.append(node)
+            existing_ids.add(str(node["memory_id"]))
+    nodes.sort(key=lambda node: (str(node.get("layer", "")), str(node.get("memory_id", ""))))
     return nodes
 
 

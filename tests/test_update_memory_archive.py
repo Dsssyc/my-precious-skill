@@ -299,6 +299,71 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn(explicit_node, index_rows)
             self.assertTrue(any("Hybrid lexical search" in row["text"] for row in index_rows))
 
+    def test_update_memory_archive_promotes_explicit_memory_as_sticky_global_node(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source = source_dir / "explicit.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": "记住这个：已经授权后不要反复请求权限确认。"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-06-04T10:00:00Z")
+
+            update_script = Path("skills/update-my-precious/scripts/update_memory_archive.py").resolve()
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "layered",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            explicit = [row for row in rows if row["source"] == "explicit"]
+            self.assertEqual(len(explicit), 1)
+            self.assertEqual(explicit[0]["layer"], "global")
+            self.assertEqual(explicit[0]["scope"], "global")
+            self.assertEqual(explicit[0]["confidence"], "high")
+            self.assertEqual(explicit[0]["persistence"], "sticky")
+            self.assertIn("已经授权后不要反复请求权限确认", explicit[0]["text"])
+            self.assertIn(
+                explicit[0],
+                [
+                    json.loads(line)
+                    for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
+                ],
+            )
+
     def test_update_memory_archive_extracts_codex_sessions_without_event_noise(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
