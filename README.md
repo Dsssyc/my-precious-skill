@@ -7,6 +7,8 @@ English | [简体中文](README.zh-CN.md)
 - `setup-my-precious` initializes or connects a private memory archive.
 - `update-my-precious` scans new source records and writes fresh memory entries.
 - `using-my-precious` searches an existing private memory archive.
+- Layered global, domain, and project memory nodes drill down to sessions,
+  evidence, and source anchors.
 
 This repository does not store real historical sessions, run production archive schedules, or push private memory data. It only stores reusable skill files, search tooling, archive-format contracts, deployment templates, and synthetic tests.
 
@@ -64,10 +66,12 @@ my-precious-skill/
       README.md
       .gitignore
       config/
+      memories/
       index/
       daily/
       sessions/
       prompts/summarize_session.prompt.md
+      schemas/memory_node.schema.json
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
@@ -179,6 +183,8 @@ The deployment repository is where real memory data belongs:
 ```text
 agent-memory/
   config/projects.jsonl
+  memories/*.jsonl
+  index/memories.jsonl
   index/*.jsonl
   daily/YYYY/YYYY-MM-DD.md
   sessions/YYYY/MM/DD/<session>/summary.md
@@ -249,6 +255,17 @@ Search without invoking an agent:
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive"
+```
+
+Search starts with layered memory nodes when `index/memories.jsonl` exists.
+Use depth controls to drill into supporting sessions, evidence, or protected
+source anchors. Reserve `--depth source` for explicit source-reachability
+requests:
+
+```bash
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth evidence
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth source
 ```
 
 Specify a repository path:
@@ -338,7 +355,7 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 ```
 
 The sync helper only stages archive paths (`INDEX.md`,
-`config/projects.jsonl`, `index/`, `daily/`, and `sessions/`). It refuses
+`config/projects.jsonl`, `index/`, `memories/`, `daily/`, and `sessions/`). It refuses
 tool/script edits, archive audit findings, unredacted key-like values, and
 whitespace errors before committing.
 
@@ -348,6 +365,9 @@ A compatible deployment repository should expose:
 
 - `INDEX.md`: overview for humans and agents.
 - `config/projects.jsonl`: optional project registry used by the global runner.
+- `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
+  and `memories/explicit.jsonl`: layered memory nodes.
+- `index/memories.jsonl`: combined layered-memory search index.
 - `index/sessions.jsonl`: one row per session.
 - `index/decisions.jsonl`: one row per reusable decision.
 - `index/unresolved.jsonl`: one row per follow-up task.
@@ -367,6 +387,8 @@ skills/using-my-precious/references/archive-format.md
 - `using-my-precious` skill.
 - Skill UI metadata in `agents/openai.yaml`.
 - Generic archive format reference.
+- Layered global, domain, and project memory nodes with drilldown to sessions,
+  evidence, and source anchors.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, and explainable result reasons.
 - Incremental update script keyed by project path and source/session timestamp.

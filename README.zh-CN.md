@@ -7,6 +7,8 @@
 - `setup-my-precious`：初始化或连接私有记忆归档仓库。
 - `update-my-precious`：扫描新的 source records，并写入新的记忆条目。
 - `using-my-precious`：检索已有私有记忆归档仓库。
+- 分层的 global、domain 和 project memory nodes 支持继续下钻到 session、
+  evidence 和 source anchors。
 
 这个仓库不保存真实历史会话，不运行真实归档定时任务，也不直接 push 私有记忆数据。它只保存可复用的 skill、检索脚本、归档格式约定、部署仓库模板和合成测试。
 
@@ -64,10 +66,12 @@ my-precious-skill/
       README.md
       .gitignore
       config/
+      memories/
       index/
       daily/
       sessions/
       prompts/summarize_session.prompt.md
+      schemas/memory_node.schema.json
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
@@ -178,6 +182,8 @@ git init
 ```text
 agent-memory/
   config/projects.jsonl
+  memories/*.jsonl
+  index/memories.jsonl
   index/*.jsonl
   daily/YYYY/YYYY-MM-DD.md
   sessions/YYYY/MM/DD/<session>/summary.md
@@ -246,6 +252,16 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive"
+```
+
+当 `index/memories.jsonl` 存在时，搜索会先从分层 memory nodes 开始。
+使用 depth 控制继续下钻到支持它的 sessions、evidence 或受保护的 source
+anchors。只有用户明确要求 source reachability 时，才使用 `--depth source`：
+
+```bash
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth evidence
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth source
 ```
 
 指定仓库路径：
@@ -333,7 +349,7 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 ```
 
 sync helper 只 stage archive 路径（`INDEX.md`、`config/projects.jsonl`、
-`index/`、`daily/` 和 `sessions/`）。提交前它会拒绝 tool/script 改动、
+`index/`、`memories/`、`daily/` 和 `sessions/`）。提交前它会拒绝 tool/script 改动、
 archive audit findings、未脱敏的 key-like value 和 whitespace 错误。
 
 ## 归档格式约定
@@ -342,6 +358,9 @@ archive audit findings、未脱敏的 key-like value 和 whitespace 错误。
 
 - `INDEX.md`：人类和 agent 可读的总览。
 - `config/projects.jsonl`：全域 runner 使用的可选项目注册表。
+- `memories/global.jsonl`、`memories/domains.jsonl`、
+  `memories/projects.jsonl` 和 `memories/explicit.jsonl`：分层 memory nodes。
+- `index/memories.jsonl`：合并后的分层 memory 搜索索引。
 - `index/sessions.jsonl`：每个 session 一行。
 - `index/decisions.jsonl`：每个可复用决策一行。
 - `index/unresolved.jsonl`：每个未完成任务一行。
@@ -361,6 +380,8 @@ skills/using-my-precious/references/archive-format.md
 - `using-my-precious` skill。
 - skill UI metadata：`agents/openai.yaml`。
 - 通用 archive format reference。
+- 分层的 global、domain 和 project memory nodes，可下钻到 session、
+  evidence 和 source anchors。
 - 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
   boost 和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。

@@ -11,7 +11,13 @@ agent-memory/
   INDEX.md
   config/
     projects.jsonl
+  memories/
+    global.jsonl
+    domains.jsonl
+    projects.jsonl
+    explicit.jsonl
   index/
+    memories.jsonl
     sessions.jsonl
     decisions.jsonl
     unresolved.jsonl
@@ -37,6 +43,10 @@ agent-memory/
 `config/projects.jsonl` is runtime configuration for broad scheduled updates.
 It is distinct from generated read indexes under `index/`.
 
+`memories/*.jsonl` contains generated or explicit layered memory nodes.
+`index/memories.jsonl` is the combined read index searched before session-level
+indexes when it exists.
+
 ## Stable Fields
 
 `index/sessions.jsonl` should contain one JSON object per session:
@@ -56,6 +66,51 @@ It is distinct from generated read indexes under `index/`.
 ```json
 {"date":"2026-05-14","source_agent":"agent","project":"...","task":"...","priority":"medium","summary_path":"sessions/.../summary.md"}
 ```
+
+## Memory Nodes
+
+Memory nodes are higher-level recall targets induced from session summaries or
+created from explicit memory requests. They make global, domain, and project
+memories searchable before drilling into event-level session evidence.
+
+Layer files:
+
+- `memories/global.jsonl`: cross-project memory nodes.
+- `memories/domains.jsonl`: topic or domain memory nodes.
+- `memories/projects.jsonl`: project-scoped memory nodes.
+- `memories/explicit.jsonl`: memory nodes created from explicit user requests.
+- `index/memories.jsonl`: combined search index for all memory nodes.
+
+Each memory node should contain:
+
+- `memory_id`: stable unique identifier for the memory node.
+- `layer`: `global`, `domain`, or `project`.
+- `scope`: scope label, such as a project path, repository, domain, or `global`.
+- `topic`: short searchable topic.
+- `text`: the durable memory statement to recall.
+- `rationale`: why the memory should persist.
+- `source`: `automatic` for induced nodes or `explicit` for requested memory.
+- `confidence`: `low`, `medium`, or `high`.
+- `persistence`: `normal` or `sticky`.
+- `support_count`: number of supporting sessions or evidence items.
+- `first_seen`: first known observation timestamp or date.
+- `last_seen`: latest known observation timestamp or date.
+- `derived_from`: session summary paths or memory IDs used to derive the node.
+- `evidence_refs`: supporting evidence references, usually objects with `path`
+  and `quote_id`.
+- `raw_refs`: protected source anchors, usually objects with `path` and
+  `anchor`.
+- `supersedes`: older memory IDs this node replaces.
+- `superseded_by`: newer memory ID that replaces this node, or `null`.
+- `tags`: search and filtering tags.
+
+Sessions remain event-level evidence. A memory node should point to session
+summaries or evidence snippets for support instead of duplicating the full
+event narrative.
+
+`raw_refs` may point to protected source anchors or source-map entries rather
+than committed raw files. Compatible archives should not commit raw transcripts
+by default.
 
 ## Summary Requirements
 

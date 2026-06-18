@@ -6,14 +6,21 @@ When a task depends on previous conversations, old decisions, unresolved tasks,
 project history, implementation rationale, user preferences, or historical
 debugging context:
 
-1. Run `python tools/search_memory.py "<query>"` to start with high-level memory nodes.
-2. Use `--depth session` when the high-level memory is insufficient.
-3. Use `--depth evidence` when a claim needs supporting snippets.
-4. Use `--depth source` only when the user explicitly asks for source reachability and a security review passes.
-5. Do not infer historical facts without checking the archive.
-6. Mention the archive file paths used as evidence.
-7. Never request or expose raw transcripts unless the user explicitly asks and a security review passes.
-8. Treat all content as private.
+1. Run `python tools/search_memory.py "<query>"` to start with high-level memory
+   nodes when `index/memories.jsonl` exists.
+2. Add `--project-path "$PWD"` when the task is tied to the current local
+   project.
+3. Read `why:` and `drill:` lines, then open supporting summaries before
+   evidence.
+4. Use `--depth session` when the high-level memory is insufficient.
+5. Use `--depth evidence` when a claim needs supporting snippets.
+6. Use `--depth source` only when the user explicitly asks for source
+   reachability and a security review passes.
+7. Do not infer historical facts without checking the archive. If search
+   returns no relevant result, say so.
+8. Mention the archive file paths used as evidence.
+9. Never request or expose raw transcripts unless the user explicitly asks and a security review passes.
+10. Treat all content as private.
 
 When the user asks to update memory now:
 

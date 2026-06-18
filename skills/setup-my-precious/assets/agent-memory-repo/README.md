@@ -9,10 +9,11 @@ unresolved work, reusable facts, and user preferences.
 ## Search
 
 Search starts with high-level memory nodes and can drill down into supporting
-sessions and evidence:
+sessions and evidence when `index/memories.jsonl` exists:
 
 ```bash
 python tools/search_memory.py "<query>"
+python tools/search_memory.py "<query>" --project-path /path/to/current/project
 python tools/search_memory.py "<query>" --depth session
 python tools/search_memory.py "<query>" --depth evidence
 ```
@@ -20,6 +21,10 @@ python tools/search_memory.py "<query>" --depth evidence
 Use `--depth source` only when source anchors are needed and the user has
 explicitly asked for raw-source reachability. The command reports source
 anchors; it does not copy raw transcripts into the archive.
+
+Read `why:` and `drill:` lines in search output. Prefer high-level memories
+with provenance, then open the supporting summaries or evidence. If no relevant
+result exists, say so instead of inferring historical facts.
 
 ## Update Now
 
@@ -149,11 +154,11 @@ Expected archive paths are limited to
 
 Expected generated data:
 
+- `index/memories.jsonl`
 - `memories/global.jsonl`
 - `memories/domains.jsonl`
 - `memories/projects.jsonl`
 - `memories/explicit.jsonl`
-- `index/memories.jsonl`
 - `sessions/YYYY/MM/DD/.../summary.md`
 - `sessions/YYYY/MM/DD/.../evidence.md`
 - `sessions/YYYY/MM/DD/.../meta.json`

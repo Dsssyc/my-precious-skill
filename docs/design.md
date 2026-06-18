@@ -23,7 +23,7 @@ scheduled ingestion, summarization, indexes, and Git synchronization.
 
 The private deployment repository contains:
 
-- real `sessions/`, `daily/`, and `index/` data
+- real `sessions/`, `daily/`, `memories/`, and `index/` data
 - `config/projects.jsonl`, the runtime project registry used by scheduled
   global updates
 - ingestion and summarization configuration
@@ -59,6 +59,10 @@ and JSONL indexes.
   coverage, and optional current-project context.
 - `skills/using-my-precious/references/archive-format.md`: stable archive
   contract for compatible deployment repos.
+- `memories/*.jsonl` and `index/memories.jsonl`: layered memory nodes induced
+  from sessions or created from explicit memory requests. These nodes make
+  global, domain, and project memories first-class recall targets while keeping
+  sessions as event-level evidence.
 - `skills/setup-my-precious/SKILL.md`: asks the user how to store the archive
   and scaffolds a local or hosted-Git-backed deployment repository.
 - `skills/setup-my-precious/scripts/setup_memory_archive.py`: copies the
