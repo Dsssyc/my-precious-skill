@@ -103,6 +103,21 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 0.0)
 
+    def test_no_hit_search_exit_code_scores_as_zero_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            self.assertEqual(payload["memory_recall_at_5"], 0.0)
+            self.assertEqual(payload["session_drilldown_at_5"], 0.0)
+            self.assertEqual(payload["source_reachability"], 0.0)
+
     def create_repo(self, root):
         repo = root / "agent-memory"
         (repo / "index").mkdir(parents=True)
@@ -158,6 +173,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 depth = arg_value("--depth")
                 with CALLS.open("a", encoding="utf-8") as handle:
                     handle.write(depth + "|" + query + "\\n")
+
+                if MODE == "nohit":
+                    print(f"No memory hits for: {{query}}")
+                    raise SystemExit(1)
 
                 if depth == "memory":
                     if MODE == "distractor":

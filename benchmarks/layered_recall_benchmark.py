@@ -13,6 +13,7 @@ from typing import Iterable, NamedTuple
 
 
 DEFAULT_SEARCH_SCRIPT = "templates/agent-memory-repo/tools/search_memory.py"
+NO_HIT_MARKER = "No memory hits for:"
 
 
 class Case(NamedTuple):
@@ -81,6 +82,8 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str) -> str:
         stderr=subprocess.PIPE,
     )
     if result.returncode != 0:
+        if NO_HIT_MARKER in result.stdout:
+            return result.stdout
         stderr = result.stderr.strip() or "(empty stderr)"
         raise SystemExit(
             "search failed: "
