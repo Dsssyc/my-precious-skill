@@ -71,10 +71,17 @@ GLOBAL_MEMORY_HINTS = (
     "强制记忆",
 )
 EXPLICIT_MEMORY_PATTERNS = (
-    re.compile(r"(?i)\bremember this\s*[:：]\s*(?P<text>.+)$"),
-    re.compile(r"(?i)\bplease remember\s*[:：]\s*(?P<text>.+)$"),
-    re.compile(r"记住这个\s*[:：]\s*(?P<text>.+)$"),
-    re.compile(r"强制记忆\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"(?i)^\s*remember this\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"(?i)^\s*please remember\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"^\s*记住这个\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"^\s*强制记忆\s*[:：]\s*(?P<text>.+)$"),
+)
+NEGATED_EXPLICIT_MEMORY_PATTERNS = (
+    re.compile(
+        r"(?i)^\s*(?:please\s+)?(?:do\s+not|don't|dont|never)\s+"
+        r"(?:please\s+)?remember(?:\s+this)?(?:\s*[:：]|\b)"
+    ),
+    re.compile(r"^\s*(?:不要|别)\s*(?:记住这个|强制记忆)(?:\s*[:：]|$)"),
 )
 EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
     r"(?i)[,;.!?，；。！？]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
@@ -2055,14 +2062,20 @@ def is_sensitive_explicit_memory_text(text: str) -> bool:
     return False
 
 
+def is_negated_explicit_memory_directive(text: str) -> bool:
+    return any(pattern.match(text) for pattern in NEGATED_EXPLICIT_MEMORY_PATTERNS)
+
+
 def extract_explicit_memory_texts(events: list[MemoryEvent]) -> list[str]:
     texts: list[str] = []
     for event in events:
         if event.kind != "user":
             continue
         compacted = compact_whitespace(event.text)
+        if is_negated_explicit_memory_directive(compacted):
+            continue
         for pattern in EXPLICIT_MEMORY_PATTERNS:
-            match = pattern.search(compacted)
+            match = pattern.match(compacted)
             if not match:
                 continue
             text = normalize_memory_text(match.group("text"))

@@ -132,6 +132,30 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             [],
         )
 
+    def test_extract_explicit_memory_texts_rejects_negated_directives(self):
+        module = load_update_module()
+
+        negated_directives = [
+            "Do not remember this: my preference is private",
+            "don't remember this: private preference",
+            "dont remember this: private preference",
+            "Never remember this: private preference",
+            "do not please remember: private preference",
+            "不要记住这个：我的偏好是私密的",
+            "别记住这个：我的偏好是私密的",
+            "不要强制记忆：我的偏好是私密的",
+            "别强制记忆：我的偏好是私密的",
+        ]
+
+        for directive in negated_directives:
+            with self.subTest(directive=directive):
+                self.assertEqual(
+                    module.extract_explicit_memory_texts(
+                        [module.MemoryEvent("user", directive)]
+                    ),
+                    [],
+                )
+
     def test_build_memory_nodes_promotes_cross_project_reusable_fact_to_domain(self):
         module = load_update_module()
         rows = [
