@@ -519,22 +519,34 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
     return findings
 
 
-def iter_memory_index_rows(repo: Path) -> Iterable[tuple[int, dict]]:
-    path = repo / "index" / "memories.jsonl"
-    if not path.exists():
-        return
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
+def iter_memory_row_files(repo: Path) -> Iterable[tuple[str, Path]]:
+    index_path = repo / "index" / "memories.jsonl"
+    if index_path.is_file():
+        yield "index/memories.jsonl", index_path
+    memories_dir = repo / "memories"
+    if memories_dir.is_dir():
+        for path in sorted(item for item in memories_dir.glob("*.jsonl") if item.is_file()):
+            yield path.relative_to(repo).as_posix(), path
+
+
+def iter_memory_node_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
+    for relative, path in iter_memory_row_files(repo):
         try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            yield line_number, {"__invalid_json__": True}
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
             continue
-        if isinstance(value, dict):
-            yield line_number, value
-        else:
-            yield line_number, {"__invalid_json__": True}
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                yield relative, line_number, {"__invalid_json__": True}
+                continue
+            if isinstance(value, dict):
+                yield relative, line_number, value
+            else:
+                yield relative, line_number, {"__invalid_json__": True}
 
 
 def safe_existing_archive_ref(repo: Path, path_text: str) -> bool:
@@ -573,29 +585,29 @@ def audit_memory_references(repo: Path) -> list[Finding]:
         "superseded_by",
         "tags",
     }
-    for line_number, row in iter_memory_index_rows(repo):
+    for relative, line_number, row in iter_memory_node_rows(repo):
         if row.get("__invalid_json__"):
-            findings.append(Finding("index/memories.jsonl", line_number, "invalid_json"))
+            findings.append(Finding(relative, line_number, "invalid_json"))
             continue
         missing = required_fields.difference(row)
         if missing:
-            findings.append(Finding("index/memories.jsonl", line_number, "invalid_memory_node"))
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
             continue
         derived_from = row.get("derived_from", [])
         if not isinstance(derived_from, list):
-            findings.append(Finding("index/memories.jsonl", line_number, "invalid_memory_node"))
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
         else:
             for path_text in derived_from:
                 if not isinstance(path_text, str) or not safe_existing_archive_ref(repo, path_text):
-                    findings.append(Finding("index/memories.jsonl", line_number, "broken_memory_ref"))
+                    findings.append(Finding(relative, line_number, "broken_memory_ref"))
         evidence_refs = row.get("evidence_refs", [])
         if not isinstance(evidence_refs, list):
-            findings.append(Finding("index/memories.jsonl", line_number, "invalid_memory_node"))
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
         else:
             for ref in evidence_refs:
                 path_text = ref.get("path") if isinstance(ref, dict) else ""
                 if not isinstance(path_text, str) or not safe_existing_archive_ref(repo, path_text):
-                    findings.append(Finding("index/memories.jsonl", line_number, "broken_memory_ref"))
+                    findings.append(Finding(relative, line_number, "broken_memory_ref"))
     return findings
 
 

@@ -6,6 +6,31 @@ import unittest
 from pathlib import Path
 
 
+def valid_memory_node(**overrides):
+    node = {
+        "memory_id": "mem_valid_root",
+        "layer": "global",
+        "scope": "global",
+        "topic": "agent-workflow",
+        "text": "Valid root memory references should pass audit.",
+        "rationale": "Audit should validate root memory node files.",
+        "source": "automatic",
+        "confidence": "high",
+        "persistence": "normal",
+        "support_count": 1,
+        "first_seen": "2026-06-05T10:00:00Z",
+        "last_seen": "2026-06-05T10:00:00Z",
+        "derived_from": [],
+        "evidence_refs": [],
+        "raw_refs": [],
+        "supersedes": [],
+        "superseded_by": None,
+        "tags": ["audit"],
+    }
+    node.update(overrides)
+    return node
+
+
 class AuditMemoryArchiveTests(unittest.TestCase):
     def test_audit_memory_archive_flags_noise_and_secrets_without_leaking_values(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
@@ -506,6 +531,120 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("category=invalid_json", combined)
             self.assertIn("category=invalid_memory_node", combined)
             self.assertIn("index/memories.jsonl", combined)
+
+    def test_audit_memory_archive_flags_invalid_root_memory_node_rows(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "memories/global.jsonl").write_text(
+                "{invalid json}\n"
+                + json.dumps({"text": "bad root-only memory row"})
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/global.jsonl:1 category=invalid_json", combined)
+            self.assertIn("memories/global.jsonl:2 category=invalid_memory_node", combined)
+
+    def test_audit_memory_archive_flags_broken_root_memory_references(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "memories/domains.jsonl").write_text(
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_broken_root",
+                        text="Broken root memory references should be caught.",
+                        derived_from=["sessions/2026/06/05/missing/summary.md"],
+                        evidence_refs=[{"path": "sessions/2026/06/05/missing/evidence.md", "quote_id": "ev_001"}],
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/domains.jsonl:1 category=broken_memory_ref", combined)
+            self.assertNotIn("index/memories.jsonl", combined)
+
+    def test_audit_memory_archive_allows_root_memory_rows_without_raw_ref_files(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/root-valid-memory"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for valid root memory evidence.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for valid root memory.\n", encoding="utf-8")
+            (memory_repo / "memories/explicit.jsonl").write_text(
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_valid_root_raw_ref",
+                        derived_from=["sessions/2026/06/05/root-valid-memory/summary.md"],
+                        evidence_refs=[
+                            {"path": "sessions/2026/06/05/root-valid-memory/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        raw_refs=[{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1"}],
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_audit_memory_archive_scans_memory_root_files(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
