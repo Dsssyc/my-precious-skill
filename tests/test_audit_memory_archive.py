@@ -604,6 +604,40 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/domains.jsonl:1 category=broken_memory_ref", combined)
             self.assertNotIn("index/memories.jsonl", combined)
 
+    def test_audit_memory_archive_does_not_read_root_memory_symlink_outside_repo(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            outside = root / "outside-memory-row.jsonl"
+            outside.write_text('{"text":"outside row must not be audited"}\n', encoding="utf-8")
+            link = memory_repo / "memories/link.jsonl"
+            try:
+                link.symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
+            self.assertNotIn("memories/link.jsonl", combined)
+            self.assertNotIn("category=invalid_memory_node", combined)
+
     def test_audit_memory_archive_allows_root_memory_rows_without_raw_ref_files(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

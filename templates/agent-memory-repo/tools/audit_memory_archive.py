@@ -521,12 +521,13 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
 
 def iter_memory_row_files(repo: Path) -> Iterable[tuple[str, Path]]:
     index_path = repo / "index" / "memories.jsonl"
-    if index_path.is_file():
+    if index_path.is_file() and is_allowed_path(index_path, repo):
         yield "index/memories.jsonl", index_path
     memories_dir = repo / "memories"
     if memories_dir.is_dir():
         for path in sorted(item for item in memories_dir.glob("*.jsonl") if item.is_file()):
-            yield path.relative_to(repo).as_posix(), path
+            if is_allowed_path(path, repo):
+                yield path.relative_to(repo).as_posix(), path
 
 
 def iter_memory_node_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
