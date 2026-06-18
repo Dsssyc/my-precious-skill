@@ -278,6 +278,21 @@ summary、user intent 等高信号字段的权重，奖励精确短语和重要 
 并输出 `why:` 行，帮助 agent 判断命中来自结构化字段、短语匹配、重要 token
 覆盖，还是当前项目上下文。
 
+### 分层召回 Benchmark
+
+可以用合成 case 检查分层召回：
+
+```bash
+python benchmarks/layered_recall_benchmark.py \
+  --repo /path/to/agent-memory \
+  --cases /path/to/cases.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py
+```
+
+输出包含 `memory_recall_at_5`、`session_drilldown_at_5` 和
+`source_reachability`。这个 benchmark 面向 My Precious 的分层召回，不应该直接
+等同于使用原文 transcript embedding 的系统分数。
+
 渲染默认全域 scheduler：
 
 ```bash

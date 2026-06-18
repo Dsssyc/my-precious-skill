@@ -282,6 +282,22 @@ rewards exact query phrases and important literal tokens; and prints a `why:`
 line so agents can tell whether a hit came from a structured field, phrase
 match, important token coverage, or project context.
 
+### Layered Recall Benchmark
+
+Synthetic layered recall cases can be checked with:
+
+```bash
+python benchmarks/layered_recall_benchmark.py \
+  --repo /path/to/agent-memory \
+  --cases /path/to/cases.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py
+```
+
+The harness reports `memory_recall_at_5`, `session_drilldown_at_5`, and
+`source_reachability`. It is designed for My Precious layered recall, not as a
+direct score comparison against systems that store verbatim transcript
+embeddings.
+
 Render a default global scheduler:
 
 ```bash
