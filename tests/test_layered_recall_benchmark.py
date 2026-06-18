@@ -2,83 +2,232 @@ import json
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
 
-class LayeredRecallBenchmarkTests(unittest.TestCase):
-    def test_layered_recall_benchmark_reports_memory_and_session_metrics(self):
-        script = Path("benchmarks/layered_recall_benchmark.py").resolve()
-        search_script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+SCRIPT = Path("benchmarks/layered_recall_benchmark.py").resolve()
+SUMMARY_PATH = "sessions/2026/06/04/source/summary.md"
+SOURCE_ANCHOR = "records/private.jsonl#message:42"
+MEMORY_TEXT = "Avoid repeated permission prompts after permission is granted."
 
+
+class LayeredRecallBenchmarkTests(unittest.TestCase):
+    def test_layered_recall_benchmark_reports_parsed_block_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            repo = root / "agent-memory"
-            (repo / "index").mkdir(parents=True)
-            (repo / "sessions/2026/06/04/source").mkdir(parents=True)
-            (repo / "sessions/2026/06/04/source/summary.md").write_text("# Session\n", encoding="utf-8")
-            (repo / "sessions/2026/06/04/source/evidence.md").write_text("# Evidence\n", encoding="utf-8")
-            raw_source = repo / "records/private.jsonl"
-            raw_source.parent.mkdir(parents=True)
-            raw_source.write_text("Synthetic private source placeholder.\n", encoding="utf-8")
-            (repo / "index/memories.jsonl").write_text(
-                json.dumps(
-                    {
-                        "memory_id": "mem_permission",
-                        "layer": "global",
-                        "scope": "global",
-                        "topic": "agent-workflow",
-                        "text": "Avoid repeated permission prompts after permission is granted.",
-                        "rationale": "Explicit user preference.",
-                        "source": "explicit",
-                        "confidence": "high",
-                        "persistence": "sticky",
-                        "support_count": 1,
-                        "first_seen": "2026-06-04T10:00:00Z",
-                        "last_seen": "2026-06-04T10:00:00Z",
-                        "derived_from": ["sessions/2026/06/04/source/summary.md"],
-                        "evidence_refs": [{"path": "sessions/2026/06/04/source/evidence.md", "quote_id": "ev_001"}],
-                        "raw_refs": [{"path": "records/private.jsonl", "anchor": "message:42"}],
-                        "supersedes": [],
-                        "superseded_by": None,
-                        "tags": ["permissions"],
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, calls_path = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            self.assertEqual(payload["memory_recall_at_5"], 1.0)
+            self.assertEqual(payload["session_drilldown_at_5"], 1.0)
+            self.assertEqual(payload["source_reachability"], 1.0)
+            calls = calls_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(calls, ["memory|permission prompts", "session|permission prompts", "source|permission prompts"])
+
+    def test_broken_search_script_fails_with_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            missing_search_script = root / "missing_search.py"
+
+            result = self.run_benchmark(repo, cases, missing_search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("search failed", result.stderr)
+            self.assertIn("depth=memory", result.stderr)
+            self.assertIn("query='permission prompts'", result.stderr)
+            self.assertIn("returncode=", result.stderr)
+            self.assertIn(str(missing_search_script), result.stderr)
+
+    def test_missing_required_field_reports_cases_path_and_line(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {"query": "permission prompts", "expected_memory_id": "mem_permission"})
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"{cases}:1", result.stderr)
+            self.assertIn("expected_summary_path", result.stderr)
+
+    def test_non_object_jsonl_row_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
             cases = root / "cases.jsonl"
-            cases.write_text(
-                json.dumps(
-                    {
-                        "query": "permission prompts after granted",
-                        "expected_memory_id": "mem_permission",
-                        "expected_summary_path": "sessions/2026/06/04/source/summary.md",
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            cases.write_text(json.dumps(["not", "an", "object"]) + "\n", encoding="utf-8")
+            search_script, _ = self.write_stub_search(root)
 
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--repo",
-                    str(repo),
-                    "--cases",
-                    str(cases),
-                    "--search-script",
-                    str(search_script),
-                ],
-                check=True,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
+            result = self.run_benchmark(repo, cases, search_script, check=False)
 
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["cases"], 1)
-        self.assertEqual(payload["memory_recall_at_5"], 1.0)
-        self.assertEqual(payload["session_drilldown_at_5"], 1.0)
-        self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"{cases}:1", result.stderr)
+            self.assertIn("expected object", result.stderr)
+
+    def test_empty_cases_file_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = root / "cases.jsonl"
+            cases.write_text("", encoding="utf-8")
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no benchmark cases", result.stderr)
+            self.assertIn(str(cases), result.stderr)
+
+    def test_distractor_blocks_do_not_count_split_expected_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root, mode="distractor")
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            self.assertEqual(payload["memory_recall_at_5"], 0.0)
+            self.assertEqual(payload["session_drilldown_at_5"], 1.0)
+            self.assertEqual(payload["source_reachability"], 0.0)
+
+    def create_repo(self, root):
+        repo = root / "agent-memory"
+        (repo / "index").mkdir(parents=True)
+        (repo / "index/memories.jsonl").write_text(
+            json.dumps(
+                {
+                    "memory_id": "mem_permission",
+                    "topic": "permission-prompts",
+                    "text": MEMORY_TEXT,
+                    "derived_from": [SUMMARY_PATH],
+                    "raw_refs": [{"path": "records/private.jsonl", "anchor": "message:42"}],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return repo
+
+    def valid_case(self):
+        return {
+            "query": "permission prompts",
+            "expected_memory_id": "mem_permission",
+            "expected_summary_path": SUMMARY_PATH,
+            "expected_source_anchor": SOURCE_ANCHOR,
+        }
+
+    def write_cases(self, root, *rows):
+        cases = root / "cases.jsonl"
+        cases.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        return cases
+
+    def write_stub_search(self, root, mode="happy"):
+        calls_path = root / "calls.log"
+        search_script = root / "stub_search.py"
+        search_script.write_text(
+            textwrap.dedent(
+                f"""\
+                import sys
+                from pathlib import Path
+
+                CALLS = Path({str(calls_path)!r})
+                SUMMARY_PATH = {SUMMARY_PATH!r}
+                SOURCE_ANCHOR = {SOURCE_ANCHOR!r}
+                MEMORY_TEXT = {MEMORY_TEXT!r}
+                MODE = {mode!r}
+
+                def arg_value(name, default=""):
+                    if name not in sys.argv:
+                        return default
+                    return sys.argv[sys.argv.index(name) + 1]
+
+                query = sys.argv[1]
+                depth = arg_value("--depth")
+                with CALLS.open("a", encoding="utf-8") as handle:
+                    handle.write(depth + "|" + query + "\\n")
+
+                if depth == "memory":
+                    if MODE == "distractor":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] " + MEMORY_TEXT)
+                        print("   source: memory")
+                        print("   drill:")
+                        print("     - sessions/other/summary.md")
+                        print()
+                        print("2. [global] Different memory")
+                        print("   source: memory")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                    else:
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] " + MEMORY_TEXT)
+                        print("   source: memory")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                elif depth == "session":
+                    print(f"Top memory hits for: {{query}}")
+                    print()
+                    print("1. " + SUMMARY_PATH)
+                    print("   source: index")
+                elif depth == "source":
+                    if MODE == "distractor":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] " + MEMORY_TEXT)
+                        print("   source: memory")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                        print()
+                        print("2. [global] Different memory")
+                        print("   source: memory")
+                        print("   source anchors:")
+                        print("     - " + SOURCE_ANCHOR)
+                    else:
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] " + MEMORY_TEXT)
+                        print("   source: memory")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                        print("   source anchors:")
+                        print("     - " + SOURCE_ANCHOR)
+                else:
+                    raise SystemExit(2)
+                """
+            ),
+            encoding="utf-8",
+        )
+        return search_script, calls_path
+
+    def run_benchmark(self, repo, cases, search_script, check=True):
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--repo",
+                str(repo),
+                "--cases",
+                str(cases),
+                "--search-script",
+                str(search_script),
+            ],
+            check=check,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )

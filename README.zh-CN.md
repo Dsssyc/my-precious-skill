@@ -290,8 +290,10 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 输出包含 `memory_recall_at_5`、`session_drilldown_at_5` 和
-`source_reachability`。这个 benchmark 面向 My Precious 的分层召回，不应该直接
-等同于使用原文 transcript embedding 的系统分数。
+`source_reachability`。每个 JSONL case 必须包含 `query`、
+`expected_memory_id`、`expected_summary_path` 和 `expected_source_anchor`。
+这个 benchmark 面向 My Precious 的分层召回，不应该直接等同于使用原文
+transcript embedding 的系统分数。
 
 渲染默认全域 scheduler：
 

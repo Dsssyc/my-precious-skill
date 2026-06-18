@@ -294,9 +294,10 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 The harness reports `memory_recall_at_5`, `session_drilldown_at_5`, and
-`source_reachability`. It is designed for My Precious layered recall, not as a
-direct score comparison against systems that store verbatim transcript
-embeddings.
+`source_reachability`. Each JSONL case must include `query`,
+`expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
+It is designed for My Precious layered recall, not as a direct score comparison
+against systems that store verbatim transcript embeddings.
 
 Render a default global scheduler:
 
