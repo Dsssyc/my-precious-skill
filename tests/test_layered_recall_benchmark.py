@@ -1047,11 +1047,19 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                             "session_drilldown_at_5",
                             "source_reachability",
                         ],
+                        "memory_ndcg_at_5": 0.0,
+                        "memory_precision_at_5": 0.0,
                         "memory_rank": None,
                         "memory_recall_at_1": False,
                         "memory_recall_at_5": False,
+                        "memory_relevant_count_at_5": 0,
+                        "memory_result_count_at_5": 0,
+                        "memory_result_ids": [],
                         "session_drilldown_hit": False,
+                        "session_result_paths": [],
                         "source_benchmark": "LongMemEval",
+                        "source_result_anchors": [],
+                        "source_result_ids": [],
                         "source_reachability_hit": False,
                     }
                 ],
@@ -1104,6 +1112,38 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(failure_payload["failed_cases"][0]["category"], "[unsafe-result-identifier]")
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(failure_payload))
             self.assertNotIn("cookie=", json.dumps(failure_payload))
+
+    def test_layered_recall_benchmark_failures_json_sanitizes_returned_identifiers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(root, mode="leaky_path")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-over",
+                    "failed_case_count=0",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            failed_case = failure_payload["failed_cases"][0]
+            self.assertEqual(failed_case["session_result_paths"], ["[unsafe-result-identifier]"])
+            self.assertEqual(
+                failed_case["source_result_anchors"],
+                [SOURCE_ANCHOR, "[unsafe-result-identifier]"],
+            )
+            self.assertNotIn("/Users/private", json.dumps(failure_payload))
+            self.assertNotIn("../outside", json.dumps(failure_payload))
 
     def test_layered_recall_benchmark_sanitizes_sensitive_payload_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
