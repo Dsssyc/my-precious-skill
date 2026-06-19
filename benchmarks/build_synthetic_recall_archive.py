@@ -5,19 +5,51 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 
 
+UNSAFE_PATH = "[unsafe-path]"
+SENSITIVE_PATH_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
+    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|"
+    r"\bbearer\s+\S+|"
+    r"\bsk-[A-Za-z0-9_-]{20,}\b|"
+    r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b|"
+    r"\bAKIA[0-9A-Z]{16}\b"
+    r")"
+)
+
+
+def safe_diagnostic_text(value: object) -> str:
+    text = str(value)
+    if any(ord(char) < 32 or ord(char) == 127 for char in text) or SENSITIVE_PATH_PATTERN.search(text):
+        return UNSAFE_PATH
+    return text
+
+
+def safe_diagnostic_path(path: Path) -> str:
+    return safe_diagnostic_text(path)
+
+
 def iter_jsonl(path: Path) -> Iterable[dict]:
-    with path.open("r", encoding="utf-8") as handle:
+    try:
+        handle = path.open("r", encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"unable to read cases JSONL {safe_diagnostic_path(path)}: {safe_diagnostic_text(exc)}") from exc
+    with handle:
         for line_no, line in enumerate(handle, 1):
             line = line.strip()
             if not line:
                 continue
-            value = json.loads(line)
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"invalid JSON at {safe_diagnostic_path(path)}:{line_no}: {exc}") from exc
             if not isinstance(value, dict):
-                raise SystemExit(f"{path}:{line_no}: expected object case")
+                raise SystemExit(f"{safe_diagnostic_path(path)}:{line_no}: expected object case")
             yield value
 
 
