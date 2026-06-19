@@ -329,6 +329,7 @@ def safe_result_identifiers(values: list[str]) -> list[str]:
 
 
 def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float) -> str:
+    display_query = safe_result_identifier(query)
     try:
         result = subprocess.run(
             [
@@ -351,7 +352,7 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
     except subprocess.TimeoutExpired as exc:
         raise SystemExit(
             "search timed out: "
-            f"depth={depth} query={query!r} timeout_s={timeout_s:g} "
+            f"depth={depth} query={display_query!r} timeout_s={timeout_s:g} "
             f"script={search_script}"
         ) from exc
     if result.returncode != 0:
@@ -360,7 +361,7 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
         stderr = result.stderr.strip() or "(empty stderr)"
         raise SystemExit(
             "search failed: "
-            f"depth={depth} query={query!r} returncode={result.returncode} "
+            f"depth={depth} query={display_query!r} returncode={result.returncode} "
             f"script={search_script}\nstderr:\n{stderr}"
         )
     return result.stdout
@@ -642,23 +643,23 @@ def failed_checks(result: dict) -> list[str]:
 
 def case_detail(case: Case, result: dict) -> dict:
     data = case.data
-    query = optional_case_text(data, "query")
+    query = safe_result_identifier(optional_case_text(data, "query"))
     memory_rank = result["memory_rank"]
     checks = failed_checks(result)
     return {
         "case_path": str(case.path),
         "case_line": case.line_no,
-        "case_id": optional_case_text(data, "case_id"),
+        "case_id": safe_result_identifier(optional_case_text(data, "case_id")),
         "query": query,
         "category": category_name(data),
-        "source_benchmark": optional_case_text(data, "source_benchmark"),
-        "temporal_scope": optional_case_text(data, "temporal_scope"),
-        "expected_memory_id": optional_case_text(data, "expected_memory_id"),
-        "expected_not_memory_ids": case_texts(data, "expected_not_memory_id"),
-        "stale_memory_ids": case_texts(data, "stale_memory_id"),
-        "expected_summary_path": optional_case_text(data, "expected_summary_path"),
-        "expected_source_anchor": optional_case_text(data, "expected_source_anchor"),
-        "required_evidence_paths": case_texts(data, "required_evidence_paths"),
+        "source_benchmark": safe_result_identifier(optional_case_text(data, "source_benchmark")),
+        "temporal_scope": safe_result_identifier(optional_case_text(data, "temporal_scope")),
+        "expected_memory_id": safe_result_identifier(optional_case_text(data, "expected_memory_id")),
+        "expected_not_memory_ids": safe_result_identifiers(case_texts(data, "expected_not_memory_id")),
+        "stale_memory_ids": safe_result_identifiers(case_texts(data, "stale_memory_id")),
+        "expected_summary_path": safe_result_identifier(optional_case_text(data, "expected_summary_path")),
+        "expected_source_anchor": safe_result_identifier(optional_case_text(data, "expected_source_anchor")),
+        "required_evidence_paths": safe_result_identifiers(case_texts(data, "required_evidence_paths")),
         "forbidden_output_patterns_count": len(case_texts(data, "forbidden_output_patterns")),
         "positive_case": result["positive_case"],
         "expected_abstain": result["expected_abstain"],

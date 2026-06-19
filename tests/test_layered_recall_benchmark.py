@@ -519,6 +519,50 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn(MEMORY_TEXT, json.dumps(detail))
             self.assertNotIn("SYNTHETIC-SECRET", json.dumps(detail))
 
+    def test_layered_recall_benchmark_details_sanitize_sensitive_case_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "query": "permission prompts cookie=SHOULD_NOT_RENDER",
+                    "case_id": "case cookie=SHOULD_NOT_RENDER",
+                    "source_benchmark": "Memora cookie=SHOULD_NOT_RENDER",
+                    "temporal_scope": "latest cookie=SHOULD_NOT_RENDER",
+                    "expected_memory_id": "mem_permission cookie=SHOULD_NOT_RENDER",
+                    "expected_not_memory_id": "mem_old cookie=SHOULD_NOT_RENDER",
+                    "stale_memory_id": "mem_stale cookie=SHOULD_NOT_RENDER",
+                    "expected_summary_path": f"{SUMMARY_PATH} cookie=SHOULD_NOT_RENDER",
+                    "expected_source_anchor": f"{SOURCE_ANCHOR} cookie=SHOULD_NOT_RENDER",
+                    "required_evidence_paths": [f"{SUMMARY_PATH} cookie=SHOULD_NOT_RENDER"],
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["query"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["case_id"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["source_benchmark"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["temporal_scope"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["expected_memory_id"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["expected_not_memory_ids"], ["[unsafe-result-identifier]"])
+            self.assertEqual(detail["stale_memory_ids"], ["[unsafe-result-identifier]"])
+            self.assertEqual(detail["expected_summary_path"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["expected_source_anchor"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["required_evidence_paths"], ["[unsafe-result-identifier]"])
+            self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
+            self.assertNotIn("cookie=", json.dumps(detail))
+
     def test_layered_recall_benchmark_details_include_safe_returned_identifiers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -965,6 +1009,25 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("query='permission prompts'", result.stderr)
             self.assertIn("returncode=", result.stderr)
             self.assertIn(str(missing_search_script), result.stderr)
+
+    def test_broken_search_script_sanitizes_sensitive_query_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {**self.valid_case(), "query": "permission prompts cookie=SHOULD_NOT_RENDER"},
+            )
+            missing_search_script = root / "missing_search.py"
+
+            result = self.run_benchmark(repo, cases, missing_search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("search failed", result.stderr)
+            self.assertIn("depth=memory", result.stderr)
+            self.assertIn("query='[unsafe-result-identifier]'", result.stderr)
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+            self.assertNotIn("cookie=", result.stderr)
 
     def test_search_timeout_fails_with_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
