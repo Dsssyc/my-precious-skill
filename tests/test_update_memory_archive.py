@@ -1215,6 +1215,43 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("[REDACTED_OPENAI_KEY]", output)
             self.assertNotIn(path_secret, output)
 
+    def test_update_memory_archive_sanitizes_slugged_missing_source_dir_errors(self):
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            project_path = root / "project"
+            missing_source_dir = root / "records-cookie_should_not_render"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            project_path.mkdir()
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(missing_source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("source directory not found:", output)
+            self.assertIn("[unsafe-path]", output)
+            self.assertNotIn("cookie_should_not_render", output)
+            self.assertNotIn("cookie", output.lower())
+
     def test_update_memory_archive_sanitizes_unsafe_archive_entry_errors(self):
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
 

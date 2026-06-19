@@ -47,6 +47,7 @@ REDACTION_PATTERNS = {
     "openai_key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 }
+UNSAFE_PATH = "[unsafe-path]"
 REDACTION_CATEGORY_LABELS = frozenset(REDACTION_PATTERNS)
 MEMORY_LAYER_FILES = {
     "global": "global.jsonl",
@@ -746,8 +747,38 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
 
 def safe_diagnostic_path(path: Path) -> str:
     display = path.name or "<path>"
+    if has_sensitive_identifier_token(display):
+        return UNSAFE_PATH
     redacted, _ = redact_text(display)
     return redacted
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
 
 
 def read_record_text(path: Path) -> str:
