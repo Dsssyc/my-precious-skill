@@ -1079,9 +1079,9 @@ def main(argv: list[str] | None = None) -> int:
 
     validate_memory_repo(repo)
     payload, details = score_cases(repo, cases, search_script, args.search_timeout_s)
-    payload["cases_path"] = str(cases_path)
+    payload["cases_path"] = safe_diagnostic_path(cases_path)
     payload["cases_sha256"] = file_sha256(cases_path)
-    payload["search_script_path"] = str(search_script)
+    payload["search_script_path"] = safe_diagnostic_path(search_script)
     payload["search_script_sha256"] = file_sha256(search_script)
     print(json.dumps(payload, sort_keys=True), flush=True)
     if args.details_jsonl:

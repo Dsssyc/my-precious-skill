@@ -893,6 +893,39 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(failure_payload))
             self.assertNotIn("cookie=", json.dumps(failure_payload))
 
+    def test_layered_recall_benchmark_sanitizes_sensitive_payload_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            sensitive_input_root = root / "inputs-cookie=SHOULD_NOT_RENDER"
+            sensitive_input_root.mkdir()
+            cases = self.write_cases(sensitive_input_root, self.valid_case())
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(sensitive_input_root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-under",
+                    "memory_recall_at_5=0.5",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            payload = json.loads(result.stdout)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            combined = result.stdout + result.stderr + failures.read_text(encoding="utf-8")
+            self.assertEqual(payload["cases_path"], "[unsafe-result-identifier]")
+            self.assertEqual(payload["search_script_path"], "[unsafe-result-identifier]")
+            self.assertEqual(failure_payload["cases_path"], "[unsafe-result-identifier]")
+            self.assertEqual(failure_payload["search_script_path"], "[unsafe-result-identifier]")
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+
     def test_layered_recall_benchmark_writes_empty_threshold_failures_json_when_gates_pass(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
