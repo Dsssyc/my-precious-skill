@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -35,6 +36,42 @@ PROJECT_PATH_KEYS = {
 }
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env"}
 PROJECT_REGISTRY = Path("config/projects.jsonl")
+UNSAFE_PATH = "[unsafe-path]"
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
+
+
+def safe_diagnostic_path(path: Path) -> str:
+    text = str(path)
+    if any(ord(char) < 32 or ord(char) == 127 for char in text) or has_sensitive_identifier_token(text):
+        return UNSAFE_PATH
+    return text
 
 
 def utc_now_text() -> str:
@@ -176,7 +213,7 @@ def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
 
 def ensure_safe_project_registry_path(memory_repo: Path, path: Path) -> None:
     if not is_safe_repo_path(memory_repo, path):
-        raise SystemExit(f"Refusing to access unsafe project registry path: {path}")
+        raise SystemExit(f"Refusing to access unsafe project registry path: {safe_diagnostic_path(path)}")
 
 
 def load_registry(memory_repo: Path) -> dict[str, dict[str, object]]:
@@ -237,7 +274,7 @@ def merge_discovered_projects(
 def write_registry(memory_repo: Path, projects: dict[str, dict[str, object]], dry_run: bool) -> None:
     path = registry_path(memory_repo)
     if dry_run:
-        print(f"dry-run: write project registry {path}")
+        print(f"dry-run: write project registry {safe_diagnostic_path(path)}")
         return
     ensure_safe_project_registry_path(memory_repo, path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,7 +329,7 @@ def run_project_update(
     if dry_run:
         command.append("--dry-run")
 
-    print(f"Updating project: {project_path}")
+    print(f"Updating project: {safe_diagnostic_path(Path(project_path))}")
     result = subprocess.run(command, cwd=memory_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.stdout:
         print(result.stdout, end="")
@@ -333,8 +370,8 @@ def main(argv: list[str] | None = None) -> int:
     write_registry(memory_repo, projects, args.dry_run)
 
     runnable = enabled_projects(projects)
-    print(f"Memory repo: {memory_repo}")
-    print(f"Source dir: {source_dir}")
+    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
+    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
     print(f"Discovered projects: {len(discovered)}")
     print(f"Registered new projects: {added}")
     print(f"Enabled projects: {len(runnable)}")

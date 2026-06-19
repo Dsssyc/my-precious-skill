@@ -170,6 +170,59 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             sessions_index = memory_repo / "index/sessions.jsonl"
             self.assertFalse(sessions_index.exists() and sessions_index.read_text(encoding="utf-8").strip())
 
+    def test_run_memory_updates_sanitizes_slugged_paths_in_status_output(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory-cookie_should_not_render"
+            source_dir = root / ".codex" / "sessions-cookie_should_not_render"
+            project_path = root / "project-cookie_should_not_render"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (source_dir / "sensitive-path.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Runner status output should not expose slugged sensitive path tokens.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertIn("[unsafe-path]", combined)
+            self.assertNotIn("cookie_should_not_render", combined)
+            self.assertNotIn("cookie", combined.lower())
+
     def test_run_memory_updates_refuses_symlinked_project_registry_outside_archive(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
