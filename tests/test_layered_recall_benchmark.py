@@ -86,6 +86,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
             self.assertEqual(payload["evidence_reachability"], 1.0)
+            self.assertEqual(payload["answer_cases"], 9)
+            self.assertEqual(payload["answer_reachability"], 1.0)
+            self.assertEqual(payload["answer_normalized_reachability"], 1.0)
+            self.assertEqual(payload["answer_token_f1"], 1.0)
             self.assertEqual(payload["abstention_accuracy"], 1.0)
             self.assertEqual(payload["negative_memory_suppression"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
@@ -124,6 +128,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             payload = json.loads(result.stdout)
             self.assertEqual(payload["cases"], 30)
+            self.assertEqual(payload["answer_cases"], 9)
+            self.assertEqual(payload["answer_reachability"], 1.0)
+            self.assertEqual(payload["answer_normalized_reachability"], 1.0)
+            self.assertEqual(payload["answer_token_f1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
 
     def test_synthetic_builder_can_add_superseded_stale_distractors(self):

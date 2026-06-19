@@ -431,10 +431,10 @@ example:
 
 Direct `--fail-under` arguments override duplicate metric keys loaded from
 threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
-gate covers the synthetic suite's recall, source/evidence, abstention,
-stale/update, privacy, and denominator-count checks. Add answer-metric gates to
-custom threshold files when the evaluated case set includes `reference_answer`
-samples.
+gate covers the synthetic suite's recall, source/evidence, answer reachability,
+abstention, stale/update, privacy, and denominator-count checks. Add additional
+answer-metric gates to custom threshold files when an evaluated case set has
+broader `reference_answer` coverage.
 
 To stress stale-memory suppression, add superseded distractor nodes that share
 the same query terms but must not appear in search output:
