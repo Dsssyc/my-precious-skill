@@ -606,6 +606,35 @@ def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]
     return thresholds
 
 
+def load_fail_under_file(path: Path, payload: dict) -> list[tuple[str, float]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SystemExit(f"unable to read --fail-under-file {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid JSON at {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit(f"--fail-under-file must contain a JSON object: {path}")
+    thresholds: list[tuple[str, float]] = []
+    for metric, raw_threshold in data.items():
+        if not isinstance(metric, str) or not metric.strip():
+            raise SystemExit(f"--fail-under-file metric keys must be non-empty strings: {path}")
+        metric = metric.strip()
+        fail_under_metric_value(payload, metric)
+        if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
+            raise SystemExit(f"--fail-under-file threshold must be numeric for {metric}")
+        thresholds.append((metric, float(raw_threshold)))
+    return thresholds
+
+
+def merge_thresholds(*groups: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    merged: dict[str, float] = {}
+    for group in groups:
+        for metric, threshold in group:
+            merged[metric] = threshold
+    return list(merged.items())
+
+
 def threshold_failures(payload: dict, thresholds: list[tuple[str, float]]) -> list[str]:
     failures: list[str] = []
     for metric, threshold in thresholds:
@@ -628,6 +657,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="METRIC=THRESHOLD",
         help="Exit non-zero when a numeric metric or dotted metric path is below a threshold",
     )
+    parser.add_argument(
+        "--fail-under-file",
+        action="append",
+        default=[],
+        help="JSON object of metric or dotted metric path thresholds",
+    )
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
@@ -638,7 +673,11 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(payload, sort_keys=True), flush=True)
     if args.details_jsonl:
         write_details_jsonl(Path(args.details_jsonl).expanduser().resolve(), details)
-    failures = threshold_failures(payload, parse_fail_under(args.fail_under, payload))
+    file_thresholds: list[tuple[str, float]] = []
+    for threshold_file in args.fail_under_file:
+        file_thresholds.extend(load_fail_under_file(Path(threshold_file).expanduser().resolve(), payload))
+    thresholds = merge_thresholds(file_thresholds, parse_fail_under(args.fail_under, payload))
+    failures = threshold_failures(payload, thresholds)
     if failures:
         print("benchmark threshold failed: " + "; ".join(failures), file=sys.stderr)
         return 1

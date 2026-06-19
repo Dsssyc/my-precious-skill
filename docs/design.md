@@ -214,9 +214,11 @@ Optional fields include `category`, `required_evidence_paths`,
 The benchmark can also write per-case details as JSONL and enforce numeric
 metric thresholds with `--fail-under`. Thresholds can target top-level metrics
 or dotted category paths such as
-`categories.knowledge_update.update_consistency=1.0`. Threshold failures keep
-the aggregate JSON on stdout and report the failed metrics on stderr so
-automated quality gates can preserve machine-readable scores.
+`categories.knowledge_update.update_consistency=1.0`. `--fail-under-file`
+loads the same thresholds from a JSON object for repeatable CI gates; direct
+`--fail-under` arguments override duplicate metric keys from files. Threshold
+failures keep the aggregate JSON on stdout and report the failed metrics on
+stderr so automated quality gates can preserve machine-readable scores.
 
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic

@@ -402,6 +402,7 @@ python benchmarks/layered_recall_benchmark.py \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
   --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
+  --fail-under-file /tmp/my-precious-thresholds.json \
   --fail-under memory_recall_at_5=0.95 \
   --fail-under privacy_boundary_pass_rate=1.0
 ```
@@ -412,6 +413,20 @@ keeps the aggregate JSON on stdout and exits non-zero when a configured numeric
 metric falls below its threshold, which makes the benchmark usable as a CI
 quality gate. Thresholds can target top-level metrics or dotted category paths
 such as `categories.knowledge_update.update_consistency=1.0`.
+`--fail-under-file` accepts a JSON object using the same metric paths, for
+example:
+
+```json
+{
+  "answer_normalized_reachability": 0.9,
+  "categories.knowledge_update.update_consistency": 1.0,
+  "memory_recall_at_5": 0.95,
+  "privacy_boundary_pass_rate": 1.0
+}
+```
+
+Direct `--fail-under` arguments override duplicate metric keys loaded from
+threshold files.
 
 To stress stale-memory suppression, add superseded distractor nodes that share
 the same query terms but must not appear in search output:

@@ -354,6 +354,102 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_layered_recall_benchmark_accepts_fail_under_threshold_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "category": "knowledge_update"})
+            threshold_file = root / "thresholds.json"
+            threshold_file.write_text(
+                json.dumps(
+                    {
+                        "memory_recall_at_5": 1.0,
+                        "categories.knowledge_update.memory_recall_at_5": 1.0,
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--fail-under-file", str(threshold_file)],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["memory_recall_at_5"], 1.0)
+
+    def test_layered_recall_benchmark_fails_under_threshold_file_metric(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "category": "knowledge_update"})
+            threshold_file = root / "thresholds.json"
+            threshold_file.write_text(
+                json.dumps({"categories.knowledge_update.memory_recall_at_5": 0.5}, sort_keys=True),
+                encoding="utf-8",
+            )
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under-file", str(threshold_file)],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["categories"]["knowledge_update"]["memory_recall_at_5"], 0.0)
+            self.assertIn(
+                "categories.knowledge_update.memory_recall_at_5=0.0 below threshold 0.5",
+                result.stderr,
+            )
+
+    def test_layered_recall_benchmark_rejects_non_numeric_threshold_file_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            threshold_file = root / "thresholds.json"
+            threshold_file.write_text(json.dumps({"memory_recall_at_5": "strict"}), encoding="utf-8")
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under-file", str(threshold_file)],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--fail-under-file threshold must be numeric for memory_recall_at_5", result.stderr)
+
+    def test_layered_recall_benchmark_reports_missing_threshold_file_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            missing_threshold_file = root / "missing-thresholds.json"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under-file", str(missing_threshold_file)],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to read --fail-under-file", result.stderr)
+            self.assertIn(str(missing_threshold_file), result.stderr)
+
     def test_broken_search_script_fails_with_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
