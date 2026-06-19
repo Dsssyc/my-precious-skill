@@ -225,8 +225,10 @@ and forbidden-pattern counts. Details also include safe returned identifiers
 such as memory result IDs, session paths, and source anchors, but avoid
 returned hit titles, snippets, raw `reference_answer`, and
 `forbidden_output_patterns` text. The benchmark can also write structured
-threshold failures with `--failures-json` and enforce numeric metric thresholds
-with `--fail-under`.
+threshold failures with `--failures-json`; that failure file includes the same
+case-set and search-script fingerprints as stdout so CI artifacts remain
+traceable. The benchmark can enforce numeric metric thresholds with
+`--fail-under`.
 Thresholds can target top-level metrics or dotted category paths such as
 `categories.knowledge_update.update_consistency=1.0`. `--fail-under-file`
 loads the same thresholds from a JSON object for repeatable CI gates; direct

@@ -528,8 +528,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
             failure_payload = json.loads(failures.read_text(encoding="utf-8"))
             self.assertEqual(failure_payload["failure_count"], 1)
+            self.assertEqual(failure_payload["cases"], 1)
+            self.assertEqual(failure_payload["cases_path"], payload["cases_path"])
+            self.assertEqual(failure_payload["cases_sha256"], payload["cases_sha256"])
+            self.assertEqual(failure_payload["search_script_path"], payload["search_script_path"])
+            self.assertEqual(failure_payload["search_script_sha256"], payload["search_script_sha256"])
             self.assertEqual(
                 failure_payload["failures"],
                 [
@@ -564,7 +570,13 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             failure_payload = json.loads(failures.read_text(encoding="utf-8"))
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
-            self.assertEqual(failure_payload, {"failure_count": 0, "failures": []})
+            self.assertEqual(failure_payload["failure_count"], 0)
+            self.assertEqual(failure_payload["cases"], 1)
+            self.assertEqual(failure_payload["cases_path"], payload["cases_path"])
+            self.assertEqual(failure_payload["cases_sha256"], payload["cases_sha256"])
+            self.assertEqual(failure_payload["search_script_path"], payload["search_script_path"])
+            self.assertEqual(failure_payload["search_script_sha256"], payload["search_script_sha256"])
+            self.assertEqual(failure_payload["failures"], [])
 
     def test_layered_recall_benchmark_accepts_nested_category_fail_under_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:

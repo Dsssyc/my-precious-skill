@@ -777,10 +777,19 @@ def threshold_failure_details(payload: dict, thresholds: list[tuple[str, float]]
     return failures
 
 
-def write_failures_json(path: Path, failures: list[dict]) -> None:
+def write_failures_json(path: Path, failures: list[dict], payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    output = {
+        "cases": payload.get("cases"),
+        "cases_path": payload.get("cases_path"),
+        "cases_sha256": payload.get("cases_sha256"),
+        "search_script_path": payload.get("search_script_path"),
+        "search_script_sha256": payload.get("search_script_sha256"),
+        "failure_count": len(failures),
+        "failures": failures,
+    }
     path.write_text(
-        json.dumps({"failure_count": len(failures), "failures": failures}, sort_keys=True) + "\n",
+        json.dumps(output, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -826,7 +835,7 @@ def main(argv: list[str] | None = None) -> int:
     thresholds = merge_thresholds(file_thresholds, parse_fail_under(args.fail_under, payload))
     failure_details = threshold_failure_details(payload, thresholds)
     if args.failures_json:
-        write_failures_json(Path(args.failures_json).expanduser().resolve(), failure_details)
+        write_failures_json(Path(args.failures_json).expanduser().resolve(), failure_details, payload)
     failures = [
         f"{failure['metric']}={failure['value']} below threshold {failure['threshold']}"
         for failure in failure_details
