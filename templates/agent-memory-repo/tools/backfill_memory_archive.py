@@ -99,7 +99,14 @@ def collect_groups(memory_repo: Path, project_path: Path | None, source_record: 
 
 
 def entry_has_noise(entry_dir: Path) -> bool:
-    for path in sorted(item for item in entry_dir.rglob("*") if item.is_file()):
+    entry_root = entry_dir.resolve()
+    for path in sorted(entry_dir.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            path.resolve(strict=False).relative_to(entry_root)
+        except (OSError, ValueError):
+            continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
