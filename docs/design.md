@@ -220,11 +220,11 @@ Abstention cases use `expected_abstain: true` and do not require positive
 expected fields.
 
 The benchmark can also write per-case details as JSONL, including a
-`failed_checks` list for each case, source benchmark, temporal scope, stale or
-negative memory IDs, stable case IDs when provided, required evidence paths,
-and forbidden-pattern counts. Details also include safe returned identifiers
-such as memory result IDs, session paths, and source anchors, but avoid
-returned hit titles, snippets, raw `reference_answer`, and
+`case_pass` boolean and `failed_checks` list for each case, source benchmark,
+temporal scope, stale or negative memory IDs, stable case IDs when provided,
+required evidence paths, and forbidden-pattern counts. Details also include
+safe returned identifiers such as memory result IDs, session paths, and source
+anchors, but avoid returned hit titles, snippets, raw `reference_answer`, and
 `forbidden_output_patterns` text. The benchmark can also write structured
 threshold failures with `--failures-json`; that failure file includes the same
 case-set and search-script fingerprints as stdout, the aggregate

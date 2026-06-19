@@ -389,6 +389,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(detail["session_drilldown_hit"])
             self.assertTrue(detail["source_reachability_hit"])
             self.assertTrue(detail["privacy_boundary_pass"])
+            self.assertTrue(detail["case_pass"])
             self.assertEqual(detail["failed_checks"], [])
             self.assertGreaterEqual(detail["latency_ms"], 0)
 
@@ -420,6 +421,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["cases"], 1)
             detail = self.read_rows(details)[0]
+            self.assertFalse(detail["case_pass"])
             self.assertEqual(
                 detail["failed_checks"],
                 [

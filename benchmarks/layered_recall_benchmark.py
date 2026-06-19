@@ -563,6 +563,7 @@ def case_detail(case: Case, result: dict) -> dict:
     data = case.data
     query = optional_case_text(data, "query")
     memory_rank = result["memory_rank"]
+    checks = failed_checks(result)
     return {
         "case_path": str(case.path),
         "case_line": case.line_no,
@@ -599,7 +600,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "session_result_paths": result["session_result_paths"],
         "source_result_ids": result["source_result_ids"],
         "source_result_anchors": result["source_result_anchors"],
-        "failed_checks": failed_checks(result),
+        "case_pass": not checks,
+        "failed_checks": checks,
         "latency_ms": round(result["latency_ms"], 3),
     }
 
