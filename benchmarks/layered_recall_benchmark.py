@@ -13,7 +13,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Iterable, NamedTuple
+from typing import Any, Iterable, NamedTuple
 
 
 DEFAULT_SEARCH_SCRIPT = "templates/agent-memory-repo/tools/search_memory.py"
@@ -42,6 +42,9 @@ class MemoryPrecisionAt5(NamedTuple):
     score: float
     result_count: int
     relevant_count: int
+
+
+Totals = dict[str, Any]
 
 
 def has_diagnostic_control_chars(text: str) -> bool:
@@ -216,13 +219,15 @@ def no_hits(*block_groups: list[str]) -> bool:
     return not any(block for blocks in block_groups for block in blocks)
 
 
-def new_totals() -> dict[str, float]:
+def new_totals() -> Totals:
     return {
         "cases": 0,
         "positive_cases": 0,
         "memory_hit_1": 0,
         "memory_hit_5": 0,
         "memory_rr": 0.0,
+        "memory_rank_sum": 0.0,
+        "memory_rank_counts": {},
         "memory_ndcg_at_5": 0.0,
         "memory_precision_at_5": 0.0,
         "memory_result_count_at_5": 0,
@@ -259,10 +264,44 @@ def ratio(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
-def finalize_totals(totals: dict[str, float]) -> dict:
+def memory_rank_counts(totals: Totals) -> dict[int, int]:
+    counts = totals.get("memory_rank_counts")
+    return counts if isinstance(counts, dict) else {}
+
+
+def memory_rank_median(rank_counts: dict[int, int]) -> float:
+    total = sum(rank_counts.values())
+    if not total:
+        return 0.0
+
+    def rank_at(position: int) -> int:
+        seen = 0
+        for rank, count in sorted(rank_counts.items()):
+            seen += count
+            if position <= seen:
+                return rank
+        return 0
+
+    if total % 2:
+        return float(rank_at(total // 2 + 1))
+    return (rank_at(total // 2) + rank_at(total // 2 + 1)) / 2
+
+
+def memory_rank_histogram(rank_counts: dict[int, int], missing_cases: int) -> dict[str, int]:
+    histogram = {str(rank): int(rank_counts.get(rank, 0)) for rank in range(1, 6)}
+    histogram[">5"] = sum(count for rank, count in rank_counts.items() if rank > 5)
+    histogram["missing"] = max(0, missing_cases)
+    return histogram
+
+
+def finalize_totals(totals: Totals) -> dict:
+    positive_cases = int(totals["positive_cases"])
+    rank_counts = memory_rank_counts(totals)
+    ranked_cases = sum(rank_counts.values())
+    missing_rank_cases = max(0, positive_cases - ranked_cases)
     return {
         "cases": int(totals["cases"]),
-        "positive_cases": int(totals["positive_cases"]),
+        "positive_cases": positive_cases,
         "session_cases": int(totals["session_cases"]),
         "source_cases": int(totals["source_cases"]),
         "evidence_cases": int(totals["evidence_cases"]),
@@ -283,6 +322,11 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "memory_relevant_count_at_5": int(totals["memory_relevant_count_at_5"]),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),
         "memory_ndcg_at_5": ratio(totals["memory_ndcg_at_5"], totals["positive_cases"]),
+        "memory_ranked_cases": ranked_cases,
+        "memory_rank_missing_cases": missing_rank_cases,
+        "memory_rank_mean": ratio(totals["memory_rank_sum"], ranked_cases),
+        "memory_rank_median": memory_rank_median(rank_counts),
+        "memory_rank_histogram": memory_rank_histogram(rank_counts, missing_rank_cases),
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
@@ -302,7 +346,7 @@ def finalize_totals(totals: dict[str, float]) -> dict:
     }
 
 
-def add_result(totals: dict[str, float], result: dict) -> None:
+def add_result(totals: Totals, result: dict) -> None:
     totals["cases"] += 1
     totals["latency_ms"] += result["latency_ms"]
     totals["latency_max_ms"] = max(totals["latency_max_ms"], result["latency_ms"])
@@ -315,6 +359,9 @@ def add_result(totals: dict[str, float], result: dict) -> None:
         totals["memory_hit_5"] += int(result["memory_rank"] is not None and result["memory_rank"] <= 5)
         if result["memory_rank"] is not None:
             totals["memory_rr"] += 1 / result["memory_rank"]
+            totals["memory_rank_sum"] += result["memory_rank"]
+            rank_counts = memory_rank_counts(totals)
+            rank_counts[result["memory_rank"]] = rank_counts.get(result["memory_rank"], 0) + 1
         totals["memory_ndcg_at_5"] += result["memory_ndcg_at_5"]
         totals["memory_precision_at_5"] += result["memory_precision_at_5"]
         totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
@@ -859,7 +906,7 @@ def score_cases(
 ) -> tuple[dict, list[dict]]:
     memory_records = load_memory_records(repo)
     totals = new_totals()
-    category_totals: dict[str, dict[str, float]] = {}
+    category_totals: dict[str, Totals] = {}
     details: list[dict] = []
 
     for case in cases:

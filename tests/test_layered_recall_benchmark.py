@@ -101,6 +101,12 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
             self.assertEqual(payload["memory_mrr"], 1.0)
             self.assertEqual(payload["memory_ndcg_at_5"], 1.0)
+            self.assertEqual(payload["memory_ranked_cases"], payload["positive_cases"])
+            self.assertEqual(payload["memory_rank_missing_cases"], 0)
+            self.assertEqual(payload["memory_rank_mean"], 1.0)
+            self.assertEqual(payload["memory_rank_median"], 1.0)
+            self.assertEqual(payload["memory_rank_histogram"]["1"], payload["positive_cases"])
+            self.assertEqual(payload["memory_rank_histogram"]["missing"], 0)
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
             self.assertEqual(payload["evidence_reachability"], 1.0)
@@ -130,10 +136,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             repo = Path(tmpdir) / "agent-memory"
             details = Path(tmpdir) / "details.jsonl"
             lower_gates = json.loads(SYNTHETIC_QUALITY_GATES.read_text(encoding="utf-8"))
+            upper_gates = json.loads(SYNTHETIC_MAX_QUALITY_GATES.read_text(encoding="utf-8"))
             self.assertEqual(lower_gates["case_pass_rate"], 1.0)
             self.assertEqual(lower_gates["memory_precision_at_5"], 0.25)
             self.assertEqual(lower_gates["memory_micro_precision_at_5"], 0.24)
             self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
+            self.assertEqual(lower_gates["memory_ranked_cases"], 27)
+            self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
+            self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
+            self.assertEqual(upper_gates["memory_rank_median"], 1.0)
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             subprocess.run(
                 [
@@ -175,6 +186,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_cases"], 9)
             self.assertGreaterEqual(payload["memory_precision_at_5"], lower_gates["memory_precision_at_5"])
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
+            self.assertGreaterEqual(payload["memory_ranked_cases"], lower_gates["memory_ranked_cases"])
+            self.assertLessEqual(payload["memory_rank_missing_cases"], upper_gates["memory_rank_missing_cases"])
+            self.assertLessEqual(payload["memory_rank_mean"], upper_gates["memory_rank_mean"])
+            self.assertLessEqual(payload["memory_rank_median"], upper_gates["memory_rank_median"])
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
             self.assertEqual(payload["answer_token_f1"], 1.0)
@@ -438,6 +453,35 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertAlmostEqual(payload["memory_ndcg_at_5"], expected_ndcg)
             self.assertAlmostEqual(payload["categories"]["uncategorized"]["memory_ndcg_at_5"], expected_ndcg)
             self.assertAlmostEqual(detail["memory_ndcg_at_5"], round(expected_ndcg, 6))
+
+    def test_layered_recall_benchmark_reports_memory_rank_distribution(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                self.valid_case(),
+                {**self.valid_case(), "query": "permission prompts rank second"},
+                {**self.valid_case(), "query": "permission prompts missing"},
+            )
+            search_script, _ = self.write_stub_search(root, mode="rank_distribution")
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["positive_cases"], 3)
+            self.assertEqual(payload["memory_ranked_cases"], 2)
+            self.assertEqual(payload["memory_rank_missing_cases"], 1)
+            self.assertEqual(payload["memory_rank_mean"], 1.5)
+            self.assertEqual(payload["memory_rank_median"], 1.5)
+            self.assertEqual(
+                payload["memory_rank_histogram"],
+                {"1": 1, "2": 1, "3": 0, "4": 0, "5": 0, ">5": 0, "missing": 1},
+            )
+            self.assertEqual(payload["memory_recall_at_1"], 1 / 3)
+            self.assertEqual(payload["memory_recall_at_5"], 2 / 3)
+            self.assertEqual(payload["categories"]["uncategorized"]["memory_ranked_cases"], 2)
+            self.assertEqual(payload["categories"]["uncategorized"]["memory_rank_missing_cases"], 1)
 
     def test_layered_recall_benchmark_reports_input_fingerprints(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2059,6 +2103,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
 
+                if MODE == "rank_distribution" and "missing" in query:
+                    print(f"No memory hits for: {{query}}")
+                    raise SystemExit(1)
+
                 if depth == "memory":
                     if MODE == "forbidden":
                         print(f"Top memory hits for: {{query}}")
@@ -2108,7 +2156,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_unrelated")
                         print("   drill:")
                         print("     - sessions/other/summary.md")
-                    elif MODE == "rank_second":
+                    elif MODE == "rank_second" or (MODE == "rank_distribution" and "rank second" in query):
                         print(f"Top memory hits for: {{query}}")
                         print()
                         print("1. [global] Unrelated archived preference")

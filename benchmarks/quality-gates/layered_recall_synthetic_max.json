@@ -1,3 +1,6 @@
 {
-  "failed_case_count": 0
+  "failed_case_count": 0,
+  "memory_rank_mean": 1.0,
+  "memory_rank_median": 1.0,
+  "memory_rank_missing_cases": 0
 }
