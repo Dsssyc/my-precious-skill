@@ -12,6 +12,7 @@ SCRIPT = Path("benchmarks/layered_recall_benchmark.py").resolve()
 SYNTHETIC_ARCHIVE_BUILDER = Path("benchmarks/build_synthetic_recall_archive.py").resolve()
 SYNTHETIC_CASES = Path("benchmarks/cases/layered_recall_synthetic.jsonl").resolve()
 SYNTHETIC_QUALITY_GATES = Path("benchmarks/quality-gates/layered_recall_synthetic.json").resolve()
+SYNTHETIC_MAX_QUALITY_GATES = Path("benchmarks/quality-gates/layered_recall_synthetic_max.json").resolve()
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 SUMMARY_PATH = "sessions/2026/06/04/source/summary.md"
 SOURCE_ANCHOR = "records/private.jsonl#message:42"
@@ -144,6 +145,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     str(details),
                     "--fail-under-file",
                     str(SYNTHETIC_QUALITY_GATES),
+                    "--fail-over-file",
+                    str(SYNTHETIC_MAX_QUALITY_GATES),
                 ],
             )
 
