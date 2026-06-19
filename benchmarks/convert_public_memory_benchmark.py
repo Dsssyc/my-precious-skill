@@ -46,24 +46,30 @@ def safe_diagnostic_path(path: Path) -> str:
     return safe_diagnostic_text(path)
 
 
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+                "secret",
+                "token",
+            }
+        )
+        or token_pairs.intersection({("api", "key"), ("private", "key"), ("session", "id")})
+    )
+
+
 def safe_case_id_for_diagnostic(value: object) -> str:
     text = str(value)
-    normalized_tokens = set(re.split(r"[^a-z0-9]+", text.lower().replace("_", " ")))
-    if SENSITIVE_PATH_PATTERN.search(text) or normalized_tokens.intersection(
-        {
-            "apikey",
-            "api",
-            "authorization",
-            "bearer",
-            "cookie",
-            "credential",
-            "password",
-            "private",
-            "secret",
-            "session",
-            "token",
-        }
-    ):
+    if SENSITIVE_PATH_PATTERN.search(text) or has_sensitive_identifier_token(text):
         return UNSAFE_PATH
     return safe_diagnostic_text(text)
 

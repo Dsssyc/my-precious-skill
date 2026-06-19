@@ -173,6 +173,59 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertNotIn("should_not_render", combined)
             self.assertFalse(output.exists())
 
+    def test_duplicate_case_id_error_keeps_safe_public_benchmark_ids(self):
+        for display_text, slug in (
+            ("API Reference", "api_reference"),
+            ("Private Archive", "private_archive"),
+            ("Session Boundary", "session_boundary"),
+        ):
+            with self.subTest(display_text=display_text):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    source = root / "longmemeval.json"
+                    output = root / "cases.jsonl"
+                    source.write_text(
+                        json.dumps(
+                            [
+                                {
+                                    "question_id": display_text,
+                                    "question": "Which project adopted layered recall?",
+                                    "answer": "The memory skill project.",
+                                },
+                                {
+                                    "question_id": slug,
+                                    "question": "Which project adopted source drilldown?",
+                                    "answer": "The memory skill project.",
+                                },
+                            ],
+                            sort_keys=True,
+                        ),
+                        encoding="utf-8",
+                    )
+
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(SCRIPT),
+                            "--source",
+                            "longmemeval",
+                            "--input",
+                            str(source),
+                            "--output",
+                            str(output),
+                        ],
+                        check=False,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("duplicate case_id", result.stderr)
+                    self.assertIn(f"longmemeval:{slug}", result.stderr)
+                    self.assertNotIn("[unsafe-path]", result.stderr)
+                    self.assertFalse(output.exists())
+
     def test_rejects_empty_converted_case_set(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
