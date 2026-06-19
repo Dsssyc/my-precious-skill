@@ -25,6 +25,12 @@ class Case(NamedTuple):
     line_no: int
 
 
+class MemoryPrecisionAt5(NamedTuple):
+    score: float
+    result_count: int
+    relevant_count: int
+
+
 def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
     with path.open("r", encoding="utf-8") as handle:
         for line_no, line in enumerate(handle, 1):
@@ -161,6 +167,8 @@ def new_totals() -> dict[str, float]:
         "memory_hit_5": 0,
         "memory_rr": 0.0,
         "memory_precision_at_5": 0.0,
+        "memory_result_count_at_5": 0,
+        "memory_relevant_count_at_5": 0,
         "session_cases": 0,
         "session_hits": 0,
         "source_cases": 0,
@@ -209,6 +217,8 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "memory_recall_at_1": ratio(totals["memory_hit_1"], totals["positive_cases"]),
         "memory_recall_at_5": ratio(totals["memory_hit_5"], totals["positive_cases"]),
         "memory_precision_at_5": ratio(totals["memory_precision_at_5"], totals["positive_cases"]),
+        "memory_result_count_at_5": int(totals["memory_result_count_at_5"]),
+        "memory_relevant_count_at_5": int(totals["memory_relevant_count_at_5"]),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
@@ -243,6 +253,8 @@ def add_result(totals: dict[str, float], result: dict) -> None:
         if result["memory_rank"] is not None:
             totals["memory_rr"] += 1 / result["memory_rank"]
         totals["memory_precision_at_5"] += result["memory_precision_at_5"]
+        totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
+        totals["memory_relevant_count_at_5"] += result["memory_relevant_count_at_5"]
         totals["session_cases"] += 1
         totals["session_hits"] += int(result["session_drilldown_hit"])
         totals["source_cases"] += int(result["source_expected"])
@@ -463,15 +475,19 @@ def memory_precision_at_5(
     expected_memory_id: str,
     expected_summary_path: str,
     record: dict | None,
-) -> float:
+) -> MemoryPrecisionAt5:
     memory_blocks = [block for block in blocks if is_memory_block(block)][:5]
     if not memory_blocks:
-        return 0.0
+        return MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     relevant = sum(
         int(block_has_drill_path(block, expected_summary_path) and block_contains_memory(block, expected_memory_id, record))
         for block in memory_blocks
     )
-    return relevant / len(memory_blocks)
+    return MemoryPrecisionAt5(
+        score=relevant / len(memory_blocks),
+        result_count=len(memory_blocks),
+        relevant_count=relevant,
+    )
 
 
 def blocks_contain_memory_ids(blocks: list[str], memory_ids: list[str], records: dict[str, dict]) -> bool:
@@ -604,6 +620,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_recall_at_1": bool(memory_rank == 1),
         "memory_recall_at_5": bool(memory_rank is not None and memory_rank <= 5),
         "memory_precision_at_5": round(result["memory_precision_at_5"], 6),
+        "memory_result_count_at_5": result["memory_result_count_at_5"],
+        "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
         "source_reachability_hit": result["source_reachability_hit"],
         "evidence_reachability_hit": result["evidence_reachability_hit"],
@@ -659,7 +677,7 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     answer_hit = False
     normalized_answer_hit = False
     answer_f1 = 0.0
-    memory_precision = 0.0
+    memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         memory_precision = memory_precision_at_5(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
@@ -682,7 +700,9 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
         "positive_case": is_positive,
         "expected_abstain": expected_abstain,
         "memory_rank": rank,
-        "memory_precision_at_5": memory_precision,
+        "memory_precision_at_5": memory_precision.score,
+        "memory_result_count_at_5": memory_precision.result_count,
+        "memory_relevant_count_at_5": memory_precision.relevant_count,
         "session_drilldown_hit": session_hit,
         "source_expected": bool(is_positive and expected_source_anchor),
         "source_reachability_hit": source_hit,
