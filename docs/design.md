@@ -207,14 +207,18 @@ indexes.
 
 Benchmark case files are JSONL. Positive cases require `query`,
 `expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
-Optional fields include `category`, `required_evidence_paths`,
-`reference_answer`, `expected_not_memory_id`, `stale_memory_id`,
-`temporal_scope`, and `forbidden_output_patterns`. Abstention cases use
-`expected_abstain: true` and do not require positive expected fields.
+Optional fields include `category`, `source_benchmark`,
+`required_evidence_paths`, `reference_answer`, `expected_not_memory_id`,
+`stale_memory_id`, `temporal_scope`, and `forbidden_output_patterns`.
+Abstention cases use `expected_abstain: true` and do not require positive
+expected fields.
 
 The benchmark can also write per-case details as JSONL, including a
-`failed_checks` list for each case, write structured threshold failures with
-`--failures-json`, and enforce numeric metric thresholds with `--fail-under`.
+`failed_checks` list for each case, source benchmark, temporal scope, stale or
+negative memory IDs, required evidence paths, and forbidden-pattern counts.
+Details avoid raw `reference_answer` and `forbidden_output_patterns` text. The
+benchmark can also write structured threshold failures with `--failures-json`
+and enforce numeric metric thresholds with `--fail-under`.
 Thresholds can target top-level metrics or dotted category paths such as
 `categories.knowledge_update.update_consistency=1.0`. `--fail-under-file`
 loads the same thresholds from a JSON object for repeatable CI gates; direct

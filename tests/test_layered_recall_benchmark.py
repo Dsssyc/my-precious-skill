@@ -383,6 +383,45 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 ],
             )
 
+    def test_layered_recall_benchmark_details_include_safe_case_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "source_benchmark": "Memora",
+                    "reference_answer": MEMORY_TEXT,
+                    "required_evidence_paths": [SUMMARY_PATH],
+                    "expected_not_memory_id": "mem_permission_v1",
+                    "stale_memory_id": "mem_permission_v1",
+                    "temporal_scope": "latest",
+                    "forbidden_output_patterns": ["SYNTHETIC-SECRET"],
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["source_benchmark"], "Memora")
+            self.assertEqual(detail["temporal_scope"], "latest")
+            self.assertEqual(detail["expected_not_memory_ids"], ["mem_permission_v1"])
+            self.assertEqual(detail["stale_memory_ids"], ["mem_permission_v1"])
+            self.assertEqual(detail["required_evidence_paths"], [SUMMARY_PATH])
+            self.assertEqual(detail["forbidden_output_patterns_count"], 1)
+            self.assertNotIn("reference_answer", detail)
+            self.assertNotIn("forbidden_output_patterns", detail)
+            self.assertNotIn(MEMORY_TEXT, json.dumps(detail))
+            self.assertNotIn("SYNTHETIC-SECRET", json.dumps(detail))
+
     def test_layered_recall_benchmark_fails_under_metric_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

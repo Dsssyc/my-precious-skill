@@ -330,8 +330,9 @@ stress tests:
 
 Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include
-`category`, `reference_answer`, `required_evidence_paths`, `expected_not_memory_id`,
-`stale_memory_id`, `temporal_scope`, and `forbidden_output_patterns`.
+`category`, `source_benchmark`, `reference_answer`, `required_evidence_paths`,
+`expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
+`forbidden_output_patterns`.
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text
 reachability; `answer_normalized_reachability` ignores case and punctuation;
@@ -410,8 +411,12 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 `--details-jsonl` writes one row per case with rank, drill-down, source,
-evidence, abstention, stale-suppression, privacy outcomes, and a `failed_checks`
-list naming the failed applicable metrics for that case. `--failures-json`
+evidence, abstention, stale-suppression, privacy outcomes, safe case metadata,
+and a `failed_checks` list naming the failed applicable metrics for that case.
+The detail rows include benchmark source, temporal scope, expected stale or
+negative memory IDs, required evidence paths, and forbidden-pattern counts, but
+they do not render raw `reference_answer` or `forbidden_output_patterns` text.
+`--failures-json`
 writes structured quality-gate failures with `metric`, `value`, and `threshold`
 fields for CI systems that should not parse stderr. `--fail-under` keeps the
 aggregate JSON on stdout and exits non-zero when a configured numeric metric
