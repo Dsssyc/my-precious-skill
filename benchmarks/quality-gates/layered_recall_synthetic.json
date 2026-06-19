@@ -24,6 +24,8 @@
   "categories.stale_memory_suppression.stale_memory_suppression": 1.0,
   "categories.temporal_reasoning.answer_cases": 1,
   "evidence_reachability": 1.0,
+  "evidence_text_cases": 1,
+  "evidence_text_reachability": 1.0,
   "layer_calibration": 1.0,
   "layer_calibration_cases": 3,
   "memory_explainability": 1.0,

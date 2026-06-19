@@ -186,7 +186,8 @@ are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 `layer_calibration_cases`, `layer_calibration`, `scope_filter_cases`,
 `scope_filter_recall`, `wrong_scope_suppression_cases`,
 `wrong_scope_suppression`,
-`session_drilldown_at_5`, `evidence_reachability`, `source_reachability`,
+`session_drilldown_at_5`, `evidence_reachability`,
+`evidence_text_cases`, `evidence_text_reachability`, `source_reachability`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
 `case_pass_rate`. Exact answer
@@ -247,6 +248,7 @@ Benchmark case files are JSONL. Positive cases require `query`,
 `expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
 Optional fields include `category`, `source_benchmark`,
 `case_id`, `required_evidence_paths`, `reference_answer`,
+`reference_evidence`,
 `expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
 `forbidden_output_patterns`.
 `forbidden_output_patterns` values are Python regular expressions matched
@@ -259,11 +261,13 @@ The benchmark can also write per-case details as JSONL, including a
 `case_pass` boolean, precision count fields, and `failed_checks` list for each
 case, source benchmark, temporal scope, stale or negative memory IDs, stable
 case IDs when provided, required evidence paths, and forbidden-pattern counts.
+When present, `reference_evidence` is checked against required evidence files
+with exact-text reachability and is counted by `evidence_text_cases`.
 Details also include safe returned identifiers such as memory result IDs,
 session paths, and source anchors, but avoid returned hit titles, snippets, raw
-`reference_answer`, and `forbidden_output_patterns` text. Sensitive-looking or
-control-character-bearing returned identifiers are rendered as
-`[unsafe-result-identifier]`. The benchmark can also write structured
+`reference_answer`, raw `reference_evidence`, and `forbidden_output_patterns`
+text. Sensitive-looking or control-character-bearing returned identifiers are
+rendered as `[unsafe-result-identifier]`. The benchmark can also write structured
 threshold failures with `--failures-json`; that failure file includes the same
 case-set and search-script fingerprints as stdout, the aggregate
 `failed_case_count` and `case_pass_rate`, plus safe per-case failure summaries
@@ -288,8 +292,8 @@ subprocess has a default timeout of 30 seconds; use finite positive
 lower it for CI smoke tests.
 The packaged synthetic gates intentionally split lower-bound and upper-bound
 checks: `benchmarks/quality-gates/layered_recall_synthetic.json` covers the
-synthetic suite dimensions, rank coverage, answer reachability, pass-rate
-metrics, and denominator counts, while
+synthetic suite dimensions, rank coverage, evidence-text reachability, answer
+reachability, pass-rate metrics, and denominator counts, while
 `benchmarks/quality-gates/layered_recall_synthetic_max.json` enforces upper
 bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`, and rank
 mean/median caps. Additional answer-metric gates should be added to custom

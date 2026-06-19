@@ -334,8 +334,8 @@ stress tests:
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`
-- `session_drilldown_at_5`, `source_reachability`, and
-  `evidence_reachability`
+- `session_drilldown_at_5`, `source_reachability`, `evidence_reachability`,
+  and `evidence_text_reachability` with `evidence_text_cases`
 - `answer_reachability`, `answer_normalized_reachability`, and
   `answer_token_f1` for reference-answer snippets that should be present in
   recalled memory/session/source output
@@ -352,8 +352,8 @@ stress tests:
 Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include
 `case_id`, `category`, `source_benchmark`, `reference_answer`,
-`required_evidence_paths`, `expected_not_memory_id`, `stale_memory_id`,
-`temporal_scope`, `expected_layer`, and
+`reference_evidence`, `required_evidence_paths`, `expected_not_memory_id`,
+`stale_memory_id`, `temporal_scope`, `expected_layer`, and
 `forbidden_output_patterns`.
 `forbidden_output_patterns` entries are Python regular expressions matched
 against combined memory, session, and source output.
@@ -362,7 +362,10 @@ Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text
 reachability; `answer_normalized_reachability` ignores case and punctuation;
 `answer_token_f1` reports best-window token overlap. These are retrieval-side
-checks, not generated-answer semantic grading.
+checks, not generated-answer semantic grading. `evidence_text_reachability`
+checks that required evidence files contain exact `reference_evidence` snippets,
+so source-depth claims are backed by reachable evidence text rather than only
+path references.
 
 Locally downloaded public benchmark files can be converted into this case
 schema without committing the source data:
@@ -472,8 +475,9 @@ example:
 Direct `--fail-under` arguments override duplicate metric keys loaded from
 threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
 gate covers the synthetic suite's recall, rank coverage, source/evidence,
-answer reachability, abstention, stale/update, privacy, and denominator-count
-checks. The paired `benchmarks/quality-gates/layered_recall_synthetic_max.json`
+evidence-text reachability, answer reachability, abstention, stale/update,
+privacy, and denominator-count checks. The paired
+`benchmarks/quality-gates/layered_recall_synthetic_max.json`
 uses `--fail-over-file` for upper-bound checks such as `failed_case_count`,
 `memory_rank_missing_cases`, `memory_rank_mean`, and `memory_rank_median`. Add
 additional answer-metric gates to custom threshold files when an evaluated case

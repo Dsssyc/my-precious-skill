@@ -50,6 +50,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         self.assertTrue(any(row.get("stale_memory_id") for row in rows))
         self.assertTrue(any(row.get("expected_not_memory_id") for row in rows))
         self.assertTrue(any(row.get("forbidden_output_patterns") for row in rows))
+        self.assertTrue(any(row.get("reference_evidence") for row in rows))
 
         case_ids = []
         for row in rows:
@@ -131,6 +132,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
             self.assertEqual(payload["evidence_reachability"], 1.0)
+            self.assertEqual(payload["evidence_text_cases"], 1)
+            self.assertEqual(payload["evidence_text_reachability"], 1.0)
             self.assertEqual(payload["answer_cases"], 9)
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
@@ -170,6 +173,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["scope_filter_cases"], 3)
             self.assertEqual(lower_gates["wrong_scope_suppression"], 1.0)
             self.assertEqual(lower_gates["wrong_scope_suppression_cases"], 3)
+            self.assertEqual(lower_gates["evidence_text_cases"], 1)
+            self.assertEqual(lower_gates["evidence_text_reachability"], 1.0)
             self.assertEqual(lower_gates["memory_ranked_cases"], 27)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
@@ -231,6 +236,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertLessEqual(payload["memory_rank_mean"], upper_gates["memory_rank_mean"])
             self.assertLessEqual(payload["memory_rank_median"], upper_gates["memory_rank_median"])
             self.assertEqual(payload["answer_reachability"], 1.0)
+            self.assertGreaterEqual(payload["evidence_text_cases"], lower_gates["evidence_text_cases"])
+            self.assertGreaterEqual(payload["evidence_text_reachability"], lower_gates["evidence_text_reachability"])
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
             self.assertEqual(payload["answer_token_f1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
@@ -706,6 +713,116 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
+
+    def test_layered_recall_benchmark_checks_reference_evidence_text(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "required_evidence_paths": [SUMMARY_PATH],
+                    "reference_evidence": "Dedicated supporting evidence token.",
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["evidence_reachability"], 1.0)
+            self.assertEqual(payload["evidence_text_cases"], 1)
+            self.assertEqual(payload["evidence_text_reachability"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["reference_evidence_count"], 1)
+            self.assertFalse(detail["evidence_text_reachability_hit"])
+            self.assertIn("evidence_text_reachability", detail["failed_checks"])
+
+    def test_layered_recall_benchmark_refuses_reference_evidence_outside_repo(self):
+        scenarios = {
+            "absolute": lambda outside: str(outside),
+            "parent_escape": lambda outside: "../outside-evidence.md",
+        }
+        for name, path_text in scenarios.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                repo = self.create_repo(root)
+                outside = root / "outside-evidence.md"
+                outside.write_text("Dedicated supporting evidence token.", encoding="utf-8")
+                cases = self.write_cases(
+                    root,
+                    {
+                        **self.valid_case(),
+                        "required_evidence_paths": [path_text(outside)],
+                        "reference_evidence": "Dedicated supporting evidence token.",
+                    },
+                )
+                details = root / "details.jsonl"
+                search_script, _ = self.write_stub_search(root)
+
+                result = self.run_benchmark(
+                    repo,
+                    cases,
+                    search_script,
+                    check=False,
+                    extra_args=["--details-jsonl", str(details)],
+                )
+
+                self.assertEqual(result.returncode, 0)
+                payload = json.loads(result.stdout)
+                self.assertEqual(payload["evidence_text_cases"], 1)
+                self.assertEqual(payload["evidence_text_reachability"], 0.0)
+                detail = self.read_rows(details)[0]
+                self.assertFalse(detail["evidence_text_reachability_hit"])
+                self.assertIn("evidence_text_reachability", detail["failed_checks"])
+
+    def test_synthetic_builder_includes_reference_evidence_for_reachability(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            evidence_path = SUMMARY_PATH.replace("/summary.md", "/evidence.md")
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "required_evidence_paths": [evidence_path],
+                    "reference_evidence": "Dedicated supporting evidence token.",
+                },
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            evidence = (repo / evidence_path).read_text(encoding="utf-8")
+            self.assertIn("Dedicated supporting evidence token.", evidence)
+
+            result = self.run_benchmark(repo, cases, SEARCH_SCRIPT)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["evidence_text_cases"], 1)
+            self.assertEqual(payload["evidence_text_reachability"], 1.0)
 
     def test_layered_recall_benchmark_writes_case_details_jsonl(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1247,6 +1364,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "session_drilldown_hit": False,
                         "session_result_paths": [],
                         "evidence_reachability_hit": False,
+                        "evidence_text_reachability_hit": False,
                         "answer_expected": False,
                         "answer_reachability_hit": False,
                         "answer_normalized_reachability_hit": False,

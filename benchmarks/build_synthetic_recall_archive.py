@@ -220,6 +220,7 @@ def write_text(path: Path, text: str) -> None:
 def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
     summary_path = repo / str(case["expected_summary_path"])
     reference_answers = text_list(case.get("reference_answer"))
+    reference_evidence = text_list(case.get("reference_evidence"))
     answer_section = ""
     if reference_answers:
         answer_section = "Reference answers:\n" + "".join(f"- {answer}\n" for answer in reference_answers) + "\n"
@@ -233,11 +234,12 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
     )
     for evidence_path in text_list(case.get("required_evidence_paths")):
         answer_evidence = " ".join(f"Reference answer: {answer}." for answer in reference_answers)
+        evidence_text = " ".join(f"Reference evidence: {snippet}." for snippet in reference_evidence)
         write_text(
             repo / evidence_path,
             "# Synthetic Evidence\n\n"
             f"syn_ev_001: Evidence supporting {case['expected_memory_id']} for query {case['query']}. "
-            f"{answer_evidence}\n",
+            f"{answer_evidence} {evidence_text}\n",
         )
     for raw_ref in record["raw_refs"]:
         raw_path = repo / raw_ref["path"]

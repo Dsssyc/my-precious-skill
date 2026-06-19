@@ -141,6 +141,7 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
         "category",
         "expected_not_memory_id",
         "reference_answer",
+        "reference_evidence",
         "stale_memory_id",
         "temporal_scope",
     ):
@@ -253,6 +254,8 @@ def new_totals() -> Totals:
         "source_hits": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
+        "evidence_text_cases": 0,
+        "evidence_text_hits": 0,
         "answer_cases": 0,
         "answer_hits": 0,
         "answer_normalized_hits": 0,
@@ -356,6 +359,8 @@ def finalize_totals(totals: Totals) -> dict:
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
+        "evidence_text_cases": int(totals["evidence_text_cases"]),
+        "evidence_text_reachability": ratio(totals["evidence_text_hits"], totals["evidence_text_cases"]),
         "answer_reachability": ratio(totals["answer_hits"], totals["answer_cases"]),
         "answer_normalized_reachability": ratio(totals["answer_normalized_hits"], totals["answer_cases"]),
         "answer_token_f1": ratio(totals["answer_f1"], totals["answer_cases"]),
@@ -408,6 +413,8 @@ def add_result(totals: Totals, result: dict) -> None:
         totals["source_hits"] += int(result["source_reachability_hit"])
         totals["evidence_cases"] += int(result["evidence_expected"])
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
+        totals["evidence_text_cases"] += int(result["evidence_text_expected"])
+        totals["evidence_text_hits"] += int(result["evidence_text_reachability_hit"])
         totals["answer_cases"] += int(result["answer_expected"])
         totals["answer_hits"] += int(result["answer_reachability_hit"])
         totals["answer_normalized_hits"] += int(result["answer_normalized_reachability_hit"])
@@ -787,6 +794,45 @@ def evidence_reachability_hit(blocks: list[str], required_paths: list[str]) -> b
     return all(any(required_path in block for block in blocks) for required_path in required_paths)
 
 
+def safe_repo_file(repo: Path, path_text: str) -> Path | None:
+    if not path_text.strip():
+        return None
+    candidate = Path(path_text)
+    if candidate.is_absolute():
+        return None
+    try:
+        repo_resolved = repo.resolve()
+        resolved = (repo / candidate).resolve(strict=False)
+        resolved.relative_to(repo_resolved)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
+
+
+def read_repo_texts(repo: Path, paths: list[str]) -> list[str]:
+    texts = []
+    for path_text in paths:
+        path = safe_repo_file(repo, path_text)
+        if path is None:
+            continue
+        try:
+            texts.append(path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            continue
+    return texts
+
+
+def evidence_text_reachability_hit(repo: Path, evidence_paths: list[str], reference_evidence: list[str]) -> bool:
+    if not evidence_paths or not reference_evidence:
+        return False
+    evidence_texts = read_repo_texts(repo, evidence_paths)
+    if not evidence_texts:
+        return False
+    return all(any(snippet in text for text in evidence_texts) for snippet in reference_evidence)
+
+
 def answer_reachability_hit(blocks: list[str], reference_answers: list[str]) -> bool:
     if not reference_answers:
         return False
@@ -864,6 +910,8 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("source_reachability")
         if result["evidence_expected"] and not result["evidence_reachability_hit"]:
             checks.append("evidence_reachability")
+        if result["evidence_text_expected"] and not result["evidence_text_reachability_hit"]:
+            checks.append("evidence_text_reachability")
         if result["answer_expected"]:
             if not result["answer_reachability_hit"]:
                 checks.append("answer_reachability")
@@ -904,6 +952,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "expected_summary_path": safe_result_identifier(optional_case_text(data, "expected_summary_path")),
         "expected_source_anchor": safe_result_identifier(optional_case_text(data, "expected_source_anchor")),
         "required_evidence_paths": safe_result_identifiers(case_texts(data, "required_evidence_paths")),
+        "reference_evidence_count": len(case_texts(data, "reference_evidence")),
         "forbidden_output_patterns_count": len(case_texts(data, "forbidden_output_patterns")),
         "positive_case": result["positive_case"],
         "expected_abstain": result["expected_abstain"],
@@ -921,6 +970,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "session_drilldown_hit": result["session_drilldown_hit"],
         "source_reachability_hit": result["source_reachability_hit"],
         "evidence_reachability_hit": result["evidence_reachability_hit"],
+        "evidence_text_reachability_hit": result["evidence_text_reachability_hit"],
         "answer_expected": result["answer_expected"],
         "answer_reachability_hit": result["answer_reachability_hit"],
         "answer_normalized_reachability_hit": result["answer_normalized_reachability_hit"],
@@ -976,6 +1026,7 @@ def score_case(
     expected_summary_path = optional_case_text(data, "expected_summary_path")
     expected_source_anchor = optional_case_text(data, "expected_source_anchor")
     required_evidence_paths = case_texts(data, "required_evidence_paths")
+    reference_evidence = case_texts(data, "reference_evidence")
     reference_answers = case_texts(data, "reference_answer")
     negative_memory_ids = case_texts(data, "expected_not_memory_id")
     stale_memory_ids = case_texts(data, "stale_memory_id")
@@ -986,6 +1037,7 @@ def score_case(
     session_hit = False
     source_hit = False
     evidence_hit = False
+    evidence_text_hit = False
     answer_hit = False
     normalized_answer_hit = False
     answer_f1 = 0.0
@@ -1024,6 +1076,8 @@ def score_case(
             source_hit = source_reachability_hit(source_blocks, expected_summary_path, expected_source_anchor)
         if required_evidence_paths:
             evidence_hit = evidence_reachability_hit(source_blocks + memory_blocks, required_evidence_paths)
+        if required_evidence_paths and reference_evidence:
+            evidence_text_hit = evidence_text_reachability_hit(repo, required_evidence_paths, reference_evidence)
         if reference_answers:
             answer_hit = answer_reachability_hit(memory_blocks + session_blocks + source_blocks, reference_answers)
             normalized_answer_hit = answer_normalized_reachability_hit(combined_output, reference_answers)
@@ -1054,6 +1108,8 @@ def score_case(
         "source_reachability_hit": source_hit,
         "evidence_expected": bool(is_positive and required_evidence_paths),
         "evidence_reachability_hit": evidence_hit,
+        "evidence_text_expected": bool(is_positive and required_evidence_paths and reference_evidence),
+        "evidence_text_reachability_hit": evidence_text_hit,
         "answer_expected": bool(is_positive and reference_answers),
         "answer_reachability_hit": answer_hit,
         "answer_normalized_reachability_hit": normalized_answer_hit,
@@ -1252,6 +1308,7 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "session_result_paths": detail.get("session_result_paths", []),
                 "evidence_reachability_hit": detail.get("evidence_reachability_hit"),
                 "answer_expected": detail.get("answer_expected"),
+                "evidence_text_reachability_hit": detail.get("evidence_text_reachability_hit"),
                 "answer_reachability_hit": detail.get("answer_reachability_hit"),
                 "answer_normalized_reachability_hit": detail.get("answer_normalized_reachability_hit"),
                 "answer_token_f1": detail.get("answer_token_f1"),
