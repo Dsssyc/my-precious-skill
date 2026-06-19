@@ -323,6 +323,33 @@ python benchmarks/layered_recall_benchmark.py \
 `stale_memory_id`、`temporal_scope` 和 `forbidden_output_patterns`。
 拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。
 
+可以把仓库外本地下载的公开 benchmark 文件转换成这套 case schema，而不用提交原始
+数据：
+
+```bash
+python benchmarks/convert_public_memory_benchmark.py \
+  --source longmemeval \
+  --input /path/outside/repo/longmemeval.json \
+  --output /tmp/longmemeval-cases.jsonl
+
+python benchmarks/convert_public_memory_benchmark.py \
+  --source locomo \
+  --input /path/outside/repo/locomo.json \
+  --output /tmp/locomo-cases.jsonl
+
+python benchmarks/convert_public_memory_benchmark.py \
+  --source memora \
+  --input /path/outside/repo/memora-evaluation.json \
+  --output /tmp/memora-cases.jsonl
+```
+
+converter 支持官方
+[LongMemEval](https://github.com/xiaowu0162/longmemeval)、
+[LoCoMo](https://github.com/snap-research/locomo) 和
+[Memora](https://github.com/geniesinc/Memora) 发布使用的 schema 形态。它会生成
+确定性的 external memory ID 和受保护 source anchor，用于本地评估；不会下载、
+vendoring 或提交公开 benchmark 原始记录。
+
 仓库还内置了一份受公开 benchmark 能力维度启发的合成 case suite：
 
 ```bash

@@ -329,6 +329,33 @@ Positive JSONL cases must include `query`, `expected_memory_id`,
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields.
 
+Locally downloaded public benchmark files can be converted into this case
+schema without committing the source data:
+
+```bash
+python benchmarks/convert_public_memory_benchmark.py \
+  --source longmemeval \
+  --input /path/outside/repo/longmemeval.json \
+  --output /tmp/longmemeval-cases.jsonl
+
+python benchmarks/convert_public_memory_benchmark.py \
+  --source locomo \
+  --input /path/outside/repo/locomo.json \
+  --output /tmp/locomo-cases.jsonl
+
+python benchmarks/convert_public_memory_benchmark.py \
+  --source memora \
+  --input /path/outside/repo/memora-evaluation.json \
+  --output /tmp/memora-cases.jsonl
+```
+
+The converter supports schema shapes used by the official
+[LongMemEval](https://github.com/xiaowu0162/longmemeval),
+[LoCoMo](https://github.com/snap-research/locomo), and
+[Memora](https://github.com/geniesinc/Memora) releases. It creates deterministic
+external memory IDs and protected source anchors for local evaluation; it does
+not download, vendor, or commit public benchmark records.
+
 The repository also includes a public-benchmark-inspired synthetic case suite:
 
 ```bash

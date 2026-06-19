@@ -207,6 +207,11 @@ numeric metric thresholds with `--fail-under`. Threshold failures keep the
 aggregate JSON on stdout and report the failed metrics on stderr so automated
 quality gates can preserve machine-readable scores.
 
+The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
+Memora JSON/JSONL files into the same case schema. It generates deterministic
+external memory IDs and source anchors, but does not download benchmark data or
+commit external records to this reusable skill repository.
+
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive
 records should not be committed to this repository; they can be locally mapped
