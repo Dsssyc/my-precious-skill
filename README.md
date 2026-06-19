@@ -408,11 +408,12 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 `--details-jsonl` writes one row per case with rank, drill-down, source,
-evidence, abstention, stale-suppression, and privacy outcomes. `--fail-under`
-keeps the aggregate JSON on stdout and exits non-zero when a configured numeric
-metric falls below its threshold, which makes the benchmark usable as a CI
-quality gate. Thresholds can target top-level metrics or dotted category paths
-such as `categories.knowledge_update.update_consistency=1.0`.
+evidence, abstention, stale-suppression, privacy outcomes, and a `failed_checks`
+list naming the failed applicable metrics for that case. `--fail-under` keeps
+the aggregate JSON on stdout and exits non-zero when a configured numeric metric
+falls below its threshold, which makes the benchmark usable as a CI quality
+gate. Thresholds can target top-level metrics or dotted category paths such as
+`categories.knowledge_update.update_consistency=1.0`.
 `--fail-under-file` accepts a JSON object using the same metric paths, for
 example:
 

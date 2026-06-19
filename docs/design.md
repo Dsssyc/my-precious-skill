@@ -211,9 +211,10 @@ Optional fields include `category`, `required_evidence_paths`,
 `temporal_scope`, and `forbidden_output_patterns`. Abstention cases use
 `expected_abstain: true` and do not require positive expected fields.
 
-The benchmark can also write per-case details as JSONL and enforce numeric
-metric thresholds with `--fail-under`. Thresholds can target top-level metrics
-or dotted category paths such as
+The benchmark can also write per-case details as JSONL, including a
+`failed_checks` list for each case, and enforce numeric metric thresholds with
+`--fail-under`. Thresholds can target top-level metrics or dotted category paths
+such as
 `categories.knowledge_update.update_consistency=1.0`. `--fail-under-file`
 loads the same thresholds from a JSON object for repeatable CI gates; direct
 `--fail-under` arguments override duplicate metric keys from files. Threshold

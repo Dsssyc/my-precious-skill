@@ -438,6 +438,40 @@ def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> 
     return not any(pattern in combined for pattern in forbidden_patterns)
 
 
+def failed_checks(result: dict) -> list[str]:
+    checks: list[str] = []
+    memory_rank = result["memory_rank"]
+    if result["positive_case"]:
+        if memory_rank != 1:
+            checks.append("memory_recall_at_1")
+        if memory_rank is None or memory_rank > 5:
+            checks.append("memory_recall_at_5")
+        if not result["session_drilldown_hit"]:
+            checks.append("session_drilldown_at_5")
+        if result["source_expected"] and not result["source_reachability_hit"]:
+            checks.append("source_reachability")
+        if result["evidence_expected"] and not result["evidence_reachability_hit"]:
+            checks.append("evidence_reachability")
+        if result["answer_expected"]:
+            if not result["answer_reachability_hit"]:
+                checks.append("answer_reachability")
+            if not result["answer_normalized_reachability_hit"]:
+                checks.append("answer_normalized_reachability")
+            if result["answer_token_f1"] < 1.0:
+                checks.append("answer_token_f1")
+    if result["expected_abstain"] and not result["abstention_hit"]:
+        checks.append("abstention_accuracy")
+    if result["negative_expected"] and not result["negative_memory_suppression_hit"]:
+        checks.append("negative_memory_suppression")
+    if result["stale_expected"] and not result["stale_memory_suppression_hit"]:
+        checks.append("stale_memory_suppression")
+    if result["update_expected"] and not result["update_consistency_hit"]:
+        checks.append("update_consistency")
+    if not result["privacy_boundary_pass"]:
+        checks.append("privacy_boundary_pass_rate")
+    return checks
+
+
 def case_detail(case: Case, result: dict) -> dict:
     data = case.data
     query = optional_case_text(data, "query")
@@ -467,6 +501,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
         "update_consistency_hit": result["update_consistency_hit"],
         "privacy_boundary_pass": result["privacy_boundary_pass"],
+        "failed_checks": failed_checks(result),
         "latency_ms": round(result["latency_ms"], 3),
     }
 

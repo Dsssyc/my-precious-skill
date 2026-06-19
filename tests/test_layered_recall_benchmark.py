@@ -323,7 +323,51 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(detail["session_drilldown_hit"])
             self.assertTrue(detail["source_reachability_hit"])
             self.assertTrue(detail["privacy_boundary_pass"])
+            self.assertEqual(detail["failed_checks"], [])
             self.assertGreaterEqual(detail["latency_ms"], 0)
+
+    def test_layered_recall_benchmark_details_list_failed_checks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "reference_answer": MEMORY_TEXT,
+                    "required_evidence_paths": [SUMMARY_PATH],
+                    "expected_not_memory_id": "mem_permission_v1",
+                    "stale_memory_id": "mem_permission_v1",
+                    "category": "knowledge_update",
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(
+                detail["failed_checks"],
+                [
+                    "memory_recall_at_1",
+                    "memory_recall_at_5",
+                    "session_drilldown_at_5",
+                    "source_reachability",
+                    "evidence_reachability",
+                    "answer_reachability",
+                    "answer_normalized_reachability",
+                    "answer_token_f1",
+                    "update_consistency",
+                ],
+            )
 
     def test_layered_recall_benchmark_fails_under_metric_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -892,3 +936,6 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+
+    def read_rows(self, path):
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
