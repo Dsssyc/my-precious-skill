@@ -510,7 +510,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             repo = self.create_repo(root)
-            cases = self.write_cases(root, self.valid_case())
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "case_id": "synthetic:permission_prompt",
+                    "category": "information_extraction",
+                    "source_benchmark": "LongMemEval",
+                },
+            )
             failures = root / "failures.json"
             search_script, _ = self.write_stub_search(root, mode="nohit")
 
@@ -536,6 +544,25 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(failure_payload["cases_sha256"], payload["cases_sha256"])
             self.assertEqual(failure_payload["search_script_path"], payload["search_script_path"])
             self.assertEqual(failure_payload["search_script_sha256"], payload["search_script_sha256"])
+            self.assertEqual(
+                failure_payload["failed_cases"],
+                [
+                    {
+                        "case_id": "synthetic:permission_prompt",
+                        "case_line": 1,
+                        "category": "information_extraction",
+                        "failed_checks": [
+                            "memory_recall_at_1",
+                            "memory_recall_at_5",
+                            "session_drilldown_at_5",
+                            "source_reachability",
+                        ],
+                        "source_benchmark": "LongMemEval",
+                    }
+                ],
+            )
+            self.assertNotIn("query", failure_payload["failed_cases"][0])
+            self.assertNotIn("expected_memory_id", failure_payload["failed_cases"][0])
             self.assertEqual(
                 failure_payload["failures"],
                 [
@@ -576,6 +603,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(failure_payload["cases_sha256"], payload["cases_sha256"])
             self.assertEqual(failure_payload["search_script_path"], payload["search_script_path"])
             self.assertEqual(failure_payload["search_script_sha256"], payload["search_script_sha256"])
+            self.assertEqual(failure_payload["failed_cases"], [])
             self.assertEqual(failure_payload["failures"], [])
 
     def test_layered_recall_benchmark_accepts_nested_category_fail_under_threshold(self):
