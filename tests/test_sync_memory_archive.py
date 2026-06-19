@@ -150,6 +150,28 @@ class SyncMemoryArchiveTests(unittest.TestCase):
             self.assertIn("openai_key", combined)
             self.assertNotIn(fake_key, combined)
 
+    def test_sync_memory_archive_refuses_aws_key_like_values_before_audit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = create_git_backed_archive(Path(tmpdir))
+            fake_key = "AKIA" + ("0" * 16)
+            entry_dir = memory_repo / "sessions/2026/05/17/synthetic"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text(f"# Summary\n\nDo not publish {fake_key}.\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/sync_memory_archive.py")],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("generated archive files contain key-like values", combined)
+            self.assertIn("aws_access_key", combined)
+            self.assertNotIn(fake_key, combined)
+
     def test_sync_memory_archive_refuses_audit_quality_findings(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))
