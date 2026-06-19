@@ -844,6 +844,7 @@ def format_hit(repo: Path, hit: Hit, idx: int, depth: str = "memory") -> str:
         rel = hit.path.relative_to(repo)
     except ValueError:
         rel = hit.path
+    display_path = safe_display_path(rel.as_posix() if isinstance(rel, Path) else rel)
     display_title_text = safe_display_text(hit.title, 180) if hit.title else ""
     title = f"\n   title: {display_title_text}" if display_title_text else ""
     why = "; ".join(hit.why)
@@ -853,7 +854,7 @@ def format_hit(repo: Path, hit: Hit, idx: int, depth: str = "memory") -> str:
     elif rel.name == "INDEX.md" or str(rel).startswith("daily/"):
         next_step = "use as overview; then open the linked session summary"
     return (
-        f"{idx}. {rel}\n"
+        f"{idx}. {display_path}\n"
         f"   score: {hit.score}\n"
         f"   source: {hit.source}{title}\n"
         f"   why: {why}\n"
