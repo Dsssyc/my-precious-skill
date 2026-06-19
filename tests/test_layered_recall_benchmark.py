@@ -646,6 +646,28 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_layered_recall_benchmark_fails_over_metric_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-over", "latency_max_ms=-1"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(result.stdout, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertGreaterEqual(payload["latency_max_ms"], 0)
+            self.assertIn("latency_max_ms=", result.stderr)
+            self.assertIn("above threshold -1.0", result.stderr)
+
     def test_layered_recall_benchmark_accepts_fail_under_threshold_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -673,6 +695,71 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             payload = json.loads(result.stdout)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
+
+    def test_layered_recall_benchmark_fails_over_threshold_file_metric(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            threshold_file = root / "max-thresholds.json"
+            failures = root / "failures.json"
+            threshold_file.write_text(json.dumps({"latency_max_ms": -1}, sort_keys=True), encoding="utf-8")
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-over-file",
+                    str(threshold_file),
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(result.stdout, result.stderr)
+            payload = json.loads(result.stdout)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            self.assertGreaterEqual(payload["latency_max_ms"], 0)
+            self.assertEqual(failure_payload["failure_count"], 1)
+            self.assertEqual(
+                failure_payload["failures"],
+                [
+                    {
+                        "comparison": "above",
+                        "metric": "latency_max_ms",
+                        "threshold": -1.0,
+                        "value": payload["latency_max_ms"],
+                    }
+                ],
+            )
+
+    def test_layered_recall_benchmark_direct_fail_over_overrides_threshold_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            threshold_file = root / "max-thresholds.json"
+            threshold_file.write_text(json.dumps({"latency_max_ms": -1}, sort_keys=True), encoding="utf-8")
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=[
+                    "--fail-over-file",
+                    str(threshold_file),
+                    "--fail-over",
+                    "latency_max_ms=999999",
+                ],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertLessEqual(payload["latency_max_ms"], 999999)
 
     def test_layered_recall_benchmark_fails_under_threshold_file_metric(self):
         with tempfile.TemporaryDirectory() as tmpdir:

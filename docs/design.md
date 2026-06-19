@@ -229,14 +229,16 @@ threshold failures with `--failures-json`; that failure file includes the same
 case-set and search-script fingerprints as stdout plus safe per-case failure
 summaries (`case_id`, line number, category, source benchmark, and failed
 check names) so CI artifacts remain traceable without copying queries or
-answer text. The benchmark can enforce numeric metric thresholds with
-`--fail-under`.
+answer text. The benchmark can enforce numeric lower-bound thresholds with
+`--fail-under` and upper-bound thresholds, such as latency caps, with
+`--fail-over`.
 Thresholds can target top-level metrics or dotted category paths such as
-`categories.knowledge_update.update_consistency=1.0`. `--fail-under-file`
-loads the same thresholds from a JSON object for repeatable CI gates; direct
-`--fail-under` arguments override duplicate metric keys from files. Threshold
-failures keep the aggregate JSON on stdout and report the failed metrics on
-stderr so automated quality gates can preserve machine-readable scores.
+`categories.knowledge_update.update_consistency=1.0`. `--fail-under-file` and
+`--fail-over-file` load thresholds from JSON objects for repeatable CI gates;
+direct `--fail-under` or `--fail-over` arguments override duplicate metric keys
+from files. Threshold failures keep the aggregate JSON on stdout and report the
+failed metrics on stderr so automated quality gates can preserve
+machine-readable scores.
 The packaged synthetic gate at
 `benchmarks/quality-gates/layered_recall_synthetic.json` intentionally covers
 the synthetic suite dimensions, answer reachability, and denominator counts;

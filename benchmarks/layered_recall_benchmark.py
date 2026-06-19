@@ -711,53 +711,77 @@ def write_details_jsonl(path: Path, details: list[dict]) -> None:
             handle.write(json.dumps(detail, sort_keys=True) + "\n")
 
 
-def fail_under_metric_value(payload: dict, metric: str) -> float:
+def threshold_metric_value(payload: dict, metric: str, option: str) -> float:
     value: object = payload
     for part in metric.split("."):
         if not part or not isinstance(value, dict) or part not in value:
-            raise SystemExit(f"--fail-under metric is not numeric in benchmark output: {metric}")
+            raise SystemExit(f"{option} metric is not numeric in benchmark output: {metric}")
         value = value[part]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise SystemExit(f"--fail-under metric is not numeric in benchmark output: {metric}")
+        raise SystemExit(f"{option} metric is not numeric in benchmark output: {metric}")
     return float(value)
 
 
-def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]]:
+def fail_under_metric_value(payload: dict, metric: str) -> float:
+    return threshold_metric_value(payload, metric, "--fail-under")
+
+
+def fail_over_metric_value(payload: dict, metric: str) -> float:
+    return threshold_metric_value(payload, metric, "--fail-over")
+
+
+def parse_thresholds(values: list[str], payload: dict, option: str) -> list[tuple[str, float]]:
     thresholds: list[tuple[str, float]] = []
     for value in values:
         if "=" not in value:
-            raise SystemExit(f"--fail-under must use metric=threshold, got: {value}")
+            raise SystemExit(f"{option} must use metric=threshold, got: {value}")
         metric, raw_threshold = value.split("=", 1)
         metric = metric.strip()
         raw_threshold = raw_threshold.strip()
-        fail_under_metric_value(payload, metric)
+        threshold_metric_value(payload, metric, option)
         try:
             threshold = float(raw_threshold)
         except ValueError as exc:
-            raise SystemExit(f"--fail-under threshold must be numeric for {metric}: {raw_threshold}") from exc
+            raise SystemExit(f"{option} threshold must be numeric for {metric}: {raw_threshold}") from exc
         thresholds.append((metric, threshold))
     return thresholds
 
 
-def load_fail_under_file(path: Path, payload: dict) -> list[tuple[str, float]]:
+def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]]:
+    return parse_thresholds(values, payload, "--fail-under")
+
+
+def parse_fail_over(values: list[str], payload: dict) -> list[tuple[str, float]]:
+    return parse_thresholds(values, payload, "--fail-over")
+
+
+def load_threshold_file(path: Path, payload: dict, option: str) -> list[tuple[str, float]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise SystemExit(f"unable to read --fail-under-file {path}: {exc}") from exc
+        raise SystemExit(f"unable to read {option} {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise SystemExit(f"invalid JSON at {path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise SystemExit(f"--fail-under-file must contain a JSON object: {path}")
+        raise SystemExit(f"{option} must contain a JSON object: {path}")
     thresholds: list[tuple[str, float]] = []
     for metric, raw_threshold in data.items():
         if not isinstance(metric, str) or not metric.strip():
-            raise SystemExit(f"--fail-under-file metric keys must be non-empty strings: {path}")
+            raise SystemExit(f"{option} metric keys must be non-empty strings: {path}")
         metric = metric.strip()
-        fail_under_metric_value(payload, metric)
+        threshold_metric_value(payload, metric, option)
         if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
-            raise SystemExit(f"--fail-under-file threshold must be numeric for {metric}")
+            raise SystemExit(f"{option} threshold must be numeric for {metric}")
         thresholds.append((metric, float(raw_threshold)))
     return thresholds
+
+
+def load_fail_under_file(path: Path, payload: dict) -> list[tuple[str, float]]:
+    return load_threshold_file(path, payload, "--fail-under-file")
+
+
+def load_fail_over_file(path: Path, payload: dict) -> list[tuple[str, float]]:
+    return load_threshold_file(path, payload, "--fail-over-file")
 
 
 def merge_thresholds(*groups: list[tuple[str, float]]) -> list[tuple[str, float]]:
@@ -774,6 +798,15 @@ def threshold_failure_details(payload: dict, thresholds: list[tuple[str, float]]
         value = fail_under_metric_value(payload, metric)
         if value < threshold:
             failures.append({"metric": metric, "value": value, "threshold": threshold})
+    return failures
+
+
+def threshold_over_failure_details(payload: dict, thresholds: list[tuple[str, float]]) -> list[dict]:
+    failures: list[dict] = []
+    for metric, threshold in thresholds:
+        value = fail_over_metric_value(payload, metric)
+        if value > threshold:
+            failures.append({"comparison": "above", "metric": metric, "value": value, "threshold": threshold})
     return failures
 
 
@@ -832,6 +865,19 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="JSON object of metric or dotted metric path thresholds",
     )
+    parser.add_argument(
+        "--fail-over",
+        action="append",
+        default=[],
+        metavar="METRIC=THRESHOLD",
+        help="Exit non-zero when a numeric metric or dotted metric path is above a threshold",
+    )
+    parser.add_argument(
+        "--fail-over-file",
+        action="append",
+        default=[],
+        help="JSON object of metric or dotted metric path maximum thresholds",
+    )
     parser.add_argument("--failures-json", help="Write structured threshold failures JSON")
     args = parser.parse_args(argv)
 
@@ -851,14 +897,19 @@ def main(argv: list[str] | None = None) -> int:
     file_thresholds: list[tuple[str, float]] = []
     for threshold_file in args.fail_under_file:
         file_thresholds.extend(load_fail_under_file(Path(threshold_file).expanduser().resolve(), payload))
+    file_over_thresholds: list[tuple[str, float]] = []
+    for threshold_file in args.fail_over_file:
+        file_over_thresholds.extend(load_fail_over_file(Path(threshold_file).expanduser().resolve(), payload))
     thresholds = merge_thresholds(file_thresholds, parse_fail_under(args.fail_under, payload))
-    failure_details = threshold_failure_details(payload, thresholds)
+    over_thresholds = merge_thresholds(file_over_thresholds, parse_fail_over(args.fail_over, payload))
+    failure_details = threshold_failure_details(payload, thresholds) + threshold_over_failure_details(payload, over_thresholds)
     if args.failures_json:
         write_failures_json(Path(args.failures_json).expanduser().resolve(), failure_details, payload, details)
-    failures = [
-        f"{failure['metric']}={failure['value']} below threshold {failure['threshold']}"
-        for failure in failure_details
-    ]
+    failures = []
+    for failure in failure_details:
+        comparison = failure.get("comparison")
+        direction = "above" if comparison == "above" else "below"
+        failures.append(f"{failure['metric']}={failure['value']} {direction} threshold {failure['threshold']}")
     if failures:
         print("benchmark threshold failed: " + "; ".join(failures), file=sys.stderr)
         return 1
