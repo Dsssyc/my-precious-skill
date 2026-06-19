@@ -9,6 +9,7 @@ schema for local evaluation.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import re
@@ -40,6 +41,14 @@ def load_payload(path: Path) -> object:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise SystemExit(f"invalid JSON at {path}: {exc}") from exc
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def sequence_payload(payload: object, *, source: str) -> list[dict]:
@@ -316,7 +325,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.include_superseded_distractors and not args.build_synthetic_archive:
         parser.error("--include-superseded-distractors requires --build-synthetic-archive")
 
-    payload = load_payload(Path(args.input).expanduser().resolve())
+    input_path = Path(args.input).expanduser().resolve()
+    payload = load_payload(input_path)
     if args.source == "longmemeval":
         cases = convert_longmemeval(payload)
     elif args.source == "locomo":
@@ -329,7 +339,13 @@ def main(argv: list[str] | None = None) -> int:
     validate_unique_case_ids(cases)
     output = Path(args.output).expanduser().resolve()
     write_cases(output, cases)
-    result = {"cases": len(cases), "output": str(output), "source": SOURCE_LABELS[args.source]}
+    result = {
+        "cases": len(cases),
+        "input_sha256": file_sha256(input_path),
+        "output": str(output),
+        "output_sha256": file_sha256(output),
+        "source": SOURCE_LABELS[args.source],
+    }
     if args.build_synthetic_archive:
         archive = Path(args.build_synthetic_archive).expanduser().resolve()
         builder = load_synthetic_builder()

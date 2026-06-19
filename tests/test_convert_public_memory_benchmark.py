@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -40,7 +41,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            subprocess.run(
+            result = subprocess.run(
                 [
                     sys.executable,
                     str(SCRIPT),
@@ -71,6 +72,9 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[1]["category"], "abstention")
             self.assertTrue(rows[1]["expected_abstain"])
             self.assertNotIn("expected_memory_id", rows[1])
+            result_payload = json.loads(result.stdout)
+            self.assertEqual(result_payload["input_sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertEqual(result_payload["output_sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
 
     def test_rejects_duplicate_case_ids_after_conversion(self):
         with tempfile.TemporaryDirectory() as tmpdir:
