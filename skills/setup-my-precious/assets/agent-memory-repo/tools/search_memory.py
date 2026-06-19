@@ -611,6 +611,8 @@ def sanitize_raw_ref(repo: Path, value: object) -> str:
     safe_path = safe_repo_relative_path(repo, path_text)
     if not safe_path:
         return UNSAFE_SOURCE_REF
+    if safe_display_path(safe_path) == UNSAFE_DISPLAY_FIELD:
+        return UNSAFE_SOURCE_REF
     if anchor_text:
         return f"{safe_path}#{anchor_text}"
     return safe_path

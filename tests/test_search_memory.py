@@ -500,6 +500,57 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_depth_source_sanitizes_sensitive_source_ref_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/sensitive-source-path"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Source Path\n", encoding="utf-8")
+            raw_path = repo / "records/cookie=SHOULD_NOT_RENDER/source.jsonl"
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text("FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_sensitive_source_path",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-depth",
+                        "text": "Sensitive source-depth path text should not be printed verbatim.",
+                        "source": "explicit",
+                        "derived_from": ["sessions/2026/06/17/sensitive-source-path/summary.md"],
+                        "raw_refs": [{"path": str(raw_path), "anchor": "message:45"}],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "sensitive source-depth path",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("[unsafe-source-ref]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
     def test_search_memory_sanitizes_multiline_memory_metadata(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
