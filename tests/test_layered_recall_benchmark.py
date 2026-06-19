@@ -983,6 +983,24 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("--search-timeout-s must be greater than 0", result.stderr)
 
+    def test_search_timeout_must_be_finite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--search-timeout-s", "nan"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--search-timeout-s must be finite", result.stderr)
+
     def test_missing_required_field_reports_cases_path_and_line(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

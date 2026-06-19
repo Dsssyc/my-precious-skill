@@ -980,6 +980,8 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     cases_path = Path(args.cases).expanduser().resolve()
+    if not math.isfinite(args.search_timeout_s):
+        raise SystemExit("--search-timeout-s must be finite")
     if args.search_timeout_s <= 0:
         raise SystemExit("--search-timeout-s must be greater than 0")
     cases = load_cases(cases_path)

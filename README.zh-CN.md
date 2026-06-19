@@ -386,8 +386,8 @@ python benchmarks/layered_recall_benchmark.py \
 evidence、拒答、stale suppression 和 privacy 结果。`--fail-under` 会保留
 stdout 的 aggregate JSON，并在顶层数值指标低于阈值时用非零状态退出，方便在
 CI 里作为质量门禁。阈值必须是有限数值；NaN 和 Infinity 会在比较前被拒绝。
-memory/session/source 每一层搜索 subprocess 默认有 30 秒超时；可以用
-`--search-timeout-s` 在 CI smoke test 中调低，或在大型本地 archive 上调高。
+memory/session/source 每一层搜索 subprocess 默认有 30 秒超时；`--search-timeout-s`
+必须是有限正数，可以在 CI smoke test 中调低，或在大型本地 archive 上调高。
 
 如果要给 stale-memory suppression 增加压力，可以生成共享同一 query term、
 但不允许出现在搜索输出中的 superseded distractor node：
