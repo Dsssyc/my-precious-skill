@@ -1480,6 +1480,22 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["session_drilldown_at_5"], 0.0)
             self.assertEqual(payload["source_reachability"], 0.0)
 
+    def test_missing_memory_repo_file_reports_controlled_sanitized_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fake_secret = "sk-" + "missingrepo" + ("0" * 20)
+            missing_repo = root / f"archive-{fake_secret}"
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(missing_repo, cases, search_script, check=False)
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memory archive is missing required file", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn(fake_secret, combined)
+
     def test_benchmark_reports_public_benchmark_inspired_quality_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

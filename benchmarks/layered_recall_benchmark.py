@@ -84,6 +84,12 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_memory_repo(repo: Path) -> None:
+    required_path = repo / "index" / "memories.jsonl"
+    if not required_path.is_file():
+        raise SystemExit(f"memory archive is missing required file: {safe_diagnostic_path(required_path)}")
+
+
 def load_cases(path: Path) -> list[Case]:
     cases: list[Case] = []
     seen_case_ids: dict[str, int] = {}
@@ -1071,6 +1077,7 @@ def main(argv: list[str] | None = None) -> int:
     cases = load_cases(cases_path)
     search_script = Path(args.search_script).expanduser().resolve()
 
+    validate_memory_repo(repo)
     payload, details = score_cases(repo, cases, search_script, args.search_timeout_s)
     payload["cases_path"] = str(cases_path)
     payload["cases_sha256"] = file_sha256(cases_path)
