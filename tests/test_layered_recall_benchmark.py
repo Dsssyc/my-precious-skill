@@ -261,6 +261,33 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", combined)
             self.assertNotIn("cookie=", combined)
 
+    def test_synthetic_builder_success_payload_sanitizes_sensitive_repo_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sensitive_repo_root = root / "archive-cookie=SHOULD_NOT_RENDER"
+            repo = sensitive_repo_root / "agent-memory"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["repo"], "[unsafe-path]")
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+            self.assertNotIn("cookie=", result.stdout)
+            self.assertTrue((repo / "index" / "memories.jsonl").exists())
+
     def test_layered_recall_benchmark_reports_parsed_block_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

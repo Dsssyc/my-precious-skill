@@ -232,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     repo = Path(args.repo).expanduser().resolve()
     cases = list(iter_jsonl(Path(args.cases).expanduser().resolve()))
     write_archive(repo, cases, include_superseded_distractors=args.include_superseded_distractors)
-    print(json.dumps({"repo": str(repo), "cases": len(cases)}, sort_keys=True))
+    print(json.dumps({"repo": safe_diagnostic_path(repo), "cases": len(cases)}, sort_keys=True))
     return 0
 
 
