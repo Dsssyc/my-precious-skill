@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "cases": len(cases),
         "input_sha256": file_sha256(input_path),
-        "output": str(output),
+        "output": safe_diagnostic_path(output),
         "output_sha256": file_sha256(output),
         "source": SOURCE_LABELS[args.source],
     }
@@ -401,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
             cases,
             include_superseded_distractors=args.include_superseded_distractors,
         )
-        result["synthetic_archive"] = str(archive)
+        result["synthetic_archive"] = safe_diagnostic_path(archive)
     print(json.dumps(result, sort_keys=True))
     return 0
 
