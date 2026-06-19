@@ -46,6 +46,28 @@ def safe_diagnostic_path(path: Path) -> str:
     return safe_diagnostic_text(path)
 
 
+def safe_case_id_for_diagnostic(value: object) -> str:
+    text = str(value)
+    normalized_tokens = set(re.split(r"[^a-z0-9]+", text.lower().replace("_", " ")))
+    if SENSITIVE_PATH_PATTERN.search(text) or normalized_tokens.intersection(
+        {
+            "apikey",
+            "api",
+            "authorization",
+            "bearer",
+            "cookie",
+            "credential",
+            "password",
+            "private",
+            "secret",
+            "session",
+            "token",
+        }
+    ):
+        return UNSAFE_PATH
+    return safe_diagnostic_text(text)
+
+
 def load_payload(path: Path) -> object:
     if path.suffix == ".jsonl":
         rows = []
@@ -338,8 +360,9 @@ def validate_unique_case_ids(cases: list[dict]) -> None:
             continue
         first_idx = seen.get(value)
         if first_idx is not None:
+            display_value = safe_case_id_for_diagnostic(value)
             raise SystemExit(
-                f"duplicate case_id {value!r} in converted case {idx}; "
+                f"duplicate case_id {display_value!r} in converted case {idx}; "
                 f"first seen in converted case {first_idx}"
             )
         seen[value] = idx

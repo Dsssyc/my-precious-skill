@@ -124,6 +124,55 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertIn("first seen in converted case 1", result.stderr)
             self.assertFalse(output.exists())
 
+    def test_duplicate_case_id_error_sanitizes_sensitive_converted_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.json"
+            output = root / "cases.jsonl"
+            source.write_text(
+                json.dumps(
+                    [
+                        {
+                            "question_id": "cookie=SHOULD_NOT_RENDER",
+                            "question": "Which project adopted layered recall?",
+                            "answer": "The memory skill project.",
+                        },
+                        {
+                            "question_id": "cookie SHOULD_NOT_RENDER",
+                            "question": "Which project adopted source drilldown?",
+                            "answer": "The memory skill project.",
+                        },
+                    ],
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("duplicate case_id", result.stderr)
+            self.assertIn("[unsafe-path]", result.stderr)
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("should_not_render", combined)
+            self.assertFalse(output.exists())
+
     def test_rejects_empty_converted_case_set(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
