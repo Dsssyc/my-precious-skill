@@ -187,6 +187,9 @@ the reference answer. These are retrieval-side checks, not generated-answer
 semantic grading. The aggregate payload and each category payload also include
 denominator counts such as `positive_cases`, `answer_cases`, and `stale_cases`
 so zero-denominator metrics can be distinguished from measured failures.
+Aggregate payloads include `cases_path`, `cases_sha256`, `search_script_path`,
+and `search_script_sha256` so score reports identify the exact case file and
+search implementation used for a run.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:

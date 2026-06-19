@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -202,6 +203,24 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["uncategorized"]["latency_mean_ms"], payload["latency_ms"])
             calls = calls_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(calls, ["memory|permission prompts", "session|permission prompts", "source|permission prompts"])
+
+    def test_layered_recall_benchmark_reports_input_fingerprints(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases_path"], str(cases.resolve()))
+            self.assertEqual(payload["cases_sha256"], hashlib.sha256(cases.read_bytes()).hexdigest())
+            self.assertEqual(payload["search_script_path"], str(search_script.resolve()))
+            self.assertEqual(
+                payload["search_script_sha256"],
+                hashlib.sha256(search_script.read_bytes()).hexdigest(),
+            )
 
     def test_layered_recall_benchmark_reports_reference_answer_reachability(self):
         with tempfile.TemporaryDirectory() as tmpdir:

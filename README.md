@@ -327,6 +327,9 @@ stress tests:
   `latency_max_ms`, and per-category summaries
 - denominator counts such as `positive_cases`, `answer_cases`, `stale_cases`,
   and `privacy_cases` so zero-denominator metrics are visible
+- input provenance fields `cases_path`, `cases_sha256`, `search_script_path`,
+  and `search_script_sha256` so score reports can be reproduced against the
+  same case set and search implementation
 
 Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include

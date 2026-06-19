@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -35,6 +36,14 @@ def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
             except json.JSONDecodeError as exc:
                 raise SystemExit(f"invalid JSON at {path}:{line_no}: {exc}") from exc
             yield line_no, value
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -799,10 +808,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
-    cases = load_cases(Path(args.cases).expanduser().resolve())
+    cases_path = Path(args.cases).expanduser().resolve()
+    cases = load_cases(cases_path)
     search_script = Path(args.search_script).expanduser().resolve()
 
     payload, details = score_cases(repo, cases, search_script)
+    payload["cases_path"] = str(cases_path)
+    payload["cases_sha256"] = file_sha256(cases_path)
+    payload["search_script_path"] = str(search_script)
+    payload["search_script_sha256"] = file_sha256(search_script)
     print(json.dumps(payload, sort_keys=True), flush=True)
     if args.details_jsonl:
         write_details_jsonl(Path(args.details_jsonl).expanduser().resolve(), details)
