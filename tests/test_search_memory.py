@@ -1140,6 +1140,57 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("skipped invalid JSON", result.stderr)
         self.assertNotIn("memories.jsonl", result.stderr)
 
+    def test_search_memory_sanitizes_invalid_json_warning_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/warning-path"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Warning Path\n\nwarning path token appears here.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/cookie=SHOULD_NOT_RENDER.jsonl").write_text(
+                "{invalid json}\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-17",
+                        "project": "agent-memory",
+                        "title": "Warning path result",
+                        "summary": "warning path token appears in a valid session index.",
+                        "summary_path": "sessions/2026/06/17/warning-path/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "warning path token",
+                    "--repo",
+                    str(repo),
+                    "--legacy-sessions",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("warning: skipped invalid JSON at [unsafe-field]:1", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+        self.assertNotIn("cookie=", result.stderr)
+        self.assertNotIn(str(repo.parent), result.stderr)
+
     def test_search_memory_does_not_return_index_paths_outside_archive(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

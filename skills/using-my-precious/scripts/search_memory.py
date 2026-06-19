@@ -179,7 +179,8 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
             try:
                 value = json.loads(line)
             except json.JSONDecodeError as exc:
-                print(f"warning: skipped invalid JSON at {path}:{line_no}: {exc}", file=sys.stderr)
+                display_path = safe_display_path(path.name)
+                print(f"warning: skipped invalid JSON at {display_path}:{line_no}: {exc}", file=sys.stderr)
                 continue
             if isinstance(value, dict):
                 yield value
