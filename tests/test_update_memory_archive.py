@@ -1484,6 +1484,66 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Refusing to write unsafe archive memories path:", output)
             self.assertFalse((outside_memories / "projects.jsonl").exists())
 
+    def test_update_memory_archive_refuses_symlinked_memory_node_file_write_outside_archive(self):
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            outside_memory_file = root / "outside-global.jsonl"
+            source_dir.mkdir()
+            project_path.mkdir()
+            outside_memory_file.write_text("unchanged\n", encoding="utf-8")
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            (memory_repo / "memories").mkdir()
+            (memory_repo / "memories" / "global.jsonl").symlink_to(outside_memory_file)
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "role": "user",
+                        "content": "Please remember: avoid writing generated memory files through symlinks.",
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "role": "assistant",
+                        "content": "Decision: generated memory node files must stay inside the archive.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to write unsafe archive memory node file path:", output)
+            self.assertEqual(outside_memory_file.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_update_memory_archive_refuses_symlinked_daily_write_outside_archive(self):
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
 

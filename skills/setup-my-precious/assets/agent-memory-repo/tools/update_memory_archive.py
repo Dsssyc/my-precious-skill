@@ -2331,12 +2331,19 @@ def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
 
     for layer, file_name in MEMORY_LAYER_FILES.items():
         lines = [json.dumps(node, sort_keys=True) for node in by_layer[layer]]
-        (memories_dir / file_name).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        write_safe_archive_text(
+            memory_repo,
+            memories_dir / file_name,
+            "\n".join(lines) + ("\n" if lines else ""),
+            "memory node file",
+        )
 
     explicit_lines = [json.dumps(node, sort_keys=True) for node in explicit_nodes]
-    (memories_dir / "explicit.jsonl").write_text(
+    write_safe_archive_text(
+        memory_repo,
+        memories_dir / "explicit.jsonl",
         "\n".join(explicit_lines) + ("\n" if explicit_lines else ""),
-        encoding="utf-8",
+        "memory node file",
     )
     return nodes
 
