@@ -323,6 +323,9 @@ stress tests:
 - `memory_explainability`, with `memory_explainability_cases`, to check that
   ranked expected-memory hits are backed by high-signal `why:` reasons instead
   of only broad or low-signal matches
+- `layer_calibration`, with `layer_calibration_cases`, for cases that require
+  the expected memory to be recalled from a specific `global`, `domain`, or
+  `project` layer
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`
@@ -345,7 +348,7 @@ Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include
 `case_id`, `category`, `source_benchmark`, `reference_answer`,
 `required_evidence_paths`, `expected_not_memory_id`, `stale_memory_id`,
-`temporal_scope`, and
+`temporal_scope`, `expected_layer`, and
 `forbidden_output_patterns`.
 `forbidden_output_patterns` entries are Python regular expressions matched
 against combined memory, session, and source output.

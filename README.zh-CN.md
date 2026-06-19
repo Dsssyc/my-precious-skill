@@ -316,6 +316,8 @@ python benchmarks/layered_recall_benchmark.py \
   `memory_micro_precision_at_5`
 - `memory_explainability` 和 `memory_explainability_cases`，用于检查排到前面的
   expected memory 是否有高信号 `why:` 原因，而不是只靠宽泛或低信号匹配
+- `layer_calibration` 和 `layer_calibration_cases`，用于检查声明了
+  `expected_layer` 的 case 是否从指定的 `global`、`domain` 或 `project` 层召回
 - rank 分布字段：`memory_ranked_cases`、`memory_rank_missing_cases`、
   `memory_rank_mean`、`memory_rank_median` 和 `memory_rank_histogram`
 - `session_drilldown_at_5`、`source_reachability` 和
@@ -332,7 +334,7 @@ python benchmarks/layered_recall_benchmark.py \
 `expected_summary_path` 和 `expected_source_anchor`。可选字段包括
 `case_id`、`category`、`source_benchmark`、`reference_answer`、
 `required_evidence_paths`、`expected_not_memory_id`、`stale_memory_id`、
-`temporal_scope` 和 `forbidden_output_patterns`。
+`temporal_scope`、`expected_layer` 和 `forbidden_output_patterns`。
 `forbidden_output_patterns` 的每一项都是 Python 正则表达式，会匹配合并后的
 memory、session 和 source 输出。
 拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。

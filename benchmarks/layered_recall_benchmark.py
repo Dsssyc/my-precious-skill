@@ -133,6 +133,9 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
         raise SystemExit(f"{case_location(path, line_no)}: benchmark case field must be boolean: expected_abstain")
     for key in ("case_id", "source_benchmark"):
         optional_case_text_only(case, key, path, line_no)
+    expected_layer = optional_case_text_only(case, "expected_layer", path, line_no)
+    if expected_layer and expected_layer not in {"global", "domain", "project"}:
+        raise SystemExit(f"{case_location(path, line_no)}: expected_layer must be global, domain, or project")
     for key in (
         "category",
         "expected_not_memory_id",
@@ -235,6 +238,8 @@ def new_totals() -> Totals:
         "memory_precision_at_5": 0.0,
         "memory_explainability_cases": 0,
         "memory_explainability_hits": 0,
+        "layer_cases": 0,
+        "layer_hits": 0,
         "memory_result_count_at_5": 0,
         "memory_relevant_count_at_5": 0,
         "session_cases": 0,
@@ -332,6 +337,8 @@ def finalize_totals(totals: Totals) -> dict:
             totals["memory_explainability_hits"],
             totals["memory_explainability_cases"],
         ),
+        "layer_calibration_cases": int(totals["layer_cases"]),
+        "layer_calibration": ratio(totals["layer_hits"], totals["layer_cases"]),
         "memory_ranked_cases": ranked_cases,
         "memory_rank_missing_cases": missing_rank_cases,
         "memory_rank_mean": ratio(totals["memory_rank_sum"], ranked_cases),
@@ -377,6 +384,9 @@ def add_result(totals: Totals, result: dict) -> None:
         if result["memory_rank"] is not None:
             totals["memory_explainability_cases"] += 1
             totals["memory_explainability_hits"] += int(result["memory_explainability_hit"])
+        if result["layer_expected"]:
+            totals["layer_cases"] += 1
+            totals["layer_hits"] += int(result["layer_calibration_hit"])
         totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
         totals["memory_relevant_count_at_5"] += result["memory_relevant_count_at_5"]
         totals["session_cases"] += 1
@@ -630,6 +640,14 @@ def block_title_path(block: str) -> str:
     return candidate
 
 
+def block_memory_layer(block: str) -> str:
+    first_line = block.splitlines()[0] if block.splitlines() else ""
+    match = re.match(r"^\d+\.\s+\[([^\]]+)\]", first_line)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
 def block_result_paths(blocks: list[str]) -> list[str]:
     title_paths = [path for block in blocks if (path := block_title_path(block))]
     drill_paths = block_section_values(blocks, "drill")
@@ -721,6 +739,23 @@ def memory_explainability_hit(
     return False
 
 
+def layer_calibration_hit(
+    blocks: list[str],
+    expected_memory_id: str,
+    expected_summary_path: str,
+    record: dict | None,
+    expected_layer: str,
+) -> bool:
+    if not expected_layer:
+        return False
+    for block in blocks:
+        if not is_memory_block(block) or not block_has_drill_path(block, expected_summary_path):
+            continue
+        if block_contains_memory(block, expected_memory_id, record):
+            return block_memory_layer(block) == expected_layer
+    return False
+
+
 def blocks_contain_memory_ids(blocks: list[str], memory_ids: list[str], records: dict[str, dict]) -> bool:
     for memory_id in memory_ids:
         record = records.get(memory_id)
@@ -801,6 +836,8 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("memory_recall_at_5")
         if memory_rank is not None and not result["memory_explainability_hit"]:
             checks.append("memory_explainability")
+        if result["layer_expected"] and not result["layer_calibration_hit"]:
+            checks.append("layer_calibration")
         if not result["session_drilldown_hit"]:
             checks.append("session_drilldown_at_5")
         if result["source_expected"] and not result["source_reachability_hit"]:
@@ -840,6 +877,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "category": safe_category_name(data),
         "source_benchmark": safe_result_identifier(optional_case_text(data, "source_benchmark")),
         "temporal_scope": safe_result_identifier(optional_case_text(data, "temporal_scope")),
+        "expected_layer": safe_result_identifier(optional_case_text(data, "expected_layer")),
         "expected_memory_id": safe_result_identifier(optional_case_text(data, "expected_memory_id")),
         "expected_not_memory_ids": safe_result_identifiers(case_texts(data, "expected_not_memory_id")),
         "stale_memory_ids": safe_result_identifiers(case_texts(data, "stale_memory_id")),
@@ -855,6 +893,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_ndcg_at_5": round(result["memory_ndcg_at_5"], 6),
         "memory_precision_at_5": round(result["memory_precision_at_5"], 6),
         "memory_explainability_hit": result["memory_explainability_hit"],
+        "layer_calibration_hit": result["layer_calibration_hit"],
         "memory_result_count_at_5": result["memory_result_count_at_5"],
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
@@ -906,6 +945,7 @@ def score_case(
     expected_source_anchor = optional_case_text(data, "expected_source_anchor")
     required_evidence_paths = case_texts(data, "required_evidence_paths")
     reference_answers = case_texts(data, "reference_answer")
+    expected_layer = optional_case_text(data, "expected_layer")
     negative_memory_ids = case_texts(data, "expected_not_memory_id")
     stale_memory_ids = case_texts(data, "stale_memory_id")
     forbidden_patterns = case_texts(data, "forbidden_output_patterns")
@@ -920,6 +960,7 @@ def score_case(
     answer_f1 = 0.0
     memory_ndcg = 0.0
     explainability_hit = False
+    layer_hit = False
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
@@ -931,6 +972,13 @@ def score_case(
                 expected_memory_id,
                 expected_summary_path,
                 expected_record,
+            )
+            layer_hit = layer_calibration_hit(
+                memory_blocks,
+                expected_memory_id,
+                expected_summary_path,
+                expected_record,
+                expected_layer,
             )
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
         if expected_source_anchor:
@@ -954,6 +1002,8 @@ def score_case(
         "memory_ndcg_at_5": memory_ndcg,
         "memory_precision_at_5": memory_precision.score,
         "memory_explainability_hit": explainability_hit,
+        "layer_expected": bool(is_positive and expected_layer),
+        "layer_calibration_hit": layer_hit,
         "memory_result_count_at_5": memory_precision.result_count,
         "memory_relevant_count_at_5": memory_precision.relevant_count,
         "session_drilldown_hit": session_hit,
@@ -1146,6 +1196,7 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "memory_ndcg_at_5": detail.get("memory_ndcg_at_5"),
                 "memory_precision_at_5": detail.get("memory_precision_at_5"),
                 "memory_explainability_hit": detail.get("memory_explainability_hit"),
+                "layer_calibration_hit": detail.get("layer_calibration_hit"),
                 "memory_rank": detail.get("memory_rank"),
                 "memory_recall_at_1": detail.get("memory_recall_at_1"),
                 "memory_recall_at_5": detail.get("memory_recall_at_5"),

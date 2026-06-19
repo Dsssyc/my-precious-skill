@@ -183,6 +183,7 @@ are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 `memory_ndcg_at_5`, `memory_ranked_cases`, `memory_rank_missing_cases`,
 `memory_rank_mean`, `memory_rank_median`, `memory_rank_histogram`,
 `memory_explainability_cases`, `memory_explainability`,
+`layer_calibration_cases`, `layer_calibration`,
 `session_drilldown_at_5`, `evidence_reachability`, `source_reachability`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
@@ -197,6 +198,8 @@ returned-memory and relevant-memory hits. `memory_explainability` measures
 whether ranked expected-memory hits carry high-signal `why:` reasons such as
 structured field matches, phrase matches, important token coverage, or project
 context, while rejecting low-signal-only or broad-field-only explanations.
+`layer_calibration` measures whether cases that declare `expected_layer` return
+the expected memory from the requested `global`, `domain`, or `project` layer.
 Token F1 uses the best contiguous output-token window against the reference
 answer. `memory_ndcg_at_5` is a rank-sensitive top-5 metric: a rank-1 expected
 memory scores 1.0, lower ranks decay by the standard discounted-gain curve, and

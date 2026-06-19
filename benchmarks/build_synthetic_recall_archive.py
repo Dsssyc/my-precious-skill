@@ -124,7 +124,13 @@ def validate_case_archive_paths(case: dict) -> None:
     archive_relative_path_text(source_path, "expected_source_anchor")
 
 
-def memory_layer(category: str) -> str:
+def memory_layer(case: dict) -> str:
+    expected_layer = str(case.get("expected_layer") or "").strip()
+    if expected_layer:
+        if expected_layer not in {"global", "domain", "project"}:
+            raise SystemExit("benchmark case expected_layer must be global, domain, or project")
+        return expected_layer
+    category = str(case.get("category") or "uncategorized")
     if category == "scope_calibration":
         return "domain"
     if category == "cross_project_recall":
@@ -148,7 +154,7 @@ def build_memory_record(case: dict) -> dict:
     text_parts.append(f"{query} {query} {query}.")
     return {
         "memory_id": memory_id,
-        "layer": memory_layer(category),
+        "layer": memory_layer(case),
         "scope": "synthetic",
         "topic": category.replace("_", "-"),
         "text": " ".join(text_parts),
@@ -179,7 +185,7 @@ def build_superseded_distractor_records(case: dict) -> list[dict]:
         records.append(
             {
                 "memory_id": stale_id,
-                "layer": memory_layer(category),
+                "layer": memory_layer(case),
                 "scope": "synthetic",
                 "topic": category.replace("_", "-"),
                 "text": f"Synthetic superseded distractor target: {stale_id}. {query} {query} {query}.",

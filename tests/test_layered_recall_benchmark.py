@@ -67,6 +67,19 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         self.assertEqual(len(set(case_ids)), len(case_ids))
         self.assertEqual(case_ids[0], "synthetic:info_permission_prompt")
         self.assertEqual(case_ids[-1], "synthetic:scope_domain_benchmark")
+        expected_layers = {
+            row["case_id"]: row.get("expected_layer")
+            for row in rows
+            if row.get("category") == "scope_calibration"
+        }
+        self.assertEqual(
+            expected_layers,
+            {
+                "synthetic:scope_global_permission": "global",
+                "synthetic:scope_project_my_precious": "project",
+                "synthetic:scope_domain_benchmark": "domain",
+            },
+        )
 
     def test_packaged_synthetic_cases_produce_quantitative_scores(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -103,6 +116,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_ndcg_at_5"], 1.0)
             self.assertEqual(payload["memory_explainability_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_explainability"], 1.0)
+            self.assertEqual(payload["layer_calibration_cases"], 3)
+            self.assertEqual(payload["layer_calibration"], 1.0)
             self.assertEqual(payload["memory_ranked_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_rank_missing_cases"], 0)
             self.assertEqual(payload["memory_rank_mean"], 1.0)
@@ -145,6 +160,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
             self.assertEqual(lower_gates["memory_explainability"], 1.0)
             self.assertEqual(lower_gates["memory_explainability_cases"], 27)
+            self.assertEqual(lower_gates["layer_calibration"], 1.0)
+            self.assertEqual(lower_gates["layer_calibration_cases"], 3)
             self.assertEqual(lower_gates["memory_ranked_cases"], 27)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
@@ -192,6 +209,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
             self.assertGreaterEqual(payload["memory_explainability"], lower_gates["memory_explainability"])
             self.assertGreaterEqual(payload["memory_explainability_cases"], lower_gates["memory_explainability_cases"])
+            self.assertGreaterEqual(payload["layer_calibration"], lower_gates["layer_calibration"])
+            self.assertGreaterEqual(payload["layer_calibration_cases"], lower_gates["layer_calibration_cases"])
             self.assertGreaterEqual(payload["memory_ranked_cases"], lower_gates["memory_ranked_cases"])
             self.assertLessEqual(payload["memory_rank_missing_cases"], upper_gates["memory_rank_missing_cases"])
             self.assertLessEqual(payload["memory_rank_mean"], upper_gates["memory_rank_mean"])
@@ -251,6 +270,36 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
+
+    def test_synthetic_builder_uses_expected_layers_for_scope_cases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            records = {
+                record["memory_id"]: record
+                for record in (
+                    json.loads(line)
+                    for line in (repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            }
+            self.assertEqual(records["syn_scope_global_permission"]["layer"], "global")
+            self.assertEqual(records["syn_scope_project_my_precious"]["layer"], "project")
+            self.assertEqual(records["syn_scope_domain_benchmark"]["layer"], "domain")
 
     def test_synthetic_builder_missing_cases_file_reports_controlled_sanitized_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -747,6 +796,33 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertFalse(detail["memory_explainability_hit"])
             self.assertIn("memory_explainability", detail["failed_checks"])
 
+    def test_layered_recall_benchmark_flags_wrong_memory_layer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "expected_layer": "project"})
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["layer_calibration_cases"], 1)
+            self.assertEqual(payload["layer_calibration"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["expected_layer"], "project")
+            self.assertFalse(detail["layer_calibration_hit"])
+            self.assertIn("layer_calibration", detail["failed_checks"])
+
     def test_layered_recall_benchmark_details_include_safe_case_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1084,6 +1160,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "memory_ndcg_at_5": 0.0,
                         "memory_precision_at_5": 0.0,
                         "memory_explainability_hit": False,
+                        "layer_calibration_hit": False,
                         "memory_rank": None,
                         "memory_recall_at_1": False,
                         "memory_recall_at_5": False,
@@ -1814,6 +1891,19 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn(f"{cases}:1", result.stderr)
             self.assertIn("source_benchmark", result.stderr)
             self.assertIn("must be string", result.stderr)
+
+    def test_invalid_expected_layer_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "expected_layer": "workspace"})
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"{cases}:1", result.stderr)
+            self.assertIn("expected_layer must be global, domain, or project", result.stderr)
 
     def test_duplicate_case_id_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
