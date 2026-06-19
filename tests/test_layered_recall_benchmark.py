@@ -158,6 +158,71 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             calls = calls_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(calls, ["memory|permission prompts", "session|permission prompts", "source|permission prompts"])
 
+    def test_layered_recall_benchmark_reports_reference_answer_reachability(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "reference_answer": MEMORY_TEXT})
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["answer_reachability"], 1.0)
+            self.assertEqual(payload["categories"]["uncategorized"]["answer_reachability"], 1.0)
+            rows = [
+                json.loads(line)
+                for line in details.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(rows[0]["answer_expected"])
+            self.assertTrue(rows[0]["answer_reachability_hit"])
+
+    def test_synthetic_builder_includes_reference_answer_for_reachability(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "reference_answer": "Layered recall adopted answer reachability scoring.",
+                    "required_evidence_paths": [SUMMARY_PATH.replace("/summary.md", "/evidence.md")],
+                },
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            memory_index = (repo / "index/memories.jsonl").read_text(encoding="utf-8")
+            evidence = (repo / SUMMARY_PATH.replace("/summary.md", "/evidence.md")).read_text(encoding="utf-8")
+            self.assertIn("Layered recall adopted answer reachability scoring.", memory_index)
+            self.assertIn("Layered recall adopted answer reachability scoring.", evidence)
+
+            result = self.run_benchmark(repo, cases, SEARCH_SCRIPT)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["answer_reachability"], 1.0)
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+
     def test_layered_recall_benchmark_writes_case_details_jsonl(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

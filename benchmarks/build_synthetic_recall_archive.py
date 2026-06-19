@@ -56,12 +56,18 @@ def build_memory_record(case: dict) -> dict:
         evidence_paths = [summary_path.replace("/summary.md", "/evidence.md")]
     query = str(case["query"])
     memory_id = str(case["expected_memory_id"])
+    reference_answers = text_list(case.get("reference_answer"))
+    answer_text = " ".join(f"Reference answer: {answer}." for answer in reference_answers)
+    text_parts = [f"Synthetic answer target: {memory_id}."]
+    if answer_text:
+        text_parts.append(answer_text)
+    text_parts.append(f"{query} {query} {query}.")
     return {
         "memory_id": memory_id,
         "layer": memory_layer(category),
         "scope": "synthetic",
         "topic": category.replace("_", "-"),
-        "text": f"Synthetic answer target: {memory_id}. {query} {query} {query}.",
+        "text": " ".join(text_parts),
         "rationale": f"Exact synthetic benchmark query match for: {query}.",
         "source": "synthetic",
         "confidence": "high",
@@ -123,18 +129,25 @@ def write_text(path: Path, text: str) -> None:
 
 def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
     summary_path = repo / str(case["expected_summary_path"])
+    reference_answers = text_list(case.get("reference_answer"))
+    answer_section = ""
+    if reference_answers:
+        answer_section = "Reference answers:\n" + "".join(f"- {answer}\n" for answer in reference_answers) + "\n"
     write_text(
         summary_path,
         "# Synthetic Layered Recall Session\n\n"
         f"Query: {case['query']}\n\n"
         f"Expected memory: {case['expected_memory_id']}\n\n"
+        f"{answer_section}"
         "This file is generated synthetic benchmark data only.\n",
     )
     for evidence_path in text_list(case.get("required_evidence_paths")):
+        answer_evidence = " ".join(f"Reference answer: {answer}." for answer in reference_answers)
         write_text(
             repo / evidence_path,
             "# Synthetic Evidence\n\n"
-            f"syn_ev_001: Evidence supporting {case['expected_memory_id']} for query {case['query']}.\n",
+            f"syn_ev_001: Evidence supporting {case['expected_memory_id']} for query {case['query']}. "
+            f"{answer_evidence}\n",
         )
     for raw_ref in record["raw_refs"]:
         raw_path = repo / raw_ref["path"]

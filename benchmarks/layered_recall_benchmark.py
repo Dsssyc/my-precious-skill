@@ -59,6 +59,7 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
     for key in (
         "category",
         "expected_not_memory_id",
+        "reference_answer",
         "stale_memory_id",
         "temporal_scope",
     ):
@@ -134,6 +135,8 @@ def new_totals() -> dict[str, float]:
         "source_hits": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
+        "answer_cases": 0,
+        "answer_hits": 0,
         "abstain_cases": 0,
         "abstain_hits": 0,
         "negative_cases": 0,
@@ -163,6 +166,7 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
+        "answer_reachability": ratio(totals["answer_hits"], totals["answer_cases"]),
         "abstention_accuracy": ratio(totals["abstain_hits"], totals["abstain_cases"]),
         "negative_memory_suppression": ratio(totals["negative_hits"], totals["negative_cases"]),
         "stale_memory_suppression": ratio(totals["stale_hits"], totals["stale_cases"]),
@@ -189,6 +193,8 @@ def add_result(totals: dict[str, float], result: dict) -> None:
         totals["source_hits"] += int(result["source_reachability_hit"])
         totals["evidence_cases"] += int(result["evidence_expected"])
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
+        totals["answer_cases"] += int(result["answer_expected"])
+        totals["answer_hits"] += int(result["answer_reachability_hit"])
     if result["expected_abstain"]:
         totals["abstain_cases"] += 1
         totals["abstain_hits"] += int(result["abstention_hit"])
@@ -360,6 +366,12 @@ def evidence_reachability_hit(blocks: list[str], required_paths: list[str]) -> b
     return all(any(required_path in block for block in blocks) for required_path in required_paths)
 
 
+def answer_reachability_hit(blocks: list[str], reference_answers: list[str]) -> bool:
+    if not reference_answers:
+        return False
+    return all(any(answer in block for block in blocks) for answer in reference_answers)
+
+
 def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> bool:
     if not forbidden_patterns:
         return True
@@ -387,6 +399,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "session_drilldown_hit": result["session_drilldown_hit"],
         "source_reachability_hit": result["source_reachability_hit"],
         "evidence_reachability_hit": result["evidence_reachability_hit"],
+        "answer_expected": result["answer_expected"],
+        "answer_reachability_hit": result["answer_reachability_hit"],
         "abstention_hit": result["abstention_hit"],
         "negative_memory_suppression_hit": result["negative_memory_suppression_hit"],
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
@@ -415,6 +429,7 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     expected_summary_path = optional_case_text(data, "expected_summary_path")
     expected_source_anchor = optional_case_text(data, "expected_source_anchor")
     required_evidence_paths = case_texts(data, "required_evidence_paths")
+    reference_answers = case_texts(data, "reference_answer")
     negative_memory_ids = case_texts(data, "expected_not_memory_id")
     stale_memory_ids = case_texts(data, "stale_memory_id")
     forbidden_patterns = case_texts(data, "forbidden_output_patterns")
@@ -424,6 +439,7 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     session_hit = False
     source_hit = False
     evidence_hit = False
+    answer_hit = False
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
@@ -431,6 +447,8 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
             source_hit = source_reachability_hit(source_blocks, expected_summary_path, expected_source_anchor)
         if required_evidence_paths:
             evidence_hit = evidence_reachability_hit(source_blocks + memory_blocks, required_evidence_paths)
+        if reference_answers:
+            answer_hit = answer_reachability_hit(memory_blocks + session_blocks + source_blocks, reference_answers)
 
     no_result_hits = no_hits(memory_blocks, session_blocks, source_blocks)
     negative_suppressed = not blocks_contain_memory_ids(memory_blocks, negative_memory_ids, memory_records)
@@ -446,6 +464,8 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
         "source_reachability_hit": source_hit,
         "evidence_expected": bool(is_positive and required_evidence_paths),
         "evidence_reachability_hit": evidence_hit,
+        "answer_expected": bool(is_positive and reference_answers),
+        "answer_reachability_hit": answer_hit,
         "abstention_hit": bool(expected_abstain and no_result_hits),
         "negative_expected": bool(negative_memory_ids),
         "negative_memory_suppression_hit": negative_suppressed,

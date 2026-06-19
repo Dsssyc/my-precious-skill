@@ -174,9 +174,12 @@ store verbatim transcript embeddings.
 Positive cases check whether the correct high-level memory appears at rank 1 or
 within the top 5, whether the memory can drill down to the supporting session,
 whether required evidence paths are reachable, and whether source anchors are
-available at source depth. These metrics are reported as `memory_recall_at_1`,
-`memory_recall_at_5`, `memory_mrr`, `session_drilldown_at_5`,
-`evidence_reachability`, and `source_reachability`.
+available at source depth. Cases with `reference_answer` also check whether the
+exact answer snippet is reachable in memory, session, or source output. These
+metrics are reported as `memory_recall_at_1`, `memory_recall_at_5`,
+`memory_mrr`, `session_drilldown_at_5`, `evidence_reachability`,
+`source_reachability`, and `answer_reachability`. Answer reachability is exact
+text reachability, not generated-answer semantic grading.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:
@@ -198,9 +201,9 @@ indexes.
 Benchmark case files are JSONL. Positive cases require `query`,
 `expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
 Optional fields include `category`, `required_evidence_paths`,
-`expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
-`forbidden_output_patterns`. Abstention cases use `expected_abstain: true` and
-do not require positive expected fields.
+`reference_answer`, `expected_not_memory_id`, `stale_memory_id`,
+`temporal_scope`, and `forbidden_output_patterns`. Abstention cases use
+`expected_abstain: true` and do not require positive expected fields.
 
 The benchmark can also write per-case details as JSONL and enforce top-level
 numeric metric thresholds with `--fail-under`. Threshold failures keep the

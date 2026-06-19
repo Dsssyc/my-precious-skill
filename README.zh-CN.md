@@ -313,15 +313,18 @@ python benchmarks/layered_recall_benchmark.py \
 - `memory_recall_at_1`、`memory_recall_at_5` 和 `memory_mrr`
 - `session_drilldown_at_5`、`source_reachability` 和
   `evidence_reachability`
+- `answer_reachability`，用于检查召回的 memory/session/source 输出里是否出现
+  精确的 `reference_answer` 片段
 - `abstention_accuracy`、`negative_memory_suppression`、
   `stale_memory_suppression` 和 `update_consistency`
 - `privacy_boundary_pass_rate`、总 `latency_ms` 和按 `category` 分组的汇总
 
 正向 JSONL case 必须包含 `query`、`expected_memory_id`、
 `expected_summary_path` 和 `expected_source_anchor`。可选字段包括
-`category`、`required_evidence_paths`、`expected_not_memory_id`、
+`category`、`reference_answer`、`required_evidence_paths`、`expected_not_memory_id`、
 `stale_memory_id`、`temporal_scope` 和 `forbidden_output_patterns`。
 拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。
+`answer_reachability` 检查的是精确 reference answer 文本可达性，不是生成答案的语义评分。
 
 可以把仓库外本地下载的公开 benchmark 文件转换成这套 case schema，而不用提交原始
 数据：

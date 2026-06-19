@@ -318,16 +318,19 @@ stress tests:
 - `memory_recall_at_1`, `memory_recall_at_5`, and `memory_mrr`
 - `session_drilldown_at_5`, `source_reachability`, and
   `evidence_reachability`
+- `answer_reachability` for exact `reference_answer` snippets that should be
+  present in recalled memory/session/source output
 - `abstention_accuracy`, `negative_memory_suppression`,
   `stale_memory_suppression`, and `update_consistency`
 - `privacy_boundary_pass_rate`, total `latency_ms`, and per-category summaries
 
 Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include
-`category`, `required_evidence_paths`, `expected_not_memory_id`,
+`category`, `reference_answer`, `required_evidence_paths`, `expected_not_memory_id`,
 `stale_memory_id`, `temporal_scope`, and `forbidden_output_patterns`.
 Abstention cases set `expected_abstain` to `true` and do not need positive
-expected fields.
+expected fields. `answer_reachability` checks exact reference-answer text
+reachability; it does not grade generated-answer semantics.
 
 Locally downloaded public benchmark files can be converted into this case
 schema without committing the source data:
