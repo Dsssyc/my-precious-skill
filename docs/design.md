@@ -179,7 +179,8 @@ exact answer snippet is reachable in memory, session, or source output. These
 metrics are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 `memory_mrr`, `session_drilldown_at_5`, `evidence_reachability`,
 `source_reachability`, `answer_reachability`,
-`answer_normalized_reachability`, and `answer_token_f1`. Exact answer
+`answer_normalized_reachability`, `answer_token_f1`, `latency_ms`,
+`latency_mean_ms`, and `latency_max_ms`. Exact answer
 reachability is strict text reachability. Normalized reachability ignores case
 and punctuation. Token F1 uses the best contiguous output-token window against
 the reference answer. These are retrieval-side checks, not generated-answer

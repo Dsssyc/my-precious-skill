@@ -323,7 +323,8 @@ stress tests:
   recalled memory/session/source output
 - `abstention_accuracy`, `negative_memory_suppression`,
   `stale_memory_suppression`, and `update_consistency`
-- `privacy_boundary_pass_rate`, total `latency_ms`, and per-category summaries
+- `privacy_boundary_pass_rate`, total `latency_ms`, `latency_mean_ms`,
+  `latency_max_ms`, and per-category summaries
 - denominator counts such as `positive_cases`, `answer_cases`, `stale_cases`,
   and `privacy_cases` so zero-denominator metrics are visible
 
