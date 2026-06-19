@@ -710,7 +710,7 @@ def case_detail(case: Case, result: dict) -> dict:
     memory_rank = result["memory_rank"]
     checks = failed_checks(result)
     return {
-        "case_path": str(case.path),
+        "case_path": safe_diagnostic_path(case.path),
         "case_line": case.line_no,
         "case_id": safe_result_identifier(optional_case_text(data, "case_id")),
         "query": query,

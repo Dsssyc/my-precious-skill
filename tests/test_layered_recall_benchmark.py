@@ -983,6 +983,31 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", combined)
             self.assertNotIn("cookie=", combined)
 
+    def test_layered_recall_benchmark_details_jsonl_sanitizes_sensitive_case_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            sensitive_cases_root = root / "cases-cookie=SHOULD_NOT_RENDER"
+            sensitive_cases_root.mkdir()
+            cases = self.write_cases(sensitive_cases_root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = json.loads(details.read_text(encoding="utf-8").strip())
+            combined = result.stdout + result.stderr + details.read_text(encoding="utf-8")
+            self.assertEqual(payload["cases_path"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["case_path"], "[unsafe-result-identifier]")
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+
     def test_layered_recall_benchmark_writes_empty_threshold_failures_json_when_gates_pass(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
