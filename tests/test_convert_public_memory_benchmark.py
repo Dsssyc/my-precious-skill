@@ -245,6 +245,52 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[0]["expected_source_anchor"], "records/external/locomo.json#sample:conv-A:qa:1")
             self.assertEqual(rows[0]["reference_evidence"], ["session-1", "session-2"])
 
+    def test_rejects_non_string_locomo_evidence_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "locomo.json"
+            output = root / "cases.jsonl"
+            source.write_text(
+                json.dumps(
+                    [
+                        {
+                            "sample_id": "conv-A",
+                            "qa": [
+                                {
+                                    "question": "When did the preference change?",
+                                    "answer": "After the second session.",
+                                    "category": "temporal",
+                                    "evidence": ["session-1", 42],
+                                }
+                            ],
+                        }
+                    ],
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "locomo",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("LoCoMo sample 1 qa 1 evidence[1] must be a non-empty string", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_converts_memora_forgetting_checks_to_stale_memory_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

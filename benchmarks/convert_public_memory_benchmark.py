@@ -82,11 +82,16 @@ def first_text(record: dict, *keys: str) -> str:
     return ""
 
 
-def text_list(value: object) -> list[str]:
+def text_list(value: object, *, label: str) -> list[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
+        out = []
+        for idx, item in enumerate(value):
+            if not isinstance(item, str) or not item.strip():
+                raise SystemExit(f"{label}[{idx}] must be a non-empty string")
+            out.append(item.strip())
+        return out
     return []
 
 
@@ -196,7 +201,10 @@ def convert_locomo(payload: object) -> list[dict]:
                     f"sample:{sample_id}:qa:{qa_idx}",
                     {
                         "reference_answer": first_text(qa, "answer", "reference_answer", "final_answer"),
-                        "reference_evidence": text_list(qa.get("evidence") or qa.get("evidences")),
+                        "reference_evidence": text_list(
+                            qa.get("evidence") or qa.get("evidences"),
+                            label=f"LoCoMo sample {sample_idx} qa {qa_idx} evidence",
+                        ),
                         "locomo_sample_id": sample_id,
                         "locomo_qa_index": qa_idx,
                     },
