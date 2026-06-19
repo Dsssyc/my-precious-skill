@@ -189,6 +189,12 @@ Memora, and long-context retrieval stress tests:
 - `privacy_boundary_pass_rate`: configured forbidden output patterns, such as
   raw transcript or secret-like snippets, are not printed.
 
+Search treats memory records with a non-empty `superseded_by` field as
+inactive. The synthetic archive builder can add superseded distractor records
+with strong query overlap so `stale_memory_suppression` and
+`update_consistency` exercise that behavior instead of only testing clean
+indexes.
+
 Benchmark case files are JSONL. Positive cases require `query`,
 `expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
 Optional fields include `category`, `required_evidence_paths`,

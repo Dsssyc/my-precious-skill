@@ -605,6 +605,8 @@ def collect_memory_hits(
         layer = str(record.get("layer") or "")
         if scope != "all" and layer != scope:
             continue
+        if record.get("superseded_by"):
+            continue
         score, matched, reasons = score_index_record(query_tokens, record, context_terms)
         if not score:
             continue

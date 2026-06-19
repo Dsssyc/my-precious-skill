@@ -95,6 +95,52 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
             self.assertEqual(payload["categories"]["privacy_boundary"]["privacy_boundary_pass_rate"], 1.0)
 
+    def test_synthetic_builder_can_add_superseded_stale_distractors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                    "--include-superseded-distractors",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            records = [
+                json.loads(line)
+                for line in (repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            stale_ids = {
+                row["stale_memory_id"]
+                for row in (
+                    json.loads(line)
+                    for line in SYNTHETIC_CASES.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+                if row.get("stale_memory_id")
+            }
+            stale_records = [record for record in records if record.get("memory_id") in stale_ids]
+            self.assertGreaterEqual(len(stale_records), 1)
+            self.assertTrue(all(record.get("superseded_by") for record in stale_records))
+            self.assertTrue(any("superseded distractor" in record.get("text", "") for record in stale_records))
+
+            result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 30)
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["stale_memory_suppression"], 1.0)
+            self.assertEqual(payload["update_consistency"], 1.0)
+
     def test_layered_recall_benchmark_reports_parsed_block_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

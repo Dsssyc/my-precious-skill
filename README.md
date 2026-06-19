@@ -260,7 +260,8 @@ python ~/repos/agent-memory/tools/search_memory.py "private session archive"
 Search starts with layered memory nodes when `index/memories.jsonl` exists.
 Use depth controls to drill into supporting sessions, evidence, or protected
 source anchors. Reserve `--depth source` for explicit source-reachability
-requests:
+requests. Memory nodes with a non-empty `superseded_by` field are treated as
+inactive and skipped by search.
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
@@ -346,6 +347,16 @@ python benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my-precious-synthetic-archive \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py
+```
+
+To stress stale-memory suppression, add superseded distractor nodes that share
+the same query terms but must not appear in search output:
+
+```bash
+python benchmarks/build_synthetic_recall_archive.py \
+  --repo /tmp/my-precious-synthetic-archive \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
+  --include-superseded-distractors
 ```
 
 Those cases are synthetic templates only. They do not contain private memory

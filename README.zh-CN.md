@@ -256,7 +256,9 @@ python ~/repos/agent-memory/tools/search_memory.py "private session archive"
 
 当 `index/memories.jsonl` 存在时，搜索会先从分层 memory nodes 开始。
 使用 depth 控制继续下钻到支持它的 sessions、evidence 或受保护的 source
-anchors。只有用户明确要求 source reachability 时，才使用 `--depth source`：
+anchors。带有非空 `superseded_by` 字段的 memory node 会被视为非活跃记忆，
+并被搜索跳过。只有用户明确要求 source reachability 时，才使用
+`--depth source`：
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
@@ -339,6 +341,16 @@ python benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my-precious-synthetic-archive \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py
+```
+
+如果要给 stale-memory suppression 增加压力，可以生成共享同一 query term、
+但不允许出现在搜索输出中的 superseded distractor node：
+
+```bash
+python benchmarks/build_synthetic_recall_archive.py \
+  --repo /tmp/my-precious-synthetic-archive \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
+  --include-superseded-distractors
 ```
 
 这些 case 只是合成模板，不包含私有记忆数据，也没有复制公开 benchmark 原始记录。

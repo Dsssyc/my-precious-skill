@@ -61,7 +61,7 @@ def build_memory_record(case: dict) -> dict:
         "layer": memory_layer(category),
         "scope": "synthetic",
         "topic": category.replace("_", "-"),
-        "text": f"{query} {query} {query} Synthetic answer target: {memory_id}.",
+        "text": f"Synthetic answer target: {memory_id}. {query} {query} {query}.",
         "rationale": f"Exact synthetic benchmark query match for: {query}.",
         "source": "synthetic",
         "confidence": "high",
@@ -76,6 +76,44 @@ def build_memory_record(case: dict) -> dict:
         "superseded_by": None,
         "tags": [category, "synthetic-benchmark", str(case.get("source_benchmark") or "synthetic")],
     }
+
+
+def build_superseded_distractor_records(case: dict) -> list[dict]:
+    category = str(case.get("category") or "uncategorized")
+    query = str(case["query"])
+    expected_memory_id = str(case["expected_memory_id"])
+    records = []
+    for stale_id in text_list(case.get("stale_memory_id")):
+        if stale_id == expected_memory_id:
+            continue
+        records.append(
+            {
+                "memory_id": stale_id,
+                "layer": memory_layer(category),
+                "scope": "synthetic",
+                "topic": category.replace("_", "-"),
+                "text": f"Synthetic superseded distractor target: {stale_id}. {query} {query} {query}.",
+                "rationale": f"Superseded synthetic distractor for: {query}.",
+                "source": "synthetic",
+                "confidence": "high",
+                "persistence": "normal",
+                "support_count": 1,
+                "first_seen": "2026-06-18",
+                "last_seen": "2026-06-18",
+                "derived_from": [str(case["expected_summary_path"])],
+                "evidence_refs": [],
+                "raw_refs": [],
+                "supersedes": [],
+                "superseded_by": expected_memory_id,
+                "tags": [
+                    category,
+                    "synthetic-benchmark",
+                    "superseded-distractor",
+                    str(case.get("source_benchmark") or "synthetic"),
+                ],
+            }
+        )
+    return records
 
 
 def write_text(path: Path, text: str) -> None:
@@ -113,7 +151,7 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
         )
 
 
-def write_archive(repo: Path, cases: list[dict]) -> None:
+def write_archive(repo: Path, cases: list[dict], *, include_superseded_distractors: bool = False) -> None:
     (repo / "index").mkdir(parents=True, exist_ok=True)
     (repo / "sessions").mkdir(parents=True, exist_ok=True)
     (repo / "records").mkdir(parents=True, exist_ok=True)
@@ -124,6 +162,8 @@ def write_archive(repo: Path, cases: list[dict]) -> None:
         if not positive_case(case):
             continue
         record = build_memory_record(case)
+        if include_superseded_distractors:
+            records.extend(build_superseded_distractor_records(case))
         records.append(record)
         write_positive_case_files(repo, case, record)
 
@@ -137,11 +177,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="Output synthetic archive path")
     parser.add_argument("--cases", required=True, help="Packaged benchmark JSONL cases")
+    parser.add_argument(
+        "--include-superseded-distractors",
+        action="store_true",
+        help="Add superseded stale memories with strong query matches to stress stale suppression",
+    )
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
     cases = list(iter_jsonl(Path(args.cases).expanduser().resolve()))
-    write_archive(repo, cases)
+    write_archive(repo, cases, include_superseded_distractors=args.include_superseded_distractors)
     print(json.dumps({"repo": str(repo), "cases": len(cases)}, sort_keys=True))
     return 0
 
