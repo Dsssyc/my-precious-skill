@@ -2069,6 +2069,63 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/06/13/c-two/summary.md", first_hit)
         self.assertIn("project-context", first_hit)
 
+    def test_search_memory_project_context_matches_separator_variants(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/13/current").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/other").mkdir(parents=True)
+            (repo / "sessions/2026/06/13/current/summary.md").write_text("# Session: current\n", encoding="utf-8")
+            (repo / "sessions/2026/06/13/other/summary.md").write_text("# Session: other\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "other-project",
+                        "summary": "Layered recall metric threshold threshold threshold threshold.",
+                        "summary_path": "sessions/2026/06/13/other/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-06-13",
+                        "project": "my_precious_skill",
+                        "summary": "Layered recall metric threshold.",
+                        "summary_path": "sessions/2026/06/13/current/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "layered recall metric threshold",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/mememe/my-precious-skill",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("sessions/2026/06/13/current/summary.md", first_hit)
+        self.assertIn("project-context", first_hit)
+
     def test_search_memory_project_context_does_not_promote_context_only_noise(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

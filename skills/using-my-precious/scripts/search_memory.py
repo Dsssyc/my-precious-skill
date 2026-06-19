@@ -306,9 +306,17 @@ def project_context_match(record: dict, context_terms: list[str]) -> bool:
                 return True
             if value_path_name and value_path_name == term_name:
                 return True
+            value_key = canonical_project_key(value_path_name)
+            term_key = canonical_project_key(term_name)
+            if len(value_key) >= 4 and value_key == term_key:
+                return True
             if key_like_project_match(value, term_name):
                 return True
     return False
+
+
+def canonical_project_key(value: str) -> str:
+    return "".join(re.findall(r"[a-z0-9]+", value.lower()))
 
 
 def search_quality_noise_reason(record: dict) -> str:
