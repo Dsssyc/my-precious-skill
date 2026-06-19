@@ -166,9 +166,24 @@ def registry_path(memory_repo: Path) -> Path:
     return memory_repo / PROJECT_REGISTRY
 
 
+def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(memory_repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def ensure_safe_project_registry_path(memory_repo: Path, path: Path) -> None:
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit(f"Refusing to access unsafe project registry path: {path}")
+
+
 def load_registry(memory_repo: Path) -> dict[str, dict[str, object]]:
     projects: dict[str, dict[str, object]] = {}
     path = registry_path(memory_repo)
+    if path.exists() or path.is_symlink():
+        ensure_safe_project_registry_path(memory_repo, path)
     if not path.exists():
         return projects
     with path.open("r", encoding="utf-8") as handle:
@@ -224,6 +239,7 @@ def write_registry(memory_repo: Path, projects: dict[str, dict[str, object]], dr
     if dry_run:
         print(f"dry-run: write project registry {path}")
         return
+    ensure_safe_project_registry_path(memory_repo, path)
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(projects[key], sort_keys=True) for key in sorted(projects)]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
