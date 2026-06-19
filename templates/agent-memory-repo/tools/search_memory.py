@@ -838,7 +838,7 @@ def drill_path_limited_hits(repo: Path, hits: list[Hit], memory_hits: list[Hit],
     }
     if not allowed:
         return []
-    return [hit for hit in hits if safe_repo_relative_path(repo, hit.path) in allowed]
+    return [hit for hit in hits if safe_repo_relative_path(repo, str(hit.path)) in allowed]
 
 
 def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
@@ -945,6 +945,8 @@ def main(argv: list[str] | None = None) -> int:
         if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
             if args.depth in ("session", "evidence", "source"):
                 session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, args.depth)
+            elif args.include_evidence:
+                session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, "evidence")
             selected_hits = [*memory_hits, *session_hits]
         elif memory_hits:
             selected_hits = memory_hits

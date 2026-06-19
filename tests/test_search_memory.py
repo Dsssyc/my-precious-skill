@@ -202,6 +202,72 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/05/14/good/summary.md", result.stdout)
         self.assertNotIn("sessions/2026/05/14/noisy/summary.md", result.stdout)
 
+    def test_search_memory_include_evidence_limits_legacy_hits_to_memory_drill_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            good_dir = repo / "sessions/2026/05/14/good"
+            noisy_dir = repo / "sessions/2026/05/14/noisy"
+            good_dir.mkdir(parents=True)
+            noisy_dir.mkdir(parents=True)
+            (good_dir / "summary.md").write_text(
+                "# Session: Evidence Drill\n\n"
+                "The durable memory says evidence drill token belongs here.\n",
+                encoding="utf-8",
+            )
+            (good_dir / "evidence.md").write_text(
+                "# Evidence\n\n"
+                "Evidence drill token supporting snippet.\n",
+                encoding="utf-8",
+            )
+            (noisy_dir / "evidence.md").write_text(
+                "# Evidence\n\n"
+                "evidence drill token " * 20,
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_evidence_drill",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "evidence-drill",
+                        "text": "Evidence drill token should drill only to declared support.",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/05/14/good/summary.md"],
+                        "evidence_refs": ["sessions/2026/05/14/good/evidence.md"],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "evidence drill token",
+                    "--repo",
+                    str(repo),
+                    "--include-evidence",
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("sessions/2026/05/14/good/evidence.md", result.stdout)
+        self.assertNotIn("sessions/2026/05/14/noisy/evidence.md", result.stdout)
+
     def test_search_memory_rejects_non_positive_limit(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
