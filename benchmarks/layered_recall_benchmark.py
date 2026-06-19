@@ -57,6 +57,8 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
             required_case_text(case, key, path, line_no)
     if "expected_abstain" in case and not isinstance(case["expected_abstain"], bool):
         raise SystemExit(f"{path}:{line_no}: benchmark case field must be boolean: expected_abstain")
+    for key in ("case_id", "source_benchmark"):
+        optional_case_text_only(case, key, path, line_no)
     for key in (
         "category",
         "expected_not_memory_id",
@@ -93,6 +95,15 @@ def optional_case_texts(case: dict, key: str, path: Path, line_no: int) -> list[
             raise SystemExit(f"{path}:{line_no}: benchmark case field {key}[{idx}] must be a non-empty string")
         out.append(item.strip())
     return out
+
+
+def optional_case_text_only(case: dict, key: str, path: Path, line_no: int) -> str:
+    if key not in case or case.get(key) in (None, ""):
+        return ""
+    value = case.get(key)
+    if isinstance(value, str):
+        return value.strip()
+    raise SystemExit(f"{path}:{line_no}: benchmark case field must be string: {key}")
 
 
 def optional_case_text(case: dict, key: str) -> str:
@@ -532,6 +543,7 @@ def case_detail(case: Case, result: dict) -> dict:
     return {
         "case_path": str(case.path),
         "case_line": case.line_no,
+        "case_id": optional_case_text(data, "case_id"),
         "query": query,
         "category": category_name(data),
         "source_benchmark": optional_case_text(data, "source_benchmark"),

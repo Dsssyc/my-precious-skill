@@ -61,6 +61,10 @@ def safe_id(value: object, fallback: str = "item") -> str:
     return slug or fallback
 
 
+def case_id(source: str, item_id: str) -> str:
+    return f"{safe_id(source)}:{safe_id(item_id)}"
+
+
 def first_text(record: dict, *keys: str) -> str:
     for key in keys:
         value = record.get(key)
@@ -105,6 +109,7 @@ def positive_case(source: str, item_id: str, query: str, category: str, source_a
     item_slug = safe_id(item_id)
     summary_path = f"sessions/external/{source_slug}/{item_slug}/summary.md"
     case = {
+        "case_id": case_id(source, item_id),
         "query": query,
         "category": category,
         "source_benchmark": SOURCE_LABELS[source],
@@ -117,8 +122,9 @@ def positive_case(source: str, item_id: str, query: str, category: str, source_a
     return case
 
 
-def abstention_case(source: str, query: str, category: str, extra: dict) -> dict:
+def abstention_case(source: str, item_id: str, query: str, category: str, extra: dict) -> dict:
     case = {
+        "case_id": case_id(source, item_id),
         "query": query,
         "category": category,
         "source_benchmark": SOURCE_LABELS[source],
@@ -142,7 +148,7 @@ def convert_longmemeval(payload: object) -> list[dict]:
             "question_type": question_type,
         }
         if question_id.endswith("_abs") or category_from_text(question_type) == "abstention":
-            cases.append(abstention_case("longmemeval", question, "abstention", extra))
+            cases.append(abstention_case("longmemeval", question_id, question, "abstention", extra))
             continue
         cases.append(
             positive_case(

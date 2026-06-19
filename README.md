@@ -330,8 +330,9 @@ stress tests:
 
 Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include
-`category`, `source_benchmark`, `reference_answer`, `required_evidence_paths`,
-`expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
+`case_id`, `category`, `source_benchmark`, `reference_answer`,
+`required_evidence_paths`, `expected_not_memory_id`, `stale_memory_id`,
+`temporal_scope`, and
 `forbidden_output_patterns`.
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text
@@ -414,8 +415,9 @@ python benchmarks/layered_recall_benchmark.py \
 evidence, abstention, stale-suppression, privacy outcomes, safe case metadata,
 and a `failed_checks` list naming the failed applicable metrics for that case.
 The detail rows include benchmark source, temporal scope, expected stale or
-negative memory IDs, required evidence paths, and forbidden-pattern counts, but
-they do not render raw `reference_answer` or `forbidden_output_patterns` text.
+negative memory IDs, stable case IDs when provided, required evidence paths,
+and forbidden-pattern counts, but they do not render raw `reference_answer` or
+`forbidden_output_patterns` text.
 They also include safe returned identifiers such as memory result IDs, session
 paths, and source anchors, without returned hit titles or snippets.
 `--failures-json`

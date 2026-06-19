@@ -391,6 +391,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 root,
                 {
                     **self.valid_case(),
+                    "case_id": "memora:permission_case",
                     "source_benchmark": "Memora",
                     "reference_answer": MEMORY_TEXT,
                     "required_evidence_paths": [SUMMARY_PATH],
@@ -411,6 +412,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
 
             detail = self.read_rows(details)[0]
+            self.assertEqual(detail["case_id"], "memora:permission_case")
             self.assertEqual(detail["source_benchmark"], "Memora")
             self.assertEqual(detail["temporal_scope"], "latest")
             self.assertEqual(detail["expected_not_memory_ids"], ["mem_permission_v1"])
@@ -688,6 +690,20 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(f"{cases}:1", result.stderr)
             self.assertIn("expected_summary_path", result.stderr)
+
+    def test_invalid_source_benchmark_type_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "source_benchmark": ["Memora"]})
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"{cases}:1", result.stderr)
+            self.assertIn("source_benchmark", result.stderr)
+            self.assertIn("must be string", result.stderr)
 
     def test_non_object_jsonl_row_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -59,6 +59,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
 
             rows = self.read_rows(output)
             self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["case_id"], "longmemeval:lme_q1")
             self.assertEqual(rows[0]["source_benchmark"], "LongMemEval")
             self.assertEqual(rows[0]["category"], "multi_session_reasoning")
             self.assertEqual(rows[0]["expected_memory_id"], "external_longmemeval_lme_q1")
@@ -66,6 +67,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[0]["expected_source_anchor"], "records/external/longmemeval.json#question_id:lme_q1")
             self.assertEqual(rows[0]["reference_answer"], "The memory skill project.")
             self.assertEqual(rows[0]["question_date"], "2026-06-19")
+            self.assertEqual(rows[1]["case_id"], "longmemeval:lme_q2_abs")
             self.assertEqual(rows[1]["category"], "abstention")
             self.assertTrue(rows[1]["expected_abstain"])
             self.assertNotIn("expected_memory_id", rows[1])
@@ -114,6 +116,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
 
             rows = self.read_rows(output)
             self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["case_id"], "locomo:conv-a_qa-1")
             self.assertEqual(rows[0]["source_benchmark"], "LoCoMo")
             self.assertEqual(rows[0]["category"], "temporal_reasoning")
             self.assertEqual(rows[0]["expected_memory_id"], "external_locomo_conv-a_qa-1")
@@ -169,6 +172,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
 
             rows = self.read_rows(output)
             self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["case_id"], "memora:mem_q1")
             self.assertEqual(rows[0]["source_benchmark"], "Memora")
             self.assertEqual(rows[0]["category"], "information_extraction")
             self.assertEqual(rows[0]["expected_memory_id"], "external_memora_mem_q1")
