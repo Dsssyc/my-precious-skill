@@ -1195,6 +1195,59 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("[REDACTED_OPENAI_KEY]", output)
             self.assertNotIn(path_secret, output)
 
+    def test_update_memory_archive_refuses_symlinked_session_write_outside_archive(self):
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            outside_sessions = root / "outside-sessions"
+            source_dir.mkdir()
+            project_path.mkdir()
+            outside_sessions.mkdir()
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            (memory_repo / "sessions" / "2026").symlink_to(outside_sessions, target_is_directory=True)
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": "Need a safe archive write boundary."}) + "\n"
+                + json.dumps(
+                    {
+                        "role": "assistant",
+                        "content": "Decision: archive updates must not follow session symlinks outside the repo.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to write unsafe archive entry path:", output)
+            self.assertFalse(any(outside_sessions.glob("**/summary.md")))
+
     def test_update_memory_archive_redacts_secrets_when_explicitly_allowed(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

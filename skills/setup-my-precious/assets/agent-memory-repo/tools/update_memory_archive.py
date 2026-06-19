@@ -1877,6 +1877,8 @@ def write_record(
 ) -> Path | None:
     project_slug = slugify(project_name)
     destination = record_dir(memory_repo, project_slug, record)
+    if not is_safe_archive_entry_dir(memory_repo, destination):
+        raise SystemExit(f"Refusing to write unsafe archive entry path: {safe_diagnostic_path(destination)}")
     destination.mkdir(parents=True, exist_ok=True)
 
     source_text = read_record_text(record.path)
