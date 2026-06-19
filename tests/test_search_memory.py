@@ -880,6 +880,51 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_sanitizes_bare_secret_query_echo_for_hits(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/query-echo"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Query Echo\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_query_echo",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "query-echo",
+                        "text": "Query echo sentinel should still find this memory.",
+                        "source": "explicit",
+                        "derived_from": ["sessions/2026/06/17/query-echo/summary.md"],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            fake_openai_key = "sk-" + "queryecho" + ("0" * 20)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    f"query echo sentinel {fake_openai_key}",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("Top memory hits for: [unsafe-field]", result.stdout)
+        self.assertNotIn(fake_openai_key, result.stdout)
+
     def test_search_memory_sanitizes_sensitive_query_echo_for_no_hits(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

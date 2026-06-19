@@ -29,8 +29,14 @@ DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
 UNSAFE_DISPLAY_FIELD = "[unsafe-field]"
 SENSITIVE_DISPLAY_PATTERN = re.compile(
-    r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
-    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
+    r"(?i)(?:"
+    r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
+    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|"
+    r"\bbearer\s+\S+|"
+    r"\bsk-[A-Za-z0-9_-]{20,}\b|"
+    r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b|"
+    r"\bAKIA[0-9A-Z]{16}\b"
+    r")"
 )
 SENSITIVE_REASON_TOKEN_PATTERN = re.compile(
     r"(?i)^(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
