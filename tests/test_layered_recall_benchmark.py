@@ -101,6 +101,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
             self.assertEqual(payload["memory_mrr"], 1.0)
             self.assertEqual(payload["memory_ndcg_at_5"], 1.0)
+            self.assertEqual(payload["memory_explainability_cases"], payload["positive_cases"])
+            self.assertEqual(payload["memory_explainability"], 1.0)
             self.assertEqual(payload["memory_ranked_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_rank_missing_cases"], 0)
             self.assertEqual(payload["memory_rank_mean"], 1.0)
@@ -141,6 +143,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["memory_precision_at_5"], 0.25)
             self.assertEqual(lower_gates["memory_micro_precision_at_5"], 0.24)
             self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
+            self.assertEqual(lower_gates["memory_explainability"], 1.0)
+            self.assertEqual(lower_gates["memory_explainability_cases"], 27)
             self.assertEqual(lower_gates["memory_ranked_cases"], 27)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
@@ -186,6 +190,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_cases"], 9)
             self.assertGreaterEqual(payload["memory_precision_at_5"], lower_gates["memory_precision_at_5"])
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
+            self.assertGreaterEqual(payload["memory_explainability"], lower_gates["memory_explainability"])
+            self.assertGreaterEqual(payload["memory_explainability_cases"], lower_gates["memory_explainability_cases"])
             self.assertGreaterEqual(payload["memory_ranked_cases"], lower_gates["memory_ranked_cases"])
             self.assertLessEqual(payload["memory_rank_missing_cases"], upper_gates["memory_rank_missing_cases"])
             self.assertLessEqual(payload["memory_rank_mean"], upper_gates["memory_rank_mean"])
@@ -713,6 +719,34 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 ],
             )
 
+    def test_layered_recall_benchmark_flags_unexplainable_memory_hit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="low_signal_memory")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["session_drilldown_at_5"], 1.0)
+            self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertEqual(payload["memory_explainability_cases"], 1)
+            self.assertEqual(payload["memory_explainability"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            detail = self.read_rows(details)[0]
+            self.assertFalse(detail["memory_explainability_hit"])
+            self.assertIn("memory_explainability", detail["failed_checks"])
+
     def test_layered_recall_benchmark_details_include_safe_case_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1049,6 +1083,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         ],
                         "memory_ndcg_at_5": 0.0,
                         "memory_precision_at_5": 0.0,
+                        "memory_explainability_hit": False,
                         "memory_rank": None,
                         "memory_recall_at_1": False,
                         "memory_recall_at_5": False,
@@ -2233,6 +2268,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         return default
                     return sys.argv[sys.argv.index(name) + 1]
 
+                def memory_why():
+                    if MODE == "low_signal_memory":
+                        return "low-signal-only; broad-field-only; matched:memory, session"
+                    return "field:text; important-token-coverage; matched:permission, prompts"
+
                 query = sys.argv[1]
                 depth = arg_value("--depth")
                 with CALLS.open("a", encoding="utf-8") as handle:
@@ -2259,12 +2299,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] Forbidden old permission behavior")
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_forbidden")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                         print()
                         print("2. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
@@ -2273,11 +2315,13 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   drill:")
                         print("     - sessions/other/summary.md")
                         print()
                         print("2. [global] Different memory")
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                     elif MODE == "normalized_answer":
@@ -2285,6 +2329,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] answer reachability scoring was added")
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
@@ -2293,12 +2338,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                         print()
                         print("2. [global] Unrelated archived preference")
                         print("   source: memory")
+                        print("   why: field:text; matched:unrelated")
                         print("   memory_id: mem_unrelated")
                         print("   drill:")
                         print("     - sessions/other/summary.md")
@@ -2307,12 +2354,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] Unrelated archived preference")
                         print("   source: memory")
+                        print("   why: field:text; matched:unrelated")
                         print("   memory_id: mem_unrelated")
                         print("   drill:")
                         print("     - sessions/other/summary.md")
                         print()
                         print("2. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
@@ -2321,6 +2370,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
@@ -2338,12 +2388,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                         print()
                         print("2. [global] Different memory")
                         print("   source: memory")
+                        print("   why: field:text; matched:different")
                         print("   memory_id: mem_other")
                         print("   source anchors:")
                         print("     - " + SOURCE_ANCHOR)
@@ -2352,6 +2404,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   why: " + memory_why())
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)

@@ -20,6 +20,9 @@ DEFAULT_SEARCH_SCRIPT = "templates/agent-memory-repo/tools/search_memory.py"
 NO_HIT_MARKER = "No memory hits for:"
 DEFAULT_SEARCH_TIMEOUT_S = 30.0
 UNSAFE_RESULT_IDENTIFIER = "[unsafe-result-identifier]"
+EXPLAINABLE_MEMORY_REASON_PREFIXES = ("field:", "phrase:")
+EXPLAINABLE_MEMORY_REASONS = {"important-token-coverage", "project-context"}
+UNEXPLAINABLE_MEMORY_REASONS = {"low-signal-only", "broad-field-only"}
 SENSITIVE_RESULT_IDENTIFIER_PATTERN = re.compile(
     r"(?i)(?:"
     r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
@@ -230,6 +233,8 @@ def new_totals() -> Totals:
         "memory_rank_counts": {},
         "memory_ndcg_at_5": 0.0,
         "memory_precision_at_5": 0.0,
+        "memory_explainability_cases": 0,
+        "memory_explainability_hits": 0,
         "memory_result_count_at_5": 0,
         "memory_relevant_count_at_5": 0,
         "session_cases": 0,
@@ -322,6 +327,11 @@ def finalize_totals(totals: Totals) -> dict:
         "memory_relevant_count_at_5": int(totals["memory_relevant_count_at_5"]),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),
         "memory_ndcg_at_5": ratio(totals["memory_ndcg_at_5"], totals["positive_cases"]),
+        "memory_explainability_cases": int(totals["memory_explainability_cases"]),
+        "memory_explainability": ratio(
+            totals["memory_explainability_hits"],
+            totals["memory_explainability_cases"],
+        ),
         "memory_ranked_cases": ranked_cases,
         "memory_rank_missing_cases": missing_rank_cases,
         "memory_rank_mean": ratio(totals["memory_rank_sum"], ranked_cases),
@@ -364,6 +374,9 @@ def add_result(totals: Totals, result: dict) -> None:
             rank_counts[result["memory_rank"]] = rank_counts.get(result["memory_rank"], 0) + 1
         totals["memory_ndcg_at_5"] += result["memory_ndcg_at_5"]
         totals["memory_precision_at_5"] += result["memory_precision_at_5"]
+        if result["memory_rank"] is not None:
+            totals["memory_explainability_cases"] += 1
+            totals["memory_explainability_hits"] += int(result["memory_explainability_hit"])
         totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
         totals["memory_relevant_count_at_5"] += result["memory_relevant_count_at_5"]
         totals["session_cases"] += 1
@@ -573,6 +586,31 @@ def block_field_values(blocks: list[str], field_name: str) -> list[str]:
     return unique_texts(values)
 
 
+def block_reason_values(block: str) -> list[str]:
+    reasons: list[str] = []
+    for value in block_field_values([block], "why"):
+        for reason in value.split(";"):
+            reason = reason.strip()
+            if reason:
+                reasons.append(reason)
+    return unique_texts(reasons)
+
+
+def explainable_reason(reason: str) -> bool:
+    return reason in EXPLAINABLE_MEMORY_REASONS or reason.startswith(EXPLAINABLE_MEMORY_REASON_PREFIXES)
+
+
+def unexplainable_reason(reason: str) -> bool:
+    return reason in UNEXPLAINABLE_MEMORY_REASONS or reason.startswith("quality-penalty:")
+
+
+def block_has_explainable_memory_reason(block: str) -> bool:
+    reasons = block_reason_values(block)
+    if any(unexplainable_reason(reason) for reason in reasons):
+        return False
+    return any(explainable_reason(reason) for reason in reasons)
+
+
 def block_section_values(blocks: list[str], section_name: str) -> list[str]:
     return unique_texts(item for block in blocks for item in section_items(block, section_name))
 
@@ -669,6 +707,20 @@ def memory_precision_at_5(
     )
 
 
+def memory_explainability_hit(
+    blocks: list[str],
+    expected_memory_id: str,
+    expected_summary_path: str,
+    record: dict | None,
+) -> bool:
+    for block in blocks:
+        if not is_memory_block(block) or not block_has_drill_path(block, expected_summary_path):
+            continue
+        if block_contains_memory(block, expected_memory_id, record):
+            return block_has_explainable_memory_reason(block)
+    return False
+
+
 def blocks_contain_memory_ids(blocks: list[str], memory_ids: list[str], records: dict[str, dict]) -> bool:
     for memory_id in memory_ids:
         record = records.get(memory_id)
@@ -747,6 +799,8 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("memory_recall_at_1")
         if memory_rank is None or memory_rank > 5:
             checks.append("memory_recall_at_5")
+        if memory_rank is not None and not result["memory_explainability_hit"]:
+            checks.append("memory_explainability")
         if not result["session_drilldown_hit"]:
             checks.append("session_drilldown_at_5")
         if result["source_expected"] and not result["source_reachability_hit"]:
@@ -800,6 +854,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_recall_at_5": bool(memory_rank is not None and memory_rank <= 5),
         "memory_ndcg_at_5": round(result["memory_ndcg_at_5"], 6),
         "memory_precision_at_5": round(result["memory_precision_at_5"], 6),
+        "memory_explainability_hit": result["memory_explainability_hit"],
         "memory_result_count_at_5": result["memory_result_count_at_5"],
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
@@ -864,11 +919,19 @@ def score_case(
     normalized_answer_hit = False
     answer_f1 = 0.0
     memory_ndcg = 0.0
+    explainability_hit = False
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         memory_ndcg = memory_ndcg_at_5(rank)
         memory_precision = memory_precision_at_5(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
+        if rank is not None:
+            explainability_hit = memory_explainability_hit(
+                memory_blocks,
+                expected_memory_id,
+                expected_summary_path,
+                expected_record,
+            )
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
         if expected_source_anchor:
             source_hit = source_reachability_hit(source_blocks, expected_summary_path, expected_source_anchor)
@@ -890,6 +953,7 @@ def score_case(
         "memory_rank": rank,
         "memory_ndcg_at_5": memory_ndcg,
         "memory_precision_at_5": memory_precision.score,
+        "memory_explainability_hit": explainability_hit,
         "memory_result_count_at_5": memory_precision.result_count,
         "memory_relevant_count_at_5": memory_precision.relevant_count,
         "session_drilldown_hit": session_hit,
@@ -1081,6 +1145,7 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "failed_checks": failed,
                 "memory_ndcg_at_5": detail.get("memory_ndcg_at_5"),
                 "memory_precision_at_5": detail.get("memory_precision_at_5"),
+                "memory_explainability_hit": detail.get("memory_explainability_hit"),
                 "memory_rank": detail.get("memory_rank"),
                 "memory_recall_at_1": detail.get("memory_recall_at_1"),
                 "memory_recall_at_5": detail.get("memory_recall_at_5"),

@@ -320,6 +320,9 @@ stress tests:
 - `memory_recall_at_1`, `memory_recall_at_5`, `memory_mrr`,
   `memory_ndcg_at_5`, `memory_precision_at_5`, and
   `memory_micro_precision_at_5`
+- `memory_explainability`, with `memory_explainability_cases`, to check that
+  ranked expected-memory hits are backed by high-signal `why:` reasons instead
+  of only broad or low-signal matches
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`

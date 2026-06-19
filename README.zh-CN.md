@@ -314,6 +314,8 @@ python benchmarks/layered_recall_benchmark.py \
 - `memory_recall_at_1`、`memory_recall_at_5`、`memory_mrr`、
   `memory_ndcg_at_5`、`memory_precision_at_5` 和
   `memory_micro_precision_at_5`
+- `memory_explainability` 和 `memory_explainability_cases`，用于检查排到前面的
+  expected memory 是否有高信号 `why:` 原因，而不是只靠宽泛或低信号匹配
 - rank 分布字段：`memory_ranked_cases`、`memory_rank_missing_cases`、
   `memory_rank_mean`、`memory_rank_median` 和 `memory_rank_histogram`
 - `session_drilldown_at_5`、`source_reachability` 和
