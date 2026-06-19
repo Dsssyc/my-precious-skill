@@ -2986,6 +2986,106 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("019eb5cf-b3a5-7f81-b54d-0f6befad9c3a", combined)
             self.assertEqual(row["unresolved_count"], 0)
 
+    def test_update_memory_archive_skips_codex_commentary_channel_messages(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source = source_dir / "codex-channel.jsonl"
+            events = [
+                {
+                    "type": "session_meta",
+                    "timestamp": "2026-05-14T10:00:00Z",
+                    "payload": {"cwd": str(project_path)},
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-05-14T10:00:01Z",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Improve archive summaries."}],
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-05-14T10:00:02Z",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "channel": "commentary",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": (
+                                    "Decision: channel-commentary-marker should not become durable memory."
+                                ),
+                            }
+                        ],
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "timestamp": "2026-05-14T10:00:03Z",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "channel": "final",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Decision: skip Codex commentary-channel messages when archiving durable memory.",
+                            }
+                        ],
+                    },
+                },
+            ]
+            source.write_text("\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n", encoding="utf-8")
+            set_mtime(source, "2026-05-14T10:00:03Z")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                    "--require-project-metadata",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            row = json.loads((memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()[0])
+            entry_dir = memory_repo / Path(row["summary_path"]).parent
+            combined = "\n".join(
+                (entry_dir / name).read_text(encoding="utf-8")
+                for name in ("summary.md", "evidence.md", "meta.json")
+            )
+            self.assertIn("skip Codex commentary-channel messages", combined)
+            self.assertNotIn("channel-commentary-marker", combined)
+
     def test_update_memory_archive_rejects_placeholder_index_noise(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

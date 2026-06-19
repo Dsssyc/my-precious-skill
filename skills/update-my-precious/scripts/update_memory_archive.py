@@ -1262,7 +1262,7 @@ def events_from_value(value: object) -> list[MemoryEvent]:
     if role in {"user", "human"}:
         return [MemoryEvent("user", text)]
     if role == "assistant":
-        if str(body.get("phase") or "").lower() == "commentary":
+        if str(body.get("phase") or body.get("channel") or "").lower() == "commentary":
             return []
         return [MemoryEvent("assistant", text)]
     return [MemoryEvent("record", text)]
