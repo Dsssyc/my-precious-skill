@@ -197,25 +197,30 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
 
 
 def write_archive(repo: Path, cases: list[dict], *, include_superseded_distractors: bool = False) -> None:
-    (repo / "index").mkdir(parents=True, exist_ok=True)
-    (repo / "sessions").mkdir(parents=True, exist_ok=True)
-    (repo / "records").mkdir(parents=True, exist_ok=True)
-    write_text(repo / "INDEX.md", "# Synthetic Layered Recall Archive\n")
+    try:
+        (repo / "index").mkdir(parents=True, exist_ok=True)
+        (repo / "sessions").mkdir(parents=True, exist_ok=True)
+        (repo / "records").mkdir(parents=True, exist_ok=True)
+        write_text(repo / "INDEX.md", "# Synthetic Layered Recall Archive\n")
 
-    records = []
-    for case in cases:
-        if not positive_case(case):
-            continue
-        record = build_memory_record(case)
-        if include_superseded_distractors:
-            records.extend(build_superseded_distractor_records(case))
-        records.append(record)
-        write_positive_case_files(repo, case, record)
+        records = []
+        for case in cases:
+            if not positive_case(case):
+                continue
+            record = build_memory_record(case)
+            if include_superseded_distractors:
+                records.extend(build_superseded_distractor_records(case))
+            records.append(record)
+            write_positive_case_files(repo, case, record)
 
-    (repo / "index" / "memories.jsonl").write_text(
-        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
-        encoding="utf-8",
-    )
+        (repo / "index" / "memories.jsonl").write_text(
+            "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        display_repo = safe_diagnostic_path(repo)
+        display_error = safe_diagnostic_text(exc)
+        raise SystemExit(f"unable to write synthetic archive {display_repo}: {display_error}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:

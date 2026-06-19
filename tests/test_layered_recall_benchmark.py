@@ -288,6 +288,35 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("cookie=", result.stdout)
             self.assertTrue((repo / "index" / "memories.jsonl").exists())
 
+    def test_synthetic_builder_repo_write_error_reports_controlled_sanitized_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "archive-cookie=SHOULD_NOT_RENDER"
+            repo.write_text("not a directory", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to write synthetic archive", result.stderr)
+            self.assertIn("[unsafe-path]", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+
     def test_layered_recall_benchmark_reports_parsed_block_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
