@@ -49,7 +49,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         self.assertTrue(any(row.get("expected_not_memory_id") for row in rows))
         self.assertTrue(any(row.get("forbidden_output_patterns") for row in rows))
 
+        case_ids = []
         for row in rows:
+            self.assertIsInstance(row.get("case_id"), str)
+            self.assertRegex(row["case_id"], r"^synthetic:[a-z0-9_.-]+$")
+            case_ids.append(row["case_id"])
             self.assertIsInstance(row.get("query"), str)
             self.assertTrue(row["query"].strip())
             if row.get("expected_abstain") is True:
@@ -58,6 +62,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             for key in ("expected_memory_id", "expected_summary_path", "expected_source_anchor"):
                 self.assertIsInstance(row.get(key), str)
                 self.assertTrue(row[key].strip())
+        self.assertEqual(len(set(case_ids)), len(case_ids))
+        self.assertEqual(case_ids[0], "synthetic:info_permission_prompt")
+        self.assertEqual(case_ids[-1], "synthetic:scope_domain_benchmark")
 
     def test_packaged_synthetic_cases_produce_quantitative_scores(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -107,6 +114,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
     def test_packaged_synthetic_cases_pass_packaged_quality_gates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "agent-memory"
+            details = Path(tmpdir) / "details.jsonl"
             subprocess.run(
                 [
                     sys.executable,
@@ -127,16 +135,29 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 repo,
                 SYNTHETIC_CASES,
                 SEARCH_SCRIPT,
-                extra_args=["--fail-under-file", str(SYNTHETIC_QUALITY_GATES)],
+                extra_args=[
+                    "--details-jsonl",
+                    str(details),
+                    "--fail-under-file",
+                    str(SYNTHETIC_QUALITY_GATES),
+                ],
             )
 
             payload = json.loads(result.stdout)
+            detail_rows = [
+                json.loads(line)
+                for line in details.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
             self.assertEqual(payload["cases"], 30)
             self.assertEqual(payload["answer_cases"], 9)
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
             self.assertEqual(payload["answer_token_f1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
+            self.assertEqual(len(detail_rows), 30)
+            self.assertEqual(detail_rows[0]["case_id"], "synthetic:info_permission_prompt")
+            self.assertEqual(detail_rows[-1]["case_id"], "synthetic:scope_domain_benchmark")
 
     def test_synthetic_builder_can_add_superseded_stale_distractors(self):
         with tempfile.TemporaryDirectory() as tmpdir:
