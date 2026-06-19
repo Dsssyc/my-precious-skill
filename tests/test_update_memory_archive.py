@@ -228,6 +228,55 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(module.collect_meta(memory_repo), [])
 
+    def test_write_record_refuses_symlinked_record_file_write_outside_archive(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            outside_summary = root / "outside-summary.md"
+            source_dir.mkdir()
+            project_path.mkdir()
+            outside_summary.write_text("unchanged\n", encoding="utf-8")
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": "Need a safe archive record file boundary."}) + "\n"
+                + json.dumps(
+                    {
+                        "role": "assistant",
+                        "content": "Decision: generated session record files must stay inside the archive.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            source_text = module.read_record_text(source)
+            record = module.SourceRecord(
+                path=source,
+                updated_at=module.source_timestamp(source, source_text),
+                sha256=module.sha256_file(source),
+            )
+            destination = module.record_dir(memory_repo, module.slugify("project"), record)
+            destination.mkdir(parents=True)
+            (destination / "summary.md").symlink_to(outside_summary)
+
+            with self.assertRaises(SystemExit) as caught:
+                module.write_record(
+                    memory_repo=memory_repo,
+                    project_path=project_path,
+                    project_name="project",
+                    source_agent="agent",
+                    record=record,
+                )
+
+            self.assertIn("Refusing to write unsafe archive record file path:", str(caught.exception))
+            self.assertEqual(outside_summary.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_update_memory_archive_creates_searchable_summary(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

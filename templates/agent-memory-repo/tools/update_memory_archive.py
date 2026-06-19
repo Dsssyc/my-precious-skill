@@ -2006,11 +2006,21 @@ See `evidence.md` for short redacted snippets that support the summary.
         redactions += "- No redactions were applied to the source content.\n"
     redactions = strip_trailing_whitespace_lines(redactions)
 
-    (destination / "summary.md").write_text(summary, encoding="utf-8")
-    (destination / "evidence.md").write_text(evidence, encoding="utf-8")
-    (destination / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (destination / "redactions.md").write_text(redactions, encoding="utf-8")
-    (destination / "source-map.json").write_text(json.dumps(source_map, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_safe_archive_text(memory_repo, destination / "summary.md", summary, "record file")
+    write_safe_archive_text(memory_repo, destination / "evidence.md", evidence, "record file")
+    write_safe_archive_text(
+        memory_repo,
+        destination / "meta.json",
+        json.dumps(meta, indent=2, sort_keys=True) + "\n",
+        "record file",
+    )
+    write_safe_archive_text(memory_repo, destination / "redactions.md", redactions, "record file")
+    write_safe_archive_text(
+        memory_repo,
+        destination / "source-map.json",
+        json.dumps(source_map, indent=2, sort_keys=True) + "\n",
+        "record file",
+    )
     return destination
 
 
