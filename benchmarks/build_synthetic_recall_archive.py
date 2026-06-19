@@ -25,13 +25,45 @@ SENSITIVE_PATH_PATTERN = re.compile(
 
 def safe_diagnostic_text(value: object) -> str:
     text = str(value)
-    if any(ord(char) < 32 or ord(char) == 127 for char in text) or SENSITIVE_PATH_PATTERN.search(text):
+    if (
+        any(ord(char) < 32 or ord(char) == 127 for char in text)
+        or SENSITIVE_PATH_PATTERN.search(text)
+        or has_sensitive_identifier_token(text)
+    ):
         return UNSAFE_PATH
     return text
 
 
 def safe_diagnostic_path(path: Path) -> str:
     return safe_diagnostic_text(path)
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
 
 
 def iter_jsonl(path: Path) -> Iterable[dict]:

@@ -276,6 +276,36 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", combined)
             self.assertNotIn("cookie=", combined)
 
+    def test_synthetic_builder_missing_cases_file_sanitizes_sensitive_slug_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            sensitive_cases_root = root / "cases-cookie_should_not_render"
+            missing_cases = sensitive_cases_root / "missing.jsonl"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(missing_cases),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to read cases JSONL", result.stderr)
+            self.assertIn("[unsafe-path]", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn("cookie_should_not_render", combined)
+            self.assertNotIn("cookie", combined.lower())
+
     def test_synthetic_builder_success_payload_sanitizes_sensitive_repo_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
