@@ -45,6 +45,39 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
         self.assertIn("index:sessions.jsonl", result.stdout)
 
+    def test_search_memory_sanitizes_archive_path_display(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "cookie=SHOULD_NOT_RENDER"
+            (repo / "index").mkdir(parents=True)
+            (repo / "sessions/2026/05/14/example").mkdir(parents=True)
+
+            (repo / "sessions/2026/05/14/example/summary.md").write_text(
+                "# Session: Path Display\n\n"
+                "Archive display privacy remains searchable.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                '{"date":"2026-05-14","source_agent":"agent",'
+                '"project":"agent-memory","title":"Archive display privacy",'
+                '"summary_path":"sessions/2026/05/14/example/summary.md"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(script), "archive display privacy", "--repo", str(repo)],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("Archive: [unsafe-field]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+        self.assertNotIn(str(repo.parent), result.stdout)
+
     def test_search_memory_accepts_depth_session_for_summary_hits(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

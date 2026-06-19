@@ -899,7 +899,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"Top memory hits for: {display_query}")
-    print(f"Archive: {repo}")
+    print(f"Archive: {safe_display_text(repo.name or 'archive', 80)}")
     print()
     for idx, hit in enumerate(hits[: args.limit], 1):
         print(format_hit(repo, hit, idx, args.depth))
