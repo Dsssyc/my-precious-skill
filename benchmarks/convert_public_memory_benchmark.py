@@ -22,6 +22,7 @@ SOURCE_LABELS = {
     "locomo": "LoCoMo",
     "memora": "Memora",
 }
+REFERENCE_EVIDENCE_KEYS = ("evidence", "evidences", "supporting_evidence", "supporting_facts")
 UNSAFE_PATH = "[unsafe-path]"
 SENSITIVE_PATH_PATTERN = re.compile(
     r"(?i)(?:"
@@ -143,6 +144,8 @@ def first_text(record: dict, *keys: str) -> str:
 
 
 def text_list(value: object, *, label: str) -> list[str]:
+    if value is None:
+        return []
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     if isinstance(value, list):
@@ -152,6 +155,17 @@ def text_list(value: object, *, label: str) -> list[str]:
                 raise SystemExit(f"{label}[{idx}] must be a non-empty string")
             out.append(item.strip())
         return out
+    if value in ("", []):
+        return []
+    raise SystemExit(f"{label} must be a string or list of strings")
+
+
+def reference_evidence_texts(record: dict, *, label: str) -> list[str]:
+    for key in REFERENCE_EVIDENCE_KEYS:
+        value = record.get(key)
+        if value in (None, "", []):
+            continue
+        return text_list(value, label=f"{label} {key}")
     return []
 
 
@@ -218,6 +232,7 @@ def convert_longmemeval(payload: object) -> list[dict]:
         question_type = first_text(item, "question_type", "type")
         extra = {
             "reference_answer": first_text(item, "answer", "reference_answer"),
+            "reference_evidence": reference_evidence_texts(item, label=f"LongMemEval row {idx}"),
             "question_date": first_text(item, "question_date", "date"),
             "question_type": question_type,
         }
@@ -261,9 +276,9 @@ def convert_locomo(payload: object) -> list[dict]:
                     f"sample:{sample_id}:qa:{qa_idx}",
                     {
                         "reference_answer": first_text(qa, "answer", "reference_answer", "final_answer"),
-                        "reference_evidence": text_list(
-                            qa.get("evidence") or qa.get("evidences"),
-                            label=f"LoCoMo sample {sample_idx} qa {qa_idx} evidence",
+                        "reference_evidence": reference_evidence_texts(
+                            qa,
+                            label=f"LoCoMo sample {sample_idx} qa {qa_idx}",
                         ),
                         "locomo_sample_id": sample_id,
                         "locomo_qa_index": qa_idx,
@@ -334,6 +349,7 @@ def convert_memora(payload: object) -> list[dict]:
                 f"question_id:{question_id}",
                 {
                     "reference_answer": first_text(item, "answer", "reference_answer", "expected_answer"),
+                    "reference_evidence": reference_evidence_texts(item, label=f"Memora task {task} item {idx}"),
                     "question_date": first_text(item, "question_date", "date"),
                     "evaluation_types": evaluation_types,
                 },

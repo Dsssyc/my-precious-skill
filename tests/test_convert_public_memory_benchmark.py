@@ -26,6 +26,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
                             "question_type": "multi-session",
                             "question": "Which project adopted layered recall?",
                             "answer": "The memory skill project.",
+                            "evidence": ["setup session evidence", "search session evidence"],
                             "question_date": "2026-06-19",
                         },
                         {
@@ -67,6 +68,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[0]["expected_summary_path"], "sessions/external/longmemeval/lme_q1/summary.md")
             self.assertEqual(rows[0]["expected_source_anchor"], "records/external/longmemeval.json#question_id:lme_q1")
             self.assertEqual(rows[0]["reference_answer"], "The memory skill project.")
+            self.assertEqual(rows[0]["reference_evidence"], ["setup session evidence", "search session evidence"])
             self.assertEqual(rows[0]["question_date"], "2026-06-19")
             self.assertEqual(rows[1]["case_id"], "longmemeval:lme_q2_abs")
             self.assertEqual(rows[1]["category"], "abstention")
@@ -519,6 +521,47 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertIn("LoCoMo sample 1 qa 1 evidence[1] must be a non-empty string", result.stderr)
             self.assertFalse(output.exists())
 
+    def test_rejects_non_string_public_evidence_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.json"
+            output = root / "cases.jsonl"
+            source.write_text(
+                json.dumps(
+                    [
+                        {
+                            "question_id": "lme_q1",
+                            "question": "Which project adopted layered recall?",
+                            "answer": "The memory skill project.",
+                            "evidence": 42,
+                        }
+                    ],
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("LongMemEval row 1 evidence must be a string or list of strings", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_converts_memora_forgetting_checks_to_stale_memory_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -533,6 +576,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
                                     "question_id": "mem_q1",
                                     "question": "Which preference should be recalled?",
                                     "answer": "Use layered recall.",
+                                    "supporting_facts": ["The preference was stated in the setup note."],
                                     "question_date": "2026-06-19",
                                     "evaluation": {
                                         "evaluation_questions": [
@@ -575,6 +619,7 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[0]["stale_memory_id"], "external_memora_mem_q1_stale")
             self.assertEqual(rows[0]["expected_not_memory_id"], "external_memora_mem_q1_stale")
             self.assertEqual(rows[0]["temporal_scope"], "latest")
+            self.assertEqual(rows[0]["reference_evidence"], ["The preference was stated in the setup note."])
             self.assertEqual(rows[0]["evaluation_types"], ["memory_presence", "forgetting_absence"])
 
     def test_rejects_non_object_memora_question_rows(self):
