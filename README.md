@@ -402,7 +402,7 @@ python benchmarks/layered_recall_benchmark.py \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
   --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
-  --fail-under-file /tmp/my-precious-thresholds.json \
+  --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
   --fail-under memory_recall_at_5=0.95 \
   --fail-under privacy_boundary_pass_rate=1.0
 ```
@@ -426,7 +426,11 @@ example:
 ```
 
 Direct `--fail-under` arguments override duplicate metric keys loaded from
-threshold files.
+threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
+gate covers the synthetic suite's recall, source/evidence, abstention,
+stale/update, privacy, and denominator-count checks. Add answer-metric gates to
+custom threshold files when the evaluated case set includes `reference_answer`
+samples.
 
 To stress stale-memory suppression, add superseded distractor nodes that share
 the same query terms but must not appear in search output:

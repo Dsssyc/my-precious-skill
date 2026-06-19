@@ -10,6 +10,7 @@ from pathlib import Path
 SCRIPT = Path("benchmarks/layered_recall_benchmark.py").resolve()
 SYNTHETIC_ARCHIVE_BUILDER = Path("benchmarks/build_synthetic_recall_archive.py").resolve()
 SYNTHETIC_CASES = Path("benchmarks/cases/layered_recall_synthetic.jsonl").resolve()
+SYNTHETIC_QUALITY_GATES = Path("benchmarks/quality-gates/layered_recall_synthetic.json").resolve()
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 SUMMARY_PATH = "sessions/2026/06/04/source/summary.md"
 SOURCE_ANCHOR = "records/private.jsonl#message:42"
@@ -94,6 +95,36 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["abstention"]["cases"], 3)
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
             self.assertEqual(payload["categories"]["privacy_boundary"]["privacy_boundary_pass_rate"], 1.0)
+
+    def test_packaged_synthetic_cases_pass_packaged_quality_gates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                    "--include-superseded-distractors",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            result = self.run_benchmark(
+                repo,
+                SYNTHETIC_CASES,
+                SEARCH_SCRIPT,
+                extra_args=["--fail-under-file", str(SYNTHETIC_QUALITY_GATES)],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 30)
+            self.assertEqual(payload["stale_memory_suppression"], 1.0)
 
     def test_synthetic_builder_can_add_superseded_stale_distractors(self):
         with tempfile.TemporaryDirectory() as tmpdir:

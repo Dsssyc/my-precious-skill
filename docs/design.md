@@ -219,6 +219,11 @@ loads the same thresholds from a JSON object for repeatable CI gates; direct
 `--fail-under` arguments override duplicate metric keys from files. Threshold
 failures keep the aggregate JSON on stdout and report the failed metrics on
 stderr so automated quality gates can preserve machine-readable scores.
+The packaged synthetic gate at
+`benchmarks/quality-gates/layered_recall_synthetic.json` intentionally covers
+the synthetic suite dimensions and denominator counts; answer-metric gates
+should be added to custom threshold files for case sets that include
+`reference_answer` samples.
 
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic
