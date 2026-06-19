@@ -2439,7 +2439,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
             index_md += f"- {decision.get('project', '')}: {decision.get('decision', '')}\n"
     else:
         index_md += "No decisions indexed yet.\n"
-    (memory_repo / "INDEX.md").write_text(index_md, encoding="utf-8")
+    index_overview_path = memory_repo / "INDEX.md"
+    if not is_safe_repo_path(memory_repo, index_overview_path):
+        raise SystemExit(
+            f"Refusing to write unsafe archive index overview path: {safe_diagnostic_path(index_overview_path)}"
+        )
+    index_overview_path.write_text(index_md, encoding="utf-8")
     render_daily_summaries(memory_repo, rows)
 
 
