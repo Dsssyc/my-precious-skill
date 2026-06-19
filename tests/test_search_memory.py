@@ -541,6 +541,56 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("records/private.jsonl#message:42", result.stdout)
         self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
 
+    def test_search_memory_depth_source_parses_string_source_refs_with_anchors(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/string-source"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: String Source Anchors\n", encoding="utf-8")
+            raw_path = repo / "records/private.jsonl"
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text("FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_string_source_anchor",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "string-source-depth",
+                        "text": "String source refs should preserve source-depth anchors.",
+                        "source": "explicit",
+                        "derived_from": ["sessions/2026/06/17/string-source/summary.md"],
+                        "raw_refs": ["records/private.jsonl#message:42"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "string source-depth anchors",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("records/private.jsonl#message:42", result.stdout)
+        self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
+
     def test_search_memory_depth_source_sanitizes_unsafe_source_refs(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
