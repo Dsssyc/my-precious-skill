@@ -204,6 +204,30 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "sessions/2026/06/02/beta/summary.md",
         ])
 
+    def test_collect_meta_skips_symlinked_meta_outside_archive(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            entry_dir = memory_repo / "sessions/2026/05/14/symlink-meta"
+            outside_meta = root / "outside-meta.json"
+            entry_dir.mkdir(parents=True)
+            outside_meta.write_text(
+                json.dumps(
+                    {
+                        "session_id": "outside",
+                        "source_updated_at": "2026-05-14T10:00:00Z",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (entry_dir / "meta.json").symlink_to(outside_meta)
+
+            self.assertEqual(module.collect_meta(memory_repo), [])
+
     def test_update_memory_archive_creates_searchable_summary(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

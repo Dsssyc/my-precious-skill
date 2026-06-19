@@ -2236,6 +2236,8 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
 def collect_meta(memory_repo: Path) -> list[dict]:
     rows: list[dict] = []
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
+        if meta_path.is_symlink() or not is_safe_repo_path(memory_repo, meta_path):
+            continue
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
