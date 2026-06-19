@@ -1232,6 +1232,26 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn(f"{cases}:1", result.stderr)
             self.assertIn("expected_summary_path", result.stderr)
 
+    def test_missing_required_field_sanitizes_sensitive_cases_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            sensitive_cases_root = root / "cases-cookie=SHOULD_NOT_RENDER"
+            sensitive_cases_root.mkdir()
+            cases = self.write_cases(
+                sensitive_cases_root,
+                {"query": "permission prompts", "expected_memory_id": "mem_permission"},
+            )
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("[unsafe-result-identifier]:1", result.stderr)
+            self.assertIn("expected_summary_path", result.stderr)
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+            self.assertNotIn("cookie=", result.stderr)
+
     def test_invalid_source_benchmark_type_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

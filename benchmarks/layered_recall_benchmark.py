@@ -38,6 +38,21 @@ class MemoryPrecisionAt5(NamedTuple):
     relevant_count: int
 
 
+def has_diagnostic_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def safe_diagnostic_path(path: Path) -> str:
+    text = str(path)
+    if has_diagnostic_control_chars(text) or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(text):
+        return UNSAFE_RESULT_IDENTIFIER
+    return text
+
+
+def case_location(path: Path, line_no: int) -> str:
+    return f"{safe_diagnostic_path(path)}:{line_no}"
+
+
 def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
     with path.open("r", encoding="utf-8") as handle:
         for line_no, line in enumerate(handle, 1):
@@ -47,7 +62,7 @@ def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
             try:
                 value = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise SystemExit(f"invalid JSON at {path}:{line_no}: {exc}") from exc
+                raise SystemExit(f"invalid JSON at {case_location(path, line_no)}: {exc}") from exc
             yield line_no, value
 
 
@@ -64,7 +79,7 @@ def load_cases(path: Path) -> list[Case]:
     seen_case_ids: dict[str, int] = {}
     for line_no, value in iter_jsonl(path):
         if not isinstance(value, dict):
-            raise SystemExit(f"{path}:{line_no}: expected object benchmark case")
+            raise SystemExit(f"{case_location(path, line_no)}: expected object benchmark case")
         validate_case(value, path, line_no)
         case_id = optional_case_text(value, "case_id")
         if case_id:
@@ -72,13 +87,13 @@ def load_cases(path: Path) -> list[Case]:
             if first_line is not None:
                 display_case_id = safe_result_identifier(case_id)
                 raise SystemExit(
-                    f"{path}:{line_no}: duplicate case_id {display_case_id!r}; "
-                    f"first seen at {path}:{first_line}"
+                    f"{case_location(path, line_no)}: duplicate case_id {display_case_id!r}; "
+                    f"first seen at {case_location(path, first_line)}"
                 )
             seen_case_ids[case_id] = line_no
         cases.append(Case(value, path, line_no))
     if not cases:
-        raise SystemExit(f"no benchmark cases found in {path}")
+        raise SystemExit(f"no benchmark cases found in {safe_diagnostic_path(path)}")
     return cases
 
 
@@ -89,7 +104,7 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
         for key in ("expected_memory_id", "expected_summary_path", "expected_source_anchor"):
             required_case_text(case, key, path, line_no)
     if "expected_abstain" in case and not isinstance(case["expected_abstain"], bool):
-        raise SystemExit(f"{path}:{line_no}: benchmark case field must be boolean: expected_abstain")
+        raise SystemExit(f"{case_location(path, line_no)}: benchmark case field must be boolean: expected_abstain")
     for key in ("case_id", "source_benchmark"):
         optional_case_text_only(case, key, path, line_no)
     for key in (
@@ -113,7 +128,7 @@ def optional_case_text_or_texts(case: dict, key: str, path: Path, line_no: int) 
             return [value.strip()]
     elif isinstance(value, list):
         return optional_case_texts(case, key, path, line_no)
-    raise SystemExit(f"{path}:{line_no}: benchmark case field must be string or list of strings: {key}")
+    raise SystemExit(f"{case_location(path, line_no)}: benchmark case field must be string or list of strings: {key}")
 
 
 def optional_case_texts(case: dict, key: str, path: Path, line_no: int) -> list[str]:
@@ -121,11 +136,11 @@ def optional_case_texts(case: dict, key: str, path: Path, line_no: int) -> list[
         return []
     value = case.get(key)
     if not isinstance(value, list):
-        raise SystemExit(f"{path}:{line_no}: benchmark case field must be list of strings: {key}")
+        raise SystemExit(f"{case_location(path, line_no)}: benchmark case field must be list of strings: {key}")
     out: list[str] = []
     for idx, item in enumerate(value):
         if not isinstance(item, str) or not item.strip():
-            raise SystemExit(f"{path}:{line_no}: benchmark case field {key}[{idx}] must be a non-empty string")
+            raise SystemExit(f"{case_location(path, line_no)}: benchmark case field {key}[{idx}] must be a non-empty string")
         out.append(item.strip())
     return out
 
@@ -136,7 +151,7 @@ def validate_forbidden_output_patterns(case: dict, path: Path, line_no: int) -> 
         try:
             re.compile(pattern)
         except re.error as exc:
-            raise SystemExit(f"{path}:{line_no}: invalid forbidden_output_patterns[{idx}]: {exc}") from exc
+            raise SystemExit(f"{case_location(path, line_no)}: invalid forbidden_output_patterns[{idx}]: {exc}") from exc
     return patterns
 
 
@@ -146,7 +161,7 @@ def optional_case_text_only(case: dict, key: str, path: Path, line_no: int) -> s
     value = case.get(key)
     if isinstance(value, str):
         return value.strip()
-    raise SystemExit(f"{path}:{line_no}: benchmark case field must be string: {key}")
+    raise SystemExit(f"{case_location(path, line_no)}: benchmark case field must be string: {key}")
 
 
 def optional_case_text(case: dict, key: str) -> str:
@@ -400,7 +415,7 @@ def load_memory_records(repo: Path) -> dict[str, dict]:
 def required_case_text(case: dict, key: str, path: Path, line_no: int) -> str:
     value = case.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise SystemExit(f"{path}:{line_no}: benchmark case missing required string field: {key}")
+        raise SystemExit(f"{case_location(path, line_no)}: benchmark case missing required string field: {key}")
     return value
 
 
