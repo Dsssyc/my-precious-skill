@@ -213,6 +213,7 @@ def new_totals() -> dict[str, float]:
         "memory_hit_1": 0,
         "memory_hit_5": 0,
         "memory_rr": 0.0,
+        "memory_ndcg_at_5": 0.0,
         "memory_precision_at_5": 0.0,
         "memory_result_count_at_5": 0,
         "memory_relevant_count_at_5": 0,
@@ -271,6 +272,7 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "memory_result_count_at_5": int(totals["memory_result_count_at_5"]),
         "memory_relevant_count_at_5": int(totals["memory_relevant_count_at_5"]),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),
+        "memory_ndcg_at_5": ratio(totals["memory_ndcg_at_5"], totals["positive_cases"]),
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
@@ -303,6 +305,7 @@ def add_result(totals: dict[str, float], result: dict) -> None:
         totals["memory_hit_5"] += int(result["memory_rank"] is not None and result["memory_rank"] <= 5)
         if result["memory_rank"] is not None:
             totals["memory_rr"] += 1 / result["memory_rank"]
+        totals["memory_ndcg_at_5"] += result["memory_ndcg_at_5"]
         totals["memory_precision_at_5"] += result["memory_precision_at_5"]
         totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
         totals["memory_relevant_count_at_5"] += result["memory_relevant_count_at_5"]
@@ -561,6 +564,12 @@ def memory_hit_rank(
     return None
 
 
+def memory_ndcg_at_5(memory_rank: int | None) -> float:
+    if memory_rank is None or memory_rank > 5:
+        return 0.0
+    return 1 / math.log2(memory_rank + 1)
+
+
 def memory_precision_at_5(
     blocks: list[str],
     expected_memory_id: str,
@@ -710,6 +719,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_rank": memory_rank,
         "memory_recall_at_1": bool(memory_rank == 1),
         "memory_recall_at_5": bool(memory_rank is not None and memory_rank <= 5),
+        "memory_ndcg_at_5": round(result["memory_ndcg_at_5"], 6),
         "memory_precision_at_5": round(result["memory_precision_at_5"], 6),
         "memory_result_count_at_5": result["memory_result_count_at_5"],
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
@@ -774,9 +784,11 @@ def score_case(
     answer_hit = False
     normalized_answer_hit = False
     answer_f1 = 0.0
+    memory_ndcg = 0.0
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
+        memory_ndcg = memory_ndcg_at_5(rank)
         memory_precision = memory_precision_at_5(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
         if expected_source_anchor:
@@ -797,6 +809,7 @@ def score_case(
         "positive_case": is_positive,
         "expected_abstain": expected_abstain,
         "memory_rank": rank,
+        "memory_ndcg_at_5": memory_ndcg,
         "memory_precision_at_5": memory_precision.score,
         "memory_result_count_at_5": memory_precision.result_count,
         "memory_relevant_count_at_5": memory_precision.relevant_count,

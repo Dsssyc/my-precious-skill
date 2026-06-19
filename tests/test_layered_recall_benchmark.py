@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -99,6 +100,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 payload["memory_relevant_count_at_5"] / payload["memory_result_count_at_5"],
             )
             self.assertEqual(payload["memory_mrr"], 1.0)
+            self.assertEqual(payload["memory_ndcg_at_5"], 1.0)
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
             self.assertEqual(payload["evidence_reachability"], 1.0)
@@ -131,6 +133,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["case_pass_rate"], 1.0)
             self.assertEqual(lower_gates["memory_precision_at_5"], 0.25)
             self.assertEqual(lower_gates["memory_micro_precision_at_5"], 0.24)
+            self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             subprocess.run(
                 [
@@ -171,6 +174,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["cases"], 30)
             self.assertEqual(payload["answer_cases"], 9)
             self.assertGreaterEqual(payload["memory_precision_at_5"], lower_gates["memory_precision_at_5"])
+            self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
             self.assertEqual(payload["answer_token_f1"], 1.0)
@@ -277,6 +281,30 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(detail["memory_relevant_count_at_5"], 1)
             self.assertTrue(detail["case_pass"])
             self.assertNotIn("memory_precision_at_5", detail["failed_checks"])
+
+    def test_layered_recall_benchmark_reports_memory_ndcg_at_5(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="rank_second")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            expected_ndcg = 1 / math.log2(3)
+            self.assertEqual(payload["memory_recall_at_1"], 0.0)
+            self.assertEqual(payload["memory_recall_at_5"], 1.0)
+            self.assertAlmostEqual(payload["memory_ndcg_at_5"], expected_ndcg)
+            self.assertAlmostEqual(payload["categories"]["uncategorized"]["memory_ndcg_at_5"], expected_ndcg)
+            self.assertAlmostEqual(detail["memory_ndcg_at_5"], round(expected_ndcg, 6))
 
     def test_layered_recall_benchmark_reports_input_fingerprints(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1805,6 +1833,20 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_unrelated")
                         print("   drill:")
                         print("     - sessions/other/summary.md")
+                    elif MODE == "rank_second":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] Unrelated archived preference")
+                        print("   source: memory")
+                        print("   memory_id: mem_unrelated")
+                        print("   drill:")
+                        print("     - sessions/other/summary.md")
+                        print()
+                        print("2. [global] " + MEMORY_TEXT)
+                        print("   source: memory")
+                        print("   memory_id: mem_permission")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
                     else:
                         print(f"Top memory hits for: {{query}}")
                         print()

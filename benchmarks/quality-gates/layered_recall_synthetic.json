@@ -25,6 +25,7 @@
   "categories.temporal_reasoning.answer_cases": 1,
   "evidence_reachability": 1.0,
   "memory_mrr": 1.0,
+  "memory_ndcg_at_5": 1.0,
   "memory_micro_precision_at_5": 0.24,
   "memory_precision_at_5": 0.25,
   "memory_recall_at_1": 1.0,
