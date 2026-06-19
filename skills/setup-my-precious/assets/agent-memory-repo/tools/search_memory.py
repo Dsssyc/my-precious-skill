@@ -584,6 +584,10 @@ def matched_reason(matched: list[str]) -> str:
     return f"matched:{safe_reason_text(', '.join(matched))}"
 
 
+def safe_display_path(value: object, limit: int = 200) -> str:
+    return safe_display_text(str(value), limit)
+
+
 def sanitize_raw_ref(repo: Path, value: object) -> str:
     if isinstance(value, str):
         path_text = value.strip()
@@ -823,7 +827,7 @@ def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
     drill_paths = memory_drill_paths_for_depth(hit, depth)
     if drill_paths:
         lines.append("   drill:")
-        lines.extend(f"     - {path}" for path in drill_paths)
+        lines.extend(f"     - {safe_display_path(path)}" for path in drill_paths)
     if depth == "source" and hit.raw_refs:
         lines.append("   source anchors:")
         lines.extend(f"     - {raw_ref}" for raw_ref in hit.raw_refs)

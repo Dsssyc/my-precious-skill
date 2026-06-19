@@ -693,6 +693,54 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("cookie=", result.stdout)
         self.assertNotIn("cookie", result.stdout.lower())
 
+    def test_search_memory_sanitizes_sensitive_drill_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/cookie=SHOULD_NOT_RENDER"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Path\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_sensitive_drill",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "sensitive-drill-path",
+                        "text": "Sensitive drill path sentinel remains searchable.",
+                        "source": "explicit",
+                        "derived_from": [
+                            "sessions/2026/06/17/cookie=SHOULD_NOT_RENDER/summary.md"
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "sensitive drill path sentinel",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("drill:", result.stdout)
+        self.assertIn("     - [unsafe-field]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
     def test_search_memory_sanitizes_sensitive_legacy_index_titles(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
