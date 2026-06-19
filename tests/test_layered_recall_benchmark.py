@@ -158,6 +158,63 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             calls = calls_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(calls, ["memory|permission prompts", "session|permission prompts", "source|permission prompts"])
 
+    def test_layered_recall_benchmark_writes_case_details_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            rows = [
+                json.loads(line)
+                for line in details.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(rows), 1)
+            detail = rows[0]
+            self.assertEqual(detail["case_path"], str(cases.resolve()))
+            self.assertEqual(detail["case_line"], 1)
+            self.assertEqual(detail["query"], "permission prompts")
+            self.assertEqual(detail["category"], "uncategorized")
+            self.assertEqual(detail["expected_memory_id"], "mem_permission")
+            self.assertEqual(detail["memory_rank"], 1)
+            self.assertTrue(detail["memory_recall_at_1"])
+            self.assertTrue(detail["memory_recall_at_5"])
+            self.assertTrue(detail["session_drilldown_hit"])
+            self.assertTrue(detail["source_reachability_hit"])
+            self.assertTrue(detail["privacy_boundary_pass"])
+            self.assertGreaterEqual(detail["latency_ms"], 0)
+
+    def test_layered_recall_benchmark_fails_under_metric_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under", "memory_recall_at_5=0.5"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["memory_recall_at_5"], 0.0)
+            self.assertIn("memory_recall_at_5=0.0 below threshold 0.5", result.stderr)
+
     def test_broken_search_script_fails_with_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -490,7 +547,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         )
         return search_script, calls_path
 
-    def run_benchmark(self, repo, cases, search_script, check=True):
+    def run_benchmark(self, repo, cases, search_script, check=True, extra_args=None):
+        extra_args = extra_args or []
         return subprocess.run(
             [
                 sys.executable,
@@ -501,6 +559,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 str(cases),
                 "--search-script",
                 str(search_script),
+                *extra_args,
             ],
             check=check,
             text=True,

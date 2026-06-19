@@ -202,6 +202,11 @@ Optional fields include `category`, `required_evidence_paths`,
 `forbidden_output_patterns`. Abstention cases use `expected_abstain: true` and
 do not require positive expected fields.
 
+The benchmark can also write per-case details as JSONL and enforce top-level
+numeric metric thresholds with `--fail-under`. Threshold failures keep the
+aggregate JSON on stdout and report the failed metrics on stderr so automated
+quality gates can preserve machine-readable scores.
+
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive
 records should not be committed to this repository; they can be locally mapped

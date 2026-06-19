@@ -367,6 +367,35 @@ def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> 
     return not any(pattern in combined for pattern in forbidden_patterns)
 
 
+def case_detail(case: Case, result: dict) -> dict:
+    data = case.data
+    query = optional_case_text(data, "query")
+    memory_rank = result["memory_rank"]
+    return {
+        "case_path": str(case.path),
+        "case_line": case.line_no,
+        "query": query,
+        "category": category_name(data),
+        "expected_memory_id": optional_case_text(data, "expected_memory_id"),
+        "expected_summary_path": optional_case_text(data, "expected_summary_path"),
+        "expected_source_anchor": optional_case_text(data, "expected_source_anchor"),
+        "positive_case": result["positive_case"],
+        "expected_abstain": result["expected_abstain"],
+        "memory_rank": memory_rank,
+        "memory_recall_at_1": bool(memory_rank == 1),
+        "memory_recall_at_5": bool(memory_rank is not None and memory_rank <= 5),
+        "session_drilldown_hit": result["session_drilldown_hit"],
+        "source_reachability_hit": result["source_reachability_hit"],
+        "evidence_reachability_hit": result["evidence_reachability_hit"],
+        "abstention_hit": result["abstention_hit"],
+        "negative_memory_suppression_hit": result["negative_memory_suppression_hit"],
+        "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
+        "update_consistency_hit": result["update_consistency_hit"],
+        "privacy_boundary_pass": result["privacy_boundary_pass"],
+        "latency_ms": round(result["latency_ms"], 3),
+    }
+
+
 def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_script: Path) -> dict:
     data = case.data
     query = required_case_text(data, "query", case.path, case.line_no)
@@ -432,14 +461,16 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     }
 
 
-def score_cases(repo: Path, cases: list[Case], search_script: Path) -> dict:
+def score_cases(repo: Path, cases: list[Case], search_script: Path) -> tuple[dict, list[dict]]:
     memory_records = load_memory_records(repo)
     totals = new_totals()
     category_totals: dict[str, dict[str, float]] = {}
+    details: list[dict] = []
 
     for case in cases:
         result = score_case(repo, case, memory_records, search_script)
         add_result(totals, result)
+        details.append(case_detail(case, result))
         category = category_name(case.data)
         category_totals.setdefault(category, new_totals())
         add_result(category_totals[category], result)
@@ -449,7 +480,41 @@ def score_cases(repo: Path, cases: list[Case], search_script: Path) -> dict:
         category: finalize_totals(category_total)
         for category, category_total in sorted(category_totals.items())
     }
-    return payload
+    return payload, details
+
+
+def write_details_jsonl(path: Path, details: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for detail in details:
+            handle.write(json.dumps(detail, sort_keys=True) + "\n")
+
+
+def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]]:
+    thresholds: list[tuple[str, float]] = []
+    for value in values:
+        if "=" not in value:
+            raise SystemExit(f"--fail-under must use metric=threshold, got: {value}")
+        metric, raw_threshold = value.split("=", 1)
+        metric = metric.strip()
+        raw_threshold = raw_threshold.strip()
+        if metric not in payload or not isinstance(payload[metric], (int, float)):
+            raise SystemExit(f"--fail-under metric is not numeric in benchmark output: {metric}")
+        try:
+            threshold = float(raw_threshold)
+        except ValueError as exc:
+            raise SystemExit(f"--fail-under threshold must be numeric for {metric}: {raw_threshold}") from exc
+        thresholds.append((metric, threshold))
+    return thresholds
+
+
+def threshold_failures(payload: dict, thresholds: list[tuple[str, float]]) -> list[str]:
+    failures: list[str] = []
+    for metric, threshold in thresholds:
+        value = float(payload[metric])
+        if value < threshold:
+            failures.append(f"{metric}={value} below threshold {threshold}")
+    return failures
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -457,13 +522,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", required=True, help="Path to the memory archive")
     parser.add_argument("--cases", required=True, help="Path to JSONL benchmark cases")
     parser.add_argument("--search-script", default=DEFAULT_SEARCH_SCRIPT, help="Path to search_memory.py")
+    parser.add_argument("--details-jsonl", help="Write one JSON object per scored benchmark case")
+    parser.add_argument(
+        "--fail-under",
+        action="append",
+        default=[],
+        metavar="METRIC=THRESHOLD",
+        help="Exit non-zero when a top-level numeric metric is below a threshold",
+    )
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
     cases = load_cases(Path(args.cases).expanduser().resolve())
     search_script = Path(args.search_script).expanduser().resolve()
 
-    print(json.dumps(score_cases(repo, cases, search_script), sort_keys=True))
+    payload, details = score_cases(repo, cases, search_script)
+    print(json.dumps(payload, sort_keys=True), flush=True)
+    if args.details_jsonl:
+        write_details_jsonl(Path(args.details_jsonl).expanduser().resolve(), details)
+    failures = threshold_failures(payload, parse_fail_under(args.fail_under, payload))
+    if failures:
+        print("benchmark threshold failed: " + "; ".join(failures), file=sys.stderr)
+        return 1
     return 0
 
 

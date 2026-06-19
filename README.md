@@ -346,8 +346,17 @@ python benchmarks/build_synthetic_recall_archive.py \
 python benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my-precious-synthetic-archive \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
-  --search-script templates/agent-memory-repo/tools/search_memory.py
+  --search-script templates/agent-memory-repo/tools/search_memory.py \
+  --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
+  --fail-under memory_recall_at_5=0.95 \
+  --fail-under privacy_boundary_pass_rate=1.0
 ```
+
+`--details-jsonl` writes one row per case with rank, drill-down, source,
+evidence, abstention, stale-suppression, and privacy outcomes. `--fail-under`
+keeps the aggregate JSON on stdout and exits non-zero when a top-level numeric
+metric falls below the configured threshold, which makes the benchmark usable as
+a CI quality gate.
 
 To stress stale-memory suppression, add superseded distractor nodes that share
 the same query terms but must not appear in search output:

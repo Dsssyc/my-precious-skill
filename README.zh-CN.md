@@ -340,8 +340,16 @@ python benchmarks/build_synthetic_recall_archive.py \
 python benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my-precious-synthetic-archive \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
-  --search-script templates/agent-memory-repo/tools/search_memory.py
+  --search-script templates/agent-memory-repo/tools/search_memory.py \
+  --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
+  --fail-under memory_recall_at_5=0.95 \
+  --fail-under privacy_boundary_pass_rate=1.0
 ```
+
+`--details-jsonl` 会为每条 case 写一行 JSON，包含 rank、drill-down、source、
+evidence、拒答、stale suppression 和 privacy 结果。`--fail-under` 会保留
+stdout 的 aggregate JSON，并在顶层数值指标低于阈值时用非零状态退出，方便在
+CI 里作为质量门禁。
 
 如果要给 stale-memory suppression 增加压力，可以生成共享同一 query term、
 但不允许出现在搜索输出中的 superseded distractor node：
