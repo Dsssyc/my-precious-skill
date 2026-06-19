@@ -305,11 +305,46 @@ python benchmarks/layered_recall_benchmark.py \
   --search-script templates/agent-memory-repo/tools/search_memory.py
 ```
 
-输出包含 `memory_recall_at_5`、`session_drilldown_at_5` 和
-`source_reachability`。每个 JSONL case 必须包含 `query`、
-`expected_memory_id`、`expected_summary_path` 和 `expected_source_anchor`。
-这个 benchmark 面向 My Precious 的分层召回，不应该直接等同于使用原文
-transcript embedding 的系统分数。
+这个 harness 会输出受 LongMemEval、LOCoMo、Memora、RULER 风格检索压力测试
+启发的长期记忆可靠性指标：
+
+- `memory_recall_at_1`、`memory_recall_at_5` 和 `memory_mrr`
+- `session_drilldown_at_5`、`source_reachability` 和
+  `evidence_reachability`
+- `abstention_accuracy`、`negative_memory_suppression`、
+  `stale_memory_suppression` 和 `update_consistency`
+- `privacy_boundary_pass_rate`、总 `latency_ms` 和按 `category` 分组的汇总
+
+正向 JSONL case 必须包含 `query`、`expected_memory_id`、
+`expected_summary_path` 和 `expected_source_anchor`。可选字段包括
+`category`、`required_evidence_paths`、`expected_not_memory_id`、
+`stale_memory_id`、`temporal_scope` 和 `forbidden_output_patterns`。
+拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。
+
+仓库还内置了一份受公开 benchmark 能力维度启发的合成 case suite：
+
+```bash
+benchmarks/cases/layered_recall_synthetic.jsonl
+```
+
+如果要生成一份量化 synthetic 分数报告，先构建临时合成 archive，再用真实搜索脚本
+跑 benchmark：
+
+```bash
+python benchmarks/build_synthetic_recall_archive.py \
+  --repo /tmp/my-precious-synthetic-archive \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl
+
+python benchmarks/layered_recall_benchmark.py \
+  --repo /tmp/my-precious-synthetic-archive \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py
+```
+
+这些 case 只是合成模板，不包含私有记忆数据，也没有复制公开 benchmark 原始记录。
+如果需要跑外部公开 benchmark，应把下载数据保存在仓库外，并在本地转换为同一套
+JSONL case schema。这个 benchmark 面向 My Precious 的分层召回，不应该直接
+等同于使用原文 transcript embedding 的系统分数。
 
 渲染默认全域 scheduler：
 

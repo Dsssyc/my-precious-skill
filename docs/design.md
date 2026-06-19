@@ -164,3 +164,39 @@ If none are set, tools may try `~/repos/agent-memory`.
   values, and whitespace errors before committing or pushing.
 - The template repository contains no real memory data.
 - The design keeps skill development separate from private deployment.
+
+## Benchmark Evaluation Model
+
+The layered recall benchmark evaluates the read path as a provenance-grounded
+memory system, not as a direct leaderboard comparison against systems that
+store verbatim transcript embeddings.
+
+Positive cases check whether the correct high-level memory appears at rank 1 or
+within the top 5, whether the memory can drill down to the supporting session,
+whether required evidence paths are reachable, and whether source anchors are
+available at source depth. These metrics are reported as `memory_recall_at_1`,
+`memory_recall_at_5`, `memory_mrr`, `session_drilldown_at_5`,
+`evidence_reachability`, and `source_reachability`.
+
+Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
+Memora, and long-context retrieval stress tests:
+
+- `abstention_accuracy`: no memory is returned when a query is unsupported.
+- `negative_memory_suppression`: explicitly forbidden memory IDs are absent.
+- `stale_memory_suppression`: superseded memory IDs are absent.
+- `update_consistency`: the latest expected memory is found while stale memory
+  is suppressed.
+- `privacy_boundary_pass_rate`: configured forbidden output patterns, such as
+  raw transcript or secret-like snippets, are not printed.
+
+Benchmark case files are JSONL. Positive cases require `query`,
+`expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
+Optional fields include `category`, `required_evidence_paths`,
+`expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
+`forbidden_output_patterns`. Abstention cases use `expected_abstain: true` and
+do not require positive expected fields.
+
+The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
+synthetic cases only. External public benchmark downloads or private archive
+records should not be committed to this repository; they can be locally mapped
+to the same JSONL schema for evaluation.

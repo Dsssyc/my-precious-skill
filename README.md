@@ -310,11 +310,50 @@ python benchmarks/layered_recall_benchmark.py \
   --search-script templates/agent-memory-repo/tools/search_memory.py
 ```
 
-The harness reports `memory_recall_at_5`, `session_drilldown_at_5`, and
-`source_reachability`. Each JSONL case must include `query`,
-`expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
-It is designed for My Precious layered recall, not as a direct score comparison
-against systems that store verbatim transcript embeddings.
+The harness reports retrieval and reliability metrics inspired by long-memory
+benchmarks such as LongMemEval, LOCoMo, Memora, and RULER-style retrieval
+stress tests:
+
+- `memory_recall_at_1`, `memory_recall_at_5`, and `memory_mrr`
+- `session_drilldown_at_5`, `source_reachability`, and
+  `evidence_reachability`
+- `abstention_accuracy`, `negative_memory_suppression`,
+  `stale_memory_suppression`, and `update_consistency`
+- `privacy_boundary_pass_rate`, total `latency_ms`, and per-category summaries
+
+Positive JSONL cases must include `query`, `expected_memory_id`,
+`expected_summary_path`, and `expected_source_anchor`. Optional fields include
+`category`, `required_evidence_paths`, `expected_not_memory_id`,
+`stale_memory_id`, `temporal_scope`, and `forbidden_output_patterns`.
+Abstention cases set `expected_abstain` to `true` and do not need positive
+expected fields.
+
+The repository also includes a public-benchmark-inspired synthetic case suite:
+
+```bash
+benchmarks/cases/layered_recall_synthetic.jsonl
+```
+
+To produce a quantitative synthetic score report, build a temporary synthetic
+archive and run the benchmark against the real search script:
+
+```bash
+python benchmarks/build_synthetic_recall_archive.py \
+  --repo /tmp/my-precious-synthetic-archive \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl
+
+python benchmarks/layered_recall_benchmark.py \
+  --repo /tmp/my-precious-synthetic-archive \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py
+```
+
+Those cases are synthetic templates only. They do not contain private memory
+data or copied public benchmark records. External benchmark downloads should be
+kept outside this repository and locally converted to the same JSONL case
+schema when needed. This benchmark is designed for My Precious layered recall,
+not as a direct score comparison against systems that store verbatim transcript
+embeddings.
 
 Render a default global scheduler:
 
