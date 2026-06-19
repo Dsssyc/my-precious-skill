@@ -358,7 +358,7 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
     if result.returncode != 0:
         if NO_HIT_MARKER in result.stdout:
             return result.stdout
-        stderr = result.stderr.strip() or "(empty stderr)"
+        stderr = safe_result_identifier(result.stderr.strip() or "(empty stderr)")
         raise SystemExit(
             "search failed: "
             f"depth={depth} query={display_query!r} returncode={result.returncode} "
