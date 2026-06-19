@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 SCRIPT = Path("benchmarks/convert_public_memory_benchmark.py").resolve()
+BENCHMARK_SCRIPT = Path("benchmarks/layered_recall_benchmark.py").resolve()
+SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
 
 class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
@@ -174,6 +176,136 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[0]["expected_not_memory_id"], "external_memora_mem_q1_stale")
             self.assertEqual(rows[0]["temporal_scope"], "latest")
             self.assertEqual(rows[0]["evaluation_types"], ["memory_presence", "forgetting_absence"])
+
+    def test_can_build_synthetic_archive_and_score_converted_public_cases(self):
+        cases = [
+            (
+                "longmemeval",
+                [
+                    {
+                        "question_id": "lme_public_e2e",
+                        "question_type": "multi-session",
+                        "question": "Which recall mode should the public benchmark adapter verify?",
+                        "answer": "Layered recall with source drilldown.",
+                        "question_date": "2026-06-19",
+                    }
+                ],
+                {},
+            ),
+            (
+                "locomo",
+                [
+                    {
+                        "sample_id": "conv-public-e2e",
+                        "qa": [
+                            {
+                                "question": "Which detail changed after the second conversation?",
+                                "answer": "The evaluation target moved to normalized answer reachability.",
+                                "category": "temporal",
+                                "evidence": ["conversation-1", "conversation-2"],
+                            }
+                        ],
+                    }
+                ],
+                {},
+            ),
+            (
+                "memora",
+                {
+                    "questions": {
+                        "Remembering": [
+                            {
+                                "question_id": "mem_public_e2e",
+                                "question": "Which current memory should replace the stale scoring rule?",
+                                "answer": "Use answer-token F1 alongside exact reachability.",
+                                "question_date": "2026-06-19",
+                                "evaluation": {
+                                    "evaluation_questions": [
+                                        {"evaluation_type": "memory_presence"},
+                                        {"evaluation_type": "forgetting_absence"},
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                },
+                {"stale_memory_suppression": 1.0},
+            ),
+        ]
+
+        for source_name, payload, extra_thresholds in cases:
+            with self.subTest(source=source_name), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                source = root / f"{source_name}.json"
+                output = root / "cases.jsonl"
+                archive = root / "archive"
+                details = root / "details.jsonl"
+                source.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+                convert = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPT),
+                        "--source",
+                        source_name,
+                        "--input",
+                        str(source),
+                        "--output",
+                        str(output),
+                        "--build-synthetic-archive",
+                        str(archive),
+                        "--include-superseded-distractors",
+                    ],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                convert_payload = json.loads(convert.stdout)
+
+                self.assertEqual(convert_payload["cases"], 1)
+                self.assertEqual(convert_payload["synthetic_archive"], str(archive.resolve()))
+                self.assertTrue((archive / "index" / "memories.jsonl").exists())
+
+                thresholds = {
+                    "memory_recall_at_1": 1.0,
+                    "memory_recall_at_5": 1.0,
+                    "session_drilldown_at_5": 1.0,
+                    "source_reachability": 1.0,
+                    "evidence_reachability": 1.0,
+                    "answer_normalized_reachability": 1.0,
+                    "answer_token_f1": 1.0,
+                }
+                thresholds.update(extra_thresholds)
+                command = [
+                    sys.executable,
+                    str(BENCHMARK_SCRIPT),
+                    "--repo",
+                    str(archive),
+                    "--cases",
+                    str(output),
+                    "--search-script",
+                    str(SEARCH_SCRIPT),
+                    "--details-jsonl",
+                    str(details),
+                ]
+                for metric, value in thresholds.items():
+                    command.extend(["--fail-under", f"{metric}={value}"])
+
+                scored = subprocess.run(
+                    command,
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                scored_payload = json.loads(scored.stdout)
+                detail_rows = self.read_rows(details)
+
+                self.assertEqual(scored_payload["cases"], 1)
+                self.assertEqual(scored_payload["answer_token_f1"], 1.0)
+                self.assertEqual(len(detail_rows), 1)
+                self.assertTrue(detail_rows[0]["answer_normalized_reachability_hit"])
 
     def read_rows(self, path):
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

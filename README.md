@@ -342,7 +342,8 @@ schema without committing the source data:
 python benchmarks/convert_public_memory_benchmark.py \
   --source longmemeval \
   --input /path/outside/repo/longmemeval.json \
-  --output /tmp/longmemeval-cases.jsonl
+  --output /tmp/longmemeval-cases.jsonl \
+  --build-synthetic-archive /tmp/longmemeval-synthetic-archive
 
 python benchmarks/convert_public_memory_benchmark.py \
   --source locomo \
@@ -361,6 +362,23 @@ The converter supports schema shapes used by the official
 [Memora](https://github.com/geniesinc/Memora) releases. It creates deterministic
 external memory IDs and protected source anchors for local evaluation; it does
 not download, vendor, or commit public benchmark records.
+`--build-synthetic-archive` is optional. It creates a temporary synthetic
+archive from the converted case targets, which lets you dry-run the adapter
+through the real search benchmark before evaluating a real memory archive.
+Add `--include-superseded-distractors` with that option to create stale-memory
+distractors for converted cases that declare `stale_memory_id`.
+
+Converted public-style cases can be scored with the same quantitative gate:
+
+```bash
+python benchmarks/layered_recall_benchmark.py \
+  --repo /tmp/longmemeval-synthetic-archive \
+  --cases /tmp/longmemeval-cases.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py \
+  --details-jsonl /tmp/longmemeval-details.jsonl \
+  --fail-under memory_recall_at_5=0.95 \
+  --fail-under answer_normalized_reachability=0.90
+```
 
 The repository also includes a public-benchmark-inspired synthetic case suite:
 

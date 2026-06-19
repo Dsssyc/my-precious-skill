@@ -9,6 +9,7 @@ schema for local evaluation.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -262,13 +263,32 @@ def write_cases(path: Path, cases: list[dict]) -> None:
             handle.write(json.dumps(case, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def load_synthetic_builder():
+    builder_path = Path(__file__).with_name("build_synthetic_recall_archive.py")
+    spec = importlib.util.spec_from_file_location("build_synthetic_recall_archive", builder_path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"unable to load synthetic archive builder from {builder_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, choices=sorted(SOURCE_LABELS), help="Input benchmark schema")
     parser.add_argument("--input", required=True, help="Downloaded public benchmark JSON or JSONL file")
     parser.add_argument("--output", required=True, help="Output My Precious benchmark cases JSONL")
     parser.add_argument("--limit", type=int, help="Limit converted cases after schema conversion")
+    parser.add_argument("--build-synthetic-archive", help="Optional output repo path for a synthetic dry-run archive")
+    parser.add_argument(
+        "--include-superseded-distractors",
+        action="store_true",
+        help="When building a synthetic archive, include superseded stale-memory distractors",
+    )
     args = parser.parse_args(argv)
+
+    if args.include_superseded_distractors and not args.build_synthetic_archive:
+        parser.error("--include-superseded-distractors requires --build-synthetic-archive")
 
     payload = load_payload(Path(args.input).expanduser().resolve())
     if args.source == "longmemeval":
@@ -281,7 +301,17 @@ def main(argv: list[str] | None = None) -> int:
         cases = cases[: max(0, args.limit)]
     output = Path(args.output).expanduser().resolve()
     write_cases(output, cases)
-    print(json.dumps({"cases": len(cases), "output": str(output), "source": SOURCE_LABELS[args.source]}, sort_keys=True))
+    result = {"cases": len(cases), "output": str(output), "source": SOURCE_LABELS[args.source]}
+    if args.build_synthetic_archive:
+        archive = Path(args.build_synthetic_archive).expanduser().resolve()
+        builder = load_synthetic_builder()
+        builder.write_archive(
+            archive,
+            cases,
+            include_superseded_distractors=args.include_superseded_distractors,
+        )
+        result["synthetic_archive"] = str(archive)
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 

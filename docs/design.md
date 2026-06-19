@@ -217,7 +217,11 @@ quality gates can preserve machine-readable scores.
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic
 external memory IDs and source anchors, but does not download benchmark data or
-commit external records to this reusable skill repository.
+commit external records to this reusable skill repository. For adapter dry-runs,
+the converter can also build a temporary synthetic archive from the converted
+cases with `--build-synthetic-archive`; that archive is then scored by the same
+layered recall benchmark and `--fail-under` quality gates as packaged synthetic
+cases.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive
