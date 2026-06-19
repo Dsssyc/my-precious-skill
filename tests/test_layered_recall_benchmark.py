@@ -1017,7 +1017,12 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                             "session_drilldown_at_5",
                             "source_reachability",
                         ],
+                        "memory_rank": None,
+                        "memory_recall_at_1": False,
+                        "memory_recall_at_5": False,
+                        "session_drilldown_hit": False,
                         "source_benchmark": "LongMemEval",
+                        "source_reachability_hit": False,
                     }
                 ],
             )

@@ -1057,7 +1057,12 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "case_line": detail.get("case_line"),
                 "category": detail.get("category", ""),
                 "failed_checks": failed,
+                "memory_rank": detail.get("memory_rank"),
+                "memory_recall_at_1": detail.get("memory_recall_at_1"),
+                "memory_recall_at_5": detail.get("memory_recall_at_5"),
+                "session_drilldown_hit": detail.get("session_drilldown_hit"),
                 "source_benchmark": detail.get("source_benchmark", ""),
+                "source_reachability_hit": detail.get("source_reachability_hit"),
             }
         )
     return summaries
