@@ -303,6 +303,51 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertEqual(rows[0]["temporal_scope"], "latest")
             self.assertEqual(rows[0]["evaluation_types"], ["memory_presence", "forgetting_absence"])
 
+    def test_rejects_non_object_memora_question_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "memora.json"
+            output = root / "cases.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "questions": {
+                            "Remembering": [
+                                {
+                                    "question_id": "mem_q1",
+                                    "question": "Which preference should be recalled?",
+                                    "answer": "Use layered recall.",
+                                },
+                                "not-a-question-object",
+                            ]
+                        }
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "memora",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Memora task Remembering item 2 is not an object", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_can_build_synthetic_archive_and_score_converted_public_cases(self):
         cases = [
             (

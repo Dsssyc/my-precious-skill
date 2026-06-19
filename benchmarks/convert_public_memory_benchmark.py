@@ -207,21 +207,30 @@ def convert_locomo(payload: object) -> list[dict]:
 
 def memora_question_groups(payload: object) -> Iterable[tuple[str, list[dict]]]:
     if isinstance(payload, list):
-        yield "uncategorized", [item for item in payload if isinstance(item, dict)]
+        yield "uncategorized", memora_object_items(payload, "Memora input")
         return
     if not isinstance(payload, dict):
         raise SystemExit("Memora input must be a JSON object or array")
     questions = payload.get("questions") or payload.get("data")
     if isinstance(questions, list):
-        yield "uncategorized", [item for item in questions if isinstance(item, dict)]
+        yield "uncategorized", memora_object_items(questions, "Memora questions")
         return
     if isinstance(questions, dict):
         for task, values in questions.items():
             if not isinstance(values, list):
                 raise SystemExit(f"Memora task {task} must contain a list")
-            yield str(task), [item for item in values if isinstance(item, dict)]
+            yield str(task), memora_object_items(values, f"Memora task {task}")
         return
     raise SystemExit("Memora input is missing questions")
+
+
+def memora_object_items(values: list, label: str) -> list[dict]:
+    out = []
+    for idx, value in enumerate(values, 1):
+        if not isinstance(value, dict):
+            raise SystemExit(f"{label} item {idx} is not an object")
+        out.append(value)
+    return out
 
 
 def memora_evaluation_types(item: dict) -> list[str]:
