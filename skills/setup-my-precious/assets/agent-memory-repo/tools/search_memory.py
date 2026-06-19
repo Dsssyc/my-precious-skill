@@ -32,6 +32,10 @@ SENSITIVE_DISPLAY_PATTERN = re.compile(
     r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
     r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
 )
+SENSITIVE_REASON_TOKEN_PATTERN = re.compile(
+    r"(?i)^(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
+    r"private[_-]?key|secret|session[_-]?id|token)$"
+)
 
 
 @dataclass
@@ -440,7 +444,7 @@ def score_index_record(query_tokens: list[str], record: dict, context_terms: lis
                     if phrase in lowered:
                         score += phrase_score(phrase) * max(1, field_weight // 4)
                         phrase_matches += 1
-                        add_reason(reasons, f"phrase:{phrase}")
+                        add_reason(reasons, f"phrase:{safe_reason_text(phrase)}")
         if field_matched and key in HIGH_SIGNAL_FIELDS:
             structured_match_count += len(field_matched)
     if matched_tokens:
@@ -563,6 +567,23 @@ def safe_display_text(value: object, limit: int = 180) -> str:
     return clip(text, limit)
 
 
+def has_sensitive_reason_token(text: str) -> bool:
+    return any(SENSITIVE_REASON_TOKEN_PATTERN.fullmatch(token) for token in tokenize(text))
+
+
+def safe_reason_text(value: object, limit: int = 160) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
+    if has_control_chars(text) or has_sensitive_display_text(text) or has_sensitive_reason_token(text):
+        return UNSAFE_DISPLAY_FIELD
+    return clip(text, limit)
+
+
+def matched_reason(matched: list[str]) -> str:
+    return f"matched:{safe_reason_text(', '.join(matched))}"
+
+
 def sanitize_raw_ref(repo: Path, value: object) -> str:
     if isinstance(value, str):
         path_text = value.strip()
@@ -656,7 +677,7 @@ def collect_memory_hits(
         if isinstance(support_count, int) or isinstance(support_count, str):
             why.append(f"support_count:{safe_display_scalar(support_count, 60)}")
         why.extend(reasons)
-        why.append(f"matched:{', '.join(matched)}")
+        why.append(matched_reason(matched))
         hits.append(
             Hit(
                 path=memory_hit_path(repo, raw_memory_id, line_no),
@@ -685,7 +706,7 @@ def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[
             if not score:
                 continue
             path = safe_index_record_path(repo, index_path, record.get("summary_path") or record.get("path"))
-            why = [f"index:{index_path.name}", *reasons, f"matched:{', '.join(matched)}"]
+            why = [f"index:{index_path.name}", *reasons, matched_reason(matched)]
             hits.append(Hit(path=path, score=score + 10, source="index", why=why, title=display_title(record, query_tokens)))
     return hits
 
@@ -732,7 +753,7 @@ def collect_markdown_hits(repo: Path, query_tokens: list[str], include_evidence:
                 path=path,
                 score=score,
                 source="markdown",
-                why=[f"matched:{', '.join(matched)}"],
+                why=[matched_reason(matched)],
                 title=safe_display_text(title),
             )
         )
