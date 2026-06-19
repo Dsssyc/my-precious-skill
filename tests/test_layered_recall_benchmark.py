@@ -1140,6 +1140,23 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
             self.assertNotIn("cookie=", result.stderr)
 
+    def test_broken_search_script_sanitizes_sensitive_script_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            sensitive_script_root = root / "scripts-cookie=SHOULD_NOT_RENDER"
+            sensitive_script_root.mkdir()
+            missing_search_script = sensitive_script_root / "missing_search.py"
+
+            result = self.run_benchmark(repo, cases, missing_search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("search failed", result.stderr)
+            self.assertIn("script=[unsafe-result-identifier]", result.stderr)
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+            self.assertNotIn("cookie=", result.stderr)
+
     def test_broken_search_script_sanitizes_sensitive_child_stderr(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -363,6 +363,7 @@ def safe_result_identifiers(values: list[str]) -> list[str]:
 
 def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float) -> str:
     display_query = safe_result_identifier(query)
+    display_script = safe_diagnostic_path(search_script)
     try:
         result = subprocess.run(
             [
@@ -386,7 +387,7 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
         raise SystemExit(
             "search timed out: "
             f"depth={depth} query={display_query!r} timeout_s={timeout_s:g} "
-            f"script={search_script}"
+            f"script={display_script}"
         ) from exc
     if result.returncode != 0:
         if NO_HIT_MARKER in result.stdout:
@@ -395,7 +396,7 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
         raise SystemExit(
             "search failed: "
             f"depth={depth} query={display_query!r} returncode={result.returncode} "
-            f"script={search_script}\nstderr:\n{stderr}"
+            f"script={display_script}\nstderr:\n{stderr}"
         )
     return result.stdout
 
