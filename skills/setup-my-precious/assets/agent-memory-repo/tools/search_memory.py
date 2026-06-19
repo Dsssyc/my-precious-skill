@@ -892,12 +892,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             selected_hits = session_hits
     hits = merge_hits(repo, selected_hits)
+    display_query = safe_display_text(args.query)
 
     if not hits:
-        print(f"No memory hits for: {args.query}")
+        print(f"No memory hits for: {display_query}")
         return 1
 
-    print(f"Top memory hits for: {args.query}")
+    print(f"Top memory hits for: {display_query}")
     print(f"Archive: {repo}")
     print()
     for idx, hit in enumerate(hits[: args.limit], 1):
