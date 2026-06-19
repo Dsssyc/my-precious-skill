@@ -99,7 +99,8 @@ Both modes are repair paths, not the normal incremental path.
 ## Audit
 
 Check generated archive files for wrapper-field noise, first-person process
-updates, and unredacted key-like values:
+updates, unredacted key-like values, broken memory drilldown paths, and
+unreachable evidence `quote_id` references:
 
 ```bash
 python tools/audit_memory_archive.py --memory-repo .
@@ -173,6 +174,6 @@ Expected generated data:
 - Source records matching secret patterns are refused by default.
 - Redaction runs before summarization and evidence rendering.
 - Git sync refuses tool/script changes and unredacted key-like values.
-- Archive audit refuses wrapper-field noise and first-person process updates in generated files.
+- Archive audit refuses wrapper-field noise, first-person process updates, broken memory drilldown paths, and unreachable evidence quote IDs in generated files.
 - Credentials must never be committed.
 - Keep this repository private.

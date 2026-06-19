@@ -585,18 +585,34 @@ def iter_memory_node_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
                 yield relative, line_number, {"__invalid_json__": True}
 
 
-def safe_existing_archive_ref(repo: Path, path_text: str) -> bool:
+def safe_archive_ref_path(repo: Path, path_text: str) -> Path | None:
     if not path_text:
-        return False
+        return None
     raw_relative = PurePosixPath(path_text)
     if raw_relative.is_absolute() or ".." in raw_relative.parts:
-        return False
+        return None
     candidate = repo / path_text
     try:
         candidate.resolve(strict=False).relative_to(repo.resolve())
     except (OSError, ValueError):
+        return None
+    if not candidate.exists():
+        return None
+    return candidate
+
+
+def safe_existing_archive_ref(repo: Path, path_text: str) -> bool:
+    return safe_archive_ref_path(repo, path_text) is not None
+
+
+def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
+    if not quote_id.strip():
         return False
-    return candidate.exists()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
 
 
 def audit_memory_references(repo: Path) -> list[Finding]:
@@ -642,7 +658,13 @@ def audit_memory_references(repo: Path) -> list[Finding]:
         else:
             for ref in evidence_refs:
                 path_text = ref.get("path") if isinstance(ref, dict) else ""
-                if not isinstance(path_text, str) or not safe_existing_archive_ref(repo, path_text):
+                quote_id = ref.get("quote_id") if isinstance(ref, dict) else ""
+                evidence_path = safe_archive_ref_path(repo, path_text) if isinstance(path_text, str) else None
+                if (
+                    evidence_path is None
+                    or not isinstance(quote_id, str)
+                    or not evidence_quote_id_exists(evidence_path, quote_id)
+                ):
                     findings.append(Finding(relative, line_number, "broken_memory_ref"))
     return findings
 

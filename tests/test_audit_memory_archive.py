@@ -521,6 +521,65 @@ class AuditMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_audit_memory_archive_flags_missing_evidence_quote_id(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/missing-quote"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for evidence quote validation.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_0010: Different evidence quote.\n", encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_missing_quote",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "agent-workflow",
+                        "text": "Evidence quote IDs should be reachable.",
+                        "rationale": "Audit should validate evidence quote anchors, not only files.",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "persistence": "normal",
+                        "support_count": 1,
+                        "first_seen": "2026-06-05T10:00:00Z",
+                        "last_seen": "2026-06-05T10:00:00Z",
+                        "derived_from": ["sessions/2026/06/05/missing-quote/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/05/missing-quote/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                        "supersedes": [],
+                        "superseded_by": None,
+                        "tags": ["audit"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("category=broken_memory_ref", combined)
+            self.assertIn("index/memories.jsonl", combined)
+
     def test_audit_memory_archive_flags_invalid_memory_node_rows(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

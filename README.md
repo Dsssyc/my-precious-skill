@@ -251,6 +251,9 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
   --memory-repo ~/repos/agent-memory
 ```
 
+The audit checks generated text quality, unsafe key-like values, memory-node
+drilldown paths, and evidence `quote_id` reachability.
+
 Search without invoking an agent:
 
 ```bash

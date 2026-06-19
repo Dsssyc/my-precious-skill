@@ -248,6 +248,9 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
   --memory-repo ~/repos/agent-memory
 ```
 
+audit 会检查生成文本质量、不安全 key-like value、memory node 下钻路径，以及
+evidence `quote_id` 是否可达。
+
 不用 agent，也可以直接运行搜索脚本：
 
 ```bash
