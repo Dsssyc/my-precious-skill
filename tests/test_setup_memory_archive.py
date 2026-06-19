@@ -95,6 +95,26 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(config_path.parent.stat().st_mode), 0o700)
 
+    def test_write_config_refuses_symlinked_config_file(self):
+        module = load_setup_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            config_dir = root / "config"
+            outside_config = root / "outside-config.json"
+            config_path = config_dir / "my-precious.json"
+            target.mkdir()
+            config_dir.mkdir()
+            outside_config.write_text('{"memory_repo": "unchanged"}\n', encoding="utf-8")
+            config_path.symlink_to(outside_config)
+
+            with self.assertRaises(SystemExit) as caught:
+                module.write_config(target, config_path, dry_run=False)
+
+            self.assertIn("Refusing to write symlinked config path:", str(caught.exception))
+            self.assertEqual(outside_config.read_text(encoding="utf-8"), '{"memory_repo": "unchanged"}\n')
+
     def test_setup_memory_archive_refuses_non_empty_without_force(self):
         script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

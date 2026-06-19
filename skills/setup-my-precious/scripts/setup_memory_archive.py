@@ -176,10 +176,13 @@ def create_github_repo(target: Path, repo: str, private: bool, dry_run: bool) ->
 
 
 def write_config(target: Path, config_path: Path, dry_run: bool) -> None:
-    config_path = config_path.expanduser().resolve()
+    config_path = config_path.expanduser()
     if dry_run:
         print(f"dry-run: write config {config_path} memory_repo={target}")
         return
+    if config_path.is_symlink():
+        raise SystemExit(f"Refusing to write symlinked config path: {config_path}")
+    config_path = config_path.resolve()
 
     payload: dict[str, object] = {}
     if config_path.exists():
