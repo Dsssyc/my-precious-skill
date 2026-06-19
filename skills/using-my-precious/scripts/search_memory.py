@@ -724,6 +724,15 @@ def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[
     return hits
 
 
+def is_safe_repo_file(repo: Path, path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return path.is_file()
+
+
 def iter_markdown_files(repo: Path, include_evidence: bool) -> Iterable[Path]:
     paths: list[Path] = []
     for name in ("INDEX.md",):
@@ -736,7 +745,7 @@ def iter_markdown_files(repo: Path, include_evidence: bool) -> Iterable[Path]:
         paths.extend(sorted((repo / "sessions").glob("**/evidence.md")))
     seen: set[Path] = set()
     for path in paths:
-        if path not in seen and path.is_file():
+        if path not in seen and is_safe_repo_file(repo, path):
             seen.add(path)
             yield path
 

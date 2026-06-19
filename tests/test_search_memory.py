@@ -1263,6 +1263,33 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("index/sessions.jsonl", result.stdout)
         self.assertNotIn("../outside/secret.md", result.stdout)
 
+    def test_search_memory_does_not_read_symlinked_markdown_outside_archive(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            outside = root / "outside-secret.md"
+            outside.write_text("# Outside Secret\n\noutside-only-token should never be indexed.\n", encoding="utf-8")
+            session_dir = repo / "sessions/2026/06/18/symlink"
+            session_dir.mkdir(parents=True)
+            (repo / "index").mkdir()
+            (session_dir / "summary.md").symlink_to(outside)
+
+            result = subprocess.run(
+                [sys.executable, str(script), "outside-only-token", "--repo", str(repo)],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("No memory hits", result.stdout)
+        self.assertNotIn("Outside Secret", result.stdout)
+        self.assertNotIn("outside-only-token should never be indexed", result.stdout)
+        self.assertNotIn(str(outside), result.stdout + result.stderr)
+
     def test_search_memory_uses_summary_title_when_index_title_is_generic_source_file(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
