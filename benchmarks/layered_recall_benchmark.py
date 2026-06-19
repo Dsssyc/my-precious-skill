@@ -826,7 +826,7 @@ def threshold_failure_details(payload: dict, thresholds: list[tuple[str, float]]
     for metric, threshold in thresholds:
         value = fail_under_metric_value(payload, metric)
         if value < threshold:
-            failures.append({"metric": metric, "value": value, "threshold": threshold})
+            failures.append({"comparison": "below", "metric": metric, "value": value, "threshold": threshold})
     return failures
 
 

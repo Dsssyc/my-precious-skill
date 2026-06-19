@@ -245,7 +245,8 @@ Thresholds can target top-level metrics or dotted category paths such as
 direct `--fail-under` or `--fail-over` arguments override duplicate metric keys
 from files. Threshold failures keep the aggregate JSON on stdout and report the
 failed metrics on stderr so automated quality gates can preserve
-machine-readable scores.
+machine-readable scores. Structured threshold failure entries include a
+`comparison` field set to `below` or `above`.
 The packaged synthetic gates intentionally split lower-bound and upper-bound
 checks: `benchmarks/quality-gates/layered_recall_synthetic.json` covers the
 synthetic suite dimensions, answer reachability, pass-rate metrics, and

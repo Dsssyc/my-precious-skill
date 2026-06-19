@@ -612,6 +612,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 failure_payload["failures"],
                 [
                     {
+                        "comparison": "below",
                         "metric": "memory_recall_at_5",
                         "threshold": 0.5,
                         "value": 0.0,
