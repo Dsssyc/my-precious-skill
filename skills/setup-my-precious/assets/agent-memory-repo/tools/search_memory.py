@@ -27,6 +27,10 @@ CONFIG_CANDIDATES = (
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
+SENSITIVE_SOURCE_ANCHOR_PATTERN = re.compile(
+    r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
+    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
+)
 
 
 @dataclass
@@ -541,6 +545,10 @@ def has_control_chars(text: str) -> bool:
     return any(ord(char) < 32 or ord(char) == 127 for char in text)
 
 
+def has_sensitive_source_anchor_text(text: str) -> bool:
+    return bool(SENSITIVE_SOURCE_ANCHOR_PATTERN.search(text))
+
+
 def sanitize_raw_ref(repo: Path, value: object) -> str:
     if isinstance(value, str):
         path_text = value.strip()
@@ -554,7 +562,12 @@ def sanitize_raw_ref(repo: Path, value: object) -> str:
         anchor_text = anchor.strip() if isinstance(anchor, str) else ""
     else:
         return UNSAFE_SOURCE_REF
-    if not path_text or has_control_chars(path_text) or has_control_chars(anchor_text):
+    if (
+        not path_text
+        or has_control_chars(path_text)
+        or has_control_chars(anchor_text)
+        or has_sensitive_source_anchor_text(anchor_text)
+    ):
         return UNSAFE_SOURCE_REF
     safe_path = safe_repo_relative_path(repo, path_text)
     if not safe_path:

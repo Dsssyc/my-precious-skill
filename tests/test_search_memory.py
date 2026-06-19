@@ -367,6 +367,60 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("/Users/private", result.stdout)
         self.assertNotIn("injected: yes", result.stdout)
 
+    def test_search_memory_depth_source_sanitizes_sensitive_source_ref_anchors(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/sensitive-source-anchor"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Source Anchor\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_sensitive_source_anchor",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-depth",
+                        "text": "Sensitive source-depth anchor text should not be printed verbatim.",
+                        "rationale": "Source anchors are untrusted display data.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/sensitive-source-anchor/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [
+                            {"path": "records/private.jsonl", "anchor": "message:44 cookie=SHOULD_NOT_RENDER"}
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "sensitive source-depth anchor",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("[unsafe-source-ref]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
     def test_search_memory_scope_global_filters_memory_layers(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

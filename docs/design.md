@@ -199,6 +199,9 @@ so zero-denominator metrics can be distinguished from measured failures.
 Aggregate payloads include `cases_path`, `cases_sha256`, `search_script_path`,
 and `search_script_sha256` so score reports identify the exact case file and
 search implementation used for a run.
+Search treats source anchors as untrusted display data: unsafe paths or
+sensitive-looking anchor text are rendered as `[unsafe-source-ref]` instead of
+being printed verbatim.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:
