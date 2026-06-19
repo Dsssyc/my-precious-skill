@@ -317,6 +317,53 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", combined)
             self.assertNotIn("cookie=", combined)
 
+    def test_synthetic_builder_rejects_case_paths_outside_archive(self):
+        scenarios = [
+            (
+                "expected_summary_path",
+                {"expected_summary_path": "../outside/summary.md"},
+                "outside/summary.md",
+            ),
+            (
+                "required_evidence_paths",
+                {"required_evidence_paths": ["../outside/evidence.md"]},
+                "outside/evidence.md",
+            ),
+            (
+                "expected_source_anchor",
+                {"expected_source_anchor": "../outside/raw.jsonl#message:1"},
+                "outside/raw.jsonl",
+            ),
+        ]
+        for field, override, outside_path in scenarios:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                repo = root / "agent-memory"
+                cases = self.write_cases(root, {**self.valid_case(), **override})
+                outside = root / outside_path
+
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SYNTHETIC_ARCHIVE_BUILDER),
+                        "--repo",
+                        str(repo),
+                        "--cases",
+                        str(cases),
+                    ],
+                    check=False,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unsafe archive path in benchmark case field", result.stderr)
+                self.assertIn(field, result.stderr)
+                self.assertNotIn("Traceback", combined)
+                self.assertFalse(outside.exists())
+
     def test_layered_recall_benchmark_reports_parsed_block_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -72,6 +72,26 @@ def raw_ref_from_anchor(anchor: str) -> dict:
     return {"path": path, "anchor": raw_anchor}
 
 
+def archive_relative_path_text(value: object, field: str) -> str:
+    text = str(value).strip()
+    if (
+        not text
+        or text.startswith(("~", "/", "\\"))
+        or re.match(r"^[A-Za-z]:[\\/]", text)
+        or any(part == ".." for part in re.split(r"[\\/]+", text))
+    ):
+        raise SystemExit(f"unsafe archive path in benchmark case field: {field}")
+    return text
+
+
+def validate_case_archive_paths(case: dict) -> None:
+    archive_relative_path_text(case["expected_summary_path"], "expected_summary_path")
+    for evidence_path in text_list(case.get("required_evidence_paths")):
+        archive_relative_path_text(evidence_path, "required_evidence_paths")
+    source_path = str(case["expected_source_anchor"]).split("#", 1)[0]
+    archive_relative_path_text(source_path, "expected_source_anchor")
+
+
 def memory_layer(category: str) -> str:
     if category == "scope_calibration":
         return "domain"
@@ -207,6 +227,7 @@ def write_archive(repo: Path, cases: list[dict], *, include_superseded_distracto
         for case in cases:
             if not positive_case(case):
                 continue
+            validate_case_archive_paths(case)
             record = build_memory_record(case)
             if include_superseded_distractors:
                 records.extend(build_superseded_distractor_records(case))
