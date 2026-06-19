@@ -377,7 +377,8 @@ python benchmarks/layered_recall_benchmark.py \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
   --details-jsonl /tmp/longmemeval-details.jsonl \
   --fail-under memory_recall_at_5=0.95 \
-  --fail-under answer_normalized_reachability=0.90
+  --fail-under answer_normalized_reachability=0.90 \
+  --fail-under categories.temporal_reasoning.memory_recall_at_5=0.90
 ```
 
 The repository also includes a public-benchmark-inspired synthetic case suite:
@@ -405,9 +406,10 @@ python benchmarks/layered_recall_benchmark.py \
 
 `--details-jsonl` writes one row per case with rank, drill-down, source,
 evidence, abstention, stale-suppression, and privacy outcomes. `--fail-under`
-keeps the aggregate JSON on stdout and exits non-zero when a top-level numeric
-metric falls below the configured threshold, which makes the benchmark usable as
-a CI quality gate.
+keeps the aggregate JSON on stdout and exits non-zero when a configured numeric
+metric falls below its threshold, which makes the benchmark usable as a CI
+quality gate. Thresholds can target top-level metrics or dotted category paths
+such as `categories.knowledge_update.update_consistency=1.0`.
 
 To stress stale-memory suppression, add superseded distractor nodes that share
 the same query terms but must not appear in search output:

@@ -209,10 +209,12 @@ Optional fields include `category`, `required_evidence_paths`,
 `temporal_scope`, and `forbidden_output_patterns`. Abstention cases use
 `expected_abstain: true` and do not require positive expected fields.
 
-The benchmark can also write per-case details as JSONL and enforce top-level
-numeric metric thresholds with `--fail-under`. Threshold failures keep the
-aggregate JSON on stdout and report the failed metrics on stderr so automated
-quality gates can preserve machine-readable scores.
+The benchmark can also write per-case details as JSONL and enforce numeric
+metric thresholds with `--fail-under`. Thresholds can target top-level metrics
+or dotted category paths such as
+`categories.knowledge_update.update_consistency=1.0`. Threshold failures keep
+the aggregate JSON on stdout and report the failed metrics on stderr so
+automated quality gates can preserve machine-readable scores.
 
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic

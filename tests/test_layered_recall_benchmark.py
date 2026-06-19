@@ -314,6 +314,46 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_5"], 0.0)
             self.assertIn("memory_recall_at_5=0.0 below threshold 0.5", result.stderr)
 
+    def test_layered_recall_benchmark_accepts_nested_category_fail_under_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "category": "knowledge_update"})
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--fail-under", "categories.knowledge_update.memory_recall_at_5=1.0"],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["categories"]["knowledge_update"]["memory_recall_at_5"], 1.0)
+
+    def test_layered_recall_benchmark_fails_under_nested_category_metric_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "category": "knowledge_update"})
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under", "categories.knowledge_update.memory_recall_at_5=0.5"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["categories"]["knowledge_update"]["memory_recall_at_5"], 0.0)
+            self.assertIn(
+                "categories.knowledge_update.memory_recall_at_5=0.0 below threshold 0.5",
+                result.stderr,
+            )
+
     def test_broken_search_script_fails_with_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

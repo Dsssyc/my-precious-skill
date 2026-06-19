@@ -568,6 +568,17 @@ def write_details_jsonl(path: Path, details: list[dict]) -> None:
             handle.write(json.dumps(detail, sort_keys=True) + "\n")
 
 
+def fail_under_metric_value(payload: dict, metric: str) -> float:
+    value: object = payload
+    for part in metric.split("."):
+        if not part or not isinstance(value, dict) or part not in value:
+            raise SystemExit(f"--fail-under metric is not numeric in benchmark output: {metric}")
+        value = value[part]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SystemExit(f"--fail-under metric is not numeric in benchmark output: {metric}")
+    return float(value)
+
+
 def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]]:
     thresholds: list[tuple[str, float]] = []
     for value in values:
@@ -576,8 +587,7 @@ def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]
         metric, raw_threshold = value.split("=", 1)
         metric = metric.strip()
         raw_threshold = raw_threshold.strip()
-        if metric not in payload or not isinstance(payload[metric], (int, float)):
-            raise SystemExit(f"--fail-under metric is not numeric in benchmark output: {metric}")
+        fail_under_metric_value(payload, metric)
         try:
             threshold = float(raw_threshold)
         except ValueError as exc:
@@ -589,7 +599,7 @@ def parse_fail_under(values: list[str], payload: dict) -> list[tuple[str, float]
 def threshold_failures(payload: dict, thresholds: list[tuple[str, float]]) -> list[str]:
     failures: list[str] = []
     for metric, threshold in thresholds:
-        value = float(payload[metric])
+        value = fail_under_metric_value(payload, metric)
         if value < threshold:
             failures.append(f"{metric}={value} below threshold {threshold}")
     return failures
@@ -606,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="METRIC=THRESHOLD",
-        help="Exit non-zero when a top-level numeric metric is below a threshold",
+        help="Exit non-zero when a numeric metric or dotted metric path is below a threshold",
     )
     args = parser.parse_args(argv)
 
