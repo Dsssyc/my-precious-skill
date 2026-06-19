@@ -699,6 +699,29 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
             self.assertNotIn("cookie=", result.stderr)
 
+    def test_layered_recall_benchmark_sanitizes_sensitive_threshold_metric_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under", "api_key:SHOULD_NOT_RENDER=0.5"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "--fail-under metric is not numeric in benchmark output: [unsafe-result-identifier]",
+                result.stderr,
+            )
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+            self.assertNotIn("api_key:", result.stderr)
+
     def test_layered_recall_benchmark_writes_structured_threshold_failures_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

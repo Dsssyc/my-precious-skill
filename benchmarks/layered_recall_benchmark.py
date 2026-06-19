@@ -837,13 +837,14 @@ def write_details_jsonl(path: Path, details: list[dict]) -> None:
 
 
 def threshold_metric_value(payload: dict, metric: str, option: str) -> float:
+    display_metric = safe_result_identifier(metric)
     value: object = payload
     for part in metric.split("."):
         if not part or not isinstance(value, dict) or part not in value:
-            raise SystemExit(f"{option} metric is not numeric in benchmark output: {metric}")
+            raise SystemExit(f"{option} metric is not numeric in benchmark output: {display_metric}")
         value = value[part]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise SystemExit(f"{option} metric is not numeric in benchmark output: {metric}")
+        raise SystemExit(f"{option} metric is not numeric in benchmark output: {display_metric}")
     return float(value)
 
 
