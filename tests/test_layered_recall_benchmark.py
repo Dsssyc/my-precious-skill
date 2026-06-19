@@ -561,6 +561,24 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_5"], 0.0)
             self.assertIn("memory_recall_at_5=0.0 below threshold 0.5", result.stderr)
 
+    def test_layered_recall_benchmark_rejects_non_finite_direct_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under", "memory_recall_at_5=nan"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--fail-under threshold must be finite for memory_recall_at_5", result.stderr)
+
     def test_layered_recall_benchmark_writes_structured_threshold_failures_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -868,6 +886,26 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("--fail-under-file threshold must be numeric for memory_recall_at_5", result.stderr)
+
+    def test_layered_recall_benchmark_rejects_non_finite_threshold_file_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            threshold_file = root / "thresholds.json"
+            threshold_file.write_text('{"memory_recall_at_5": Infinity}', encoding="utf-8")
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under-file", str(threshold_file)],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--fail-under-file threshold must be finite for memory_recall_at_5", result.stderr)
 
     def test_layered_recall_benchmark_reports_missing_threshold_file_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -254,9 +254,10 @@ Thresholds can target top-level metrics or dotted category paths such as
 `categories.knowledge_update.update_consistency=1.0`. `--fail-under-file` and
 `--fail-over-file` load thresholds from JSON objects for repeatable CI gates;
 direct `--fail-under` or `--fail-over` arguments override duplicate metric keys
-from files. Threshold failures keep the aggregate JSON on stdout and report the
-failed metrics on stderr so automated quality gates can preserve
-machine-readable scores. Structured threshold failure entries include a
+from files. All threshold values must be finite numbers; NaN and Infinity are
+rejected before comparison. Threshold failures keep the aggregate JSON on
+stdout and report the failed metrics on stderr so automated quality gates can
+preserve machine-readable scores. Structured threshold failure entries include a
 `comparison` field set to `below` or `above`. Each depth-specific search
 subprocess has a default timeout of 30 seconds; use `--search-timeout-s` to
 raise that limit for large local archives or lower it for CI smoke tests.

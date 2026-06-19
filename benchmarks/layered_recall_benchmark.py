@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -826,6 +827,8 @@ def parse_thresholds(values: list[str], payload: dict, option: str) -> list[tupl
             threshold = float(raw_threshold)
         except ValueError as exc:
             raise SystemExit(f"{option} threshold must be numeric for {metric}: {raw_threshold}") from exc
+        if not math.isfinite(threshold):
+            raise SystemExit(f"{option} threshold must be finite for {metric}: {raw_threshold}")
         thresholds.append((metric, threshold))
     return thresholds
 
@@ -855,7 +858,10 @@ def load_threshold_file(path: Path, payload: dict, option: str) -> list[tuple[st
         threshold_metric_value(payload, metric, option)
         if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
             raise SystemExit(f"{option} threshold must be numeric for {metric}")
-        thresholds.append((metric, float(raw_threshold)))
+        threshold = float(raw_threshold)
+        if not math.isfinite(threshold):
+            raise SystemExit(f"{option} threshold must be finite for {metric}")
+        thresholds.append((metric, threshold))
     return thresholds
 
 

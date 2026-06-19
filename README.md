@@ -434,7 +434,8 @@ fields for CI systems that should not parse stderr. `--fail-under` keeps the
 aggregate JSON on stdout and exits non-zero when a configured numeric metric
 falls below its threshold, which makes the benchmark usable as a CI quality
 gate. Thresholds can target top-level metrics or dotted category paths such as
-`categories.knowledge_update.update_consistency=1.0`.
+`categories.knowledge_update.update_consistency=1.0`. Threshold values must be
+finite numbers; NaN and Infinity are rejected before comparison.
 `--fail-under-file` accepts a JSON object using the same metric paths, for
 example:
 
