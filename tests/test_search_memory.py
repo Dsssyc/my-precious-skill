@@ -516,6 +516,55 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("injected: yes", result.stdout)
         self.assertNotIn("source:explicit\n", result.stdout)
 
+    def test_search_memory_sanitizes_sensitive_memory_metadata(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/sensitive-display"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Display\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_display cookie=SHOULD_NOT_RENDER",
+                        "layer": "global cookie=SHOULD_NOT_RENDER",
+                        "scope": "scope cookie=SHOULD_NOT_RENDER",
+                        "topic": "sensitive-display",
+                        "text": "Metadata display sentinel should sanitize memory fields.",
+                        "rationale": "Metadata fields are untrusted display data.",
+                        "source": "explicit cookie=SHOULD_NOT_RENDER",
+                        "confidence": "high cookie=SHOULD_NOT_RENDER",
+                        "support_count": "1 cookie=SHOULD_NOT_RENDER",
+                        "derived_from": ["sessions/2026/06/17/sensitive-display/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "metadata display sentinel",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("[unsafe-field]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
     def test_search_memory_scope_global_filters_memory_layers(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

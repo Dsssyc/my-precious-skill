@@ -28,7 +28,7 @@ CONFIG_CANDIDATES = (
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
 UNSAFE_DISPLAY_FIELD = "[unsafe-field]"
-SENSITIVE_SOURCE_ANCHOR_PATTERN = re.compile(
+SENSITIVE_DISPLAY_PATTERN = re.compile(
     r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
     r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
 )
@@ -546,15 +546,15 @@ def has_control_chars(text: str) -> bool:
     return any(ord(char) < 32 or ord(char) == 127 for char in text)
 
 
-def has_sensitive_source_anchor_text(text: str) -> bool:
-    return bool(SENSITIVE_SOURCE_ANCHOR_PATTERN.search(text))
+def has_sensitive_display_text(text: str) -> bool:
+    return bool(SENSITIVE_DISPLAY_PATTERN.search(text))
 
 
 def safe_display_scalar(value: object, limit: int = 120) -> str:
     text = str(value).strip()
     if not text:
         return ""
-    if has_control_chars(text):
+    if has_control_chars(text) or has_sensitive_display_text(text):
         return UNSAFE_DISPLAY_FIELD
     return clip(text, limit)
 
@@ -576,7 +576,7 @@ def sanitize_raw_ref(repo: Path, value: object) -> str:
         not path_text
         or has_control_chars(path_text)
         or has_control_chars(anchor_text)
-        or has_sensitive_source_anchor_text(anchor_text)
+        or has_sensitive_display_text(anchor_text)
     ):
         return UNSAFE_SOURCE_REF
     safe_path = safe_repo_relative_path(repo, path_text)
