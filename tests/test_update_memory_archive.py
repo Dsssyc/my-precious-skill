@@ -1053,6 +1053,58 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("[REDACTED_OPENAI_KEY]", output)
             self.assertNotIn(path_secret, output)
 
+    def test_update_memory_archive_sanitizes_configured_paths_in_diagnostics(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path_secret = "sk-" + "diagnosticpath" + ("0" * 20)
+            memory_repo = root / f"agent-memory-{path_secret}"
+            source_dir = root / f"records-{path_secret}"
+            project_path = root / f"project-{path_secret}"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps({"role": "assistant", "content": "Decision: keep diagnostics private."}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                    "--dry-run",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertIn("Memory repo:", output)
+            self.assertIn("Project path:", output)
+            self.assertIn("Source dir:", output)
+            self.assertIn("[REDACTED_OPENAI_KEY]", output)
+            self.assertNotIn(path_secret, output)
+
     def test_update_memory_archive_redacts_secrets_when_explicitly_allowed(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

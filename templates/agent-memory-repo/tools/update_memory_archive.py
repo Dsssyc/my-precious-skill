@@ -744,8 +744,8 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
     return redacted, counts
 
 
-def safe_record_display_path(path: Path) -> str:
-    display = path.name or "<source-record>"
+def safe_diagnostic_path(path: Path) -> str:
+    display = path.name or "<path>"
     redacted, _ = redact_text(display)
     return redacted
 
@@ -2526,14 +2526,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_records >= 0:
         records = records[: args.max_records]
 
-    print(f"Memory repo: {memory_repo}")
-    print(f"Project path: {project_path}")
-    print(f"Source dir: {source_dir}")
+    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
+    print(f"Project path: {safe_diagnostic_path(project_path)}")
+    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
     print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
     print(f"Records selected: {len(records)}")
 
     for record in records:
-        print(f"- {isoformat(record.updated_at)} {safe_record_display_path(record.path)}")
+        print(f"- {isoformat(record.updated_at)} {safe_diagnostic_path(record.path)}")
 
     if args.dry_run:
         return 0
@@ -2547,7 +2547,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
         for record, counts in sensitive_records:
             labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
-            print(f"- {safe_record_display_path(record.path)}: {labels}", file=sys.stderr)
+            print(f"- {safe_diagnostic_path(record.path)}: {labels}", file=sys.stderr)
         print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
         return 2
 
