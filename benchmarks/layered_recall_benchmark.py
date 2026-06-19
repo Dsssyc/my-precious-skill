@@ -19,6 +19,11 @@ from typing import Iterable, NamedTuple
 DEFAULT_SEARCH_SCRIPT = "templates/agent-memory-repo/tools/search_memory.py"
 NO_HIT_MARKER = "No memory hits for:"
 DEFAULT_SEARCH_TIMEOUT_S = 30.0
+UNSAFE_RESULT_IDENTIFIER = "[unsafe-result-identifier]"
+SENSITIVE_RESULT_IDENTIFIER_PATTERN = re.compile(
+    r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
+    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
+)
 
 
 class Case(NamedTuple):
@@ -304,6 +309,23 @@ def clip(text: str, limit: int = 160) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def has_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def safe_result_identifier(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    if has_control_chars(text) or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(text):
+        return UNSAFE_RESULT_IDENTIFIER
+    return clip(text)
+
+
+def safe_result_identifiers(values: list[str]) -> list[str]:
+    return unique_texts(identifier for value in values if (identifier := safe_result_identifier(value)))
 
 
 def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float) -> str:
@@ -753,10 +775,10 @@ def score_case(
             [memory_output, session_output, source_output],
             forbidden_patterns,
         ),
-        "memory_result_ids": block_field_values(memory_blocks, "memory_id"),
-        "session_result_paths": block_result_paths(session_blocks),
-        "source_result_ids": block_field_values(source_blocks, "memory_id"),
-        "source_result_anchors": block_section_values(source_blocks, "source anchors"),
+        "memory_result_ids": safe_result_identifiers(block_field_values(memory_blocks, "memory_id")),
+        "session_result_paths": safe_result_identifiers(block_result_paths(session_blocks)),
+        "source_result_ids": safe_result_identifiers(block_field_values(source_blocks, "memory_id")),
+        "source_result_anchors": safe_result_identifiers(block_section_values(source_blocks, "source anchors")),
         "latency_ms": latency_ms,
     }
 

@@ -383,9 +383,10 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 `--details-jsonl` 会为每条 case 写一行 JSON，包含 rank、drill-down、source、
-evidence、拒答、stale suppression 和 privacy 结果。`--fail-under` 会保留
-stdout 的 aggregate JSON，并在顶层数值指标低于阈值时用非零状态退出，方便在
-CI 里作为质量门禁。阈值必须是有限数值；NaN 和 Infinity 会在比较前被拒绝。
+evidence、拒答、stale suppression 和 privacy 结果。疑似敏感或包含控制字符的
+returned identifier 会写成 `[unsafe-result-identifier]`。`--fail-under` 会保留
+stdout 的 aggregate JSON，并在顶层数值指标低于阈值时用非零状态退出，方便在 CI
+里作为质量门禁。阈值必须是有限数值；NaN 和 Infinity 会在比较前被拒绝。
 memory/session/source 每一层搜索 subprocess 默认有 30 秒超时；`--search-timeout-s`
 必须是有限正数，可以在 CI smoke test 中调低，或在大型本地 archive 上调高。
 

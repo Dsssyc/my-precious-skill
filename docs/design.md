@@ -239,8 +239,9 @@ case, source benchmark, temporal scope, stale or negative memory IDs, stable
 case IDs when provided, required evidence paths, and forbidden-pattern counts.
 Details also include safe returned identifiers such as memory result IDs,
 session paths, and source anchors, but avoid returned hit titles, snippets, raw
-`reference_answer`, and `forbidden_output_patterns` text. The benchmark can
-also write structured
+`reference_answer`, and `forbidden_output_patterns` text. Sensitive-looking or
+control-character-bearing returned identifiers are rendered as
+`[unsafe-result-identifier]`. The benchmark can also write structured
 threshold failures with `--failures-json`; that failure file includes the same
 case-set and search-script fingerprints as stdout, the aggregate
 `failed_case_count` and `case_pass_rate`, plus safe per-case failure summaries

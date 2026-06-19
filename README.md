@@ -428,6 +428,8 @@ and forbidden-pattern counts, but they do not render raw `reference_answer` or
 `forbidden_output_patterns` text.
 They also include safe returned identifiers such as memory result IDs, session
 paths, and source anchors, without returned hit titles or snippets.
+Sensitive-looking or control-character-bearing returned identifiers are written
+as `[unsafe-result-identifier]`.
 `--failures-json`
 writes structured quality-gate failures with `metric`, `value`, and `threshold`
 fields for CI systems that should not parse stderr. `--fail-under` keeps the
