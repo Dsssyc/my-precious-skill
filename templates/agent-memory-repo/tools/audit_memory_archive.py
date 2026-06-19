@@ -237,6 +237,7 @@ REDACTION_CATEGORY_LABELS = {
     "openai_key",
     "aws_access_key",
 }
+UNSAFE_PATH = "[unsafe-path]"
 SECRET_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.IGNORECASE),
     "bearer_token": re.compile(r"Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
@@ -326,6 +327,40 @@ class Finding:
     path: str
     line_number: int
     category: str
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
+
+
+def safe_diagnostic_path(path_text: str) -> str:
+    if any(ord(char) < 32 or ord(char) == 127 for char in path_text) or has_sensitive_identifier_token(path_text):
+        return UNSAFE_PATH
+    return path_text
 
 
 def resolve_memory_repo(repo_arg: str | None) -> Path:
@@ -642,7 +677,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print("Archive audit failed:", file=sys.stderr)
     for finding in findings[: args.max_findings]:
-        print(f"- {finding.path}:{finding.line_number} category={finding.category}", file=sys.stderr)
+        print(
+            f"- {safe_diagnostic_path(finding.path)}:{finding.line_number} category={finding.category}",
+            file=sys.stderr,
+        )
     if len(findings) > args.max_findings:
         print(f"- ... and {len(findings) - args.max_findings} more", file=sys.stderr)
     return 1

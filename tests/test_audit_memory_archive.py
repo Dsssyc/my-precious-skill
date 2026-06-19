@@ -76,6 +76,37 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("sessions/2026/05/14/noisy/summary.md", combined)
             self.assertNotIn(fake_key, combined)
 
+    def test_audit_memory_archive_sanitizes_slugged_finding_paths(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/cookie_should_not_render"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("session_meta: wrapper noise must not ship.\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("[unsafe-path]", combined)
+            self.assertNotIn("cookie_should_not_render", combined)
+            self.assertNotIn("cookie", combined.lower())
+
     def test_audit_memory_archive_allows_redaction_count_labels(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
