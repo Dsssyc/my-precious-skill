@@ -132,6 +132,32 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             [],
         )
 
+    def test_extract_explicit_memory_texts_accepts_natural_directive_forms(self):
+        module = load_update_module()
+
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "Please remember that I prefer concise answers with rationale when useful.",
+                    )
+                ]
+            ),
+            ["I prefer concise answers with rationale when useful."],
+        )
+        self.assertEqual(
+            module.extract_explicit_memory_texts(
+                [
+                    module.MemoryEvent(
+                        "user",
+                        "记住：已经授权后不要反复请求权限确认。",
+                    )
+                ]
+            ),
+            ["已经授权后不要反复请求权限确认。"],
+        )
+
     def test_extract_explicit_memory_texts_rejects_negated_directives(self):
         module = load_update_module()
 
@@ -141,8 +167,11 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "dont remember this: private preference",
             "Never remember this: private preference",
             "do not please remember: private preference",
+            "do not remember that my preference is private",
             "不要记住这个：我的偏好是私密的",
+            "不要记住：我的偏好是私密的",
             "别记住这个：我的偏好是私密的",
+            "别记住：我的偏好是私密的",
             "不要强制记忆：我的偏好是私密的",
             "别强制记忆：我的偏好是私密的",
         ]

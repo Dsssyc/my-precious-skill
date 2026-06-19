@@ -74,7 +74,9 @@ GLOBAL_MEMORY_HINTS = (
 EXPLICIT_MEMORY_PATTERNS = (
     re.compile(r"(?i)^\s*remember this\s*[:：]\s*(?P<text>.+)$"),
     re.compile(r"(?i)^\s*please remember\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"(?i)^\s*(?:please\s+)?remember(?:\s+this)?\s+that\s+(?P<text>.+)$"),
     re.compile(r"^\s*记住这个\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"^\s*记住\s*[:：]\s*(?P<text>.+)$"),
     re.compile(r"^\s*强制记忆\s*[:：]\s*(?P<text>.+)$"),
 )
 NEGATED_EXPLICIT_MEMORY_PATTERNS = (
@@ -82,7 +84,7 @@ NEGATED_EXPLICIT_MEMORY_PATTERNS = (
         r"(?i)^\s*(?:please\s+)?(?:do\s+not|don't|dont|never)\s+"
         r"(?:please\s+)?remember(?:\s+this)?(?:\s*[:：]|\b)"
     ),
-    re.compile(r"^\s*(?:不要|别)\s*(?:记住这个|强制记忆)(?:\s*[:：]|$)"),
+    re.compile(r"^\s*(?:不要|别)\s*(?:记住(?:这个)?|强制记忆)(?:\s*[:：]|$)"),
 )
 EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
     r"(?i)[,;.!?，；。！？]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
