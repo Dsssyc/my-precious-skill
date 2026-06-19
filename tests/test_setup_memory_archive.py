@@ -113,6 +113,38 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("target is not empty", result.stderr)
 
+    def test_setup_memory_archive_refuses_symlinked_template_target_outside_archive(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            outside_readme = root / "outside-readme.md"
+            target.mkdir()
+            outside_readme.write_text("unchanged\n", encoding="utf-8")
+            (target / "README.md").symlink_to(outside_readme)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--mode",
+                    "local",
+                    "--force",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to write unsafe template path:", output)
+            self.assertEqual(outside_readme.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_setup_memory_archive_github_mode_dry_run(self):
         script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
