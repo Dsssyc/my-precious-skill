@@ -850,6 +850,104 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_sanitizes_sensitive_slug_memory_metadata(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/sensitive-slug-display"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Slug Display\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_display cookie_should_not_render",
+                        "layer": "global",
+                        "scope": "scope cookie_should_not_render",
+                        "topic": "sensitive-slug-display",
+                        "text": "Slug metadata sentinel should sanitize memory fields.",
+                        "rationale": "Metadata fields are untrusted display data.",
+                        "source": "explicit cookie_should_not_render",
+                        "confidence": "high cookie_should_not_render",
+                        "support_count": "1 cookie_should_not_render",
+                        "derived_from": ["sessions/2026/06/17/sensitive-slug-display/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "slug metadata sentinel",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("[unsafe-field]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie_should_not_render", result.stdout)
+        self.assertNotIn("cookie", result.stdout.lower())
+
+    def test_search_memory_keeps_safe_privacy_boundary_memory_ids(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/privacy-secret-gate"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Privacy Secret Gate\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_privacy_secret_gate",
+                        "layer": "project",
+                        "scope": "synthetic",
+                        "topic": "privacy-boundary",
+                        "text": "Likely secrets are refused unless redacted.",
+                        "rationale": "Privacy boundary topics are safe to identify when no secret value is present.",
+                        "source": "synthetic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/privacy-secret-gate/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "likely secrets refused redacted",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_privacy_secret_gate", result.stdout)
+        self.assertNotIn("[unsafe-field]", result.stdout)
+
     def test_search_memory_sanitizes_sensitive_memory_text(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

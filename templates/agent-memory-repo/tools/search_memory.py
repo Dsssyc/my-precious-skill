@@ -558,7 +558,35 @@ def has_control_chars(text: str) -> bool:
 
 
 def has_sensitive_display_text(text: str) -> bool:
-    return bool(SENSITIVE_DISPLAY_PATTERN.search(text))
+    return bool(SENSITIVE_DISPLAY_PATTERN.search(text) or has_sensitive_display_identifier_token(text))
+
+
+def has_sensitive_display_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
 
 
 def safe_display_scalar(value: object, limit: int = 120) -> str:
