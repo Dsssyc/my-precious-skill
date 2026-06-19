@@ -861,6 +861,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.limit <= 0:
+        raise SystemExit("--limit must be greater than 0")
+
     query_tokens = unique_tokens(args.query)
     if not query_tokens:
         raise SystemExit("query must contain at least one searchable token")

@@ -84,6 +84,52 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
 
+    def test_search_memory_rejects_non_positive_limit(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/05/14/limit"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Limit Validation\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_limit_validation",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "limit-validation",
+                        "text": "Limit validation token should have a visible search result.",
+                        "source": "synthetic",
+                        "derived_from": ["sessions/2026/05/14/limit/summary.md"],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "limit validation token",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--limit must be greater than 0", result.stderr)
+
     def test_search_memory_depth_evidence_searches_evidence_markdown(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
