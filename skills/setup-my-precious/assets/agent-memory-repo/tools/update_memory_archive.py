@@ -744,6 +744,12 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
     return redacted, counts
 
 
+def safe_record_display_path(path: Path) -> str:
+    display = path.name or "<source-record>"
+    redacted, _ = redact_text(display)
+    return redacted
+
+
 def read_record_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8", errors="replace")
 
@@ -2527,7 +2533,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Records selected: {len(records)}")
 
     for record in records:
-        print(f"- {isoformat(record.updated_at)} {record.path}")
+        print(f"- {isoformat(record.updated_at)} {safe_record_display_path(record.path)}")
 
     if args.dry_run:
         return 0
@@ -2541,7 +2547,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
         for record, counts in sensitive_records:
             labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
-            print(f"- {record.path}: {labels}", file=sys.stderr)
+            print(f"- {safe_record_display_path(record.path)}: {labels}", file=sys.stderr)
         print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
         return 2
 

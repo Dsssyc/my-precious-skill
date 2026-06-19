@@ -1003,6 +1003,56 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Refusing to archive", result.stderr)
             self.assertFalse(any((memory_repo / "sessions").glob("**/summary.md")))
 
+    def test_update_memory_archive_sanitizes_secret_record_paths_in_diagnostics(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            path_secret = "sk-" + "pathnotreal" + ("0" * 20)
+            content_secret = "sk-" + "contentnotreal" + ("0" * 20)
+            source = source_dir / f"leaky-{path_secret}.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": f"secret {content_secret}"}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to archive", result.stderr)
+            self.assertIn("[REDACTED_OPENAI_KEY]", output)
+            self.assertNotIn(path_secret, output)
+
     def test_update_memory_archive_redacts_secrets_when_explicitly_allowed(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
