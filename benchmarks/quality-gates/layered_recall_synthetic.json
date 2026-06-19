@@ -41,6 +41,8 @@
   "privacy_boundary_pass_rate": 1.0,
   "privacy_cases": 30,
   "session_drilldown_at_5": 1.0,
+  "scope_filter_cases": 3,
+  "scope_filter_recall": 1.0,
   "source_reachability": 1.0,
   "stale_cases": 9,
   "stale_memory_suppression": 1.0,

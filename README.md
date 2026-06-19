@@ -326,6 +326,9 @@ stress tests:
 - `layer_calibration`, with `layer_calibration_cases`, for cases that require
   the expected memory to be recalled from a specific `global`, `domain`, or
   `project` layer
+- `scope_filter_recall`, with `scope_filter_cases`, to verify those layer
+  cases still recall the expected memory when search runs with
+  `--scope <expected_layer>`
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`

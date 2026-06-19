@@ -118,6 +118,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_explainability"], 1.0)
             self.assertEqual(payload["layer_calibration_cases"], 3)
             self.assertEqual(payload["layer_calibration"], 1.0)
+            self.assertEqual(payload["scope_filter_cases"], 3)
+            self.assertEqual(payload["scope_filter_recall"], 1.0)
             self.assertEqual(payload["memory_ranked_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_rank_missing_cases"], 0)
             self.assertEqual(payload["memory_rank_mean"], 1.0)
@@ -162,6 +164,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["memory_explainability_cases"], 27)
             self.assertEqual(lower_gates["layer_calibration"], 1.0)
             self.assertEqual(lower_gates["layer_calibration_cases"], 3)
+            self.assertEqual(lower_gates["scope_filter_recall"], 1.0)
+            self.assertEqual(lower_gates["scope_filter_cases"], 3)
             self.assertEqual(lower_gates["memory_ranked_cases"], 27)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
@@ -211,6 +215,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(payload["memory_explainability_cases"], lower_gates["memory_explainability_cases"])
             self.assertGreaterEqual(payload["layer_calibration"], lower_gates["layer_calibration"])
             self.assertGreaterEqual(payload["layer_calibration_cases"], lower_gates["layer_calibration_cases"])
+            self.assertGreaterEqual(payload["scope_filter_recall"], lower_gates["scope_filter_recall"])
+            self.assertGreaterEqual(payload["scope_filter_cases"], lower_gates["scope_filter_cases"])
             self.assertGreaterEqual(payload["memory_ranked_cases"], lower_gates["memory_ranked_cases"])
             self.assertLessEqual(payload["memory_rank_missing_cases"], upper_gates["memory_rank_missing_cases"])
             self.assertLessEqual(payload["memory_rank_mean"], upper_gates["memory_rank_mean"])
@@ -483,7 +489,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["latency_max_ms"], payload["latency_ms"])
             self.assertEqual(payload["categories"]["uncategorized"]["latency_mean_ms"], payload["latency_ms"])
             calls = calls_path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(calls, ["memory|permission prompts", "session|permission prompts", "source|permission prompts"])
+            self.assertEqual(
+                calls,
+                [
+                    "memory|all|permission prompts",
+                    "session|all|permission prompts",
+                    "source|all|permission prompts",
+                ],
+            )
 
     def test_layered_recall_benchmark_reports_memory_precision_at_5(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -823,6 +836,33 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertFalse(detail["layer_calibration_hit"])
             self.assertIn("layer_calibration", detail["failed_checks"])
 
+    def test_layered_recall_benchmark_checks_scope_filtered_recall(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "expected_layer": "global"})
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="scope_filter_missing")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["layer_calibration"], 1.0)
+            self.assertEqual(payload["scope_filter_cases"], 1)
+            self.assertEqual(payload["scope_filter_recall"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            detail = self.read_rows(details)[0]
+            self.assertFalse(detail["scope_filter_hit"])
+            self.assertIn("scope_filter_recall", detail["failed_checks"])
+
     def test_layered_recall_benchmark_details_include_safe_case_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1161,6 +1201,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "memory_precision_at_5": 0.0,
                         "memory_explainability_hit": False,
                         "layer_calibration_hit": False,
+                        "scope_filter_hit": False,
                         "memory_rank": None,
                         "memory_recall_at_1": False,
                         "memory_recall_at_5": False,
@@ -2365,8 +2406,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
                 query = sys.argv[1]
                 depth = arg_value("--depth")
+                scope = arg_value("--scope", "all")
                 with CALLS.open("a", encoding="utf-8") as handle:
-                    handle.write(depth + "|" + query + "\\n")
+                    handle.write(depth + "|" + scope + "|" + query + "\\n")
 
                 if MODE == "nohit":
                     print(f"No memory hits for: {{query}}")
@@ -2380,6 +2422,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     raise SystemExit(1)
 
                 if MODE == "rank_distribution" and "missing" in query:
+                    print(f"No memory hits for: {{query}}")
+                    raise SystemExit(1)
+
+                if MODE == "scope_filter_missing" and depth == "memory" and scope != "all":
                     print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
 
