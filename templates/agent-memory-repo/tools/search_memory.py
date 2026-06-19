@@ -338,7 +338,7 @@ def display_title(record: dict, query_tokens: list[str] | None = None) -> str:
     if isinstance(record.get("summary"), str) and isinstance(record.get("title"), str):
         title = record["title"].strip()
         if title and not is_generic_source_title(title):
-            return clip(title)
+            return safe_display_text(title)
     candidates: list[tuple[int, int, str]] = []
     title_fields = (
         ("decision", 70),
@@ -357,12 +357,12 @@ def display_title(record: dict, query_tokens: list[str] | None = None) -> str:
             match_score, matched = score_text(query_tokens, text, weight=1) if query_tokens else (0, [])
             if query_tokens and key != "title" and not matched:
                 continue
-            candidates.append((match_score, priority, clip(text)))
+            candidates.append((match_score, priority, safe_display_text(text)))
     if candidates:
         return max(candidates, key=lambda item: (item[0], item[1], len(item[2])))[2]
 
     for text in iter_record_field_texts(record, "title"):
-        return clip(text)
+        return safe_display_text(text)
     return ""
 
 
@@ -551,6 +551,10 @@ def has_sensitive_display_text(text: str) -> bool:
 
 
 def safe_display_scalar(value: object, limit: int = 120) -> str:
+    return safe_display_text(value, limit)
+
+
+def safe_display_text(value: object, limit: int = 180) -> str:
     text = str(value).strip()
     if not text:
         return ""
@@ -635,8 +639,9 @@ def collect_memory_hits(
         score, matched, reasons = score_index_record(query_tokens, record, context_terms)
         if not score:
             continue
-        text = compact_whitespace(str(record.get("text") or ""))
-        title = clip(text or display_title(record, query_tokens))
+        raw_text = compact_whitespace(str(record.get("text") or ""))
+        text = safe_display_text(raw_text)
+        title = text or display_title(record, query_tokens)
         memory_id = safe_display_scalar(raw_memory_id, 120)
         source_kind = safe_display_scalar(record.get("source") or "", 60)
         confidence = safe_display_scalar(record.get("confidence") or "", 60)
@@ -728,7 +733,7 @@ def collect_markdown_hits(repo: Path, query_tokens: list[str], include_evidence:
                 score=score,
                 source="markdown",
                 why=[f"matched:{', '.join(matched)}"],
-                title=title,
+                title=safe_display_text(title),
             )
         )
     return hits
@@ -782,7 +787,7 @@ def memory_drill_paths_for_depth(hit: Hit, depth: str) -> tuple[str, ...]:
 
 def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
     layer = hit.layer or "memory"
-    title = clip(hit.text or hit.title or "Untitled memory", 160)
+    title = safe_display_text(hit.text or hit.title or "Untitled memory", 160)
     why = "; ".join(hit.why)
     lines = [
         f"{idx}. [{layer}] {title}",
@@ -812,7 +817,8 @@ def format_hit(repo: Path, hit: Hit, idx: int, depth: str = "memory") -> str:
         rel = hit.path.relative_to(repo)
     except ValueError:
         rel = hit.path
-    title = f"\n   title: {hit.title}" if hit.title else ""
+    display_title_text = safe_display_text(hit.title, 180) if hit.title else ""
+    title = f"\n   title: {display_title_text}" if display_title_text else ""
     why = "; ".join(hit.why)
     next_step = "open summary.md first; inspect evidence.md only if needed"
     if rel.name == "evidence.md":

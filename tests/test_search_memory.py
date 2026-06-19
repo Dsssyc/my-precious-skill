@@ -565,6 +565,98 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_sanitizes_sensitive_memory_text(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/sensitive-text"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Text\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_sensitive_text",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "sensitive-text",
+                        "text": "Memory display sentinel cookie=SHOULD_NOT_RENDER should not render.",
+                        "rationale": "Memory text is untrusted display data.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/sensitive-text/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "memory display sentinel",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("[unsafe-field]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
+    def test_search_memory_sanitizes_sensitive_legacy_index_titles(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/sensitive-title"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Sensitive Title\n", encoding="utf-8")
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-17",
+                        "project": "agent-memory",
+                        "title": "Legacy title cookie=SHOULD_NOT_RENDER",
+                        "summary": "Legacy title sentinel should sanitize display titles.",
+                        "summary_path": "sessions/2026/06/17/sensitive-title/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "legacy title sentinel",
+                    "--repo",
+                    str(repo),
+                    "--legacy-sessions",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("[unsafe-field]", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
     def test_search_memory_scope_global_filters_memory_layers(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
