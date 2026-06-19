@@ -1105,6 +1105,30 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("unable to read --fail-under-file", result.stderr)
             self.assertIn(str(missing_threshold_file), result.stderr)
 
+    def test_layered_recall_benchmark_sanitizes_sensitive_threshold_file_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            sensitive_threshold_root = root / "thresholds-cookie=SHOULD_NOT_RENDER"
+            sensitive_threshold_root.mkdir()
+            missing_threshold_file = sensitive_threshold_root / "missing-thresholds.json"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under-file", str(missing_threshold_file)],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to read --fail-under-file", result.stderr)
+            self.assertIn("[unsafe-result-identifier]", result.stderr)
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+            self.assertNotIn("cookie=", result.stderr)
+
     def test_broken_search_script_fails_with_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

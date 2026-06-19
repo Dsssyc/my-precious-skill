@@ -42,11 +42,15 @@ def has_diagnostic_control_chars(text: str) -> bool:
     return any(ord(char) < 32 or ord(char) == 127 for char in text)
 
 
-def safe_diagnostic_path(path: Path) -> str:
-    text = str(path)
+def safe_diagnostic_text(value: object) -> str:
+    text = str(value)
     if has_diagnostic_control_chars(text) or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(text):
         return UNSAFE_RESULT_IDENTIFIER
     return text
+
+
+def safe_diagnostic_path(path: Path) -> str:
+    return safe_diagnostic_text(path)
 
 
 def case_location(path: Path, line_no: int) -> str:
@@ -902,18 +906,19 @@ def parse_fail_over(values: list[str], payload: dict) -> list[tuple[str, float]]
 
 
 def load_threshold_file(path: Path, payload: dict, option: str) -> list[tuple[str, float]]:
+    display_path = safe_diagnostic_path(path)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise SystemExit(f"unable to read {option} {path}: {exc}") from exc
+        raise SystemExit(f"unable to read {option} {display_path}: {safe_diagnostic_text(exc)}") from exc
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"invalid JSON at {path}: {exc}") from exc
+        raise SystemExit(f"invalid JSON at {display_path}: {safe_diagnostic_text(exc)}") from exc
     if not isinstance(data, dict):
-        raise SystemExit(f"{option} must contain a JSON object: {path}")
+        raise SystemExit(f"{option} must contain a JSON object: {display_path}")
     thresholds: list[tuple[str, float]] = []
     for metric, raw_threshold in data.items():
         if not isinstance(metric, str) or not metric.strip():
-            raise SystemExit(f"{option} metric keys must be non-empty strings: {path}")
+            raise SystemExit(f"{option} metric keys must be non-empty strings: {display_path}")
         metric = metric.strip()
         threshold_metric_value(payload, metric, option)
         if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
