@@ -243,7 +243,8 @@ failed metrics on stderr so automated quality gates can preserve
 machine-readable scores.
 The packaged synthetic gates intentionally split lower-bound and upper-bound
 checks: `benchmarks/quality-gates/layered_recall_synthetic.json` covers the
-synthetic suite dimensions, answer reachability, and denominator counts, while
+synthetic suite dimensions, answer reachability, pass-rate metrics, and
+denominator counts, while
 `benchmarks/quality-gates/layered_recall_synthetic_max.json` enforces upper
 bounds such as `failed_case_count=0`. Additional answer-metric gates should be
 added to custom threshold files for case sets with broader `reference_answer`

@@ -120,6 +120,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "agent-memory"
             details = Path(tmpdir) / "details.jsonl"
+            lower_gates = json.loads(SYNTHETIC_QUALITY_GATES.read_text(encoding="utf-8"))
+            self.assertEqual(lower_gates["case_pass_rate"], 1.0)
+            self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             subprocess.run(
                 [
                     sys.executable,
