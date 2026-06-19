@@ -702,7 +702,10 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
                         ],
                     }
                 ],
-                {},
+                {
+                    "evidence_text_cases": 1,
+                    "evidence_text_reachability": 1.0,
+                },
             ),
             (
                 "memora",
@@ -801,6 +804,11 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
                 self.assertEqual(scored_payload["answer_token_f1"], 1.0)
                 self.assertEqual(len(detail_rows), 1)
                 self.assertTrue(detail_rows[0]["answer_normalized_reachability_hit"])
+                if source_name == "locomo":
+                    self.assertEqual(scored_payload["evidence_text_cases"], 1)
+                    self.assertEqual(scored_payload["evidence_text_reachability"], 1.0)
+                    self.assertEqual(detail_rows[0]["reference_evidence_count"], 2)
+                    self.assertTrue(detail_rows[0]["evidence_text_reachability_hit"])
 
     def read_rows(self, path):
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
