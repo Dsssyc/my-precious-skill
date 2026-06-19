@@ -329,6 +329,8 @@ stress tests:
 - `scope_filter_recall`, with `scope_filter_cases`, to verify those layer
   cases still recall the expected memory when search runs with
   `--scope <expected_layer>`
+- `wrong_scope_suppression`, with `wrong_scope_suppression_cases`, to verify
+  scoped search does not return the expected memory from other layers
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`

@@ -23,6 +23,7 @@ UNSAFE_RESULT_IDENTIFIER = "[unsafe-result-identifier]"
 EXPLAINABLE_MEMORY_REASON_PREFIXES = ("field:", "phrase:")
 EXPLAINABLE_MEMORY_REASONS = {"important-token-coverage", "project-context"}
 UNEXPLAINABLE_MEMORY_REASONS = {"low-signal-only", "broad-field-only"}
+MEMORY_LAYERS = ("global", "domain", "project")
 SENSITIVE_RESULT_IDENTIFIER_PATTERN = re.compile(
     r"(?i)(?:"
     r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
@@ -134,7 +135,7 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
     for key in ("case_id", "source_benchmark"):
         optional_case_text_only(case, key, path, line_no)
     expected_layer = optional_case_text_only(case, "expected_layer", path, line_no)
-    if expected_layer and expected_layer not in {"global", "domain", "project"}:
+    if expected_layer and expected_layer not in MEMORY_LAYERS:
         raise SystemExit(f"{case_location(path, line_no)}: expected_layer must be global, domain, or project")
     for key in (
         "category",
@@ -242,6 +243,8 @@ def new_totals() -> Totals:
         "layer_hits": 0,
         "scope_filter_cases": 0,
         "scope_filter_hits": 0,
+        "wrong_scope_cases": 0,
+        "wrong_scope_hits": 0,
         "memory_result_count_at_5": 0,
         "memory_relevant_count_at_5": 0,
         "session_cases": 0,
@@ -343,6 +346,8 @@ def finalize_totals(totals: Totals) -> dict:
         "layer_calibration": ratio(totals["layer_hits"], totals["layer_cases"]),
         "scope_filter_cases": int(totals["scope_filter_cases"]),
         "scope_filter_recall": ratio(totals["scope_filter_hits"], totals["scope_filter_cases"]),
+        "wrong_scope_suppression_cases": int(totals["wrong_scope_cases"]),
+        "wrong_scope_suppression": ratio(totals["wrong_scope_hits"], totals["wrong_scope_cases"]),
         "memory_ranked_cases": ranked_cases,
         "memory_rank_missing_cases": missing_rank_cases,
         "memory_rank_mean": ratio(totals["memory_rank_sum"], ranked_cases),
@@ -393,6 +398,8 @@ def add_result(totals: Totals, result: dict) -> None:
             totals["layer_hits"] += int(result["layer_calibration_hit"])
             totals["scope_filter_cases"] += 1
             totals["scope_filter_hits"] += int(result["scope_filter_hit"])
+            totals["wrong_scope_cases"] += 1
+            totals["wrong_scope_hits"] += int(result["wrong_scope_suppression_hit"])
         totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
         totals["memory_relevant_count_at_5"] += result["memory_relevant_count_at_5"]
         totals["session_cases"] += 1
@@ -849,6 +856,8 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("layer_calibration")
         if result["scope_filter_expected"] and not result["scope_filter_hit"]:
             checks.append("scope_filter_recall")
+        if result["wrong_scope_expected"] and not result["wrong_scope_suppression_hit"]:
+            checks.append("wrong_scope_suppression")
         if not result["session_drilldown_hit"]:
             checks.append("session_drilldown_at_5")
         if result["source_expected"] and not result["source_reachability_hit"]:
@@ -906,6 +915,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_explainability_hit": result["memory_explainability_hit"],
         "layer_calibration_hit": result["layer_calibration_hit"],
         "scope_filter_hit": result["scope_filter_hit"],
+        "wrong_scope_suppression_hit": result["wrong_scope_suppression_hit"],
         "memory_result_count_at_5": result["memory_result_count_at_5"],
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
@@ -946,14 +956,19 @@ def score_case(
     session_output = run_search(search_script, repo, query, "session", search_timeout_s)
     source_output = run_search(search_script, repo, query, "source", search_timeout_s)
     scope_output = ""
+    wrong_scope_outputs: list[str] = []
     if positive_case(data) and expected_layer:
         scope_output = run_search(search_script, repo, query, "memory", search_timeout_s, expected_layer)
+        for wrong_scope in MEMORY_LAYERS:
+            if wrong_scope != expected_layer:
+                wrong_scope_outputs.append(run_search(search_script, repo, query, "memory", search_timeout_s, wrong_scope))
     latency_ms = (time.perf_counter() - started) * 1000
 
     memory_blocks = parse_hit_blocks(memory_output)
     session_blocks = parse_hit_blocks(session_output)
     source_blocks = parse_hit_blocks(source_output)
     scope_blocks = parse_hit_blocks(scope_output) if scope_output else []
+    wrong_scope_blocks = [block for output in wrong_scope_outputs for block in parse_hit_blocks(output)]
     combined_output = "\n".join([memory_output, session_output, source_output])
     expected_abstain = data.get("expected_abstain") is True
     is_positive = positive_case(data)
@@ -978,6 +993,7 @@ def score_case(
     explainability_hit = False
     layer_hit = False
     scope_hit = False
+    wrong_scope_hit = False
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
@@ -1000,6 +1016,9 @@ def score_case(
         if expected_layer:
             scope_rank = memory_hit_rank(scope_blocks, expected_memory_id, expected_summary_path, expected_record)
             scope_hit = bool(scope_rank is not None and scope_rank <= 5)
+            wrong_scope_hit = not bool(
+                memory_hit_rank(wrong_scope_blocks, expected_memory_id, expected_summary_path, expected_record)
+            )
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
         if expected_source_anchor:
             source_hit = source_reachability_hit(source_blocks, expected_summary_path, expected_source_anchor)
@@ -1026,6 +1045,8 @@ def score_case(
         "layer_calibration_hit": layer_hit,
         "scope_filter_expected": bool(is_positive and expected_layer),
         "scope_filter_hit": scope_hit,
+        "wrong_scope_expected": bool(is_positive and expected_layer),
+        "wrong_scope_suppression_hit": wrong_scope_hit,
         "memory_result_count_at_5": memory_precision.result_count,
         "memory_relevant_count_at_5": memory_precision.relevant_count,
         "session_drilldown_hit": session_hit,
@@ -1220,6 +1241,7 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "memory_explainability_hit": detail.get("memory_explainability_hit"),
                 "layer_calibration_hit": detail.get("layer_calibration_hit"),
                 "scope_filter_hit": detail.get("scope_filter_hit"),
+                "wrong_scope_suppression_hit": detail.get("wrong_scope_suppression_hit"),
                 "memory_rank": detail.get("memory_rank"),
                 "memory_recall_at_1": detail.get("memory_recall_at_1"),
                 "memory_recall_at_5": detail.get("memory_recall_at_5"),

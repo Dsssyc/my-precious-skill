@@ -320,6 +320,8 @@ python benchmarks/layered_recall_benchmark.py \
   `expected_layer` 的 case 是否从指定的 `global`、`domain` 或 `project` 层召回
 - `scope_filter_recall` 和 `scope_filter_cases`，用于验证这些分层 case 在使用
   `--scope <expected_layer>` 检索时仍能召回 expected memory
+- `wrong_scope_suppression` 和 `wrong_scope_suppression_cases`，用于验证 scoped
+  search 不会从其它层返回这个 expected memory
 - rank 分布字段：`memory_ranked_cases`、`memory_rank_missing_cases`、
   `memory_rank_mean`、`memory_rank_median` 和 `memory_rank_histogram`
 - `session_drilldown_at_5`、`source_reachability` 和

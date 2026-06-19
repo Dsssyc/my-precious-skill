@@ -46,6 +46,8 @@
   "source_reachability": 1.0,
   "stale_cases": 9,
   "stale_memory_suppression": 1.0,
+  "wrong_scope_suppression": 1.0,
+  "wrong_scope_suppression_cases": 3,
   "update_cases": 9,
   "update_consistency": 1.0
 }
