@@ -117,6 +117,91 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
 
+    def test_search_memory_depth_session_limits_legacy_hits_to_memory_drill_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            good_dir = repo / "sessions/2026/05/14/good"
+            noisy_dir = repo / "sessions/2026/05/14/noisy"
+            good_dir.mkdir(parents=True)
+            noisy_dir.mkdir(parents=True)
+            (good_dir / "summary.md").write_text(
+                "# Session: Layered Drill\n\n"
+                "The durable memory says layered drill token belongs here.\n",
+                encoding="utf-8",
+            )
+            (noisy_dir / "summary.md").write_text(
+                "# Session: Noisy Legacy\n\n"
+                "layered drill token " * 20,
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_layered_drill",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "layered-drill",
+                        "text": "Layered drill token should drill to the good session only.",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/05/14/good/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-05-14",
+                        "project": "agent-memory",
+                        "summary": "layered drill token belongs to good",
+                        "summary_path": "sessions/2026/05/14/good/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "date": "2026-05-14",
+                        "project": "agent-memory",
+                        "summary": "layered drill token " * 20,
+                        "summary_path": "sessions/2026/05/14/noisy/summary.md",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "layered drill token",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "session",
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("sessions/2026/05/14/good/summary.md", result.stdout)
+        self.assertNotIn("sessions/2026/05/14/noisy/summary.md", result.stdout)
+
     def test_search_memory_rejects_non_positive_limit(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

@@ -830,6 +830,17 @@ def memory_drill_paths_for_depth(hit: Hit, depth: str) -> tuple[str, ...]:
     return tuple(path for path in hit.drill_paths if not is_evidence_drill_path(path))
 
 
+def drill_path_limited_hits(repo: Path, hits: list[Hit], memory_hits: list[Hit], depth: str) -> list[Hit]:
+    allowed = {
+        path
+        for memory_hit in memory_hits
+        for path in memory_drill_paths_for_depth(memory_hit, depth)
+    }
+    if not allowed:
+        return []
+    return [hit for hit in hits if safe_repo_relative_path(repo, hit.path) in allowed]
+
+
 def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
     layer = hit.layer or "memory"
     title = safe_display_text(hit.text or hit.title or "Untitled memory", 160)
@@ -932,6 +943,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope)
         if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
+            if args.depth in ("session", "evidence", "source"):
+                session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, args.depth)
             selected_hits = [*memory_hits, *session_hits]
         elif memory_hits:
             selected_hits = memory_hits
