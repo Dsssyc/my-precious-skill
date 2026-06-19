@@ -1017,7 +1017,6 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
 
 
 def write_failures_json(path: Path, failures: list[dict], payload: dict, details: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     output = {
         "cases": payload.get("cases"),
         "failed_case_count": payload.get("failed_case_count"),
@@ -1030,10 +1029,16 @@ def write_failures_json(path: Path, failures: list[dict], payload: dict, details
         "failed_cases": failed_case_summaries(details),
         "failures": failures,
     }
-    path.write_text(
-        json.dumps(output, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(output, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        display_path = safe_diagnostic_path(path)
+        display_error = safe_diagnostic_text(exc)
+        raise SystemExit(f"unable to write --failures-json {display_path}: {display_error}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1067,6 +1067,31 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(failure_payload["failed_cases"], [])
             self.assertEqual(failure_payload["failures"], [])
 
+    def test_layered_recall_benchmark_failures_json_write_error_is_sanitized(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            sensitive_failures_path = root / "failures-cookie=SHOULD_NOT_RENDER"
+            sensitive_failures_path.mkdir()
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--failures-json", str(sensitive_failures_path)],
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to write --failures-json", result.stderr)
+            self.assertIn("[unsafe-result-identifier]", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+
     def test_layered_recall_benchmark_accepts_nested_category_fail_under_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
