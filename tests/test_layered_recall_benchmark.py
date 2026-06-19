@@ -652,6 +652,29 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("--fail-under threshold must be finite for memory_recall_at_5", result.stderr)
 
+    def test_layered_recall_benchmark_sanitizes_sensitive_direct_threshold_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-under", "memory_recall_at_5=cookie=SHOULD_NOT_RENDER"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "--fail-under threshold must be numeric for memory_recall_at_5: [unsafe-result-identifier]",
+                result.stderr,
+            )
+            self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
+            self.assertNotIn("cookie=", result.stderr)
+
     def test_layered_recall_benchmark_writes_structured_threshold_failures_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

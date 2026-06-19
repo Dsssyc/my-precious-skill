@@ -846,17 +846,19 @@ def parse_thresholds(values: list[str], payload: dict, option: str) -> list[tupl
     thresholds: list[tuple[str, float]] = []
     for value in values:
         if "=" not in value:
-            raise SystemExit(f"{option} must use metric=threshold, got: {value}")
+            raise SystemExit(f"{option} must use metric=threshold, got: {safe_result_identifier(value)}")
         metric, raw_threshold = value.split("=", 1)
         metric = metric.strip()
         raw_threshold = raw_threshold.strip()
         threshold_metric_value(payload, metric, option)
+        display_metric = safe_result_identifier(metric)
+        display_threshold = safe_result_identifier(raw_threshold)
         try:
             threshold = float(raw_threshold)
         except ValueError as exc:
-            raise SystemExit(f"{option} threshold must be numeric for {metric}: {raw_threshold}") from exc
+            raise SystemExit(f"{option} threshold must be numeric for {display_metric}: {display_threshold}") from exc
         if not math.isfinite(threshold):
-            raise SystemExit(f"{option} threshold must be finite for {metric}: {raw_threshold}")
+            raise SystemExit(f"{option} threshold must be finite for {display_metric}: {display_threshold}")
         thresholds.append((metric, threshold))
     return thresholds
 
