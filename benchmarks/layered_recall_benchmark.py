@@ -836,6 +836,8 @@ def write_failures_json(path: Path, failures: list[dict], payload: dict, details
     path.parent.mkdir(parents=True, exist_ok=True)
     output = {
         "cases": payload.get("cases"),
+        "failed_case_count": payload.get("failed_case_count"),
+        "case_pass_rate": payload.get("case_pass_rate"),
         "cases_path": payload.get("cases_path"),
         "cases_sha256": payload.get("cases_sha256"),
         "search_script_path": payload.get("search_script_path"),

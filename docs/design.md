@@ -227,10 +227,11 @@ such as memory result IDs, session paths, and source anchors, but avoid
 returned hit titles, snippets, raw `reference_answer`, and
 `forbidden_output_patterns` text. The benchmark can also write structured
 threshold failures with `--failures-json`; that failure file includes the same
-case-set and search-script fingerprints as stdout plus safe per-case failure
-summaries (`case_id`, line number, category, source benchmark, and failed
-check names) so CI artifacts remain traceable without copying queries or
-answer text. The benchmark can enforce numeric lower-bound thresholds with
+case-set and search-script fingerprints as stdout, the aggregate
+`failed_case_count` and `case_pass_rate`, plus safe per-case failure summaries
+(`case_id`, line number, category, source benchmark, and failed check names) so
+CI artifacts remain traceable without copying queries or answer text. The
+benchmark can enforce numeric lower-bound thresholds with
 `--fail-under` and upper-bound thresholds, such as latency caps, with
 `--fail-over`; for example, `--fail-over failed_case_count=0` rejects any case
 with one or more failed checks.
