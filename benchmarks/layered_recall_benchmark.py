@@ -217,6 +217,10 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "memory_recall_at_1": ratio(totals["memory_hit_1"], totals["positive_cases"]),
         "memory_recall_at_5": ratio(totals["memory_hit_5"], totals["positive_cases"]),
         "memory_precision_at_5": ratio(totals["memory_precision_at_5"], totals["positive_cases"]),
+        "memory_micro_precision_at_5": ratio(
+            totals["memory_relevant_count_at_5"],
+            totals["memory_result_count_at_5"],
+        ),
         "memory_result_count_at_5": int(totals["memory_result_count_at_5"]),
         "memory_relevant_count_at_5": int(totals["memory_relevant_count_at_5"]),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),

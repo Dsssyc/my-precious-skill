@@ -94,6 +94,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(payload["memory_precision_at_5"], 0.25)
             self.assertGreater(payload["memory_result_count_at_5"], payload["memory_relevant_count_at_5"])
             self.assertEqual(payload["memory_relevant_count_at_5"], payload["positive_cases"])
+            self.assertEqual(
+                payload["memory_micro_precision_at_5"],
+                payload["memory_relevant_count_at_5"] / payload["memory_result_count_at_5"],
+            )
             self.assertEqual(payload["memory_mrr"], 1.0)
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
@@ -126,6 +130,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             lower_gates = json.loads(SYNTHETIC_QUALITY_GATES.read_text(encoding="utf-8"))
             self.assertEqual(lower_gates["case_pass_rate"], 1.0)
             self.assertEqual(lower_gates["memory_precision_at_5"], 0.25)
+            self.assertEqual(lower_gates["memory_micro_precision_at_5"], 0.24)
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             subprocess.run(
                 [
@@ -263,6 +268,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
             self.assertEqual(payload["memory_precision_at_5"], 0.5)
+            self.assertEqual(payload["memory_micro_precision_at_5"], 0.5)
             self.assertEqual(payload["memory_result_count_at_5"], 2)
             self.assertEqual(payload["memory_relevant_count_at_5"], 1)
             self.assertEqual(payload["case_pass_rate"], 1.0)

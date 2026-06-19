@@ -178,18 +178,20 @@ required evidence paths are reachable, and whether source anchors are available
 at source depth. Cases with `reference_answer` also check whether the exact
 answer snippet is reachable in memory, session, or source output. These metrics
 are reported as `memory_recall_at_1`, `memory_recall_at_5`,
-`memory_precision_at_5`, `memory_result_count_at_5`,
-`memory_relevant_count_at_5`, `memory_mrr`, `session_drilldown_at_5`,
-`evidence_reachability`, `source_reachability`, `answer_reachability`,
-`answer_normalized_reachability`, `answer_token_f1`, `latency_ms`,
-`latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
+`memory_precision_at_5`, `memory_micro_precision_at_5`,
+`memory_result_count_at_5`, `memory_relevant_count_at_5`, `memory_mrr`,
+`session_drilldown_at_5`, `evidence_reachability`, `source_reachability`,
+`answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
+`latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
 `case_pass_rate`. Exact answer
 reachability is strict text reachability. Normalized reachability ignores case
 and punctuation. `memory_precision_at_5` is a returned-result purity metric:
 for each positive case, the benchmark divides matching expected-memory hits by
-the returned memory hits in the top-5 cutoff. The related count fields report
-the summed returned-memory and relevant-memory hits behind that precision
-score. Token F1 uses the best contiguous output-token window against the
+the returned memory hits in the top-5 cutoff, then macro-averages those per-case
+scores. `memory_micro_precision_at_5` divides summed relevant-memory hits by
+summed returned-memory hits. The related count fields report those summed
+returned-memory and relevant-memory hits. Token F1 uses the best contiguous
+output-token window against the
 reference answer. These are retrieval-side checks, not generated-answer
 semantic grading. The aggregate payload and each category payload also include
 denominator counts such as `positive_cases`, `answer_cases`, and `stale_cases`
