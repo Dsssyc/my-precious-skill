@@ -184,6 +184,40 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(rows[0]["answer_expected"])
             self.assertTrue(rows[0]["answer_reachability_hit"])
 
+    def test_layered_recall_benchmark_scores_normalized_answer_overlap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "reference_answer": "Answer-reachability scoring was added.",
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="normalized_answer")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["answer_reachability"], 0.0)
+            self.assertEqual(payload["answer_normalized_reachability"], 1.0)
+            self.assertEqual(payload["answer_token_f1"], 1.0)
+            rows = [
+                json.loads(line)
+                for line in details.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertFalse(rows[0]["answer_reachability_hit"])
+            self.assertTrue(rows[0]["answer_normalized_reachability_hit"])
+            self.assertEqual(rows[0]["answer_token_f1"], 1.0)
+
     def test_synthetic_builder_includes_reference_answer_for_reachability(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -567,6 +601,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("2. [global] Different memory")
                         print("   source: memory")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                    elif MODE == "normalized_answer":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] answer reachability scoring was added")
+                        print("   source: memory")
+                        print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                     else:

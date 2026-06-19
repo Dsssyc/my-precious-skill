@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
@@ -137,6 +138,8 @@ def new_totals() -> dict[str, float]:
         "evidence_hits": 0,
         "answer_cases": 0,
         "answer_hits": 0,
+        "answer_normalized_hits": 0,
+        "answer_f1": 0.0,
         "abstain_cases": 0,
         "abstain_hits": 0,
         "negative_cases": 0,
@@ -167,6 +170,8 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "answer_reachability": ratio(totals["answer_hits"], totals["answer_cases"]),
+        "answer_normalized_reachability": ratio(totals["answer_normalized_hits"], totals["answer_cases"]),
+        "answer_token_f1": ratio(totals["answer_f1"], totals["answer_cases"]),
         "abstention_accuracy": ratio(totals["abstain_hits"], totals["abstain_cases"]),
         "negative_memory_suppression": ratio(totals["negative_hits"], totals["negative_cases"]),
         "stale_memory_suppression": ratio(totals["stale_hits"], totals["stale_cases"]),
@@ -195,6 +200,8 @@ def add_result(totals: dict[str, float], result: dict) -> None:
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
         totals["answer_cases"] += int(result["answer_expected"])
         totals["answer_hits"] += int(result["answer_reachability_hit"])
+        totals["answer_normalized_hits"] += int(result["answer_normalized_reachability_hit"])
+        totals["answer_f1"] += result["answer_token_f1"] if result["answer_expected"] else 0.0
     if result["expected_abstain"]:
         totals["abstain_cases"] += 1
         totals["abstain_hits"] += int(result["abstention_hit"])
@@ -372,6 +379,48 @@ def answer_reachability_hit(blocks: list[str], reference_answers: list[str]) -> 
     return all(any(answer in block for block in blocks) for answer in reference_answers)
 
 
+def normalized_answer_text(text: str) -> str:
+    return compact_whitespace(re.sub(r"[^\w]+", " ", text.lower()))
+
+
+def answer_tokens(text: str) -> list[str]:
+    return [token for token in normalized_answer_text(text).split() if token]
+
+
+def answer_token_f1_score(output: str, reference_answer: str) -> float:
+    reference_tokens = answer_tokens(reference_answer)
+    output_tokens = answer_tokens(output)
+    if not reference_tokens:
+        return 0.0
+    window_size = len(reference_tokens)
+    if not output_tokens:
+        return 0.0
+    reference_counts = Counter(reference_tokens)
+    best = 0.0
+    for start in range(0, max(1, len(output_tokens) - window_size + 1)):
+        window = output_tokens[start : start + window_size]
+        overlap = sum((Counter(window) & reference_counts).values())
+        if not overlap:
+            continue
+        precision = overlap / max(1, len(window))
+        recall = overlap / len(reference_tokens)
+        best = max(best, 2 * precision * recall / (precision + recall))
+    return best
+
+
+def answer_normalized_reachability_hit(output: str, reference_answers: list[str]) -> bool:
+    if not reference_answers:
+        return False
+    normalized_output = normalized_answer_text(output)
+    return all(normalized_answer_text(answer) in normalized_output for answer in reference_answers)
+
+
+def answer_token_f1(output: str, reference_answers: list[str]) -> float:
+    if not reference_answers:
+        return 0.0
+    return sum(answer_token_f1_score(output, answer) for answer in reference_answers) / len(reference_answers)
+
+
 def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> bool:
     if not forbidden_patterns:
         return True
@@ -401,6 +450,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "evidence_reachability_hit": result["evidence_reachability_hit"],
         "answer_expected": result["answer_expected"],
         "answer_reachability_hit": result["answer_reachability_hit"],
+        "answer_normalized_reachability_hit": result["answer_normalized_reachability_hit"],
+        "answer_token_f1": round(result["answer_token_f1"], 6),
         "abstention_hit": result["abstention_hit"],
         "negative_memory_suppression_hit": result["negative_memory_suppression_hit"],
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
@@ -423,6 +474,7 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     memory_blocks = parse_hit_blocks(memory_output)
     session_blocks = parse_hit_blocks(session_output)
     source_blocks = parse_hit_blocks(source_output)
+    combined_output = "\n".join([memory_output, session_output, source_output])
     expected_abstain = data.get("expected_abstain") is True
     is_positive = positive_case(data)
     expected_memory_id = optional_case_text(data, "expected_memory_id")
@@ -440,6 +492,8 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     source_hit = False
     evidence_hit = False
     answer_hit = False
+    normalized_answer_hit = False
+    answer_f1 = 0.0
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
@@ -449,6 +503,8 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
             evidence_hit = evidence_reachability_hit(source_blocks + memory_blocks, required_evidence_paths)
         if reference_answers:
             answer_hit = answer_reachability_hit(memory_blocks + session_blocks + source_blocks, reference_answers)
+            normalized_answer_hit = answer_normalized_reachability_hit(combined_output, reference_answers)
+            answer_f1 = answer_token_f1(combined_output, reference_answers)
 
     no_result_hits = no_hits(memory_blocks, session_blocks, source_blocks)
     negative_suppressed = not blocks_contain_memory_ids(memory_blocks, negative_memory_ids, memory_records)
@@ -466,6 +522,8 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
         "evidence_reachability_hit": evidence_hit,
         "answer_expected": bool(is_positive and reference_answers),
         "answer_reachability_hit": answer_hit,
+        "answer_normalized_reachability_hit": normalized_answer_hit,
+        "answer_token_f1": answer_f1,
         "abstention_hit": bool(expected_abstain and no_result_hits),
         "negative_expected": bool(negative_memory_ids),
         "negative_memory_suppression_hit": negative_suppressed,
