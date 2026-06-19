@@ -386,9 +386,7 @@ python benchmarks/layered_recall_benchmark.py \
   --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
   --failures-json /tmp/my-precious-synthetic-failures.json \
   --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
-  --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json \
-  --fail-under memory_recall_at_5=0.95 \
-  --fail-under privacy_boundary_pass_rate=1.0
+  --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json
 ```
 
 `--details-jsonl` 会为每条 case 写一行 JSON，包含 rank、drill-down、source、
