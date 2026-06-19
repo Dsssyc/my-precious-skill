@@ -70,8 +70,9 @@ def load_cases(path: Path) -> list[Case]:
         if case_id:
             first_line = seen_case_ids.get(case_id)
             if first_line is not None:
+                display_case_id = safe_result_identifier(case_id)
                 raise SystemExit(
-                    f"{path}:{line_no}: duplicate case_id {case_id!r}; "
+                    f"{path}:{line_no}: duplicate case_id {display_case_id!r}; "
                     f"first seen at {path}:{first_line}"
                 )
             seen_case_ids[case_id] = line_no
