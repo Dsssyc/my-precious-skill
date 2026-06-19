@@ -1057,10 +1057,19 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "memory_result_ids": [],
                         "session_drilldown_hit": False,
                         "session_result_paths": [],
+                        "evidence_reachability_hit": False,
+                        "answer_expected": False,
+                        "answer_reachability_hit": False,
+                        "answer_normalized_reachability_hit": False,
+                        "answer_token_f1": 0.0,
                         "source_benchmark": "LongMemEval",
                         "source_result_anchors": [],
                         "source_result_ids": [],
                         "source_reachability_hit": False,
+                        "negative_memory_suppression_hit": True,
+                        "stale_memory_suppression_hit": True,
+                        "update_consistency_hit": False,
+                        "privacy_boundary_pass": True,
                     }
                 ],
             )
@@ -1144,6 +1153,45 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
             self.assertNotIn("/Users/private", json.dumps(failure_payload))
             self.assertNotIn("../outside", json.dumps(failure_payload))
+
+    def test_layered_recall_benchmark_failures_json_includes_answer_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "case_id": "synthetic:answer_gap",
+                    "reference_answer": "The archive should surface the dedicated answer diagnostic.",
+                },
+            )
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-over",
+                    "failed_case_count=0",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            failed_case = failure_payload["failed_cases"][0]
+            self.assertEqual(failed_case["case_id"], "synthetic:answer_gap")
+            self.assertTrue(failed_case["answer_expected"])
+            self.assertFalse(failed_case["answer_reachability_hit"])
+            self.assertFalse(failed_case["answer_normalized_reachability_hit"])
+            self.assertEqual(failed_case["answer_token_f1"], 0.0)
+            self.assertNotIn("reference_answer", failed_case)
+            self.assertNotIn("dedicated answer diagnostic", json.dumps(failure_payload))
 
     def test_layered_recall_benchmark_sanitizes_sensitive_payload_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:

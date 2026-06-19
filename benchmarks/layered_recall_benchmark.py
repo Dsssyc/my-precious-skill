@@ -1089,10 +1089,19 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "memory_result_ids": detail.get("memory_result_ids", []),
                 "session_drilldown_hit": detail.get("session_drilldown_hit"),
                 "session_result_paths": detail.get("session_result_paths", []),
+                "evidence_reachability_hit": detail.get("evidence_reachability_hit"),
+                "answer_expected": detail.get("answer_expected"),
+                "answer_reachability_hit": detail.get("answer_reachability_hit"),
+                "answer_normalized_reachability_hit": detail.get("answer_normalized_reachability_hit"),
+                "answer_token_f1": detail.get("answer_token_f1"),
                 "source_benchmark": detail.get("source_benchmark", ""),
                 "source_result_anchors": detail.get("source_result_anchors", []),
                 "source_result_ids": detail.get("source_result_ids", []),
                 "source_reachability_hit": detail.get("source_reachability_hit"),
+                "negative_memory_suppression_hit": detail.get("negative_memory_suppression_hit"),
+                "stale_memory_suppression_hit": detail.get("stale_memory_suppression_hit"),
+                "update_consistency_hit": detail.get("update_consistency_hit"),
+                "privacy_boundary_pass": detail.get("privacy_boundary_pass"),
             }
         )
     return summaries
