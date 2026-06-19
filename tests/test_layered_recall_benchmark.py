@@ -569,6 +569,43 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(payload))
             self.assertNotIn("cookie=", json.dumps(payload))
 
+    def test_layered_recall_benchmark_details_sanitize_bare_secret_identifiers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            fake_openai_key = "sk-" + "barevalue" + ("0" * 20)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "query": f"permission prompts {fake_openai_key}",
+                    "case_id": f"case-{fake_openai_key}",
+                    "category": f"privacy-{fake_openai_key}",
+                    "source_benchmark": f"Memora-{fake_openai_key}",
+                    "expected_memory_id": f"mem_permission-{fake_openai_key}",
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["query"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["case_id"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["category"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["source_benchmark"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["expected_memory_id"], "[unsafe-result-identifier]")
+            self.assertIn("[unsafe-result-identifier]", payload["categories"])
+            self.assertNotIn(fake_openai_key, json.dumps(detail))
+            self.assertNotIn(fake_openai_key, json.dumps(payload))
+
     def test_layered_recall_benchmark_details_include_safe_returned_identifiers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

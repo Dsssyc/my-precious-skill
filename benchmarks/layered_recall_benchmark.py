@@ -21,8 +21,14 @@ NO_HIT_MARKER = "No memory hits for:"
 DEFAULT_SEARCH_TIMEOUT_S = 30.0
 UNSAFE_RESULT_IDENTIFIER = "[unsafe-result-identifier]"
 SENSITIVE_RESULT_IDENTIFIER_PATTERN = re.compile(
-    r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
-    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
+    r"(?i)(?:"
+    r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
+    r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|"
+    r"\bbearer\s+\S+|"
+    r"\bsk-[A-Za-z0-9_-]{20,}\b|"
+    r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b|"
+    r"\bAKIA[0-9A-Z]{16}\b"
+    r")"
 )
 
 
