@@ -194,6 +194,39 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertIn("converted case set is empty", result.stderr)
             self.assertFalse(output.exists())
 
+    def test_missing_input_file_reports_controlled_sanitized_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sensitive_input_root = root / "inputs-cookie=SHOULD_NOT_RENDER"
+            missing_input = sensitive_input_root / "missing.json"
+            output = root / "cases.jsonl"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(missing_input),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to read input benchmark file", result.stderr)
+            self.assertIn("[unsafe-path]", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+            self.assertFalse(output.exists())
+
     def test_converts_locomo_nested_qa_items(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
