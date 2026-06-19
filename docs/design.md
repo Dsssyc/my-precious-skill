@@ -264,9 +264,9 @@ Memora JSON/JSONL files into the same case schema. It generates deterministic
 external memory IDs, stable case IDs, and source anchors. Its stdout reports
 the converted case count plus input and output SHA-256 fingerprints so dry-run
 artifacts can be traced to exact files. It rejects duplicate converted
-`case_id` values, non-object question rows, and empty converted case sets
-before writing output, but does not download benchmark data or commit external
-records to this reusable skill repository.
+`case_id` values, non-object question or evaluation rows, and empty converted
+case sets before writing output, but does not download benchmark data or commit
+external records to this reusable skill repository.
 For adapter dry-runs,
 the converter can also build a temporary synthetic archive from the converted
 cases with `--build-synthetic-archive`; that archive is then scored by the same

@@ -242,9 +242,7 @@ def memora_evaluation_types(item: dict) -> list[str]:
     else:
         questions = []
     types = []
-    for question in questions:
-        if not isinstance(question, dict):
-            continue
+    for question in memora_object_items(questions, "Memora evaluation question"):
         evaluation_type = first_text(question, "evaluation_type", "type")
         if evaluation_type:
             types.append(evaluation_type)
