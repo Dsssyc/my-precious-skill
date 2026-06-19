@@ -1864,6 +1864,12 @@ def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
     return True
 
 
+def write_safe_archive_text(memory_repo: Path, path: Path, text: str, label: str) -> None:
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit(f"Refusing to write unsafe archive {label} path: {safe_diagnostic_path(path)}")
+    path.write_text(text, encoding="utf-8")
+
+
 def prune_empty_session_dirs(root: Path) -> None:
     if not root.exists():
         return
@@ -2375,10 +2381,17 @@ def rebuild_indexes(memory_repo: Path) -> None:
                 "latest_summary_path": row.get("summary_path", ""),
             }
 
-    (index_dir / "sessions.jsonl").write_text("\n".join(sessions_lines) + ("\n" if sessions_lines else ""), encoding="utf-8")
-    (index_dir / "projects.jsonl").write_text(
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "sessions.jsonl",
+        "\n".join(sessions_lines) + ("\n" if sessions_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "projects.jsonl",
         "\n".join(json.dumps(row, sort_keys=True) for row in project_latest.values()) + ("\n" if project_latest else ""),
-        encoding="utf-8",
+        "index file",
     )
     decision_lines: list[str] = []
     unresolved_lines: list[str] = []
@@ -2410,14 +2423,36 @@ def rebuild_indexes(memory_repo: Path) -> None:
             if is_noisy_text(tag):
                 continue
             tag_lines.append(json.dumps({**common, "tag": tag}, sort_keys=True))
-    (index_dir / "decisions.jsonl").write_text("\n".join(decision_lines) + ("\n" if decision_lines else ""), encoding="utf-8")
-    (index_dir / "unresolved.jsonl").write_text("\n".join(unresolved_lines) + ("\n" if unresolved_lines else ""), encoding="utf-8")
-    (index_dir / "files.jsonl").write_text("\n".join(file_lines) + ("\n" if file_lines else ""), encoding="utf-8")
-    (index_dir / "tags.jsonl").write_text("\n".join(tag_lines) + ("\n" if tag_lines else ""), encoding="utf-8")
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "decisions.jsonl",
+        "\n".join(decision_lines) + ("\n" if decision_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "unresolved.jsonl",
+        "\n".join(unresolved_lines) + ("\n" if unresolved_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "files.jsonl",
+        "\n".join(file_lines) + ("\n" if file_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "tags.jsonl",
+        "\n".join(tag_lines) + ("\n" if tag_lines else ""),
+        "index file",
+    )
     memory_lines = [json.dumps(node, sort_keys=True) for node in memory_nodes]
-    (index_dir / "memories.jsonl").write_text(
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "memories.jsonl",
         "\n".join(memory_lines) + ("\n" if memory_lines else ""),
-        encoding="utf-8",
+        "index file",
     )
 
     recent = rows[:10]
