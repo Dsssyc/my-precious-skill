@@ -2254,6 +2254,41 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("low-signal-only", result.stdout)
         self.assertNotIn("important-token-coverage", result.stdout)
 
+    def test_search_memory_project_context_token_does_not_keep_markdown_only_hit(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/13/context-only-markdown"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: C-Two housekeeping\n\n"
+                "C-Two project housekeeping happened, with no deployment decision recorded.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "c-two migration",
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/soku/Desktop/codespace/WorldInProgress/c-two",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("No memory hits for: c-two migration", result.stdout)
+        self.assertNotIn("context-only-markdown/summary.md", result.stdout)
+
     def test_search_memory_duplicate_low_signal_rows_do_not_outrank_content_hit(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

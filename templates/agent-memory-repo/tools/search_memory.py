@@ -780,7 +780,12 @@ def iter_markdown_files(repo: Path, include_evidence: bool) -> Iterable[Path]:
             yield path
 
 
-def collect_markdown_hits(repo: Path, query_tokens: list[str], include_evidence: bool) -> list[Hit]:
+def collect_markdown_hits(
+    repo: Path,
+    query_tokens: list[str],
+    include_evidence: bool,
+    context_terms: list[str] | None = None,
+) -> list[Hit]:
     hits: list[Hit] = []
     for path in iter_markdown_files(repo, include_evidence):
         try:
@@ -791,7 +796,7 @@ def collect_markdown_hits(repo: Path, query_tokens: list[str], include_evidence:
         score, matched = score_text(query_tokens, text, weight=weight)
         if not score:
             continue
-        if not should_keep_match(query_tokens, matched):
+        if not should_keep_match(query_tokens, matched, context_terms):
             continue
         if search_quality_noise_reason({"summary": text}):
             continue
@@ -964,7 +969,7 @@ def main(argv: list[str] | None = None) -> int:
     include_evidence = args.include_evidence or args.depth in ("evidence", "source")
     session_hits = [
         *collect_index_hits(repo, query_tokens, context_terms),
-        *collect_markdown_hits(repo, query_tokens, include_evidence),
+        *collect_markdown_hits(repo, query_tokens, include_evidence, context_terms),
     ]
     if args.legacy_sessions:
         selected_hits = session_hits
