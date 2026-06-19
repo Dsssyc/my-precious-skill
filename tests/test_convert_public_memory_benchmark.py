@@ -227,6 +227,51 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertNotIn("cookie=", combined)
             self.assertFalse(output.exists())
 
+    def test_output_write_error_reports_controlled_sanitized_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.json"
+            sensitive_output = root / "outputs-cookie=SHOULD_NOT_RENDER"
+            sensitive_output.mkdir()
+            source.write_text(
+                json.dumps(
+                    [
+                        {
+                            "question_id": "lme_q1",
+                            "question": "Which project adopted layered recall?",
+                            "answer": "The memory skill project.",
+                        }
+                    ],
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(sensitive_output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to write output benchmark file", result.stderr)
+            self.assertIn("[unsafe-path]", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+
     def test_success_payload_sanitizes_sensitive_output_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

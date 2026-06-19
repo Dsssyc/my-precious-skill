@@ -319,10 +319,15 @@ def convert_memora(payload: object) -> list[dict]:
 
 
 def write_cases(path: Path, cases: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for case in cases:
-            handle.write(json.dumps(case, ensure_ascii=False, sort_keys=True) + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for case in cases:
+                handle.write(json.dumps(case, ensure_ascii=False, sort_keys=True) + "\n")
+    except OSError as exc:
+        display_path = safe_diagnostic_path(path)
+        display_error = safe_diagnostic_text(exc)
+        raise SystemExit(f"unable to write output benchmark file {display_path}: {display_error}") from exc
 
 
 def validate_unique_case_ids(cases: list[dict]) -> None:
