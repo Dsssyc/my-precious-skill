@@ -389,6 +389,66 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_5"], 0.0)
             self.assertIn("memory_recall_at_5=0.0 below threshold 0.5", result.stderr)
 
+    def test_layered_recall_benchmark_writes_structured_threshold_failures_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-under",
+                    "memory_recall_at_5=0.5",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            self.assertEqual(failure_payload["failure_count"], 1)
+            self.assertEqual(
+                failure_payload["failures"],
+                [
+                    {
+                        "metric": "memory_recall_at_5",
+                        "threshold": 0.5,
+                        "value": 0.0,
+                    }
+                ],
+            )
+
+    def test_layered_recall_benchmark_writes_empty_threshold_failures_json_when_gates_pass(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=[
+                    "--fail-under",
+                    "memory_recall_at_5=1.0",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            payload = json.loads(result.stdout)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            self.assertEqual(payload["memory_recall_at_5"], 1.0)
+            self.assertEqual(failure_payload, {"failure_count": 0, "failures": []})
+
     def test_layered_recall_benchmark_accepts_nested_category_fail_under_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

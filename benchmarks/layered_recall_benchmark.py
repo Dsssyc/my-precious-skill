@@ -670,13 +670,21 @@ def merge_thresholds(*groups: list[tuple[str, float]]) -> list[tuple[str, float]
     return list(merged.items())
 
 
-def threshold_failures(payload: dict, thresholds: list[tuple[str, float]]) -> list[str]:
-    failures: list[str] = []
+def threshold_failure_details(payload: dict, thresholds: list[tuple[str, float]]) -> list[dict]:
+    failures: list[dict] = []
     for metric, threshold in thresholds:
         value = fail_under_metric_value(payload, metric)
         if value < threshold:
-            failures.append(f"{metric}={value} below threshold {threshold}")
+            failures.append({"metric": metric, "value": value, "threshold": threshold})
     return failures
+
+
+def write_failures_json(path: Path, failures: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"failure_count": len(failures), "failures": failures}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -698,6 +706,7 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="JSON object of metric or dotted metric path thresholds",
     )
+    parser.add_argument("--failures-json", help="Write structured threshold failures JSON")
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).expanduser().resolve()
@@ -712,7 +721,13 @@ def main(argv: list[str] | None = None) -> int:
     for threshold_file in args.fail_under_file:
         file_thresholds.extend(load_fail_under_file(Path(threshold_file).expanduser().resolve(), payload))
     thresholds = merge_thresholds(file_thresholds, parse_fail_under(args.fail_under, payload))
-    failures = threshold_failures(payload, thresholds)
+    failure_details = threshold_failure_details(payload, thresholds)
+    if args.failures_json:
+        write_failures_json(Path(args.failures_json).expanduser().resolve(), failure_details)
+    failures = [
+        f"{failure['metric']}={failure['value']} below threshold {failure['threshold']}"
+        for failure in failure_details
+    ]
     if failures:
         print("benchmark threshold failed: " + "; ".join(failures), file=sys.stderr)
         return 1

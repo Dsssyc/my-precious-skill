@@ -402,6 +402,7 @@ python benchmarks/layered_recall_benchmark.py \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
   --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
+  --failures-json /tmp/my-precious-synthetic-failures.json \
   --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
   --fail-under memory_recall_at_5=0.95 \
   --fail-under privacy_boundary_pass_rate=1.0
@@ -409,8 +410,10 @@ python benchmarks/layered_recall_benchmark.py \
 
 `--details-jsonl` writes one row per case with rank, drill-down, source,
 evidence, abstention, stale-suppression, privacy outcomes, and a `failed_checks`
-list naming the failed applicable metrics for that case. `--fail-under` keeps
-the aggregate JSON on stdout and exits non-zero when a configured numeric metric
+list naming the failed applicable metrics for that case. `--failures-json`
+writes structured quality-gate failures with `metric`, `value`, and `threshold`
+fields for CI systems that should not parse stderr. `--fail-under` keeps the
+aggregate JSON on stdout and exits non-zero when a configured numeric metric
 falls below its threshold, which makes the benchmark usable as a CI quality
 gate. Thresholds can target top-level metrics or dotted category paths such as
 `categories.knowledge_update.update_consistency=1.0`.
