@@ -1858,7 +1858,7 @@ def is_safe_archive_entry_dir(memory_repo: Path, entry_dir: Path) -> bool:
 
 def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
     try:
-        path.resolve().relative_to(memory_repo.resolve())
+        path.resolve(strict=False).relative_to(memory_repo.resolve())
     except (OSError, ValueError):
         return False
     return True
@@ -2449,8 +2449,10 @@ def render_daily_summaries(memory_repo: Path, rows: list[dict]) -> None:
         day = str(row.get("source_updated_at", ""))[:10]
         if day:
             grouped.setdefault(day, []).append(row)
-    expected_paths = {memory_repo / "daily" / day[:4] / f"{day}.md" for day in grouped}
     daily_root = memory_repo / "daily"
+    if not is_safe_repo_path(memory_repo, daily_root):
+        raise SystemExit(f"Refusing to write unsafe archive daily path: {safe_diagnostic_path(daily_root)}")
+    expected_paths = {memory_repo / "daily" / day[:4] / f"{day}.md" for day in grouped}
     if daily_root.exists():
         for path in sorted(daily_root.glob("**/*.md")):
             if path not in expected_paths:
