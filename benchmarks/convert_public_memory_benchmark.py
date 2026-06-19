@@ -269,6 +269,21 @@ def write_cases(path: Path, cases: list[dict]) -> None:
             handle.write(json.dumps(case, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def validate_unique_case_ids(cases: list[dict]) -> None:
+    seen: dict[str, int] = {}
+    for idx, case in enumerate(cases, 1):
+        value = case.get("case_id")
+        if not isinstance(value, str) or not value:
+            continue
+        first_idx = seen.get(value)
+        if first_idx is not None:
+            raise SystemExit(
+                f"duplicate case_id {value!r} in converted case {idx}; "
+                f"first seen in converted case {first_idx}"
+            )
+        seen[value] = idx
+
+
 def load_synthetic_builder():
     builder_path = Path(__file__).with_name("build_synthetic_recall_archive.py")
     spec = importlib.util.spec_from_file_location("build_synthetic_recall_archive", builder_path)
@@ -305,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         cases = convert_memora(payload)
     if args.limit is not None:
         cases = cases[: max(0, args.limit)]
+    validate_unique_case_ids(cases)
     output = Path(args.output).expanduser().resolve()
     write_cases(output, cases)
     result = {"cases": len(cases), "output": str(output), "source": SOURCE_LABELS[args.source]}
