@@ -163,6 +163,16 @@ def ratio(numerator: float, denominator: float) -> float:
 def finalize_totals(totals: dict[str, float]) -> dict:
     return {
         "cases": int(totals["cases"]),
+        "positive_cases": int(totals["positive_cases"]),
+        "session_cases": int(totals["session_cases"]),
+        "source_cases": int(totals["source_cases"]),
+        "evidence_cases": int(totals["evidence_cases"]),
+        "answer_cases": int(totals["answer_cases"]),
+        "abstain_cases": int(totals["abstain_cases"]),
+        "negative_cases": int(totals["negative_cases"]),
+        "stale_cases": int(totals["stale_cases"]),
+        "update_cases": int(totals["update_cases"]),
+        "privacy_cases": int(totals["privacy_cases"]),
         "memory_recall_at_1": ratio(totals["memory_hit_1"], totals["positive_cases"]),
         "memory_recall_at_5": ratio(totals["memory_hit_5"], totals["positive_cases"]),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),

@@ -505,6 +505,58 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["abstention"]["cases"], 1)
             self.assertEqual(payload["categories"]["abstention"]["abstention_accuracy"], 1.0)
 
+    def test_layered_recall_benchmark_reports_metric_denominators(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            self.append_memory_records(
+                repo,
+                {
+                    "memory_id": "mem_permission_v1",
+                    "topic": "permission-prompts",
+                    "text": "Ask for permission again after every command.",
+                    "derived_from": ["sessions/2026/05/01/source/summary.md"],
+                    "superseded_by": "mem_permission",
+                    "raw_refs": [{"path": "records/private.jsonl", "anchor": "message:1"}],
+                },
+            )
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "category": "knowledge_update",
+                    "reference_answer": MEMORY_TEXT,
+                    "expected_not_memory_id": "mem_permission_v1",
+                    "stale_memory_id": "mem_permission_v1",
+                    "required_evidence_paths": [SUMMARY_PATH],
+                },
+                {
+                    "query": "nonexistent migration ritual",
+                    "category": "abstention",
+                    "expected_abstain": True,
+                },
+            )
+            search_script, _ = self.write_stub_search(root, mode="quality")
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 2)
+            self.assertEqual(payload["positive_cases"], 1)
+            self.assertEqual(payload["session_cases"], 1)
+            self.assertEqual(payload["source_cases"], 1)
+            self.assertEqual(payload["evidence_cases"], 1)
+            self.assertEqual(payload["answer_cases"], 1)
+            self.assertEqual(payload["abstain_cases"], 1)
+            self.assertEqual(payload["negative_cases"], 1)
+            self.assertEqual(payload["stale_cases"], 1)
+            self.assertEqual(payload["update_cases"], 1)
+            self.assertEqual(payload["privacy_cases"], 2)
+            self.assertEqual(payload["categories"]["knowledge_update"]["positive_cases"], 1)
+            self.assertEqual(payload["categories"]["knowledge_update"]["answer_cases"], 1)
+            self.assertEqual(payload["categories"]["abstention"]["abstain_cases"], 1)
+            self.assertEqual(payload["categories"]["abstention"]["positive_cases"], 0)
+
     def test_abstention_case_must_not_require_positive_expected_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

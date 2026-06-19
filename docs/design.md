@@ -183,7 +183,9 @@ metrics are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 reachability is strict text reachability. Normalized reachability ignores case
 and punctuation. Token F1 uses the best contiguous output-token window against
 the reference answer. These are retrieval-side checks, not generated-answer
-semantic grading.
+semantic grading. The aggregate payload and each category payload also include
+denominator counts such as `positive_cases`, `answer_cases`, and `stale_cases`
+so zero-denominator metrics can be distinguished from measured failures.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:

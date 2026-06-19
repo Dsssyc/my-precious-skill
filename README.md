@@ -324,6 +324,8 @@ stress tests:
 - `abstention_accuracy`, `negative_memory_suppression`,
   `stale_memory_suppression`, and `update_consistency`
 - `privacy_boundary_pass_rate`, total `latency_ms`, and per-category summaries
+- denominator counts such as `positive_cases`, `answer_cases`, `stale_cases`,
+  and `privacy_cases` so zero-denominator metrics are visible
 
 Positive JSONL cases must include `query`, `expected_memory_id`,
 `expected_summary_path`, and `expected_source_anchor`. Optional fields include
