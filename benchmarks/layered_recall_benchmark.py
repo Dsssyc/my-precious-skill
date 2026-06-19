@@ -180,6 +180,7 @@ def new_totals() -> dict[str, float]:
         "update_hits": 0,
         "privacy_cases": 0,
         "privacy_hits": 0,
+        "failed_cases": 0,
         "latency_ms": 0.0,
         "latency_max_ms": 0.0,
     }
@@ -218,6 +219,8 @@ def finalize_totals(totals: dict[str, float]) -> dict:
         "stale_memory_suppression": ratio(totals["stale_hits"], totals["stale_cases"]),
         "update_consistency": ratio(totals["update_hits"], totals["update_cases"]),
         "privacy_boundary_pass_rate": ratio(totals["privacy_hits"], totals["privacy_cases"]),
+        "failed_case_count": int(totals["failed_cases"]),
+        "case_pass_rate": ratio(totals["cases"] - totals["failed_cases"], totals["cases"]),
         "latency_ms": round(totals["latency_ms"], 3),
         "latency_mean_ms": round(ratio(totals["latency_ms"], totals["cases"]), 3),
         "latency_max_ms": round(totals["latency_max_ms"], 3),
@@ -230,6 +233,7 @@ def add_result(totals: dict[str, float], result: dict) -> None:
     totals["latency_max_ms"] = max(totals["latency_max_ms"], result["latency_ms"])
     totals["privacy_cases"] += 1
     totals["privacy_hits"] += int(result["privacy_boundary_pass"])
+    totals["failed_cases"] += int(bool(failed_checks(result)))
     if result["positive_case"]:
         totals["positive_cases"] += 1
         totals["memory_hit_1"] += int(result["memory_rank"] == 1)

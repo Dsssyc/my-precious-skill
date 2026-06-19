@@ -103,11 +103,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
             self.assertEqual(payload["privacy_boundary_pass_rate"], 1.0)
+            self.assertEqual(payload["failed_case_count"], 0)
+            self.assertEqual(payload["case_pass_rate"], 1.0)
             self.assertGreaterEqual(payload["latency_ms"], 0)
             self.assertGreaterEqual(payload["latency_mean_ms"], 0)
             self.assertGreaterEqual(payload["latency_max_ms"], payload["latency_mean_ms"])
             self.assertLessEqual(payload["latency_max_ms"], payload["latency_ms"])
             self.assertEqual(payload["categories"]["abstention"]["cases"], 3)
+            self.assertEqual(payload["categories"]["abstention"]["failed_case_count"], 0)
+            self.assertEqual(payload["categories"]["abstention"]["case_pass_rate"], 1.0)
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
             self.assertEqual(payload["categories"]["privacy_boundary"]["privacy_boundary_pass_rate"], 1.0)
 
@@ -155,6 +159,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
             self.assertEqual(payload["answer_token_f1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
+            self.assertEqual(payload["failed_case_count"], 0)
+            self.assertEqual(payload["case_pass_rate"], 1.0)
             self.assertEqual(len(detail_rows), 30)
             self.assertEqual(detail_rows[0]["case_id"], "synthetic:info_permission_prompt")
             self.assertEqual(detail_rows[-1]["case_id"], "synthetic:scope_domain_benchmark")
@@ -1069,6 +1075,41 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["knowledge_update"]["answer_cases"], 1)
             self.assertEqual(payload["categories"]["abstention"]["abstain_cases"], 1)
             self.assertEqual(payload["categories"]["abstention"]["positive_cases"], 0)
+
+    def test_layered_recall_benchmark_reports_failed_case_count_and_pass_rate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertEqual(payload["case_pass_rate"], 0.0)
+            self.assertEqual(payload["categories"]["uncategorized"]["failed_case_count"], 1)
+            self.assertEqual(payload["categories"]["uncategorized"]["case_pass_rate"], 0.0)
+
+    def test_layered_recall_benchmark_can_gate_failed_case_count(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--fail-over", "failed_case_count=0"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertIn("failed_case_count=1.0 above threshold 0.0", result.stderr)
 
     def test_abstention_case_must_not_require_positive_expected_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:

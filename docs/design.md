@@ -180,7 +180,8 @@ metrics are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 `memory_mrr`, `session_drilldown_at_5`, `evidence_reachability`,
 `source_reachability`, `answer_reachability`,
 `answer_normalized_reachability`, `answer_token_f1`, `latency_ms`,
-`latency_mean_ms`, and `latency_max_ms`. Exact answer
+`latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
+`case_pass_rate`. Exact answer
 reachability is strict text reachability. Normalized reachability ignores case
 and punctuation. Token F1 uses the best contiguous output-token window against
 the reference answer. These are retrieval-side checks, not generated-answer
@@ -231,7 +232,8 @@ summaries (`case_id`, line number, category, source benchmark, and failed
 check names) so CI artifacts remain traceable without copying queries or
 answer text. The benchmark can enforce numeric lower-bound thresholds with
 `--fail-under` and upper-bound thresholds, such as latency caps, with
-`--fail-over`.
+`--fail-over`; for example, `--fail-over failed_case_count=0` rejects any case
+with one or more failed checks.
 Thresholds can target top-level metrics or dotted category paths such as
 `categories.knowledge_update.update_consistency=1.0`. `--fail-under-file` and
 `--fail-over-file` load thresholds from JSON objects for repeatable CI gates;
