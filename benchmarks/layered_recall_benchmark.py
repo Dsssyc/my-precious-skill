@@ -879,10 +879,15 @@ def score_cases(
 
 
 def write_details_jsonl(path: Path, details: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for detail in details:
-            handle.write(json.dumps(detail, sort_keys=True) + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for detail in details:
+                handle.write(json.dumps(detail, sort_keys=True) + "\n")
+    except OSError as exc:
+        display_path = safe_diagnostic_path(path)
+        display_error = safe_diagnostic_text(exc)
+        raise SystemExit(f"unable to write --details-jsonl {display_path}: {display_error}") from exc
 
 
 def threshold_metric_value(payload: dict, metric: str, option: str) -> float:
