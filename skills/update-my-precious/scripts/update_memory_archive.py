@@ -2309,6 +2309,8 @@ def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -
 def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
     nodes = merge_existing_explicit_memory_nodes(memory_repo, nodes)
     memories_dir = memory_repo / "memories"
+    if not is_safe_repo_path(memory_repo, memories_dir):
+        raise SystemExit(f"Refusing to write unsafe archive memories path: {safe_diagnostic_path(memories_dir)}")
     memories_dir.mkdir(parents=True, exist_ok=True)
     by_layer: dict[str, list[dict]] = {"global": [], "domain": [], "project": []}
     explicit_nodes: list[dict] = []
