@@ -416,6 +416,8 @@ and a `failed_checks` list naming the failed applicable metrics for that case.
 The detail rows include benchmark source, temporal scope, expected stale or
 negative memory IDs, required evidence paths, and forbidden-pattern counts, but
 they do not render raw `reference_answer` or `forbidden_output_patterns` text.
+They also include safe returned identifiers such as memory result IDs, session
+paths, and source anchors, without returned hit titles or snippets.
 `--failures-json`
 writes structured quality-gate failures with `metric`, `value`, and `threshold`
 fields for CI systems that should not parse stderr. `--fail-under` keeps the

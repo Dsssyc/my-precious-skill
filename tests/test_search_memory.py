@@ -186,6 +186,7 @@ class SearchMemoryTests(unittest.TestCase):
         first_hit = result.stdout.split("\n\n", 2)[1]
         self.assertIn("[global]", first_hit)
         self.assertIn("source: memory", first_hit)
+        self.assertIn("memory_id: mem_global_permission_prompt", first_hit)
         self.assertIn("source:explicit", first_hit)
         self.assertIn("drill:", first_hit)
         self.assertIn("sessions/2026/06/17/permission/summary.md", first_hit)

@@ -422,6 +422,28 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn(MEMORY_TEXT, json.dumps(detail))
             self.assertNotIn("SYNTHETIC-SECRET", json.dumps(detail))
 
+    def test_layered_recall_benchmark_details_include_safe_returned_identifiers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["memory_result_ids"], ["mem_permission"])
+            self.assertEqual(detail["session_result_paths"], [SUMMARY_PATH])
+            self.assertEqual(detail["source_result_ids"], ["mem_permission"])
+            self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
+            self.assertNotIn(MEMORY_TEXT, json.dumps(detail))
+
     def test_layered_recall_benchmark_fails_under_metric_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1006,11 +1028,13 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                         print()
                         print("2. [global] Different memory")
                         print("   source: memory")
+                        print("   memory_id: mem_other")
                         print("   source anchors:")
                         print("     - " + SOURCE_ANCHOR)
                     else:
@@ -1018,6 +1042,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print()
                         print("1. [global] " + MEMORY_TEXT)
                         print("   source: memory")
+                        print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
                         print("   source anchors:")

@@ -36,6 +36,7 @@ class Hit:
     source: str
     why: list[str]
     title: str = ""
+    memory_id: str = ""
     layer: str = ""
     scope: str = ""
     text: str = ""
@@ -634,6 +635,7 @@ def collect_memory_hits(
                 source="memory",
                 why=why,
                 title=title,
+                memory_id=memory_id,
                 layer=layer,
                 scope=str(record.get("scope") or ""),
                 text=text,
@@ -722,6 +724,8 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
             current.title = hit.title
         if hit.text and not current.text:
             current.text = hit.text
+        if hit.memory_id and not current.memory_id:
+            current.memory_id = hit.memory_id
         current.drill_paths = unique_ordered((*current.drill_paths, *hit.drill_paths))
         current.raw_refs = unique_ordered((*current.raw_refs, *hit.raw_refs))
         if current.source != hit.source:
@@ -761,6 +765,8 @@ def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
         f"   score: {hit.score}",
         "   source: memory",
     ]
+    if hit.memory_id:
+        lines.append(f"   memory_id: {hit.memory_id}")
     if hit.scope:
         lines.append(f"   scope: {hit.scope}")
     lines.append(f"   why: {why}")

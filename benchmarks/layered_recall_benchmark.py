@@ -327,6 +327,55 @@ def section_items(block: str, section_name: str) -> list[str]:
     return items
 
 
+def unique_texts(items: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def block_field_values(blocks: list[str], field_name: str) -> list[str]:
+    values: list[str] = []
+    prefix = f"{field_name}:"
+    for block in blocks:
+        for line in block.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith(prefix):
+                continue
+            value = stripped[len(prefix) :].strip()
+            if value:
+                values.append(value)
+    return unique_texts(values)
+
+
+def block_section_values(blocks: list[str], section_name: str) -> list[str]:
+    return unique_texts(item for block in blocks for item in section_items(block, section_name))
+
+
+def block_title_path(block: str) -> str:
+    first_line = block.splitlines()[0] if block.splitlines() else ""
+    match = re.match(r"^\d+\.\s+(.+)$", first_line)
+    if not match:
+        return ""
+    candidate = match.group(1).strip()
+    if not candidate or candidate.startswith("["):
+        return ""
+    if re.search(r"\s", candidate):
+        return ""
+    if "/" not in candidate and not candidate.endswith((".md", ".jsonl", ".json")):
+        return ""
+    return candidate
+
+
+def block_result_paths(blocks: list[str]) -> list[str]:
+    title_paths = [path for block in blocks if (path := block_title_path(block))]
+    drill_paths = block_section_values(blocks, "drill")
+    return unique_texts([*title_paths, *drill_paths])
+
+
 def block_has_drill_path(block: str, expected_summary_path: str) -> bool:
     return expected_summary_path in section_items(block, "drill")
 
@@ -511,6 +560,10 @@ def case_detail(case: Case, result: dict) -> dict:
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
         "update_consistency_hit": result["update_consistency_hit"],
         "privacy_boundary_pass": result["privacy_boundary_pass"],
+        "memory_result_ids": result["memory_result_ids"],
+        "session_result_paths": result["session_result_paths"],
+        "source_result_ids": result["source_result_ids"],
+        "source_result_anchors": result["source_result_anchors"],
         "failed_checks": failed_checks(result),
         "latency_ms": round(result["latency_ms"], 3),
     }
@@ -590,6 +643,10 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
             [memory_output, session_output, source_output],
             forbidden_patterns,
         ),
+        "memory_result_ids": block_field_values(memory_blocks, "memory_id"),
+        "session_result_paths": block_result_paths(session_blocks),
+        "source_result_ids": block_field_values(source_blocks, "memory_id"),
+        "source_result_anchors": block_section_values(source_blocks, "source anchors"),
         "latency_ms": latency_ms,
     }
 
