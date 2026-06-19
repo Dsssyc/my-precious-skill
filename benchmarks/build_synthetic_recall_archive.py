@@ -138,12 +138,18 @@ def memory_layer(case: dict) -> str:
     return "project"
 
 
+def evidence_paths_for_case(case: dict) -> list[str]:
+    evidence_paths = text_list(case.get("required_evidence_paths"))
+    if evidence_paths:
+        return evidence_paths
+    summary_path = str(case["expected_summary_path"])
+    return [summary_path.replace("/summary.md", "/evidence.md")]
+
+
 def build_memory_record(case: dict) -> dict:
     category = str(case.get("category") or "uncategorized")
     summary_path = str(case["expected_summary_path"])
-    evidence_paths = text_list(case.get("required_evidence_paths"))
-    if not evidence_paths:
-        evidence_paths = [summary_path.replace("/summary.md", "/evidence.md")]
+    evidence_paths = evidence_paths_for_case(case)
     query = str(case["query"])
     memory_id = str(case["expected_memory_id"])
     reference_answers = text_list(case.get("reference_answer"))
@@ -232,7 +238,7 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
         f"{answer_section}"
         "This file is generated synthetic benchmark data only.\n",
     )
-    for evidence_path in text_list(case.get("required_evidence_paths")):
+    for evidence_path in evidence_paths_for_case(case):
         answer_evidence = " ".join(f"Reference answer: {answer}." for answer in reference_answers)
         evidence_text = " ".join(f"Reference evidence: {snippet}." for snippet in reference_evidence)
         write_text(

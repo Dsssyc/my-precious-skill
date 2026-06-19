@@ -714,6 +714,34 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
 
+    def test_synthetic_builder_writes_default_evidence_file_for_positive_cases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            cases = self.write_cases(root, self.valid_case())
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            record = json.loads((repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()[0])
+            evidence_path = SUMMARY_PATH.replace("/summary.md", "/evidence.md")
+            self.assertEqual(record["evidence_refs"], [{"path": evidence_path, "quote_id": "syn_ev_001"}])
+            evidence = repo / evidence_path
+            self.assertTrue(evidence.is_file())
+            self.assertIn("Evidence supporting mem_permission", evidence.read_text(encoding="utf-8"))
+
     def test_layered_recall_benchmark_checks_reference_evidence_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
