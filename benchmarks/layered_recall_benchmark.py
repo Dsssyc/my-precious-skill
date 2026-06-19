@@ -64,7 +64,11 @@ def case_location(path: Path, line_no: int) -> str:
 
 
 def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
-    with path.open("r", encoding="utf-8") as handle:
+    try:
+        handle = path.open("r", encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"unable to read JSONL {safe_diagnostic_path(path)}: {safe_diagnostic_text(exc)}") from exc
+    with handle:
         for line_no, line in enumerate(handle, 1):
             line = line.strip()
             if not line:

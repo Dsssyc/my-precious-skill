@@ -1483,6 +1483,24 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("no benchmark cases", result.stderr)
             self.assertIn(str(cases), result.stderr)
 
+    def test_missing_cases_file_reports_controlled_sanitized_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            sensitive_cases_root = root / "cases-cookie=SHOULD_NOT_RENDER"
+            missing_cases = sensitive_cases_root / "missing.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, missing_cases, search_script, check=False)
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unable to read JSONL", result.stderr)
+            self.assertIn("[unsafe-result-identifier]", result.stderr)
+            self.assertNotIn("Traceback", combined)
+            self.assertNotIn("SHOULD_NOT_RENDER", combined)
+            self.assertNotIn("cookie=", combined)
+
     def test_distractor_blocks_do_not_count_split_expected_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
