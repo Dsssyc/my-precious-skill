@@ -352,6 +352,47 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("--project-path", payload["ProgramArguments"])
             self.assertNotIn(str((target / "tools/update_memory_archive.py").resolve()), payload["ProgramArguments"])
 
+    def test_render_scheduler_refuses_symlinked_log_dir_outside_archive(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            outside_logs = root / "outside-logs"
+            source_dir.mkdir(parents=True)
+            outside_logs.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(target), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            (target / ".tmp").mkdir()
+            (target / ".tmp/logs").symlink_to(outside_logs, target_is_directory=True)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(target / "tools/render_scheduler.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--backend",
+                    "launchd",
+                    "--schedule",
+                    "daily",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to access unsafe scheduler log path:", output)
+
     def test_render_scheduler_can_render_agent_native_prompt(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
