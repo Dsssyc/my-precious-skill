@@ -614,6 +614,30 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
             self.assertNotIn("cookie=", json.dumps(detail))
 
+    def test_layered_recall_benchmark_details_sanitize_unsafe_returned_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="leaky_path")
+
+            self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["session_result_paths"], ["[unsafe-result-identifier]"])
+            self.assertEqual(
+                detail["source_result_anchors"],
+                [SOURCE_ANCHOR, "[unsafe-result-identifier]"],
+            )
+            self.assertNotIn("/Users/private", json.dumps(detail))
+            self.assertNotIn("../outside", json.dumps(detail))
+
     def test_layered_recall_benchmark_fails_under_metric_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1671,7 +1695,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 elif depth == "session":
                     print(f"Top memory hits for: {{query}}")
                     print()
-                    print("1. " + SUMMARY_PATH)
+                    if MODE == "leaky_path":
+                        print("1. /Users/private/summary.md")
+                    else:
+                        print("1. " + SUMMARY_PATH)
                     print("   source: index")
                 elif depth == "source":
                     if MODE == "distractor":
@@ -1700,6 +1727,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("     - " + SOURCE_ANCHOR)
                         if MODE == "leaky_anchor":
                             print("     - records/private.jsonl#message:44 cookie=SHOULD_NOT_RENDER")
+                        if MODE == "leaky_path":
+                            print("     - /Users/private/source.jsonl#message:44")
+                            print("     - ../outside/source.jsonl#message:45")
                         if MODE == "leaky":
                             print("   evidence:")
                             print("     - FAKE RAW PRIVATE CONTENT")

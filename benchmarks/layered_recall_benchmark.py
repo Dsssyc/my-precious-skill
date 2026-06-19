@@ -320,11 +320,24 @@ def has_control_chars(text: str) -> bool:
     return any(ord(char) < 32 or ord(char) == 127 for char in text)
 
 
+def has_unsafe_path_reference(text: str) -> bool:
+    path_text = text.split("#", 1)[0].strip()
+    if not path_text:
+        return False
+    if path_text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", path_text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", path_text))
+
+
 def safe_result_identifier(value: str) -> str:
     text = value.strip()
     if not text:
         return ""
-    if has_control_chars(text) or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(text):
+    if (
+        has_control_chars(text)
+        or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(text)
+        or has_unsafe_path_reference(text)
+    ):
         return UNSAFE_RESULT_IDENTIFIER
     return clip(text)
 
