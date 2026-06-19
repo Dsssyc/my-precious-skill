@@ -223,6 +223,8 @@ Optional fields include `category`, `source_benchmark`,
 `case_id`, `required_evidence_paths`, `reference_answer`,
 `expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
 `forbidden_output_patterns`.
+`forbidden_output_patterns` values are Python regular expressions matched
+against combined memory, session, and source output.
 When present, `case_id` must be unique within the case file.
 Abstention cases use `expected_abstain: true` and do not require positive
 expected fields.

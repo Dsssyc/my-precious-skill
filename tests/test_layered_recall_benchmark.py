@@ -1118,6 +1118,44 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["abstention"]["cases"], 1)
             self.assertEqual(payload["categories"]["abstention"]["abstention_accuracy"], 1.0)
 
+    def test_forbidden_output_patterns_are_regular_expressions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "forbidden_output_patterns": [r"FAKE\s+RAW\s+PRIVATE\s+CONTENT"],
+                },
+            )
+            search_script, _ = self.write_stub_search(root, mode="leaky")
+
+            result = self.run_benchmark(repo, cases, search_script)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["privacy_boundary_pass_rate"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+
+    def test_invalid_forbidden_output_pattern_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "forbidden_output_patterns": ["["],
+                },
+            )
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(f"{cases}:1", result.stderr)
+            self.assertIn("invalid forbidden_output_patterns[0]", result.stderr)
+
     def test_layered_recall_benchmark_reports_metric_denominators(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1407,6 +1445,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("     - " + SUMMARY_PATH)
                         print("   source anchors:")
                         print("     - " + SOURCE_ANCHOR)
+                        if MODE == "leaky":
+                            print("   evidence:")
+                            print("     - FAKE RAW PRIVATE CONTENT")
                 else:
                     raise SystemExit(2)
                 """

@@ -324,6 +324,8 @@ python benchmarks/layered_recall_benchmark.py \
 `expected_summary_path` 和 `expected_source_anchor`。可选字段包括
 `category`、`reference_answer`、`required_evidence_paths`、`expected_not_memory_id`、
 `stale_memory_id`、`temporal_scope` 和 `forbidden_output_patterns`。
+`forbidden_output_patterns` 的每一项都是 Python 正则表达式，会匹配合并后的
+memory、session 和 source 输出。
 拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。
 `answer_reachability` 检查精确 reference answer 文本可达性；
 `answer_normalized_reachability` 忽略大小写和标点；`answer_token_f1`

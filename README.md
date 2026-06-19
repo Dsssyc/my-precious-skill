@@ -337,6 +337,8 @@ Positive JSONL cases must include `query`, `expected_memory_id`,
 `required_evidence_paths`, `expected_not_memory_id`, `stale_memory_id`,
 `temporal_scope`, and
 `forbidden_output_patterns`.
+`forbidden_output_patterns` entries are Python regular expressions matched
+against combined memory, session, and source output.
 When present, `case_id` must be unique within the case file.
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text

@@ -93,8 +93,8 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
         "temporal_scope",
     ):
         optional_case_text_or_texts(case, key, path, line_no)
-    for key in ("required_evidence_paths", "forbidden_output_patterns"):
-        optional_case_texts(case, key, path, line_no)
+    optional_case_texts(case, "required_evidence_paths", path, line_no)
+    validate_forbidden_output_patterns(case, path, line_no)
 
 
 def optional_case_text_or_texts(case: dict, key: str, path: Path, line_no: int) -> list[str]:
@@ -121,6 +121,16 @@ def optional_case_texts(case: dict, key: str, path: Path, line_no: int) -> list[
             raise SystemExit(f"{path}:{line_no}: benchmark case field {key}[{idx}] must be a non-empty string")
         out.append(item.strip())
     return out
+
+
+def validate_forbidden_output_patterns(case: dict, path: Path, line_no: int) -> list[str]:
+    patterns = optional_case_texts(case, "forbidden_output_patterns", path, line_no)
+    for idx, pattern in enumerate(patterns):
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise SystemExit(f"{path}:{line_no}: invalid forbidden_output_patterns[{idx}]: {exc}") from exc
+    return patterns
 
 
 def optional_case_text_only(case: dict, key: str, path: Path, line_no: int) -> str:
@@ -570,7 +580,7 @@ def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> 
     if not forbidden_patterns:
         return True
     combined = "\n".join(outputs)
-    return not any(pattern in combined for pattern in forbidden_patterns)
+    return not any(re.search(pattern, combined) for pattern in forbidden_patterns)
 
 
 def failed_checks(result: dict) -> list[str]:
