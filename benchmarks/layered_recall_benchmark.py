@@ -414,6 +414,27 @@ def has_unsafe_path_reference(text: str) -> bool:
     return any(part == ".." for part in re.split(r"[\\/]+", path_text))
 
 
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+                "secret",
+                "token",
+            }
+        )
+        or token_pairs.intersection({("api", "key"), ("private", "key"), ("session", "id")})
+    )
+
+
 def safe_result_identifier(value: str) -> str:
     text = value.strip()
     if not text:
@@ -421,6 +442,7 @@ def safe_result_identifier(value: str) -> str:
     if (
         has_control_chars(text)
         or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(text)
+        or has_sensitive_identifier_token(text)
         or has_unsafe_path_reference(text)
     ):
         return UNSAFE_RESULT_IDENTIFIER

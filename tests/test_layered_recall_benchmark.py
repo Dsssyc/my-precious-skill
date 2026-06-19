@@ -1712,6 +1712,29 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
             self.assertNotIn("cookie=", result.stderr)
 
+    def test_duplicate_case_id_error_sanitizes_sensitive_slug_identifier(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {**self.valid_case(), "case_id": "longmemeval:cookie_should_not_render"},
+                {
+                    **self.valid_case(),
+                    "query": "permission prompts second",
+                    "case_id": "longmemeval:cookie_should_not_render",
+                },
+            )
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("duplicate case_id", result.stderr)
+            self.assertIn("[unsafe-result-identifier]", result.stderr)
+            self.assertNotIn("cookie_should_not_render", result.stderr)
+            self.assertNotIn("cookie", result.stderr)
+
     def test_non_object_jsonl_row_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
