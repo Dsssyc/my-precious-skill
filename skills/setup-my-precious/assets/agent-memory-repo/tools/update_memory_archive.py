@@ -1856,6 +1856,14 @@ def is_safe_archive_entry_dir(memory_repo: Path, entry_dir: Path) -> bool:
     return len(relative.parts) >= 4 and entry_dir.name
 
 
+def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(memory_repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def prune_empty_session_dirs(root: Path) -> None:
     if not root.exists():
         return
@@ -2325,6 +2333,8 @@ def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
 
 def rebuild_indexes(memory_repo: Path) -> None:
     index_dir = memory_repo / "index"
+    if not is_safe_repo_path(memory_repo, index_dir):
+        raise SystemExit(f"Refusing to write unsafe archive index path: {safe_diagnostic_path(index_dir)}")
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
     memory_nodes = build_memory_nodes(rows)
