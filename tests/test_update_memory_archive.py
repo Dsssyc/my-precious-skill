@@ -1142,6 +1142,59 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("[REDACTED_OPENAI_KEY]", output)
             self.assertNotIn(path_secret, output)
 
+    def test_update_memory_archive_sanitizes_unsafe_archive_entry_errors(self):
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            path_secret = "sk-" + "unsafeentry" + ("0" * 20)
+            source_dir.mkdir()
+            project_path.mkdir()
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps({"role": "assistant", "content": "Decision: rewrite matching source records."}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            unsafe_entry_dir = memory_repo / "sessions" / f"unsafe-{path_secret}"
+            unsafe_entry_dir.mkdir()
+            (unsafe_entry_dir / "meta.json").write_text(
+                json.dumps({"project_path": str(project_path.resolve()), "source_record": str(source.resolve())}),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                    "--rewrite-existing",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to remove unsafe archive entry path:", output)
+            self.assertIn("[REDACTED_OPENAI_KEY]", output)
+            self.assertNotIn(path_secret, output)
+
     def test_update_memory_archive_redacts_secrets_when_explicitly_allowed(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

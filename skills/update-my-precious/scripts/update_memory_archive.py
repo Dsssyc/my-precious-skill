@@ -1841,7 +1841,7 @@ def remove_existing_entries_for_source(memory_repo: Path, project_path: Path, so
             continue
         entry_dir = meta_path.parent
         if not is_safe_archive_entry_dir(memory_repo, entry_dir):
-            raise SystemExit(f"Refusing to remove unsafe archive entry path: {entry_dir}")
+            raise SystemExit(f"Refusing to remove unsafe archive entry path: {safe_diagnostic_path(entry_dir)}")
         shutil.rmtree(entry_dir)
         removed += 1
     prune_empty_session_dirs(memory_repo / "sessions")
