@@ -317,7 +317,12 @@ The harness reports retrieval and reliability metrics inspired by long-memory
 benchmarks such as LongMemEval, LOCoMo, Memora, and RULER-style retrieval
 stress tests:
 
-- `memory_recall_at_1`, `memory_recall_at_5`, and `memory_mrr`
+- `memory_recall_at_1`, `memory_recall_at_5`, `memory_mrr`,
+  `memory_ndcg_at_5`, `memory_precision_at_5`, and
+  `memory_micro_precision_at_5`
+- rank distribution fields `memory_ranked_cases`,
+  `memory_rank_missing_cases`, `memory_rank_mean`,
+  `memory_rank_median`, and `memory_rank_histogram`
 - `session_drilldown_at_5`, `source_reachability`, and
   `evidence_reachability`
 - `answer_reachability`, `answer_normalized_reachability`, and
@@ -432,7 +437,11 @@ Sensitive-looking or control-character-bearing returned identifiers are written
 as `[unsafe-result-identifier]`.
 `--failures-json`
 writes structured quality-gate failures with `metric`, `value`, and `threshold`
-fields for CI systems that should not parse stderr. `--fail-under` keeps the
+fields for CI systems that should not parse stderr. It also includes safe
+per-case failure summaries with case ID, line number, category, source
+benchmark, failed check names, memory rank, recall flags, session drilldown
+status, and source reachability status; it still omits raw queries, expected
+memory IDs, reference answers, and returned snippets. `--fail-under` keeps the
 aggregate JSON on stdout and exits non-zero when a configured numeric metric
 falls below its threshold, which makes the benchmark usable as a CI quality
 gate. Thresholds can target top-level metrics or dotted category paths such as
@@ -452,10 +461,13 @@ example:
 
 Direct `--fail-under` arguments override duplicate metric keys loaded from
 threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
-gate covers the synthetic suite's recall, source/evidence, answer reachability,
-abstention, stale/update, privacy, and denominator-count checks. Add additional
-answer-metric gates to custom threshold files when an evaluated case set has
-broader `reference_answer` coverage. Each memory/session/source search
+gate covers the synthetic suite's recall, rank coverage, source/evidence,
+answer reachability, abstention, stale/update, privacy, and denominator-count
+checks. The paired `benchmarks/quality-gates/layered_recall_synthetic_max.json`
+uses `--fail-over-file` for upper-bound checks such as `failed_case_count`,
+`memory_rank_missing_cases`, `memory_rank_mean`, and `memory_rank_median`. Add
+additional answer-metric gates to custom threshold files when an evaluated case
+set has broader `reference_answer` coverage. Each memory/session/source search
 subprocess has a default 30 second timeout; set finite positive
 `--search-timeout-s` values lower for CI smoke tests or higher for large local
 archives.

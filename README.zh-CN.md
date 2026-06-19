@@ -311,7 +311,11 @@ python benchmarks/layered_recall_benchmark.py \
 这个 harness 会输出受 LongMemEval、LOCoMo、Memora、RULER 风格检索压力测试
 启发的长期记忆可靠性指标：
 
-- `memory_recall_at_1`、`memory_recall_at_5` 和 `memory_mrr`
+- `memory_recall_at_1`、`memory_recall_at_5`、`memory_mrr`、
+  `memory_ndcg_at_5`、`memory_precision_at_5` 和
+  `memory_micro_precision_at_5`
+- rank 分布字段：`memory_ranked_cases`、`memory_rank_missing_cases`、
+  `memory_rank_mean`、`memory_rank_median` 和 `memory_rank_histogram`
 - `session_drilldown_at_5`、`source_reachability` 和
   `evidence_reachability`
 - `answer_reachability`、`answer_normalized_reachability` 和
@@ -319,12 +323,14 @@ python benchmarks/layered_recall_benchmark.py \
   `reference_answer` 片段
 - `abstention_accuracy`、`negative_memory_suppression`、
   `stale_memory_suppression` 和 `update_consistency`
-- `privacy_boundary_pass_rate`、总 `latency_ms` 和按 `category` 分组的汇总
+- `privacy_boundary_pass_rate`、总 `latency_ms`、`latency_mean_ms`、
+  `latency_max_ms`、分母计数字段，以及按 `category` 分组的汇总
 
 正向 JSONL case 必须包含 `query`、`expected_memory_id`、
 `expected_summary_path` 和 `expected_source_anchor`。可选字段包括
-`category`、`reference_answer`、`required_evidence_paths`、`expected_not_memory_id`、
-`stale_memory_id`、`temporal_scope` 和 `forbidden_output_patterns`。
+`case_id`、`category`、`source_benchmark`、`reference_answer`、
+`required_evidence_paths`、`expected_not_memory_id`、`stale_memory_id`、
+`temporal_scope` 和 `forbidden_output_patterns`。
 `forbidden_output_patterns` 的每一项都是 Python 正则表达式，会匹配合并后的
 memory、session 和 source 输出。
 拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。
@@ -378,15 +384,24 @@ python benchmarks/layered_recall_benchmark.py \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
   --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
+  --failures-json /tmp/my-precious-synthetic-failures.json \
+  --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json \
   --fail-under memory_recall_at_5=0.95 \
   --fail-under privacy_boundary_pass_rate=1.0
 ```
 
 `--details-jsonl` 会为每条 case 写一行 JSON，包含 rank、drill-down、source、
 evidence、拒答、stale suppression 和 privacy 结果。疑似敏感或包含控制字符的
-returned identifier 会写成 `[unsafe-result-identifier]`。`--fail-under` 会保留
-stdout 的 aggregate JSON，并在顶层数值指标低于阈值时用非零状态退出，方便在 CI
-里作为质量门禁。阈值必须是有限数值；NaN 和 Infinity 会在比较前被拒绝。
+returned identifier 会写成 `[unsafe-result-identifier]`。`--failures-json`
+会写结构化质量门禁失败信息，包括 metric、value、threshold，以及安全的失败
+case 摘要：case ID、行号、category、source benchmark、失败检查名、memory rank、
+recall 标志、session drilldown 状态和 source reachability 状态；它仍然不会写原始
+query、expected memory ID、reference answer 或返回片段。`--fail-under` 会保留
+stdout 的 aggregate JSON，并在数值指标低于阈值时用非零状态退出，方便在 CI
+里作为质量门禁；`--fail-over-file` 可用于 `failed_case_count`、
+`memory_rank_missing_cases`、rank mean/median 等上界门禁。阈值必须是有限数值；
+NaN 和 Infinity 会在比较前被拒绝。
 memory/session/source 每一层搜索 subprocess 默认有 30 秒超时；`--search-timeout-s`
 必须是有限正数，可以在 CI smoke test 中调低，或在大型本地 archive 上调高。
 

@@ -180,7 +180,8 @@ answer snippet is reachable in memory, session, or source output. These metrics
 are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 `memory_precision_at_5`, `memory_micro_precision_at_5`,
 `memory_result_count_at_5`, `memory_relevant_count_at_5`, `memory_mrr`,
-`memory_ndcg_at_5`,
+`memory_ndcg_at_5`, `memory_ranked_cases`, `memory_rank_missing_cases`,
+`memory_rank_mean`, `memory_rank_median`, `memory_rank_histogram`,
 `session_drilldown_at_5`, `evidence_reachability`, `source_reachability`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
@@ -195,6 +196,9 @@ returned-memory and relevant-memory hits. Token F1 uses the best contiguous
 output-token window against the reference answer. `memory_ndcg_at_5` is a
 rank-sensitive top-5 metric: a rank-1 expected memory scores 1.0, lower ranks
 decay by the standard discounted-gain curve, and misses beyond rank 5 score 0.
+The rank distribution fields report how many positive cases were ranked at all,
+how many were missing, mean and median rank for ranked hits, and a compact
+histogram for ranks 1 through 5, ranks beyond 5, and misses.
 These are retrieval-side checks, not generated-answer semantic grading. The
 aggregate payload and each category payload also include
 denominator counts such as `positive_cases`, `answer_cases`, and `stale_cases`
@@ -248,8 +252,9 @@ control-character-bearing returned identifiers are rendered as
 threshold failures with `--failures-json`; that failure file includes the same
 case-set and search-script fingerprints as stdout, the aggregate
 `failed_case_count` and `case_pass_rate`, plus safe per-case failure summaries
-(`case_id`, line number, category, source benchmark, and failed check names) so
-CI artifacts remain traceable without copying queries or answer text. The
+(`case_id`, line number, category, source benchmark, failed check names, memory
+rank, recall flags, session drilldown status, and source reachability status)
+so CI artifacts remain traceable without copying queries or answer text. The
 benchmark can enforce numeric lower-bound thresholds with
 `--fail-under` and upper-bound thresholds, such as latency caps, with
 `--fail-over`; for example, `--fail-over failed_case_count=0` rejects any case
@@ -268,12 +273,12 @@ subprocess has a default timeout of 30 seconds; use finite positive
 lower it for CI smoke tests.
 The packaged synthetic gates intentionally split lower-bound and upper-bound
 checks: `benchmarks/quality-gates/layered_recall_synthetic.json` covers the
-synthetic suite dimensions, answer reachability, pass-rate metrics, and
-denominator counts, while
+synthetic suite dimensions, rank coverage, answer reachability, pass-rate
+metrics, and denominator counts, while
 `benchmarks/quality-gates/layered_recall_synthetic_max.json` enforces upper
-bounds such as `failed_case_count=0`. Additional answer-metric gates should be
-added to custom threshold files for case sets with broader `reference_answer`
-coverage.
+bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`, and rank
+mean/median caps. Additional answer-metric gates should be added to custom
+threshold files for case sets with broader `reference_answer` coverage.
 
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic
