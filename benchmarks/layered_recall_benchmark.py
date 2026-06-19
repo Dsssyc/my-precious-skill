@@ -172,6 +172,10 @@ def category_name(case: dict) -> str:
     return optional_case_text(case, "category") or "uncategorized"
 
 
+def safe_category_name(case: dict) -> str:
+    return safe_result_identifier(category_name(case))
+
+
 def no_hits(*block_groups: list[str]) -> bool:
     return not any(block for blocks in block_groups for block in blocks)
 
@@ -651,7 +655,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "case_line": case.line_no,
         "case_id": safe_result_identifier(optional_case_text(data, "case_id")),
         "query": query,
-        "category": category_name(data),
+        "category": safe_category_name(data),
         "source_benchmark": safe_result_identifier(optional_case_text(data, "source_benchmark")),
         "temporal_scope": safe_result_identifier(optional_case_text(data, "temporal_scope")),
         "expected_memory_id": safe_result_identifier(optional_case_text(data, "expected_memory_id")),
@@ -799,7 +803,7 @@ def score_cases(
         result = score_case(repo, case, memory_records, search_script, search_timeout_s)
         add_result(totals, result)
         details.append(case_detail(case, result))
-        category = category_name(case.data)
+        category = safe_category_name(case.data)
         category_totals.setdefault(category, new_totals())
         add_result(category_totals[category], result)
 

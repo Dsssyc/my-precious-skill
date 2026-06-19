@@ -529,6 +529,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     **self.valid_case(),
                     "query": "permission prompts cookie=SHOULD_NOT_RENDER",
                     "case_id": "case cookie=SHOULD_NOT_RENDER",
+                    "category": "privacy cookie=SHOULD_NOT_RENDER",
                     "source_benchmark": "Memora cookie=SHOULD_NOT_RENDER",
                     "temporal_scope": "latest cookie=SHOULD_NOT_RENDER",
                     "expected_memory_id": "mem_permission cookie=SHOULD_NOT_RENDER",
@@ -542,16 +543,18 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             details = root / "details.jsonl"
             search_script, _ = self.write_stub_search(root)
 
-            self.run_benchmark(
+            result = self.run_benchmark(
                 repo,
                 cases,
                 search_script,
                 extra_args=["--details-jsonl", str(details)],
             )
 
+            payload = json.loads(result.stdout)
             detail = self.read_rows(details)[0]
             self.assertEqual(detail["query"], "[unsafe-result-identifier]")
             self.assertEqual(detail["case_id"], "[unsafe-result-identifier]")
+            self.assertEqual(detail["category"], "[unsafe-result-identifier]")
             self.assertEqual(detail["source_benchmark"], "[unsafe-result-identifier]")
             self.assertEqual(detail["temporal_scope"], "[unsafe-result-identifier]")
             self.assertEqual(detail["expected_memory_id"], "[unsafe-result-identifier]")
@@ -560,8 +563,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(detail["expected_summary_path"], "[unsafe-result-identifier]")
             self.assertEqual(detail["expected_source_anchor"], "[unsafe-result-identifier]")
             self.assertEqual(detail["required_evidence_paths"], ["[unsafe-result-identifier]"])
+            self.assertIn("[unsafe-result-identifier]", payload["categories"])
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
             self.assertNotIn("cookie=", json.dumps(detail))
+            self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(payload))
+            self.assertNotIn("cookie=", json.dumps(payload))
 
     def test_layered_recall_benchmark_details_include_safe_returned_identifiers(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -716,6 +722,41 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     }
                 ],
             )
+
+    def test_layered_recall_benchmark_failures_json_sanitizes_sensitive_category(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "case_id": "synthetic:permission_prompt",
+                    "category": "privacy cookie=SHOULD_NOT_RENDER",
+                    "source_benchmark": "LongMemEval",
+                },
+            )
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(root, mode="nohit")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-under",
+                    "memory_recall_at_5=0.5",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            self.assertEqual(failure_payload["failed_cases"][0]["category"], "[unsafe-result-identifier]")
+            self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(failure_payload))
+            self.assertNotIn("cookie=", json.dumps(failure_payload))
 
     def test_layered_recall_benchmark_writes_empty_threshold_failures_json_when_gates_pass(self):
         with tempfile.TemporaryDirectory() as tmpdir:
