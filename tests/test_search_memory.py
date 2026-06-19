@@ -1290,6 +1290,48 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("outside-only-token should never be indexed", result.stdout)
         self.assertNotIn(str(outside), result.stdout + result.stderr)
 
+    def test_search_memory_does_not_read_symlinked_memory_index_outside_archive(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            outside = root / "outside-memory.jsonl"
+            outside.write_text(
+                json.dumps(
+                    {
+                        "memory_id": "outside_memory",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "outside",
+                        "text": "outside-only-index-token should never be indexed.",
+                        "source": "external",
+                        "derived_from": [],
+                        "raw_refs": [],
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index").mkdir(parents=True)
+            (repo / "sessions").mkdir()
+            (repo / "index/memories.jsonl").symlink_to(outside)
+
+            result = subprocess.run(
+                [sys.executable, str(script), "outside-only-index-token", "--repo", str(repo)],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("No memory hits", result.stdout)
+        self.assertNotIn("outside-only-index-token should never be indexed", result.stdout)
+        self.assertNotIn("outside_memory", result.stdout)
+        self.assertNotIn(str(outside), result.stdout + result.stderr)
+
     def test_search_memory_uses_summary_title_when_index_title_is_generic_source_file(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

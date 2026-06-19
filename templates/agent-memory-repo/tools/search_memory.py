@@ -663,6 +663,8 @@ def collect_memory_hits(
 ) -> list[Hit]:
     hits: list[Hit] = []
     index_path = repo / "index" / "memories.jsonl"
+    if not is_safe_repo_file(repo, index_path):
+        return hits
     for line_no, record in enumerate(iter_jsonl(index_path), 1):
         raw_memory_id = str(record.get("memory_id") or "")
         layer = safe_display_scalar(record.get("layer") or "", 60)
@@ -712,7 +714,7 @@ def collect_memory_hits(
 def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:
     hits: list[Hit] = []
     for index_path in sorted((repo / "index").glob("*.jsonl")):
-        if index_path.name == "memories.jsonl":
+        if index_path.name == "memories.jsonl" or not is_safe_repo_file(repo, index_path):
             continue
         for record in iter_jsonl(index_path):
             score, matched, reasons = score_index_record(query_tokens, record, context_terms)
