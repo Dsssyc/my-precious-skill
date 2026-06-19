@@ -39,10 +39,20 @@ def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
 
 def load_cases(path: Path) -> list[Case]:
     cases: list[Case] = []
+    seen_case_ids: dict[str, int] = {}
     for line_no, value in iter_jsonl(path):
         if not isinstance(value, dict):
             raise SystemExit(f"{path}:{line_no}: expected object benchmark case")
         validate_case(value, path, line_no)
+        case_id = optional_case_text(value, "case_id")
+        if case_id:
+            first_line = seen_case_ids.get(case_id)
+            if first_line is not None:
+                raise SystemExit(
+                    f"{path}:{line_no}: duplicate case_id {case_id!r}; "
+                    f"first seen at {path}:{first_line}"
+                )
+            seen_case_ids[case_id] = line_no
         cases.append(Case(value, path, line_no))
     if not cases:
         raise SystemExit(f"no benchmark cases found in {path}")

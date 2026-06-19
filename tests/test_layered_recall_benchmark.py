@@ -705,6 +705,30 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("source_benchmark", result.stderr)
             self.assertIn("must be string", result.stderr)
 
+    def test_duplicate_case_id_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {**self.valid_case(), "case_id": "longmemeval:lme_q1"},
+                {
+                    **self.valid_case(),
+                    "query": "permission prompts second",
+                    "case_id": "longmemeval:lme_q1",
+                },
+            )
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(repo, cases, search_script, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            resolved_cases = cases.resolve()
+            self.assertIn(f"{resolved_cases}:2", result.stderr)
+            self.assertIn("duplicate case_id", result.stderr)
+            self.assertIn("longmemeval:lme_q1", result.stderr)
+            self.assertIn(f"first seen at {resolved_cases}:1", result.stderr)
+
     def test_non_object_jsonl_row_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
