@@ -1597,6 +1597,60 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Refusing to write unsafe archive daily path:", output)
             self.assertFalse(any(outside_daily.glob("**/*.md")))
 
+    def test_update_memory_archive_refuses_symlinked_daily_file_write_outside_archive(self):
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            outside_daily_file = root / "outside-daily.md"
+            source_dir.mkdir()
+            project_path.mkdir()
+            outside_daily_file.write_text("unchanged\n", encoding="utf-8")
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            (memory_repo / "daily" / "2026").mkdir(parents=True)
+            (memory_repo / "daily" / "2026" / "2026-05-14.md").symlink_to(outside_daily_file)
+
+            source = source_dir / "session.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": "Need a safe archive daily file boundary."}) + "\n"
+                + json.dumps(
+                    {
+                        "role": "assistant",
+                        "content": "Decision: generated daily files must not follow symlinks outside the archive.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-05-14T10:00:00Z")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--project",
+                    "project",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to write unsafe archive daily file path:", output)
+            self.assertEqual(outside_daily_file.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_update_memory_archive_redacts_secrets_when_explicitly_allowed(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

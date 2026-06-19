@@ -2537,7 +2537,7 @@ def render_daily_summaries(memory_repo: Path, rows: list[dict]) -> None:
             daily_md += "".join(f"- {task}\n" for task in unresolved)
         else:
             daily_md += "No unresolved tasks indexed for this day.\n"
-        (daily_dir / f"{day}.md").write_text(daily_md, encoding="utf-8")
+        write_safe_archive_text(memory_repo, daily_dir / f"{day}.md", daily_md, "daily file")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
