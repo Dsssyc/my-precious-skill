@@ -201,7 +201,8 @@ and `search_script_sha256` so score reports identify the exact case file and
 search implementation used for a run.
 Search treats source anchors as untrusted display data: unsafe paths or
 sensitive-looking anchor text are rendered as `[unsafe-source-ref]` instead of
-being printed verbatim.
+being printed verbatim. Unsafe memory metadata fields are rendered as
+`[unsafe-field]` so archive records cannot inject extra output lines.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:

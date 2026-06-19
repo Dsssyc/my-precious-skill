@@ -421,6 +421,55 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_sanitizes_multiline_memory_metadata(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/display-safety"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Display Safety\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_display\n   injected: yes",
+                        "layer": "global\n   injected: yes",
+                        "scope": "global\n   injected: yes",
+                        "topic": "display-safety",
+                        "text": "Display safety token should sanitize metadata fields.",
+                        "rationale": "Metadata fields are untrusted display data.",
+                        "source": "explicit\n   injected: yes",
+                        "confidence": "high\n   injected: yes",
+                        "support_count": "1\n   injected: yes",
+                        "derived_from": ["sessions/2026/06/17/display-safety/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "display safety token",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("[unsafe-field]", result.stdout)
+        self.assertNotIn("injected: yes", result.stdout)
+        self.assertNotIn("source:explicit\n", result.stdout)
+
     def test_search_memory_scope_global_filters_memory_layers(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

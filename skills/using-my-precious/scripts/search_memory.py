@@ -27,6 +27,7 @@ CONFIG_CANDIDATES = (
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
+UNSAFE_DISPLAY_FIELD = "[unsafe-field]"
 SENSITIVE_SOURCE_ANCHOR_PATTERN = re.compile(
     r"(?i)(?:\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
     r"private[_ -]?key|secret|session[_-]?id|token)\b\s*[:=]|\bbearer\s+\S+)"
@@ -549,6 +550,15 @@ def has_sensitive_source_anchor_text(text: str) -> bool:
     return bool(SENSITIVE_SOURCE_ANCHOR_PATTERN.search(text))
 
 
+def safe_display_scalar(value: object, limit: int = 120) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
+    if has_control_chars(text):
+        return UNSAFE_DISPLAY_FIELD
+    return clip(text, limit)
+
+
 def sanitize_raw_ref(repo: Path, value: object) -> str:
     if isinstance(value, str):
         path_text = value.strip()
@@ -616,7 +626,8 @@ def collect_memory_hits(
     hits: list[Hit] = []
     index_path = repo / "index" / "memories.jsonl"
     for line_no, record in enumerate(iter_jsonl(index_path), 1):
-        layer = str(record.get("layer") or "")
+        raw_memory_id = str(record.get("memory_id") or "")
+        layer = safe_display_scalar(record.get("layer") or "", 60)
         if scope != "all" and layer != scope:
             continue
         if record.get("superseded_by"):
@@ -626,9 +637,9 @@ def collect_memory_hits(
             continue
         text = compact_whitespace(str(record.get("text") or ""))
         title = clip(text or display_title(record, query_tokens))
-        memory_id = str(record.get("memory_id") or "")
-        source_kind = str(record.get("source") or "")
-        confidence = str(record.get("confidence") or "")
+        memory_id = safe_display_scalar(raw_memory_id, 120)
+        source_kind = safe_display_scalar(record.get("source") or "", 60)
+        confidence = safe_display_scalar(record.get("confidence") or "", 60)
         support_count = record.get("support_count")
         why = [f"index:{index_path.name}"]
         if layer:
@@ -638,19 +649,19 @@ def collect_memory_hits(
         if confidence:
             why.append(f"confidence:{confidence}")
         if isinstance(support_count, int) or isinstance(support_count, str):
-            why.append(f"support_count:{support_count}")
+            why.append(f"support_count:{safe_display_scalar(support_count, 60)}")
         why.extend(reasons)
         why.append(f"matched:{', '.join(matched)}")
         hits.append(
             Hit(
-                path=memory_hit_path(repo, memory_id, line_no),
+                path=memory_hit_path(repo, raw_memory_id, line_no),
                 score=score + 30,
                 source="memory",
                 why=why,
                 title=title,
                 memory_id=memory_id,
                 layer=layer,
-                scope=str(record.get("scope") or ""),
+                scope=safe_display_scalar(record.get("scope") or "", 120),
                 text=text,
                 drill_paths=memory_drill_paths(repo, record),
                 raw_refs=sanitized_raw_refs(repo, record.get("raw_refs")),

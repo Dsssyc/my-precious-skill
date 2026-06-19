@@ -257,9 +257,9 @@ python ~/repos/agent-memory/tools/search_memory.py "private session archive"
 当 `index/memories.jsonl` 存在时，搜索会先从分层 memory nodes 开始。
 使用 depth 控制继续下钻到支持它的 sessions、evidence 或受保护的 source
 anchors。source anchors 会被当作不可信显示数据处理，不安全的 anchor 文本会被
-替换为 `[unsafe-source-ref]`。带有非空 `superseded_by` 字段的 memory node 会被
-视为非活跃记忆，并被搜索跳过。只有用户明确要求 source reachability 时，才使用
-`--depth source`：
+替换为 `[unsafe-source-ref]`；不安全的 metadata 字段会显示为 `[unsafe-field]`。
+带有非空 `superseded_by` 字段的 memory node 会被视为非活跃记忆，并被搜索跳过。
+只有用户明确要求 source reachability 时，才使用 `--depth source`：
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session

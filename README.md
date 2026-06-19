@@ -261,8 +261,9 @@ Search starts with layered memory nodes when `index/memories.jsonl` exists.
 Use depth controls to drill into supporting sessions, evidence, or protected
 source anchors. Reserve `--depth source` for explicit source-reachability
 requests. Source anchors are treated as untrusted display data and unsafe
-anchor text is replaced with `[unsafe-source-ref]`. Memory nodes with a
-non-empty `superseded_by` field are treated as inactive and skipped by search.
+anchor text is replaced with `[unsafe-source-ref]`; unsafe metadata fields are
+rendered as `[unsafe-field]`. Memory nodes with a non-empty `superseded_by`
+field are treated as inactive and skipped by search.
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
