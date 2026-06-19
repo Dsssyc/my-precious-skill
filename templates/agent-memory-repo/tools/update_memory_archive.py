@@ -2509,7 +2509,7 @@ def main(argv: list[str] | None = None) -> int:
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
 
     if not source_dir.exists() or not source_dir.is_dir():
-        raise SystemExit(f"source directory not found: {source_dir}")
+        raise SystemExit(f"source directory not found: {safe_diagnostic_path(source_dir)}")
     if source_dir == project_path:
         print("warning: source-dir equals project-path; ensure this directory contains session records, not general source files", file=sys.stderr)
 
