@@ -246,8 +246,9 @@ case sets with broader `reference_answer` coverage.
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic
 external memory IDs, stable case IDs, and source anchors. It rejects duplicate
-converted `case_id` values before writing output, but does not download
-benchmark data or commit external records to this reusable skill repository.
+converted `case_id` values and empty converted case sets before writing output,
+but does not download benchmark data or commit external records to this reusable
+skill repository.
 For adapter dry-runs,
 the converter can also build a temporary synthetic archive from the converted
 cases with `--build-synthetic-archive`; that archive is then scored by the same

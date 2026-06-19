@@ -120,6 +120,76 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertIn("first seen in converted case 1", result.stderr)
             self.assertFalse(output.exists())
 
+    def test_rejects_empty_converted_case_set(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.json"
+            output = root / "cases.jsonl"
+            source.write_text("[]", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("converted case set is empty", result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_rejects_limit_that_removes_all_converted_cases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.json"
+            output = root / "cases.jsonl"
+            source.write_text(
+                json.dumps(
+                    [
+                        {
+                            "question_id": "lme_q1",
+                            "question": "Which project adopted layered recall?",
+                            "answer": "The memory skill project.",
+                        }
+                    ],
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--limit",
+                    "0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("converted case set is empty", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_converts_locomo_nested_qa_items(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

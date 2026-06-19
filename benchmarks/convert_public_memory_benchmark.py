@@ -284,6 +284,11 @@ def validate_unique_case_ids(cases: list[dict]) -> None:
         seen[value] = idx
 
 
+def validate_non_empty_cases(cases: list[dict]) -> None:
+    if not cases:
+        raise SystemExit("converted case set is empty")
+
+
 def load_synthetic_builder():
     builder_path = Path(__file__).with_name("build_synthetic_recall_archive.py")
     spec = importlib.util.spec_from_file_location("build_synthetic_recall_archive", builder_path)
@@ -320,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         cases = convert_memora(payload)
     if args.limit is not None:
         cases = cases[: max(0, args.limit)]
+    validate_non_empty_cases(cases)
     validate_unique_case_ids(cases)
     output = Path(args.output).expanduser().resolve()
     write_cases(output, cases)
