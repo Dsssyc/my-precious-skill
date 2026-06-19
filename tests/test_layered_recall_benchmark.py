@@ -905,6 +905,46 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("returncode=", result.stderr)
             self.assertIn(str(missing_search_script), result.stderr)
 
+    def test_search_timeout_fails_with_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root, mode="slow")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--search-timeout-s", "0.01"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("search timed out", result.stderr)
+            self.assertIn("depth=memory", result.stderr)
+            self.assertIn("query='permission prompts'", result.stderr)
+            self.assertIn("timeout_s=0.01", result.stderr)
+            self.assertIn(str(search_script), result.stderr)
+
+    def test_search_timeout_must_be_positive(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--search-timeout-s", "0"],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--search-timeout-s must be greater than 0", result.stderr)
+
     def test_missing_required_field_reports_cases_path_and_line(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1250,6 +1290,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             textwrap.dedent(
                 f"""\
                 import sys
+                import time
                 from pathlib import Path
 
                 CALLS = Path({str(calls_path)!r})
@@ -1271,6 +1312,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 if MODE == "nohit":
                     print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
+
+                if MODE == "slow":
+                    time.sleep(5)
 
                 if MODE == "quality" and "nonexistent migration ritual" in query:
                     print(f"No memory hits for: {{query}}")

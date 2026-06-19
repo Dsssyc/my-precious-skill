@@ -448,7 +448,9 @@ threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic
 gate covers the synthetic suite's recall, source/evidence, answer reachability,
 abstention, stale/update, privacy, and denominator-count checks. Add additional
 answer-metric gates to custom threshold files when an evaluated case set has
-broader `reference_answer` coverage.
+broader `reference_answer` coverage. Each memory/session/source search
+subprocess has a default 30 second timeout; set `--search-timeout-s` lower for
+CI smoke tests or higher for large local archives.
 
 To stress stale-memory suppression, add superseded distractor nodes that share
 the same query terms but must not appear in search output:

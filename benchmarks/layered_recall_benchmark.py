@@ -17,6 +17,7 @@ from typing import Iterable, NamedTuple
 
 DEFAULT_SEARCH_SCRIPT = "templates/agent-memory-repo/tools/search_memory.py"
 NO_HIT_MARKER = "No memory hits for:"
+DEFAULT_SEARCH_TIMEOUT_S = 30.0
 
 
 class Case(NamedTuple):
@@ -294,24 +295,32 @@ def clip(text: str, limit: int = 160) -> str:
     return text[: limit - 3].rstrip() + "..."
 
 
-def run_search(search_script: Path, repo: Path, query: str, depth: str) -> str:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(search_script),
-            query,
-            "--repo",
-            str(repo),
-            "--depth",
-            depth,
-            "--limit",
-            "5",
-        ],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float) -> str:
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(search_script),
+                query,
+                "--repo",
+                str(repo),
+                "--depth",
+                depth,
+                "--limit",
+                "5",
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(
+            "search timed out: "
+            f"depth={depth} query={query!r} timeout_s={timeout_s:g} "
+            f"script={search_script}"
+        ) from exc
     if result.returncode != 0:
         if NO_HIT_MARKER in result.stdout:
             return result.stdout
@@ -648,14 +657,20 @@ def case_detail(case: Case, result: dict) -> dict:
     }
 
 
-def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_script: Path) -> dict:
+def score_case(
+    repo: Path,
+    case: Case,
+    memory_records: dict[str, dict],
+    search_script: Path,
+    search_timeout_s: float,
+) -> dict:
     data = case.data
     query = required_case_text(data, "query", case.path, case.line_no)
 
     started = time.perf_counter()
-    memory_output = run_search(search_script, repo, query, "memory")
-    session_output = run_search(search_script, repo, query, "session")
-    source_output = run_search(search_script, repo, query, "source")
+    memory_output = run_search(search_script, repo, query, "memory", search_timeout_s)
+    session_output = run_search(search_script, repo, query, "session", search_timeout_s)
+    source_output = run_search(search_script, repo, query, "source", search_timeout_s)
     latency_ms = (time.perf_counter() - started) * 1000
 
     memory_blocks = parse_hit_blocks(memory_output)
@@ -735,14 +750,19 @@ def score_case(repo: Path, case: Case, memory_records: dict[str, dict], search_s
     }
 
 
-def score_cases(repo: Path, cases: list[Case], search_script: Path) -> tuple[dict, list[dict]]:
+def score_cases(
+    repo: Path,
+    cases: list[Case],
+    search_script: Path,
+    search_timeout_s: float = DEFAULT_SEARCH_TIMEOUT_S,
+) -> tuple[dict, list[dict]]:
     memory_records = load_memory_records(repo)
     totals = new_totals()
     category_totals: dict[str, dict[str, float]] = {}
     details: list[dict] = []
 
     for case in cases:
-        result = score_case(repo, case, memory_records, search_script)
+        result = score_case(repo, case, memory_records, search_script, search_timeout_s)
         add_result(totals, result)
         details.append(case_detail(case, result))
         category = category_name(case.data)
@@ -906,6 +926,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", required=True, help="Path to the memory archive")
     parser.add_argument("--cases", required=True, help="Path to JSONL benchmark cases")
     parser.add_argument("--search-script", default=DEFAULT_SEARCH_SCRIPT, help="Path to search_memory.py")
+    parser.add_argument(
+        "--search-timeout-s",
+        type=float,
+        default=DEFAULT_SEARCH_TIMEOUT_S,
+        help="Per-depth search subprocess timeout in seconds",
+    )
     parser.add_argument("--details-jsonl", help="Write one JSON object per scored benchmark case")
     parser.add_argument(
         "--fail-under",
@@ -938,10 +964,12 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = Path(args.repo).expanduser().resolve()
     cases_path = Path(args.cases).expanduser().resolve()
+    if args.search_timeout_s <= 0:
+        raise SystemExit("--search-timeout-s must be greater than 0")
     cases = load_cases(cases_path)
     search_script = Path(args.search_script).expanduser().resolve()
 
-    payload, details = score_cases(repo, cases, search_script)
+    payload, details = score_cases(repo, cases, search_script, args.search_timeout_s)
     payload["cases_path"] = str(cases_path)
     payload["cases_sha256"] = file_sha256(cases_path)
     payload["search_script_path"] = str(search_script)
