@@ -756,6 +756,31 @@ def memory_node_signature(row: dict) -> str:
     return json.dumps(row, sort_keys=True, separators=(",", ":"))
 
 
+def audit_memory_id_uniqueness(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    index_ids: dict[str, MemoryNodeLocation] = {}
+    durable_ids: dict[str, MemoryNodeLocation] = {}
+
+    def add_id(target: dict[str, MemoryNodeLocation], relative: str, line_number: int, row: dict) -> None:
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str) or not is_valid_memory_node_shape(row):
+            return
+        location = MemoryNodeLocation(memory_node_signature(row), relative, line_number)
+        if memory_id in target:
+            findings.append(Finding(relative, line_number, "duplicate_memory_id"))
+            return
+        target[memory_id] = location
+
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__"):
+            continue
+        if relative == "index/memories.jsonl":
+            add_id(index_ids, relative, line_number, row)
+        else:
+            add_id(durable_ids, relative, line_number, row)
+    return findings
+
+
 def audit_memory_index_consistency(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
     index_nodes: dict[str, MemoryNodeLocation] = {}
@@ -864,6 +889,7 @@ def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
         findings.extend(scan_file(repo, path, check_process_updates))
     findings.extend(audit_memory_references(repo))
     findings.extend(audit_memory_file_placement(repo))
+    findings.extend(audit_memory_id_uniqueness(repo))
     findings.extend(audit_memory_index_consistency(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 
