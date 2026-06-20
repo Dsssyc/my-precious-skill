@@ -132,6 +132,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_rank_histogram"]["missing"], 0)
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertGreaterEqual(payload["source_precision_at_5"], 0.3)
+            self.assertGreaterEqual(payload["source_micro_precision_at_5"], 0.25)
+            self.assertGreater(payload["source_result_count_at_5"], payload["source_relevant_count_at_5"])
+            self.assertEqual(payload["source_relevant_count_at_5"], payload["source_cases"])
+            self.assertEqual(
+                payload["source_micro_precision_at_5"],
+                payload["source_relevant_count_at_5"] / payload["source_result_count_at_5"],
+            )
             self.assertEqual(payload["evidence_reachability"], 1.0)
             self.assertEqual(payload["evidence_text_cases"], 1)
             self.assertEqual(payload["evidence_text_reachability"], 1.0)
@@ -204,10 +212,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["wrong_scope_suppression_cases"], 3)
             self.assertEqual(lower_gates["evidence_text_cases"], 1)
             self.assertEqual(lower_gates["evidence_text_reachability"], 1.0)
+            self.assertEqual(lower_gates["source_precision_at_5"], 0.3)
+            self.assertEqual(lower_gates["source_micro_precision_at_5"], 0.25)
+            self.assertEqual(lower_gates["source_relevant_count_at_5"], 27)
             self.assertEqual(lower_gates["memory_ranked_cases"], 27)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
             self.assertEqual(upper_gates["memory_rank_median"], 1.0)
+            self.assertEqual(upper_gates["source_result_count_at_5"], 104)
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             subprocess.run(
                 [
@@ -264,6 +276,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertLessEqual(payload["memory_rank_missing_cases"], upper_gates["memory_rank_missing_cases"])
             self.assertLessEqual(payload["memory_rank_mean"], upper_gates["memory_rank_mean"])
             self.assertLessEqual(payload["memory_rank_median"], upper_gates["memory_rank_median"])
+            self.assertGreaterEqual(payload["source_precision_at_5"], lower_gates["source_precision_at_5"])
+            self.assertGreaterEqual(payload["source_micro_precision_at_5"], lower_gates["source_micro_precision_at_5"])
+            self.assertGreaterEqual(payload["source_relevant_count_at_5"], lower_gates["source_relevant_count_at_5"])
+            self.assertLessEqual(payload["source_result_count_at_5"], upper_gates["source_result_count_at_5"])
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertGreaterEqual(payload["evidence_text_cases"], lower_gates["evidence_text_cases"])
             self.assertGreaterEqual(payload["evidence_text_reachability"], lower_gates["evidence_text_reachability"])
@@ -1352,6 +1368,34 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
             self.assertNotIn("cookie=", json.dumps(detail))
 
+    def test_layered_recall_benchmark_reports_source_anchor_precision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="leaky_anchor")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertIn("source_precision_at_5", payload)
+            self.assertEqual(payload["source_precision_at_5"], 0.5)
+            self.assertEqual(payload["source_micro_precision_at_5"], 0.5)
+            self.assertEqual(payload["source_result_count_at_5"], 2)
+            self.assertEqual(payload["source_relevant_count_at_5"], 1)
+            self.assertIn("source_precision_at_5", detail)
+            self.assertEqual(detail["source_precision_at_5"], 0.5)
+            self.assertEqual(detail["source_result_count_at_5"], 2)
+            self.assertEqual(detail["source_relevant_count_at_5"], 1)
+
     def test_layered_recall_benchmark_details_sanitize_sensitive_returned_reasons(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1565,6 +1609,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "source_result_anchors": [],
                         "source_result_ids": [],
                         "source_reachability_hit": False,
+                        "source_precision_at_5": 0.0,
+                        "source_relevant_count_at_5": 0,
+                        "source_result_count_at_5": 0,
                         "negative_memory_suppression_hit": True,
                         "stale_memory_suppression_hit": True,
                         "update_consistency_hit": False,

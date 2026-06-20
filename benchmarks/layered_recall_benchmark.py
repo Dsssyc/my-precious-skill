@@ -273,6 +273,9 @@ def new_totals() -> Totals:
         "session_hits": 0,
         "source_cases": 0,
         "source_hits": 0,
+        "source_precision_at_5": 0.0,
+        "source_result_count_at_5": 0,
+        "source_relevant_count_at_5": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
         "evidence_text_cases": 0,
@@ -379,6 +382,13 @@ def finalize_totals(totals: Totals) -> dict:
         "memory_rank_histogram": memory_rank_histogram(rank_counts, missing_rank_cases),
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
+        "source_precision_at_5": ratio(totals["source_precision_at_5"], totals["source_cases"]),
+        "source_micro_precision_at_5": ratio(
+            totals["source_relevant_count_at_5"],
+            totals["source_result_count_at_5"],
+        ),
+        "source_result_count_at_5": int(totals["source_result_count_at_5"]),
+        "source_relevant_count_at_5": int(totals["source_relevant_count_at_5"]),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "evidence_text_cases": int(totals["evidence_text_cases"]),
         "evidence_text_reachability": ratio(totals["evidence_text_hits"], totals["evidence_text_cases"]),
@@ -432,6 +442,10 @@ def add_result(totals: Totals, result: dict) -> None:
         totals["session_hits"] += int(result["session_drilldown_hit"])
         totals["source_cases"] += int(result["source_expected"])
         totals["source_hits"] += int(result["source_reachability_hit"])
+        if result["source_expected"]:
+            totals["source_precision_at_5"] += result["source_precision_at_5"]
+            totals["source_result_count_at_5"] += result["source_result_count_at_5"]
+            totals["source_relevant_count_at_5"] += result["source_relevant_count_at_5"]
         totals["evidence_cases"] += int(result["evidence_expected"])
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
         totals["evidence_text_cases"] += int(result["evidence_text_expected"])
@@ -758,6 +772,18 @@ def source_reachability_hit(blocks: list[str], expected_summary_path: str, expec
     return False
 
 
+def source_anchor_precision_at_5(blocks: list[str], expected_source_anchor: str) -> MemoryPrecisionAt5:
+    anchors = block_section_values(blocks[:5], "source anchors")
+    if not anchors:
+        return MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
+    relevant = sum(int(anchor == expected_source_anchor) for anchor in anchors)
+    return MemoryPrecisionAt5(
+        score=relevant / len(anchors),
+        result_count=len(anchors),
+        relevant_count=relevant,
+    )
+
+
 def block_contains_memory(block: str, memory_id: str, record: dict | None) -> bool:
     if memory_id and memory_id in block:
         return True
@@ -1041,6 +1067,9 @@ def case_detail(case: Case, result: dict) -> dict:
         "session_result_paths": result["session_result_paths"],
         "source_result_ids": result["source_result_ids"],
         "source_result_anchors": result["source_result_anchors"],
+        "source_precision_at_5": round(result["source_precision_at_5"], 6),
+        "source_result_count_at_5": result["source_result_count_at_5"],
+        "source_relevant_count_at_5": result["source_relevant_count_at_5"],
         "case_pass": not checks,
         "failed_checks": checks,
         "latency_ms": round(result["latency_ms"], 3),
@@ -1104,6 +1133,7 @@ def score_case(
     scope_hit = False
     wrong_scope_hit = False
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
+    source_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         memory_ndcg = memory_ndcg_at_5(rank)
@@ -1131,6 +1161,7 @@ def score_case(
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
         if expected_source_anchor:
             source_hit = source_reachability_hit(source_blocks, expected_summary_path, expected_source_anchor)
+            source_precision = source_anchor_precision_at_5(source_blocks, expected_source_anchor)
         if required_evidence_paths:
             evidence_hit = evidence_reachability_hit(source_blocks + memory_blocks, required_evidence_paths)
         if required_evidence_paths and reference_evidence:
@@ -1163,6 +1194,9 @@ def score_case(
         "session_drilldown_hit": session_hit,
         "source_expected": bool(is_positive and expected_source_anchor),
         "source_reachability_hit": source_hit,
+        "source_precision_at_5": source_precision.score,
+        "source_result_count_at_5": source_precision.result_count,
+        "source_relevant_count_at_5": source_precision.relevant_count,
         "evidence_expected": bool(is_positive and required_evidence_paths),
         "evidence_reachability_hit": evidence_hit,
         "evidence_text_expected": bool(is_positive and required_evidence_paths and reference_evidence),
@@ -1375,6 +1409,9 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "source_result_anchors": detail.get("source_result_anchors", []),
                 "source_result_ids": detail.get("source_result_ids", []),
                 "source_reachability_hit": detail.get("source_reachability_hit"),
+                "source_precision_at_5": detail.get("source_precision_at_5"),
+                "source_relevant_count_at_5": detail.get("source_relevant_count_at_5"),
+                "source_result_count_at_5": detail.get("source_result_count_at_5"),
                 "negative_memory_suppression_hit": detail.get("negative_memory_suppression_hit"),
                 "stale_memory_suppression_hit": detail.get("stale_memory_suppression_hit"),
                 "update_consistency_hit": detail.get("update_consistency_hit"),
