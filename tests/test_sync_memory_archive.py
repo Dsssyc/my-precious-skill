@@ -106,12 +106,18 @@ class SyncMemoryArchiveTests(unittest.TestCase):
     def test_sync_memory_archive_dry_run_allows_memory_node_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))
+            entry_dir = memory_repo / "sessions/2026/06/17/sync-node"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for sync dry-run memory node.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for sync dry-run memory node.\n", encoding="utf-8")
             memory_node = (
                 '{"memory_id":"mem_test","layer":"global","scope":"*","topic":"sync",'
                 '"text":"Synthetic memory node for sync dry run.","rationale":"test",'
                 '"source":"automatic","confidence":"high","persistence":"normal",'
                 '"support_count":1,"first_seen":"2026-06-17","last_seen":"2026-06-17",'
-                '"derived_from":[],"evidence_refs":[],"raw_refs":[],"supersedes":[],'
+                '"derived_from":["sessions/2026/06/17/sync-node/summary.md"],'
+                '"evidence_refs":[{"path":"sessions/2026/06/17/sync-node/evidence.md","quote_id":"ev_001"}],'
+                '"raw_refs":[],"supersedes":[],'
                 '"superseded_by":null,"tags":["test"]}\n'
             )
             (memory_repo / "memories/global.jsonl").write_text(memory_node, encoding="utf-8")
