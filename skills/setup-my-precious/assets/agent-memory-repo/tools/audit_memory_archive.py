@@ -655,7 +655,7 @@ def safe_archive_ref_path(repo: Path, path_text: str) -> Path | None:
         candidate.resolve(strict=False).relative_to(repo.resolve())
     except (OSError, ValueError):
         return None
-    if not candidate.exists():
+    if not candidate.is_file():
         return None
     return candidate
 
@@ -772,6 +772,10 @@ def is_safe_raw_ref(ref: object) -> bool:
     if has_unsafe_identifier_path_reference(path_text):
         return False
     return not (has_sensitive_identifier_token(path_text) or has_sensitive_identifier_token(anchor_text))
+
+
+def is_archive_internal_ref_path(path_text: str) -> bool:
+    return any(path_text == root or path_text.startswith(f"{root}/") for root in ALLOWED_ROOTS)
 
 
 def memory_node_signature(row: dict) -> str:
@@ -941,6 +945,10 @@ def audit_memory_references(repo: Path) -> list[Finding]:
         else:
             for ref in raw_refs:
                 if not is_safe_raw_ref(ref):
+                    findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+                    continue
+                path_text = str(ref.get("path", ""))
+                if is_archive_internal_ref_path(path_text) and safe_archive_ref_path(repo, path_text) is None:
                     findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
     return findings
 
