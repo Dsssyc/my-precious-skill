@@ -227,6 +227,8 @@ def build_superseded_distractor_records(case: dict) -> list[dict]:
     category = str(case.get("category") or "uncategorized")
     query = str(case["query"])
     expected_memory_id = str(case["expected_memory_id"])
+    summary_paths = summary_paths_for_case(case)
+    evidence_paths = evidence_paths_for_case(case)
     records = []
     for stale_id in text_list(case.get("stale_memory_id")):
         if stale_id == expected_memory_id:
@@ -242,12 +244,12 @@ def build_superseded_distractor_records(case: dict) -> list[dict]:
                 "source": "automatic",
                 "confidence": "high",
                 "persistence": "normal",
-                "support_count": 1,
+                "support_count": max(1, len(summary_paths), len(evidence_paths)),
                 "first_seen": "2026-06-18",
                 "last_seen": "2026-06-18",
-                "derived_from": [str(case["expected_summary_path"])],
-                "evidence_refs": [],
-                "raw_refs": [],
+                "derived_from": summary_paths,
+                "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
+                "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
                 "supersedes": [],
                 "superseded_by": expected_memory_id,
                 "tags": [

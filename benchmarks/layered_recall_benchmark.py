@@ -242,6 +242,17 @@ def case_texts(case: dict, key: str) -> list[str]:
     return []
 
 
+def record_texts(record: dict | None, key: str) -> list[str]:
+    if not isinstance(record, dict):
+        return []
+    value = record.get(key)
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list):
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return []
+
+
 def positive_case(case: dict) -> bool:
     return case.get("expected_abstain") is not True
 
@@ -296,6 +307,8 @@ def new_totals() -> Totals:
         "unsafe_source_anchor_count_at_5": 0,
         "memory_evidence_ref_cases": 0,
         "memory_evidence_ref_hits": 0,
+        "lifecycle_supersession_cases": 0,
+        "lifecycle_supersession_hits": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
         "evidence_text_cases": 0,
@@ -419,6 +432,11 @@ def finalize_totals(totals: Totals) -> dict:
             totals["memory_evidence_ref_hits"],
             totals["memory_evidence_ref_cases"],
         ),
+        "lifecycle_supersession_cases": int(totals["lifecycle_supersession_cases"]),
+        "lifecycle_supersession_reciprocity": ratio(
+            totals["lifecycle_supersession_hits"],
+            totals["lifecycle_supersession_cases"],
+        ),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "evidence_text_cases": int(totals["evidence_text_cases"]),
         "evidence_text_reachability": ratio(totals["evidence_text_hits"], totals["evidence_text_cases"]),
@@ -499,6 +517,9 @@ def add_result(totals: Totals, result: dict) -> None:
     if result["update_expected"]:
         totals["update_cases"] += 1
         totals["update_hits"] += int(result["update_consistency_hit"])
+    if result["lifecycle_supersession_expected"]:
+        totals["lifecycle_supersession_cases"] += 1
+        totals["lifecycle_supersession_hits"] += int(result["lifecycle_supersession_reciprocity_hit"])
 
 
 def compact_whitespace(text: str) -> str:
@@ -632,6 +653,40 @@ def load_memory_records(repo: Path) -> dict[str, dict]:
         if isinstance(memory_id, str) and memory_id:
             records[memory_id] = record
     return records
+
+
+def lifecycle_supersession_expected(
+    expected_memory_id: str,
+    stale_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not expected_memory_id or not stale_memory_ids:
+        return False
+    current = memory_records.get(expected_memory_id)
+    if not isinstance(current, dict):
+        return False
+    current_supersedes = set(record_texts(current, "supersedes"))
+    return any(stale_id in current_supersedes or stale_id in memory_records for stale_id in stale_memory_ids)
+
+
+def lifecycle_supersession_reciprocity_hit(
+    expected_memory_id: str,
+    stale_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not lifecycle_supersession_expected(expected_memory_id, stale_memory_ids, memory_records):
+        return False
+    current = memory_records.get(expected_memory_id)
+    current_supersedes = set(record_texts(current, "supersedes"))
+    if not all(stale_id in current_supersedes for stale_id in stale_memory_ids):
+        return False
+    for stale_id in stale_memory_ids:
+        stale_record = memory_records.get(stale_id)
+        if not isinstance(stale_record, dict):
+            return False
+        if stale_record.get("superseded_by") != expected_memory_id:
+            return False
+    return True
 
 
 def required_case_text(case: dict, key: str, path: Path, line_no: int) -> str:
@@ -1154,6 +1209,8 @@ def failed_checks(result: dict) -> list[str]:
         checks.append("stale_memory_suppression")
     if result["update_expected"] and not result["update_consistency_hit"]:
         checks.append("update_consistency")
+    if result["lifecycle_supersession_expected"] and not result["lifecycle_supersession_reciprocity_hit"]:
+        checks.append("lifecycle_supersession_reciprocity")
     if not result["privacy_boundary_pass"]:
         checks.append("privacy_boundary_pass_rate")
     return checks
@@ -1207,6 +1264,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "negative_memory_suppression_hit": result["negative_memory_suppression_hit"],
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
         "update_consistency_hit": result["update_consistency_hit"],
+        "lifecycle_supersession_expected": result["lifecycle_supersession_expected"],
+        "lifecycle_supersession_reciprocity_hit": result["lifecycle_supersession_reciprocity_hit"],
         "privacy_boundary_pass": result["privacy_boundary_pass"],
         "memory_result_ids": result["memory_result_ids"],
         "memory_results_at_5": result["memory_results_at_5"],
@@ -1396,6 +1455,14 @@ def score_case(
     negative_suppressed = not blocks_contain_memory_ids(suppression_blocks, negative_memory_ids, memory_records)
     stale_suppressed = not blocks_contain_memory_ids(suppression_blocks, stale_memory_ids, memory_records)
     update_expected = bool(is_positive and stale_memory_ids)
+    lifecycle_expected = bool(
+        is_positive
+        and lifecycle_supersession_expected(expected_memory_id, stale_memory_ids, memory_records)
+    )
+    lifecycle_hit = bool(
+        lifecycle_expected
+        and lifecycle_supersession_reciprocity_hit(expected_memory_id, stale_memory_ids, memory_records)
+    )
 
     return {
         "positive_case": is_positive,
@@ -1436,6 +1503,8 @@ def score_case(
         "stale_memory_suppression_hit": stale_suppressed,
         "update_expected": update_expected,
         "update_consistency_hit": bool(update_expected and rank is not None and stale_suppressed),
+        "lifecycle_supersession_expected": lifecycle_expected,
+        "lifecycle_supersession_reciprocity_hit": lifecycle_hit,
         "privacy_boundary_pass": privacy_boundary_pass(
             all_search_outputs,
             forbidden_patterns,

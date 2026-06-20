@@ -223,6 +223,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["memory_explainability_cases"], 29)
             self.assertEqual(lower_gates["memory_evidence_ref_cases"], 29)
             self.assertEqual(lower_gates["memory_evidence_ref_reachability"], 1.0)
+            self.assertEqual(lower_gates["lifecycle_supersession_cases"], 9)
+            self.assertEqual(lower_gates["lifecycle_supersession_reciprocity"], 1.0)
             self.assertEqual(lower_gates["layer_calibration"], 1.0)
             self.assertEqual(lower_gates["layer_calibration_cases"], 5)
             self.assertEqual(lower_gates["scope_filter_recall"], 1.0)
@@ -252,6 +254,18 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["categories.explicit_memory.layer_calibration"], 1.0)
             self.assertEqual(
                 lower_gates["categories.explicit_memory.memory_evidence_ref_reachability"],
+                1.0,
+            )
+            self.assertEqual(
+                lower_gates["categories.knowledge_update.lifecycle_supersession_reciprocity"],
+                1.0,
+            )
+            self.assertEqual(
+                lower_gates["categories.stale_memory_suppression.lifecycle_supersession_reciprocity"],
+                1.0,
+            )
+            self.assertEqual(
+                lower_gates["categories.temporal_reasoning.lifecycle_supersession_reciprocity"],
                 1.0,
             )
             subprocess.run(
@@ -301,6 +315,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 payload["memory_evidence_ref_reachability"],
                 lower_gates["memory_evidence_ref_reachability"],
             )
+            self.assertGreaterEqual(
+                payload["lifecycle_supersession_cases"],
+                lower_gates["lifecycle_supersession_cases"],
+            )
+            self.assertGreaterEqual(
+                payload["lifecycle_supersession_reciprocity"],
+                lower_gates["lifecycle_supersession_reciprocity"],
+            )
             self.assertGreaterEqual(payload["layer_calibration"], lower_gates["layer_calibration"])
             self.assertGreaterEqual(payload["layer_calibration_cases"], lower_gates["layer_calibration_cases"])
             self.assertGreaterEqual(payload["scope_filter_recall"], lower_gates["scope_filter_recall"])
@@ -332,6 +354,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_normalized_reachability"], 1.0)
             self.assertEqual(payload["answer_token_f1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
+            self.assertEqual(payload["lifecycle_supersession_cases"], 9)
+            self.assertEqual(payload["lifecycle_supersession_reciprocity"], 1.0)
+            lifecycle_rows = [
+                row
+                for row in detail_rows
+                if row["stale_memory_ids"] and row["lifecycle_supersession_expected"]
+            ]
+            self.assertEqual(len(lifecycle_rows), 9)
+            self.assertTrue(all(row["lifecycle_supersession_reciprocity_hit"] for row in lifecycle_rows))
             self.assertEqual(payload["failed_case_count"], 0)
             self.assertEqual(payload["case_pass_rate"], 1.0)
             self.assertEqual(len(detail_rows), 34)
@@ -374,6 +405,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             stale_records = [record for record in records if record.get("memory_id") in stale_ids]
             self.assertGreaterEqual(len(stale_records), 1)
             self.assertTrue(all(record.get("superseded_by") for record in stale_records))
+            self.assertTrue(all(record.get("derived_from") for record in stale_records))
+            self.assertTrue(all(record.get("evidence_refs") for record in stale_records))
             self.assertTrue(any("superseded distractor" in record.get("text", "") for record in stale_records))
 
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
@@ -383,6 +416,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
+            self.assertEqual(payload["lifecycle_supersession_cases"], 9)
+            self.assertEqual(payload["lifecycle_supersession_reciprocity"], 1.0)
 
     def test_synthetic_builder_omits_supersedes_when_stale_records_are_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -424,6 +459,12 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             self.assertGreaterEqual(len(current_records), 1)
             self.assertTrue(all(record.get("supersedes") == [] for record in current_records))
+
+            result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["lifecycle_supersession_cases"], 0)
+            self.assertEqual(payload["lifecycle_supersession_reciprocity"], 0.0)
 
     def test_synthetic_builder_uses_expected_layers_for_scope_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
