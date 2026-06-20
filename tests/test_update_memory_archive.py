@@ -418,6 +418,13 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 [{"path": "sessions/2026/06/20/direct-explicit/evidence.md", "quote_id": "ev_direct_001"}],
             )
             self.assertIn(node["memory_id"], (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8"))
+            audit = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
 
     def test_update_memory_archive_refuses_direct_explicit_memory_without_evidence(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
