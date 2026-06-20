@@ -320,6 +320,41 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             ]
             self.assertIn(node["memory_id"], {row.get("memory_id") for row in indexed_rows})
 
+    def test_build_memory_nodes_skips_automatic_candidates_without_summary_or_evidence(self):
+        module = load_update_module()
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-20T10:00:00Z",
+                "summary_path": "",
+                "evidence_path": "sessions/2026/06/20/alpha/evidence.md",
+                "reusable_facts": ["Untraceable automatic memories must not be promoted."],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-20T11:00:00Z",
+                "summary_path": "sessions/2026/06/20/beta/summary.md",
+                "evidence_path": "",
+                "reusable_facts": ["Untraceable automatic memories must not be promoted."],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+
+        self.assertEqual(nodes, [])
+
     def test_build_memory_nodes_omits_unsafe_raw_ref_paths(self):
         module = load_update_module()
         rows = [

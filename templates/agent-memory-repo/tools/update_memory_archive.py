@@ -2240,6 +2240,10 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
     candidates: list[MemoryCandidate] = []
     for row in rows:
         tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
+        summary_path = str(row.get("summary_path", ""))
+        evidence_path = str(row.get("evidence_path", ""))
+        if not summary_path or not evidence_path:
+            continue
         for text, rationale in iter_memory_candidate_texts(row):
             candidates.append(
                 MemoryCandidate(
@@ -2249,8 +2253,8 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     topic=memory_topic(text, tags),
                     project=str(row.get("project", "")),
                     project_path=str(row.get("project_path", "")),
-                    summary_path=str(row.get("summary_path", "")),
-                    evidence_path=str(row.get("evidence_path", "")),
+                    summary_path=summary_path,
+                    evidence_path=evidence_path,
                     source_record=str(row.get("source_record", "")),
                     source_map_path=str(row.get("source_map_path", "")),
                     source_updated_at=str(row.get("source_updated_at", "")),
