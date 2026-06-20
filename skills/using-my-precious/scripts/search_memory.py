@@ -767,7 +767,7 @@ def collect_memory_hits(
         layer = safe_display_scalar(record.get("layer") or "", 60)
         if scope != "all" and layer != scope:
             continue
-        if raw_memory_id in forward_superseded_ids or record.get("superseded_by"):
+        if raw_memory_id in forward_superseded_ids or is_safe_memory_identifier(record.get("superseded_by")):
             continue
         if not has_valid_memory_lifecycle(record):
             continue

@@ -622,6 +622,56 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_ignores_unsafe_superseded_by_metadata(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/17/permission").mkdir(parents=True)
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_permission_safe",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "permission-prompts",
+                        "text": "permission prompts current policy safe retained policy",
+                        "source": "synthetic",
+                        "confidence": "high",
+                        "support_count": 3,
+                        "derived_from": ["sessions/2026/06/17/permission/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                        "supersedes": [],
+                        "superseded_by": "mem_current cookie=SHOULD_NOT_RENDER",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "safe retained policy",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("safe retained policy", result.stdout)
+        self.assertIn("memory_id: mem_permission_safe", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+
     def test_search_memory_skips_invalid_memory_lifecycle_nodes(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
