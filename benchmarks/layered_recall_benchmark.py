@@ -1139,6 +1139,7 @@ def score_case(
     source_blocks = parse_hit_blocks(source_output)
     scope_blocks = parse_hit_blocks(scope_output) if scope_output else []
     wrong_scope_blocks = [block for output in wrong_scope_outputs for block in parse_hit_blocks(output)]
+    all_search_outputs = [memory_output, session_output, source_output, scope_output, *wrong_scope_outputs]
     combined_output = "\n".join([memory_output, session_output, source_output])
     expected_abstain = data.get("expected_abstain") is True
     is_positive = positive_case(data)
@@ -1250,7 +1251,7 @@ def score_case(
         "update_expected": update_expected,
         "update_consistency_hit": bool(update_expected and rank is not None and stale_suppressed),
         "privacy_boundary_pass": privacy_boundary_pass(
-            [memory_output, session_output, source_output],
+            all_search_outputs,
             forbidden_patterns,
         ),
         "memory_result_ids": safe_result_identifiers(block_field_values(memory_blocks, "memory_id")),

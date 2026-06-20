@@ -2780,6 +2780,37 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["privacy_boundary_pass_rate"], 0.0)
             self.assertEqual(payload["failed_case_count"], 1)
 
+    def test_privacy_boundary_checks_scope_search_outputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "expected_layer": "global",
+                    "forbidden_output_patterns": ["SCOPE-ONLY-LEAK"],
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="scope_leaky")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["scope_filter_recall"], 1.0)
+            self.assertEqual(payload["wrong_scope_suppression"], 1.0)
+            self.assertEqual(payload["privacy_boundary_pass_rate"], 0.0)
+            self.assertFalse(detail["privacy_boundary_pass"])
+            self.assertIn("privacy_boundary_pass_rate", detail["failed_checks"])
+
     def test_invalid_forbidden_output_pattern_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3048,6 +3079,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     print("   drill:")
                     print("     - " + SUMMARY_PATH)
                     raise SystemExit(0)
+
+                if MODE == "scope_leaky" and depth == "memory" and scope not in ("all", "global"):
+                    print(f"No memory hits for: {{query}}")
+                    print("SCOPE-ONLY-LEAK")
+                    raise SystemExit(1)
 
                 if depth == "memory":
                     if MODE == "forbidden":
