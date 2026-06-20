@@ -598,6 +598,22 @@ def has_sensitive_display_identifier_token(text: str) -> bool:
     )
 
 
+def has_unsafe_identifier_path_reference(text: str) -> bool:
+    if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", text))
+
+
+def is_safe_memory_identifier(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return not (
+        has_control_chars(value)
+        or has_sensitive_display_identifier_token(value)
+        or has_unsafe_identifier_path_reference(value)
+    )
+
+
 def safe_display_scalar(value: object, limit: int = 120) -> str:
     return safe_display_text(value, limit)
 
@@ -722,12 +738,14 @@ def collect_forward_superseded_ids(records: list[dict]) -> set[str]:
     for record in records:
         if not has_valid_memory_lifecycle(record):
             continue
-        memory_id = str(record.get("memory_id") or "")
+        memory_id = record.get("memory_id")
+        if not is_safe_memory_identifier(memory_id):
+            continue
         supersedes = record.get("supersedes", [])
         if not isinstance(supersedes, list):
             continue
         for target in supersedes:
-            if isinstance(target, str) and target and target != memory_id:
+            if is_safe_memory_identifier(target) and target != memory_id:
                 superseded_ids.add(target)
     return superseded_ids
 
