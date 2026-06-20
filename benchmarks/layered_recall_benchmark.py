@@ -50,6 +50,14 @@ class MemoryPrecisionAt5(NamedTuple):
     relevant_count: int
 
 
+class SearchOutput(NamedTuple):
+    stdout: str
+    stderr: str
+
+    def combined(self) -> str:
+        return "\n".join(part for part in (self.stdout, self.stderr) if part)
+
+
 Totals = dict[str, Any]
 
 
@@ -562,7 +570,7 @@ def safe_reason_identifiers(values: list[str]) -> list[str]:
     return unique_texts(identifier for value in values if (identifier := safe_reason_identifier(value)))
 
 
-def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float, scope: str = "all") -> str:
+def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float, scope: str = "all") -> SearchOutput:
     display_query = safe_result_identifier(query)
     display_script = safe_diagnostic_path(search_script)
     command = [
@@ -595,14 +603,14 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
         ) from exc
     if result.returncode != 0:
         if NO_HIT_MARKER in result.stdout:
-            return result.stdout
+            return SearchOutput(result.stdout, result.stderr)
         stderr = safe_result_identifier(result.stderr.strip() or "(empty stderr)")
         raise SystemExit(
             "search failed: "
             f"depth={depth} scope={scope} query={display_query!r} returncode={result.returncode} "
             f"script={display_script}\nstderr:\n{stderr}"
         )
-    return result.stdout
+    return SearchOutput(result.stdout, result.stderr)
 
 
 def load_memory_records(repo: Path) -> dict[str, dict]:
@@ -1202,24 +1210,30 @@ def score_case(
     is_positive = positive_case(data)
 
     started = time.perf_counter()
-    memory_output = run_search(search_script, repo, query, "memory", search_timeout_s)
-    session_output = run_search(search_script, repo, query, "session", search_timeout_s)
-    source_output = run_search(search_script, repo, query, "source", search_timeout_s)
-    scope_output = ""
-    wrong_scope_outputs: list[str] = []
-    abstain_scope_outputs: list[str] = []
+    memory_search = run_search(search_script, repo, query, "memory", search_timeout_s)
+    session_search = run_search(search_script, repo, query, "session", search_timeout_s)
+    source_search = run_search(search_script, repo, query, "source", search_timeout_s)
+    scope_search = SearchOutput("", "")
+    wrong_scope_searches: list[SearchOutput] = []
+    abstain_scope_searches: list[SearchOutput] = []
     if expected_abstain:
         for abstain_scope in MEMORY_LAYERS:
-            abstain_scope_outputs.append(
+            abstain_scope_searches.append(
                 run_search(search_script, repo, query, "memory", search_timeout_s, abstain_scope)
             )
     elif is_positive and expected_layer:
-        scope_output = run_search(search_script, repo, query, "memory", search_timeout_s, expected_layer)
+        scope_search = run_search(search_script, repo, query, "memory", search_timeout_s, expected_layer)
         for wrong_scope in MEMORY_LAYERS:
             if wrong_scope != expected_layer:
-                wrong_scope_outputs.append(run_search(search_script, repo, query, "memory", search_timeout_s, wrong_scope))
+                wrong_scope_searches.append(run_search(search_script, repo, query, "memory", search_timeout_s, wrong_scope))
     latency_ms = (time.perf_counter() - started) * 1000
 
+    memory_output = memory_search.stdout
+    session_output = session_search.stdout
+    source_output = source_search.stdout
+    scope_output = scope_search.stdout
+    wrong_scope_outputs = [search.stdout for search in wrong_scope_searches]
+    abstain_scope_outputs = [search.stdout for search in abstain_scope_searches]
     memory_blocks = parse_hit_blocks(memory_output)
     session_blocks = parse_hit_blocks(session_output)
     source_blocks = parse_hit_blocks(source_output)
@@ -1234,7 +1248,14 @@ def score_case(
         *wrong_scope_blocks,
         *abstain_scope_blocks,
     ]
-    all_search_outputs = [memory_output, session_output, source_output, scope_output, *wrong_scope_outputs, *abstain_scope_outputs]
+    all_search_outputs = [
+        memory_search.combined(),
+        session_search.combined(),
+        source_search.combined(),
+        scope_search.combined(),
+        *(search.combined() for search in wrong_scope_searches),
+        *(search.combined() for search in abstain_scope_searches),
+    ]
     combined_output = "\n".join([memory_output, session_output, source_output])
     expected_memory_id = optional_case_text(data, "expected_memory_id")
     expected_summary_path = optional_case_text(data, "expected_summary_path")
@@ -1331,7 +1352,12 @@ def score_case(
             normalized_answer_hit = answer_normalized_reachability_hit(answer_output, reference_answers)
             answer_f1 = answer_token_f1(answer_output, reference_answers)
 
-    no_result_hits = no_hit_outputs(memory_output, session_output, source_output, *abstain_scope_outputs)
+    no_result_hits = no_hit_outputs(
+        memory_search.combined(),
+        session_search.combined(),
+        source_search.combined(),
+        *(search.combined() for search in abstain_scope_searches),
+    )
     negative_suppressed = not blocks_contain_memory_ids(suppression_blocks, negative_memory_ids, memory_records)
     stale_suppressed = not blocks_contain_memory_ids(suppression_blocks, stale_memory_ids, memory_records)
     update_expected = bool(is_positive and stale_memory_ids)

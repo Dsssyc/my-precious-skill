@@ -2968,6 +2968,35 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["privacy_boundary_pass_rate"], 0.0)
             self.assertEqual(payload["failed_case_count"], 1)
 
+    def test_privacy_boundary_checks_successful_search_stderr(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "forbidden_output_patterns": ["STDERR-ONLY-LEAK"],
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="stderr_leaky")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["privacy_boundary_pass_rate"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["privacy_boundary_pass"])
+            self.assertIn("privacy_boundary_pass_rate", detail["failed_checks"])
+
     def test_privacy_boundary_checks_scope_search_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3365,6 +3394,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
                 if MODE == "slow":
                     time.sleep(5)
+
+                if MODE == "stderr_leaky":
+                    print("STDERR-ONLY-LEAK", file=sys.stderr)
 
                 if MODE == "quality" and "nonexistent migration ritual" in query:
                     print(f"No memory hits for: {{query}}")
