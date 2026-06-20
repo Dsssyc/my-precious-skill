@@ -556,6 +556,16 @@ def is_reachable_drill_path(repo: Path, path_text: str) -> bool:
     return not is_archive_internal_ref_path(path_text) or (repo / path_text).is_file()
 
 
+def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
+    if not quote_id.strip():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
+
+
 def unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     out: list[str] = []
@@ -576,6 +586,29 @@ def iter_ref_paths(value: object) -> Iterable[str]:
     elif isinstance(value, list):
         for item in value:
             yield from iter_ref_paths(item)
+
+
+def iter_evidence_drill_paths(repo: Path, value: object) -> Iterable[str]:
+    if isinstance(value, list):
+        for item in value:
+            yield from iter_evidence_drill_paths(repo, item)
+        return
+    if isinstance(value, dict):
+        path = value.get("path")
+        if not isinstance(path, str):
+            return
+        safe_path = safe_repo_relative_path(repo, path)
+        if not safe_path or not is_reachable_drill_path(repo, safe_path):
+            return
+        quote_id = value.get("quote_id")
+        if not isinstance(quote_id, str) or not evidence_quote_id_exists(repo / safe_path, quote_id):
+            return
+        yield safe_path
+        return
+    for path in iter_ref_paths(value):
+        safe_path = safe_repo_relative_path(repo, path)
+        if safe_path and is_reachable_drill_path(repo, safe_path):
+            yield safe_path
 
 
 def has_control_chars(text: str) -> bool:
@@ -712,10 +745,7 @@ def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
         safe_path = safe_repo_relative_path(repo, path)
         if safe_path and is_reachable_drill_path(repo, safe_path):
             paths.append(safe_path)
-    for path in iter_ref_paths(record.get("evidence_refs")):
-        safe_path = safe_repo_relative_path(repo, path)
-        if safe_path and is_reachable_drill_path(repo, safe_path):
-            paths.append(safe_path)
+    paths.extend(iter_evidence_drill_paths(repo, record.get("evidence_refs")))
     return unique_ordered(paths)
 
 
