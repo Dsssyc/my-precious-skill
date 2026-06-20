@@ -329,6 +329,48 @@ class Finding:
     category: str
 
 
+MEMORY_NODE_REQUIRED_FIELDS = {
+    "memory_id",
+    "layer",
+    "scope",
+    "topic",
+    "text",
+    "rationale",
+    "source",
+    "confidence",
+    "persistence",
+    "support_count",
+    "first_seen",
+    "last_seen",
+    "derived_from",
+    "evidence_refs",
+    "raw_refs",
+    "supersedes",
+    "superseded_by",
+    "tags",
+}
+MEMORY_NODE_STRING_FIELDS = {
+    "memory_id",
+    "layer",
+    "scope",
+    "topic",
+    "text",
+    "rationale",
+    "source",
+    "confidence",
+    "persistence",
+    "first_seen",
+    "last_seen",
+}
+MEMORY_NODE_ENUM_FIELDS = {
+    "layer": {"project", "domain", "global"},
+    "source": {"automatic", "explicit"},
+    "confidence": {"low", "medium", "high"},
+    "persistence": {"normal", "sticky"},
+}
+MEMORY_NODE_STRING_LIST_FIELDS = {"derived_from", "supersedes", "tags"}
+
+
 def has_sensitive_identifier_token(text: str) -> bool:
     tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
     token_set = set(tokens)
@@ -623,6 +665,41 @@ def is_positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
+def is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def is_valid_evidence_ref_shape(ref: object) -> bool:
+    return (
+        isinstance(ref, dict)
+        and set(ref) == {"path", "quote_id"}
+        and isinstance(ref.get("path"), str)
+        and isinstance(ref.get("quote_id"), str)
+    )
+
+
+def is_valid_memory_node_shape(row: dict) -> bool:
+    if set(row) != MEMORY_NODE_REQUIRED_FIELDS:
+        return False
+    for field in MEMORY_NODE_STRING_FIELDS:
+        if not isinstance(row.get(field), str):
+            return False
+    for field, allowed_values in MEMORY_NODE_ENUM_FIELDS.items():
+        if row.get(field) not in allowed_values:
+            return False
+    if not is_positive_int(row.get("support_count")):
+        return False
+    for field in MEMORY_NODE_STRING_LIST_FIELDS:
+        if not is_string_list(row.get(field)):
+            return False
+    if not isinstance(row.get("evidence_refs"), list) or not all(
+        is_valid_evidence_ref_shape(ref) for ref in row.get("evidence_refs", [])
+    ):
+        return False
+    superseded_by = row.get("superseded_by")
+    return superseded_by is None or isinstance(superseded_by, str)
+
+
 def is_safe_raw_ref(ref: object) -> bool:
     if not isinstance(ref, dict):
         return False
@@ -641,35 +718,15 @@ def is_safe_raw_ref(ref: object) -> bool:
 
 def audit_memory_references(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
-    required_fields = {
-        "memory_id",
-        "layer",
-        "scope",
-        "topic",
-        "text",
-        "rationale",
-        "source",
-        "confidence",
-        "persistence",
-        "support_count",
-        "first_seen",
-        "last_seen",
-        "derived_from",
-        "evidence_refs",
-        "raw_refs",
-        "supersedes",
-        "superseded_by",
-        "tags",
-    }
     for relative, line_number, row in iter_memory_node_rows(repo):
         if row.get("__invalid_json__"):
             findings.append(Finding(relative, line_number, "invalid_json"))
             continue
-        missing = required_fields.difference(row)
+        missing = MEMORY_NODE_REQUIRED_FIELDS.difference(row)
         if missing:
             findings.append(Finding(relative, line_number, "invalid_memory_node"))
             continue
-        if not is_positive_int(row.get("support_count")):
+        if not is_valid_memory_node_shape(row):
             findings.append(Finding(relative, line_number, "invalid_memory_node"))
         derived_from = row.get("derived_from", [])
         if not isinstance(derived_from, list):

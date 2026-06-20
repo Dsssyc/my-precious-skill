@@ -695,6 +695,50 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/global.jsonl:3 category=invalid_memory_node", combined)
             self.assertIn("memories/global.jsonl:4 category=invalid_memory_node", combined)
 
+    def test_audit_memory_archive_flags_schema_violating_root_memory_nodes(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            extra_field = valid_memory_node(memory_id="mem_extra_field")
+            extra_field["embedding"] = [0.1, 0.2]
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(valid_memory_node(memory_id="mem_bad_layer", layer="team"))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_bad_source", source="manual"))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_bad_tags", tags=["audit", 123]))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_bad_superseded_by", superseded_by=42))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id=123))
+                + "\n"
+                + json.dumps(extra_field)
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            for line_number in range(1, 7):
+                self.assertIn(f"memories/global.jsonl:{line_number} category=invalid_memory_node", combined)
+
     def test_audit_memory_archive_flags_broken_root_memory_references(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
