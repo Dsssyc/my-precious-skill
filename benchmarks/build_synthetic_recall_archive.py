@@ -139,6 +139,8 @@ def archive_relative_path_text(value: object, field: str) -> str:
 
 def validate_case_archive_paths(case: dict) -> None:
     archive_relative_path_text(case["expected_summary_path"], "expected_summary_path")
+    for summary_path in text_list(case.get("derived_from_paths")):
+        archive_relative_path_text(summary_path, "derived_from_paths")
     for evidence_path in text_list(case.get("required_evidence_paths")):
         archive_relative_path_text(evidence_path, "required_evidence_paths")
     source_path = str(case["expected_source_anchor"]).split("#", 1)[0]
@@ -179,9 +181,16 @@ def evidence_paths_for_case(case: dict) -> list[str]:
     return [summary_path.replace("/summary.md", "/evidence.md")]
 
 
+def summary_paths_for_case(case: dict) -> list[str]:
+    summary_paths = text_list(case.get("derived_from_paths"))
+    if summary_paths:
+        return summary_paths
+    return [str(case["expected_summary_path"])]
+
+
 def build_memory_record(case: dict, *, include_superseded_refs: bool = False) -> dict:
     category = str(case.get("category") or "uncategorized")
-    summary_path = str(case["expected_summary_path"])
+    summary_paths = summary_paths_for_case(case)
     evidence_paths = evidence_paths_for_case(case)
     query = str(case["query"])
     memory_id = str(case["expected_memory_id"])
@@ -191,6 +200,7 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
     if answer_text:
         text_parts.append(answer_text)
     text_parts.append(f"{query} {query} {query}.")
+    is_explicit_memory = category == "explicit_memory"
     return {
         "memory_id": memory_id,
         "layer": memory_layer(case),
@@ -198,13 +208,13 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
         "topic": category.replace("_", "-"),
         "text": " ".join(text_parts),
         "rationale": f"Exact synthetic benchmark query match for: {query}.",
-        "source": "automatic",
+        "source": "explicit" if is_explicit_memory else "automatic",
         "confidence": "high",
-        "persistence": "normal",
-        "support_count": max(1, len(evidence_paths)),
+        "persistence": "sticky" if is_explicit_memory else "normal",
+        "support_count": max(1, len(summary_paths), len(evidence_paths)),
         "first_seen": "2026-06-19",
         "last_seen": "2026-06-19",
-        "derived_from": [summary_path],
+        "derived_from": summary_paths,
         "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
         "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
         "supersedes": text_list(case.get("stale_memory_id")) if include_superseded_refs else [],
@@ -257,20 +267,20 @@ def write_text(path: Path, text: str) -> None:
 
 
 def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
-    summary_path = repo / str(case["expected_summary_path"])
     reference_answers = text_list(case.get("reference_answer"))
     reference_evidence = text_list(case.get("reference_evidence"))
     answer_section = ""
     if reference_answers:
         answer_section = "Reference answers:\n" + "".join(f"- {answer}\n" for answer in reference_answers) + "\n"
-    write_text(
-        summary_path,
-        "# Synthetic Layered Recall Session\n\n"
-        f"Query: {case['query']}\n\n"
-        f"Expected memory: {case['expected_memory_id']}\n\n"
-        f"{answer_section}"
-        "This file is generated synthetic benchmark data only.\n",
-    )
+    for summary_path in record["derived_from"]:
+        write_text(
+            repo / str(summary_path),
+            "# Synthetic Layered Recall Session\n\n"
+            f"Query: {case['query']}\n\n"
+            f"Expected memory: {case['expected_memory_id']}\n\n"
+            f"{answer_section}"
+            "This file is generated synthetic benchmark data only.\n",
+        )
     for evidence_path in evidence_paths_for_case(case):
         answer_evidence = " ".join(f"Reference answer: {answer}." for answer in reference_answers)
         evidence_text = " ".join(f"Reference evidence: {snippet}." for snippet in reference_evidence)
@@ -302,10 +312,11 @@ def write_memory_root_files(repo: Path, records: list[dict]) -> None:
     explicit_records: list[dict] = []
     for record in records:
         layer = str(record.get("layer") or "project")
-        if layer in by_layer:
-            by_layer[layer].append(record)
         if record.get("source") == "explicit":
             explicit_records.append(record)
+            continue
+        if layer in by_layer:
+            by_layer[layer].append(record)
     for layer, file_name in MEMORY_LAYER_FILES.items():
         write_text(
             memories_dir / file_name,
