@@ -733,8 +733,8 @@ def has_valid_memory_lifecycle(record: dict) -> bool:
     return first_seen is not None and last_seen is not None and first_seen <= last_seen
 
 
-def collect_forward_superseded_ids(records: list[dict]) -> set[str]:
-    superseded_ids: set[str] = set()
+def collect_supersedes_by_memory_id(records: list[dict]) -> dict[str, set[str]]:
+    supersedes_by_memory_id: dict[str, set[str]] = {}
     for record in records:
         if not has_valid_memory_lifecycle(record):
             continue
@@ -746,8 +746,25 @@ def collect_forward_superseded_ids(records: list[dict]) -> set[str]:
             continue
         for target in supersedes:
             if is_safe_memory_identifier(target) and target != memory_id:
-                superseded_ids.add(target)
+                supersedes_by_memory_id.setdefault(memory_id, set()).add(target)
+    return supersedes_by_memory_id
+
+
+def collect_forward_superseded_ids(supersedes_by_memory_id: dict[str, set[str]]) -> set[str]:
+    superseded_ids: set[str] = set()
+    for superseded in supersedes_by_memory_id.values():
+        superseded_ids.update(superseded)
     return superseded_ids
+
+
+def has_confirmed_superseded_by(record: dict, supersedes_by_memory_id: dict[str, set[str]]) -> bool:
+    memory_id = record.get("memory_id")
+    superseded_by = record.get("superseded_by")
+    return (
+        is_safe_memory_identifier(memory_id)
+        and is_safe_memory_identifier(superseded_by)
+        and memory_id in supersedes_by_memory_id.get(superseded_by, set())
+    )
 
 
 def collect_memory_hits(
@@ -761,13 +778,14 @@ def collect_memory_hits(
     if not is_safe_repo_file(repo, index_path):
         return hits
     records = list(iter_jsonl(index_path))
-    forward_superseded_ids = collect_forward_superseded_ids(records)
+    supersedes_by_memory_id = collect_supersedes_by_memory_id(records)
+    forward_superseded_ids = collect_forward_superseded_ids(supersedes_by_memory_id)
     for line_no, record in enumerate(records, 1):
         raw_memory_id = str(record.get("memory_id") or "")
         layer = safe_display_scalar(record.get("layer") or "", 60)
         if scope != "all" and layer != scope:
             continue
-        if raw_memory_id in forward_superseded_ids or is_safe_memory_identifier(record.get("superseded_by")):
+        if raw_memory_id in forward_superseded_ids or has_confirmed_superseded_by(record, supersedes_by_memory_id):
             continue
         if not has_valid_memory_lifecycle(record):
             continue
