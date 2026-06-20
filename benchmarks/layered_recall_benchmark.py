@@ -792,8 +792,16 @@ def session_drilldown_hit(blocks: list[str], expected_summary_path: str) -> bool
     return expected_summary_path in block_result_paths(blocks)
 
 
-def source_reachability_hit(blocks: list[str], expected_summary_path: str, expected_source_anchor: str) -> bool:
+def source_reachability_hit(
+    blocks: list[str],
+    expected_memory_id: str,
+    expected_summary_path: str,
+    expected_source_anchor: str,
+    record: dict | None,
+) -> bool:
     for block in blocks:
+        if not block_contains_memory(block, expected_memory_id, record):
+            continue
         if not block_has_drill_path(block, expected_summary_path):
             continue
         if expected_source_anchor in section_items(block, "source anchors"):
@@ -1241,7 +1249,13 @@ def score_case(
             )
         session_hit = session_drilldown_hit(session_blocks, expected_summary_path)
         if expected_source_anchor:
-            source_hit = source_reachability_hit(source_blocks, expected_summary_path, expected_source_anchor)
+            source_hit = source_reachability_hit(
+                source_blocks,
+                expected_memory_id,
+                expected_summary_path,
+                expected_source_anchor,
+                expected_record,
+            )
             source_precision = source_anchor_precision_at_5(source_blocks, expected_source_anchor)
         if required_evidence_paths:
             evidence_hit = evidence_reachability_hit(source_blocks + memory_blocks, required_evidence_paths)

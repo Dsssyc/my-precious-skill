@@ -175,9 +175,9 @@ Positive cases check whether the correct high-level memory appears at rank 1 or
 within the top 5, whether the memory can drill down to the supporting session,
 what fraction of returned top-5 memory hits match the expected memory, whether
 required evidence paths are reachable, and whether source anchors are available
-at source depth. Cases with `reference_answer` also check whether the exact
-answer snippet is reachable in memory, session, or source output. These metrics
-are reported as `memory_recall_at_1`, `memory_recall_at_5`,
+on the expected memory at source depth. Cases with `reference_answer` also check
+whether the exact answer snippet is reachable in memory, session, or source
+output. These metrics are reported as `memory_recall_at_1`, `memory_recall_at_5`,
 `memory_precision_at_5`, `memory_micro_precision_at_5`,
 `memory_result_count_at_5`, `memory_relevant_count_at_5`, `memory_mrr`,
 `memory_ndcg_at_5`, `memory_ranked_cases`, `memory_rank_missing_cases`,

@@ -1538,6 +1538,33 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(detail["unsafe_source_anchor_count_at_5"], 1)
             self.assertEqual(detail["unsafe_source_anchor_rate_at_5"], 0.5)
 
+    def test_source_reachability_requires_expected_memory_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="source_wrong_memory")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["session_drilldown_at_5"], 1.0)
+            self.assertEqual(payload["source_reachability"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["source_reachability_hit"])
+            self.assertEqual(detail["source_result_ids"], ["mem_other"])
+            self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
+            self.assertIn("source_reachability", detail["failed_checks"])
+
     def test_layered_recall_benchmark_details_sanitize_sensitive_returned_reasons(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3414,6 +3441,17 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   source: memory")
                         print("   why: field:text; matched:different")
                         print("   memory_id: mem_other")
+                        print("   source anchors:")
+                        print("     - " + SOURCE_ANCHOR)
+                    elif MODE == "source_wrong_memory":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] Different memory")
+                        print("   source: memory")
+                        print("   why: field:text; matched:different")
+                        print("   memory_id: mem_other")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
                         print("   source anchors:")
                         print("     - " + SOURCE_ANCHOR)
                     else:
