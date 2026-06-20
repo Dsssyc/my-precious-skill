@@ -17,13 +17,13 @@ LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
 Baseline date: 2026-06-20
 
-Code point used for the benchmark harness: `da3da62`
+Code point used for the benchmark harness: `e9a383d`
 
 Case file:
 `benchmarks/cases/layered_recall_synthetic.jsonl`
 
 Case fingerprint:
-`d9140c729f420fe902b7f4cce462d6104fa21e77e6f33bd0c3e50278c168c1b5`
+`84358ae2053eaa87145cd96be0b9aa463d35eef359157640359297e95646ac33`
 
 Search implementation fingerprint:
 `681f812a1de9ccb416c94b5b4310789e72befb5577038d4cb65c4227f36fe075`
@@ -32,15 +32,15 @@ Baseline commands:
 
 ```bash
 python3 benchmarks/build_synthetic_recall_archive.py \
-  --repo /tmp/my-precious-layered-postfix-audit \
+  --repo /tmp/my-precious-layered-final-audit \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl
 
 python3 benchmarks/layered_recall_benchmark.py \
-  --repo /tmp/my-precious-layered-postfix-audit \
+  --repo /tmp/my-precious-layered-final-audit \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/my-precious-layered-postfix-details.jsonl \
-  --failures-json /tmp/my-precious-layered-postfix-failures.json \
+  --details-jsonl /tmp/my-precious-layered-final-details.jsonl \
+  --failures-json /tmp/my-precious-layered-final-failures.json \
   --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
   --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json
 ```
@@ -49,25 +49,25 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 32 |
-| positive_cases | 27 |
+| cases | 34 |
+| positive_cases | 29 |
 | abstain_cases | 5 |
-| answer_cases | 9 |
-| evidence_text_cases | 1 |
+| answer_cases | 11 |
+| evidence_text_cases | 3 |
 | memory_recall_at_1 | 1.0 |
 | memory_recall_at_5 | 1.0 |
 | memory_mrr | 1.0 |
 | memory_ndcg_at_5 | 1.0 |
-| memory_precision_at_5 | 0.3012345679012346 |
-| memory_micro_precision_at_5 | 0.25471698113207547 |
+| memory_precision_at_5 | 0.2787356321839081 |
+| memory_micro_precision_at_5 | 0.24369747899159663 |
 | memory_explainability | 1.0 |
 | layer_calibration | 1.0 |
 | scope_filter_recall | 1.0 |
 | wrong_scope_suppression | 1.0 |
 | session_drilldown_at_5 | 1.0 |
 | source_reachability | 1.0 |
-| source_precision_at_5 | 0.3049382716049383 |
-| source_micro_precision_at_5 | 0.25961538461538464 |
+| source_precision_at_5 | 0.28218390804597704 |
+| source_micro_precision_at_5 | 0.24786324786324787 |
 | evidence_reachability | 1.0 |
 | evidence_text_reachability | 1.0 |
 | answer_reachability | 1.0 |
@@ -81,26 +81,21 @@ Baseline result:
 | failed_case_count | 0 |
 | case_pass_rate | 1.0 |
 
-Latency for this local run was `8685.746 ms` total, `271.43 ms` mean per case,
-and `430.96 ms` max per case. Treat these as local smoke-test timings, not a
+Latency for this local run was `9688.309 ms` total, `284.95 ms` mean per case,
+and `442.835 ms` max per case. Treat these as local smoke-test timings, not a
 performance claim; they depend on the local Python runtime, filesystem cache,
 and machine load.
 
-The full unit test suite also passed after the measurement fix:
-
-```text
-Ran 332 tests in 71.936s
-OK
-```
-
 ## Synthetic Case Coverage
 
-The packaged synthetic suite contains 32 cases across these categories:
+The packaged synthetic suite contains 34 cases across these categories:
 
 | Category | Cases |
 | --- | ---: |
 | abstention | 5 |
+| automatic_induction | 1 |
 | cross_project_recall | 3 |
+| explicit_memory | 1 |
 | information_extraction | 3 |
 | knowledge_update | 3 |
 | multi_session_reasoning | 3 |
@@ -124,6 +119,7 @@ Source labels in the synthetic file are:
 | LOCoMo | 4 |
 | LongMemEval-V2 | 3 |
 | MemPalace-analysis | 3 |
+| MyPrecious-layered-synthetic | 2 |
 
 These labels indicate which public benchmark family or design concern inspired
 the case. They do not mean the public benchmark dataset was run.
@@ -363,6 +359,19 @@ The current implementation can be trusted for these bounded claims:
   details/failure artifacts.
 - The benchmark now includes successful search `stderr` in privacy and
   abstention checks.
+- Archive audit rejects high-level memory nodes without non-empty
+  `derived_from` and `evidence_refs`, and it checks missing evidence quote IDs
+  in both root memory files and `index/memories.jsonl`.
+- The updater can induce a `domain` high-level memory from multiple synthetic
+  session source records. The generated memory is automatic, has two supporting
+  summaries, has evidence refs whose quote IDs exist in `evidence.md`, and is
+  indexed.
+- The updater has a direct explicit-memory write path that creates sticky
+  high-level memories only when an existing summary path and evidence quote ref
+  are supplied. Source-free direct explicit writes are refused.
+- The packaged synthetic benchmark now includes `automatic_induction` and
+  `explicit_memory` categories with category pass rate and layer calibration
+  gated at `1.0`.
 
 ## Remaining Gaps Against The Target System
 
@@ -374,20 +383,20 @@ Current gaps:
 
 - Project path still remains central to update configuration and scheduled
   ingestion. Project is not yet merely one scope among many.
-- Automatic induction is not implemented as a durable default write behavior.
-  The benchmark can build synthetic high-level memories, but the archive updater
-  does not yet promote, merge, or refresh high-level memories from real session
-  events as the normal path.
-- Explicit memory is represented in template data, but there is no complete
-  force-memory interface that writes sticky high-level memories with audited
-  evidence attachments across runtimes.
+- Automatic induction is implemented only as a conservative minimum slice. It
+  can promote synthetic reusable facts into high-level memories, but it is not
+  yet a semantic consolidation engine and has not been validated on real
+  private histories.
+- Direct explicit-memory writes exist in the reusable updater, but runtime-level
+  adapters and governing-prompt integration still need policy design.
 - The system has `global`, `domain`, and `project` memory files, but lifecycle
   operations such as support-count update, contradiction handling, supersession,
   decay, and confidence revision are still incomplete.
 - Raw/source reachability is represented by anchors, not by a fully gated
   drilldown workflow that can safely walk all the way to original chat records.
-- The benchmark has one `evidence_text` case; this is useful as a guard but too
-  small to prove source-depth robustness.
+- The benchmark has three `evidence_text` cases; this is a better guard than
+  the previous single case, but still too small to prove source-depth
+  robustness.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
   public datasets.
@@ -419,34 +428,37 @@ this convergence audit as open-ended optimization.
 
 ## Recommendation
 
-Proceed to next-generation layered memory architecture design.
+Proceed from the minimum verifiable slice to lifecycle and consolidation
+architecture.
 
-The reason is not that the current system already satisfies the target design.
-It does not. The reason is that the current retrieval benchmark is now stable
-enough to act as a regression baseline while the next architecture is designed.
-Further small harness hardening will have lower value than designing the missing
-write-path ontology: automatic induction, explicit sticky memories, lifecycle
-fields, cross-project promotion, and gated source drilldown.
+The system now has a bounded proof that high-level memories can be induced from
+synthetic session events and that direct explicit memories can be written only
+with evidence. It still does not satisfy the full target design. The next
+valuable work is no longer broad benchmark exploration; it is making the write
+path durable under realistic memory evolution: promotion, merge, refresh,
+supersession, confidence revision, and gated source drilldown.
 
-## Next Minimal Roadmap
+## Next Roadmap After The Minimum Slice
 
-1. Specify the memory-node lifecycle contract.
-   Define promotion, merge, refresh, supersession, confidence, support count,
-   evidence refs, and raw refs as enforceable schema behavior.
+1. Strengthen automatic induction.
+   Move from literal `Reusable fact:` extraction toward a reviewable
+   consolidation stage that can merge repeated facts, preserve contradictory
+   evidence, and avoid process-noise promotion.
 
-2. Add automatic induction as a separate write-stage prototype.
-   Start with synthetic sessions that promote one cross-project reusable memory
-   into `global` or `domain` without requiring real private data.
+2. Implement lifecycle operations.
+   Add explicit support for refresh, supersession, contradiction handling,
+   confidence revision, decay, and support-count updates.
 
-3. Add explicit-memory write tests.
-   A forced memory should create a sticky high-level node with evidence refs and
-   should reject source-free facts unless explicitly allowed by policy.
+3. Reduce project-boundary centrality.
+   Treat project as one retrieval scope rather than the primary storage and
+   scheduling boundary.
 
-4. Expand source-depth evaluation.
-   Increase `evidence_text_cases`, add broken-anchor cases, and test that raw
-   source drilldown is gated and sanitized.
+4. Expand source-depth governance.
+   Keep raw source anchors private by default, add authorization checks for
+   deeper drilldown, and test broken source anchors separately from evidence
+   quote refs.
 
-5. Run an adapted public benchmark locally.
+5. Run adapted public benchmarks locally.
    Use the existing converter against downloaded public records outside the
    repository. Record dataset version, conversion fingerprints, archive build
    rules, and score JSON.
