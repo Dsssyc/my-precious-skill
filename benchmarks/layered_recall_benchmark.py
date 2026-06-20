@@ -1273,7 +1273,10 @@ def threshold_metric_value(payload: dict, metric: str, option: str) -> float:
         value = value[part]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise SystemExit(f"{option} metric is not numeric in benchmark output: {display_metric}")
-    return float(value)
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise SystemExit(f"{option} metric is not finite in benchmark output: {display_metric}")
+    return numeric_value
 
 
 def fail_under_metric_value(payload: dict, metric: str) -> float:

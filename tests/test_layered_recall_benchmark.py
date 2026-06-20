@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -1466,6 +1467,23 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["memory_recall_at_5"], 0.0)
             self.assertIn("memory_recall_at_5=0.0 below threshold 0.5", result.stderr)
+
+    def test_layered_recall_benchmark_rejects_non_finite_metric_values(self):
+        benchmark = runpy.run_path(str(SCRIPT))
+        threshold_failure_details = benchmark["threshold_failure_details"]
+
+        for metric_value in (math.nan, math.inf, -math.inf):
+            with self.subTest(metric_value=metric_value):
+                with self.assertRaises(SystemExit) as error:
+                    threshold_failure_details(
+                        {"source_precision_at_5": metric_value},
+                        [("source_precision_at_5", 0.25)],
+                    )
+
+                self.assertIn(
+                    "--fail-under metric is not finite in benchmark output: source_precision_at_5",
+                    str(error.exception),
+                )
 
     def test_layered_recall_benchmark_rejects_non_finite_direct_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
