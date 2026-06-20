@@ -106,15 +106,16 @@ class SyncMemoryArchiveTests(unittest.TestCase):
     def test_sync_memory_archive_dry_run_allows_memory_node_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))
-            (memory_repo / "memories/global.jsonl").write_text(
+            memory_node = (
                 '{"memory_id":"mem_test","layer":"global","scope":"*","topic":"sync",'
                 '"text":"Synthetic memory node for sync dry run.","rationale":"test",'
                 '"source":"automatic","confidence":"high","persistence":"normal",'
                 '"support_count":1,"first_seen":"2026-06-17","last_seen":"2026-06-17",'
                 '"derived_from":[],"evidence_refs":[],"raw_refs":[],"supersedes":[],'
-                '"superseded_by":null,"tags":["test"]}\n',
-                encoding="utf-8",
+                '"superseded_by":null,"tags":["test"]}\n'
             )
+            (memory_repo / "memories/global.jsonl").write_text(memory_node, encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(memory_node, encoding="utf-8")
 
             result = subprocess.run(
                 [sys.executable, str(memory_repo / "tools/sync_memory_archive.py"), "--dry-run"],

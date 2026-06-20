@@ -751,8 +751,13 @@ def audit_memory_index_consistency(repo: Path) -> list[Finding]:
         else:
             add_node(durable_nodes, relative, line_number, row)
 
-    if not durable_nodes or not index_nodes:
+    if not durable_nodes:
         return findings
+    if not index_nodes:
+        return [
+            Finding(durable.path, durable.line_number, "memory_index_mismatch")
+            for durable in durable_nodes.values()
+        ]
 
     for memory_id, durable in durable_nodes.items():
         indexed = index_nodes.get(memory_id)
