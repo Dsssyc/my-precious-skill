@@ -487,6 +487,72 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("latest active policy", result.stdout)
         self.assertNotIn("old superseded policy", result.stdout)
 
+    def test_search_memory_skips_memory_nodes_listed_in_current_supersedes(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/06/17/permission").mkdir(parents=True)
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_permission_v1",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "permission-prompts",
+                        "text": "permission prompts current policy stale forward-only policy",
+                        "source": "synthetic",
+                        "confidence": "high",
+                        "support_count": 3,
+                        "derived_from": ["sessions/2026/06/17/permission/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                        "supersedes": [],
+                        "superseded_by": None,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_permission_current",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "permission-prompts",
+                        "text": "permission prompts current policy latest active policy",
+                        "source": "synthetic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/permission/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                        "supersedes": ["mem_permission_v1"],
+                        "superseded_by": None,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "permission prompts current policy",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("latest active policy", result.stdout)
+        self.assertNotIn("stale forward-only policy", result.stdout)
+
     def test_search_memory_skips_invalid_memory_lifecycle_nodes(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

@@ -717,6 +717,21 @@ def has_valid_memory_lifecycle(record: dict) -> bool:
     return first_seen is not None and last_seen is not None and first_seen <= last_seen
 
 
+def collect_forward_superseded_ids(records: list[dict]) -> set[str]:
+    superseded_ids: set[str] = set()
+    for record in records:
+        if not has_valid_memory_lifecycle(record):
+            continue
+        memory_id = str(record.get("memory_id") or "")
+        supersedes = record.get("supersedes", [])
+        if not isinstance(supersedes, list):
+            continue
+        for target in supersedes:
+            if isinstance(target, str) and target and target != memory_id:
+                superseded_ids.add(target)
+    return superseded_ids
+
+
 def collect_memory_hits(
     repo: Path,
     query_tokens: list[str],
@@ -727,12 +742,14 @@ def collect_memory_hits(
     index_path = repo / "index" / "memories.jsonl"
     if not is_safe_repo_file(repo, index_path):
         return hits
-    for line_no, record in enumerate(iter_jsonl(index_path), 1):
+    records = list(iter_jsonl(index_path))
+    forward_superseded_ids = collect_forward_superseded_ids(records)
+    for line_no, record in enumerate(records, 1):
         raw_memory_id = str(record.get("memory_id") or "")
         layer = safe_display_scalar(record.get("layer") or "", 60)
         if scope != "all" and layer != scope:
             continue
-        if record.get("superseded_by"):
+        if raw_memory_id in forward_superseded_ids or record.get("superseded_by"):
             continue
         if not has_valid_memory_lifecycle(record):
             continue
