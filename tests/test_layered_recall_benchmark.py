@@ -570,6 +570,42 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 self.assertNotIn("Traceback", combined)
                 self.assertFalse(outside.exists())
 
+    def test_synthetic_builder_rejects_unsafe_memory_identifiers_without_leaking_values(self):
+        scenarios = [
+            ("expected_memory_id", {"expected_memory_id": "mem_control\nidentifier"}),
+            ("stale_memory_id", {"stale_memory_id": "mem_cookie_SHOULD_NOT_RENDER"}),
+            ("stale_memory_id", {"stale_memory_id": "../outside-memory"}),
+        ]
+        for field, override in scenarios:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                repo = root / "agent-memory"
+                cases = self.write_cases(root, {**self.valid_case(), **override})
+
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SYNTHETIC_ARCHIVE_BUILDER),
+                        "--repo",
+                        str(repo),
+                        "--cases",
+                        str(cases),
+                        "--include-superseded-distractors",
+                    ],
+                    check=False,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unsafe benchmark memory identifier", result.stderr)
+                self.assertIn(field, result.stderr)
+                self.assertNotIn("Traceback", combined)
+                self.assertNotIn("SHOULD_NOT_RENDER", combined)
+                self.assertNotIn("cookie", combined)
+
     def test_layered_recall_benchmark_reports_parsed_block_metrics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

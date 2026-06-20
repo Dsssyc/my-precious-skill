@@ -71,6 +71,22 @@ def has_sensitive_identifier_token(text: str) -> bool:
     )
 
 
+def has_unsafe_identifier_path_reference(text: str) -> bool:
+    if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", text))
+
+
+def is_safe_memory_identifier(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return not (
+        any(ord(char) < 32 or ord(char) == 127 for char in value)
+        or has_sensitive_identifier_token(value)
+        or has_unsafe_identifier_path_reference(value)
+    )
+
+
 def iter_jsonl(path: Path) -> Iterable[dict]:
     try:
         handle = path.open("r", encoding="utf-8")
@@ -127,6 +143,18 @@ def validate_case_archive_paths(case: dict) -> None:
         archive_relative_path_text(evidence_path, "required_evidence_paths")
     source_path = str(case["expected_source_anchor"]).split("#", 1)[0]
     archive_relative_path_text(source_path, "expected_source_anchor")
+
+
+def validate_case_memory_identifier(value: object, field: str) -> None:
+    if not is_safe_memory_identifier(value):
+        raise SystemExit(f"unsafe benchmark memory identifier in case field: {field}")
+
+
+def validate_case_memory_identifiers(case: dict) -> None:
+    if positive_case(case):
+        validate_case_memory_identifier(case.get("expected_memory_id"), "expected_memory_id")
+    for stale_id in text_list(case.get("stale_memory_id")):
+        validate_case_memory_identifier(stale_id, "stale_memory_id")
 
 
 def memory_layer(case: dict) -> str:
@@ -300,6 +328,7 @@ def write_archive(repo: Path, cases: list[dict], *, include_superseded_distracto
         for case in cases:
             if not positive_case(case):
                 continue
+            validate_case_memory_identifiers(case)
             validate_case_archive_paths(case)
             record = build_memory_record(case, include_superseded_refs=include_superseded_distractors)
             if include_superseded_distractors:
