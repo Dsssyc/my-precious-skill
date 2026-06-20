@@ -854,6 +854,51 @@ class AuditMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_audit_memory_archive_flags_memory_index_mismatches(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/index-mismatch"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for index mismatch evidence.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for index mismatch.\n", encoding="utf-8")
+            durable_node = valid_memory_node(
+                memory_id="mem_index_mismatch",
+                derived_from=["sessions/2026/06/05/index-mismatch/summary.md"],
+                evidence_refs=[{"path": "sessions/2026/06/05/index-mismatch/evidence.md", "quote_id": "ev_001"}],
+            )
+            stale_index_node = dict(durable_node)
+            stale_index_node["text"] = "Stale index text should be caught by audit."
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(durable_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(stale_index_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/global.jsonl:1 category=memory_index_mismatch", combined)
+
     def test_audit_memory_archive_flags_unsafe_root_memory_raw_refs(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

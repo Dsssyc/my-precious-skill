@@ -329,6 +329,13 @@ class Finding:
     category: str
 
 
+@dataclass(frozen=True)
+class MemoryNodeLocation:
+    signature: str
+    path: str
+    line_number: int
+
+
 MEMORY_NODE_REQUIRED_FIELDS = {
     "memory_id",
     "layer",
@@ -716,6 +723,47 @@ def is_safe_raw_ref(ref: object) -> bool:
     return not (has_sensitive_identifier_token(path_text) or has_sensitive_identifier_token(anchor_text))
 
 
+def memory_node_signature(row: dict) -> str:
+    return json.dumps(row, sort_keys=True, separators=(",", ":"))
+
+
+def audit_memory_index_consistency(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    index_nodes: dict[str, MemoryNodeLocation] = {}
+    durable_nodes: dict[str, MemoryNodeLocation] = {}
+
+    def add_node(target: dict[str, MemoryNodeLocation], relative: str, line_number: int, row: dict) -> None:
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str) or not is_valid_memory_node_shape(row):
+            return
+        location = MemoryNodeLocation(memory_node_signature(row), relative, line_number)
+        existing = target.get(memory_id)
+        if existing and existing.signature != location.signature:
+            findings.append(Finding(relative, line_number, "memory_index_mismatch"))
+            return
+        target[memory_id] = existing or location
+
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__"):
+            continue
+        if relative == "index/memories.jsonl":
+            add_node(index_nodes, relative, line_number, row)
+        else:
+            add_node(durable_nodes, relative, line_number, row)
+
+    if not durable_nodes or not index_nodes:
+        return findings
+
+    for memory_id, durable in durable_nodes.items():
+        indexed = index_nodes.get(memory_id)
+        if indexed is None or indexed.signature != durable.signature:
+            findings.append(Finding(durable.path, durable.line_number, "memory_index_mismatch"))
+    for memory_id, indexed in index_nodes.items():
+        if memory_id not in durable_nodes:
+            findings.append(Finding(indexed.path, indexed.line_number, "memory_index_mismatch"))
+    return findings
+
+
 def audit_memory_references(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
     for relative, line_number, row in iter_memory_node_rows(repo):
@@ -764,6 +812,7 @@ def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     for path in sorted(iter_archive_files(repo)):
         findings.extend(scan_file(repo, path, check_process_updates))
     findings.extend(audit_memory_references(repo))
+    findings.extend(audit_memory_index_consistency(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 
 
