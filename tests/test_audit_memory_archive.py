@@ -810,6 +810,50 @@ class AuditMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_audit_memory_archive_flags_unsafe_root_memory_raw_refs(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "memories/explicit.jsonl").write_text(
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_legacy_raw_ref",
+                        raw_refs=["records/private.jsonl#message:42"],
+                    )
+                )
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_control_raw_ref",
+                        raw_refs=[{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1\nleak"}],
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/explicit.jsonl:1 category=unsafe_raw_ref", combined)
+            self.assertIn("memories/explicit.jsonl:2 category=unsafe_raw_ref", combined)
+
     def test_audit_memory_archive_scans_memory_root_files(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

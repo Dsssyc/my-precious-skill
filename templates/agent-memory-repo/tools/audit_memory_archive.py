@@ -357,8 +357,12 @@ def has_sensitive_identifier_token(text: str) -> bool:
     )
 
 
+def has_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
 def safe_diagnostic_path(path_text: str) -> str:
-    if any(ord(char) < 32 or ord(char) == 127 for char in path_text) or has_sensitive_identifier_token(path_text):
+    if has_control_chars(path_text) or has_sensitive_identifier_token(path_text):
         return UNSAFE_PATH
     return path_text
 
@@ -619,6 +623,22 @@ def is_positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
+def is_safe_raw_ref(ref: object) -> bool:
+    if not isinstance(ref, dict):
+        return False
+    if set(ref) != {"path", "anchor"}:
+        return False
+    path_text = ref.get("path")
+    anchor_text = ref.get("anchor")
+    if not isinstance(path_text, str) or not isinstance(anchor_text, str):
+        return False
+    if not path_text.strip() or not anchor_text.strip():
+        return False
+    if has_control_chars(path_text) or has_control_chars(anchor_text):
+        return False
+    return not (has_sensitive_identifier_token(path_text) or has_sensitive_identifier_token(anchor_text))
+
+
 def audit_memory_references(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
     required_fields = {
@@ -672,6 +692,13 @@ def audit_memory_references(repo: Path) -> list[Finding]:
                     or not evidence_quote_id_exists(evidence_path, quote_id)
                 ):
                     findings.append(Finding(relative, line_number, "broken_memory_ref"))
+        raw_refs = row.get("raw_refs", [])
+        if not isinstance(raw_refs, list):
+            findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+        else:
+            for ref in raw_refs:
+                if not is_safe_raw_ref(ref):
+                    findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
     return findings
 
 
