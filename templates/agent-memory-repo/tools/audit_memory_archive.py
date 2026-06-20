@@ -615,8 +615,8 @@ def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
     return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
 
 
-def is_non_negative_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+def is_positive_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def audit_memory_references(repo: Path) -> list[Finding]:
@@ -649,7 +649,7 @@ def audit_memory_references(repo: Path) -> list[Finding]:
         if missing:
             findings.append(Finding(relative, line_number, "invalid_memory_node"))
             continue
-        if not is_non_negative_int(row.get("support_count")):
+        if not is_positive_int(row.get("support_count")):
             findings.append(Finding(relative, line_number, "invalid_memory_node"))
         derived_from = row.get("derived_from", [])
         if not isinstance(derived_from, list):
