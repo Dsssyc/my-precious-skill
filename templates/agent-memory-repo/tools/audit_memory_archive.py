@@ -794,6 +794,27 @@ def audit_memory_supersession_refs(repo: Path) -> list[Finding]:
         valid_rows.append((relative, line_number, row))
         rows_by_id.setdefault(memory_id, []).append(row)
 
+    supersedes_by_id: dict[str, set[str]] = {}
+    for _, _, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        supersedes = row.get("supersedes", [])
+        supersedes_by_id.setdefault(memory_id, set()).update(
+            target for target in supersedes if target != memory_id and target in rows_by_id
+        )
+
+    def supersession_path_exists(start_id: str, target_id: str) -> bool:
+        visited: set[str] = set()
+        stack = list(supersedes_by_id.get(start_id, set()))
+        while stack:
+            current = stack.pop()
+            if current == target_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            stack.extend(supersedes_by_id.get(current, set()) - visited)
+        return False
+
     for relative, line_number, row in valid_rows:
         memory_id = str(row.get("memory_id"))
         supersedes = row.get("supersedes", [])
@@ -809,7 +830,10 @@ def audit_memory_supersession_refs(repo: Path) -> list[Finding]:
             or superseded_by not in rows_by_id
             or not any(memory_id in target_row.get("supersedes", []) for target_row in rows_by_id[superseded_by])
         )
-        if broken_supersedes or broken_superseded_by:
+        cyclic_supersedes = any(
+            target in rows_by_id and supersession_path_exists(target, memory_id) for target in supersedes
+        )
+        if broken_supersedes or broken_superseded_by or cyclic_supersedes:
             findings.append(Finding(relative, line_number, "broken_supersession_ref"))
     return findings
 
