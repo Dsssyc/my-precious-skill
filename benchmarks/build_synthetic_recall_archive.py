@@ -151,7 +151,7 @@ def evidence_paths_for_case(case: dict) -> list[str]:
     return [summary_path.replace("/summary.md", "/evidence.md")]
 
 
-def build_memory_record(case: dict) -> dict:
+def build_memory_record(case: dict, *, include_superseded_refs: bool = False) -> dict:
     category = str(case.get("category") or "uncategorized")
     summary_path = str(case["expected_summary_path"])
     evidence_paths = evidence_paths_for_case(case)
@@ -179,7 +179,7 @@ def build_memory_record(case: dict) -> dict:
         "derived_from": [summary_path],
         "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
         "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
-        "supersedes": text_list(case.get("stale_memory_id")),
+        "supersedes": text_list(case.get("stale_memory_id")) if include_superseded_refs else [],
         "superseded_by": None,
         "tags": [category, "synthetic-benchmark", str(case.get("source_benchmark") or "synthetic")],
     }
@@ -301,7 +301,7 @@ def write_archive(repo: Path, cases: list[dict], *, include_superseded_distracto
             if not positive_case(case):
                 continue
             validate_case_archive_paths(case)
-            record = build_memory_record(case)
+            record = build_memory_record(case, include_superseded_refs=include_superseded_distractors)
             if include_superseded_distractors:
                 records.extend(build_superseded_distractor_records(case))
             records.append(record)

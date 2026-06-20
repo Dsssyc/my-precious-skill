@@ -781,6 +781,32 @@ def audit_memory_id_uniqueness(repo: Path) -> list[Finding]:
     return findings
 
 
+def audit_memory_supersession_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    valid_rows: list[tuple[str, int, dict]] = []
+    memory_ids: set[str] = set()
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str):
+            continue
+        valid_rows.append((relative, line_number, row))
+        memory_ids.add(memory_id)
+
+    for relative, line_number, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        supersedes = row.get("supersedes", [])
+        superseded_by = row.get("superseded_by")
+        broken_supersedes = any(target == memory_id or target not in memory_ids for target in supersedes)
+        broken_superseded_by = isinstance(superseded_by, str) and (
+            superseded_by == memory_id or superseded_by not in memory_ids
+        )
+        if broken_supersedes or broken_superseded_by:
+            findings.append(Finding(relative, line_number, "broken_supersession_ref"))
+    return findings
+
+
 def audit_memory_index_consistency(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
     index_nodes: dict[str, MemoryNodeLocation] = {}
@@ -890,6 +916,7 @@ def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     findings.extend(audit_memory_references(repo))
     findings.extend(audit_memory_file_placement(repo))
     findings.extend(audit_memory_id_uniqueness(repo))
+    findings.extend(audit_memory_supersession_refs(repo))
     findings.extend(audit_memory_index_consistency(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 

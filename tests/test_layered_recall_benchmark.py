@@ -322,6 +322,47 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
 
+    def test_synthetic_builder_omits_supersedes_when_stale_records_are_absent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            rows_by_case_id = {
+                row["case_id"]: row
+                for row in (
+                    json.loads(line)
+                    for line in SYNTHETIC_CASES.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+            }
+            records = [
+                json.loads(line)
+                for line in (repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            stale_case_memory_ids = {
+                row["expected_memory_id"]
+                for row in rows_by_case_id.values()
+                if row.get("stale_memory_id")
+            }
+            current_records = [record for record in records if record.get("memory_id") in stale_case_memory_ids]
+
+            self.assertGreaterEqual(len(current_records), 1)
+            self.assertTrue(all(record.get("supersedes") == [] for record in current_records))
+
     def test_synthetic_builder_uses_expected_layers_for_scope_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "agent-memory"
