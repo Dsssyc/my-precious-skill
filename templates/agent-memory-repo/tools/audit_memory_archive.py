@@ -892,13 +892,13 @@ def audit_memory_supersession_refs(repo: Path) -> list[Finding]:
         broken_supersedes = any(
             target == memory_id
             or target not in rows_by_id
-            or not any(target_row.get("superseded_by") == memory_id for target_row in rows_by_id[target])
+            or not all(target_row.get("superseded_by") == memory_id for target_row in rows_by_id[target])
             for target in supersedes
         )
         broken_superseded_by = isinstance(superseded_by, str) and (
             superseded_by == memory_id
             or superseded_by not in rows_by_id
-            or not any(memory_id in target_row.get("supersedes", []) for target_row in rows_by_id[superseded_by])
+            or not all(memory_id in target_row.get("supersedes", []) for target_row in rows_by_id[superseded_by])
         )
         cyclic_supersedes = any(
             target in rows_by_id and supersession_path_exists(target, memory_id) for target in supersedes

@@ -1775,6 +1775,52 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("index/memories.jsonl:2 category=broken_supersession_ref", combined)
             self.assertNotIn("index/memories.jsonl:4 category=broken_supersession_ref", combined)
 
+    def test_audit_memory_archive_flags_supersession_refs_masked_by_other_copies(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            provenance = write_memory_node_provenance(memory_repo, "masked-supersession")
+            current = valid_memory_node(memory_id="mem_current_masked", **provenance)
+            old = valid_memory_node(
+                memory_id="mem_old_masked",
+                superseded_by="mem_current_masked",
+                **provenance,
+            )
+            indexed_current = valid_memory_node(
+                memory_id="mem_current_masked",
+                supersedes=["mem_old_masked"],
+                **provenance,
+            )
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(current) + "\n" + json.dumps(old) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(indexed_current) + "\n" + json.dumps(old) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/global.jsonl:2 category=broken_supersession_ref", combined)
+
     def test_audit_memory_archive_flags_cyclic_supersession_references(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
