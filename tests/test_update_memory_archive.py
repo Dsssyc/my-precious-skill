@@ -419,6 +419,40 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
             self.assertIn(node["memory_id"], (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8"))
 
+    def test_update_memory_archive_refuses_direct_explicit_memory_without_evidence(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(root),
+                    "--explicit-memory",
+                    "This unsupported memory must be refused.",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--explicit-summary-path is required with --explicit-memory", result.stderr)
+            self.assertEqual((memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8"), "")
+
     def test_build_memory_nodes_omits_unsafe_raw_ref_paths(self):
         module = load_update_module()
         rows = [
