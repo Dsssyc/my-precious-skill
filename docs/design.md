@@ -202,6 +202,8 @@ returned-memory and relevant-memory hits. `memory_explainability` measures
 whether ranked expected-memory hits carry high-signal `why:` reasons such as
 structured field matches, phrase matches, important token coverage, or project
 context, while rejecting low-signal-only or broad-field-only explanations.
+`source_precision_at_5` counts all top-5 returned source anchors in the
+denominator, but only anchors on the expected memory block are relevant.
 `layer_calibration` measures whether cases that declare `expected_layer` return
 the expected memory from the requested `global`, `domain`, or `project` layer.
 `scope_filter_recall` reruns those `expected_layer` cases with

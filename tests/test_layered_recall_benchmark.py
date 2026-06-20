@@ -1622,6 +1622,33 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
             self.assertIn("source_reachability", detail["failed_checks"])
 
+    def test_source_anchor_precision_requires_expected_memory_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="source_wrong_memory")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["source_reachability"], 0.0)
+            self.assertEqual(payload["source_precision_at_5"], 0.0)
+            self.assertEqual(payload["source_micro_precision_at_5"], 0.0)
+            self.assertEqual(payload["source_result_count_at_5"], 1)
+            self.assertEqual(payload["source_relevant_count_at_5"], 0)
+            self.assertEqual(detail["source_precision_at_5"], 0.0)
+            self.assertEqual(detail["source_result_count_at_5"], 1)
+            self.assertEqual(detail["source_relevant_count_at_5"], 0)
+
     def test_layered_recall_benchmark_details_sanitize_sensitive_returned_reasons(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

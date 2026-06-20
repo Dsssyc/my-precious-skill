@@ -809,11 +809,21 @@ def source_reachability_hit(
     return False
 
 
-def source_anchor_precision_at_5(blocks: list[str], expected_source_anchor: str) -> MemoryPrecisionAt5:
-    anchors = block_section_values(blocks[:5], "source anchors")
+def source_anchor_precision_at_5(
+    blocks: list[str],
+    expected_memory_id: str,
+    expected_source_anchor: str,
+    record: dict | None,
+) -> MemoryPrecisionAt5:
+    top_blocks = blocks[:5]
+    anchors = block_section_values(top_blocks, "source anchors")
     if not anchors:
         return MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
-    relevant = sum(int(anchor == expected_source_anchor) for anchor in anchors)
+    relevant = sum(
+        int(block_contains_memory(block, expected_memory_id, record) and anchor == expected_source_anchor)
+        for block in top_blocks
+        for anchor in section_items(block, "source anchors")
+    )
     return MemoryPrecisionAt5(
         score=relevant / len(anchors),
         result_count=len(anchors),
@@ -1282,7 +1292,12 @@ def score_case(
                 expected_source_anchor,
                 expected_record,
             )
-            source_precision = source_anchor_precision_at_5(source_blocks, expected_source_anchor)
+            source_precision = source_anchor_precision_at_5(
+                source_blocks,
+                expected_memory_id,
+                expected_source_anchor,
+                expected_record,
+            )
         if required_evidence_paths:
             evidence_hit = evidence_reachability_hit(
                 source_blocks + memory_blocks,
