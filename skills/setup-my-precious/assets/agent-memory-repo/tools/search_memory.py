@@ -13,6 +13,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -691,6 +692,31 @@ def memory_hit_path(repo: Path, memory_id: str, line_no: int) -> Path:
     return repo / "index" / "memories.jsonl" / safe_id[:120]
 
 
+def parse_memory_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def has_valid_memory_lifecycle(record: dict) -> bool:
+    first_seen_value = record.get("first_seen")
+    last_seen_value = record.get("last_seen")
+    if first_seen_value in (None, "") and last_seen_value in (None, ""):
+        return True
+    first_seen = parse_memory_timestamp(first_seen_value)
+    last_seen = parse_memory_timestamp(last_seen_value)
+    return first_seen is not None and last_seen is not None and first_seen <= last_seen
+
+
 def collect_memory_hits(
     repo: Path,
     query_tokens: list[str],
@@ -707,6 +733,8 @@ def collect_memory_hits(
         if scope != "all" and layer != scope:
             continue
         if record.get("superseded_by"):
+            continue
+        if not has_valid_memory_lifecycle(record):
             continue
         score, matched, reasons = score_index_record(query_tokens, record, context_terms)
         if not score:
