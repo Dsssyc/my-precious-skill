@@ -17,7 +17,7 @@ LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
 Baseline date: 2026-06-20
 
-Code point used for the benchmark harness: `e9a383d`
+Code point used for the benchmark harness: `49ea91e`
 
 Case file:
 `benchmarks/cases/layered_recall_synthetic.jsonl`
@@ -26,7 +26,7 @@ Case fingerprint:
 `84358ae2053eaa87145cd96be0b9aa463d35eef359157640359297e95646ac33`
 
 Search implementation fingerprint:
-`681f812a1de9ccb416c94b5b4310789e72befb5577038d4cb65c4227f36fe075`
+`a92d90f51d779a4bd8c4089611a58386599246ce53a42accd0eaf3a16b8bc234`
 
 Baseline commands:
 
@@ -68,6 +68,8 @@ Baseline result:
 | source_reachability | 1.0 |
 | source_precision_at_5 | 0.28218390804597704 |
 | source_micro_precision_at_5 | 0.24786324786324787 |
+| memory_evidence_ref_cases | 29 |
+| memory_evidence_ref_reachability | 1.0 |
 | evidence_reachability | 1.0 |
 | evidence_text_reachability | 1.0 |
 | answer_reachability | 1.0 |
@@ -81,8 +83,8 @@ Baseline result:
 | failed_case_count | 0 |
 | case_pass_rate | 1.0 |
 
-Latency for this local run was `9688.309 ms` total, `284.95 ms` mean per case,
-and `442.835 ms` max per case. Treat these as local smoke-test timings, not a
+Latency for this local run was `9834.587 ms` total, `289.253 ms` mean per case,
+and `447.586 ms` max per case. Treat these as local smoke-test timings, not a
 performance claim; they depend on the local Python runtime, filesystem cache,
 and machine load.
 
@@ -210,6 +212,9 @@ Measured:
   in session-depth results.
 - `evidence_reachability`: whether required evidence paths are reachable from
   the expected memory's memory blocks.
+- `memory_evidence_ref_reachability`: whether the expected memory block itself
+  exposes each required evidence path in its `evidence:` section, with a
+  `path#quote_id` display ref when the quote id is available.
 - `evidence_text_reachability`: whether required evidence files contain exact
   reference evidence snippets.
 - `source_reachability`: whether the expected source anchor appears on the
@@ -219,6 +224,8 @@ Recent hardening:
 
 - Source, evidence, and answer metrics are bound to the expected memory identity
   instead of accepting matching paths or anchors from unrelated blocks.
+- The default memory search result now displays validated evidence references
+  without printing evidence file text.
 - Diagnostic result IDs are filtered to memory blocks so index/source blocks
   cannot impersonate memory results.
 
@@ -351,6 +358,8 @@ The current implementation can be trusted for these bounded claims:
   layers on the packaged scope-calibration cases.
 - Search can drill from high-level memories to session paths, evidence paths,
   and expected source anchors in the synthetic archive.
+- Default memory results expose validated evidence references as
+  `path#quote_id` entries while leaving evidence text unread and unprinted.
 - Stale and forbidden memory IDs are checked across default and scoped search
   outputs.
 - Unsupported queries are tested for abstention rather than being silently
@@ -372,6 +381,9 @@ The current implementation can be trusted for these bounded claims:
 - The packaged synthetic benchmark now includes `automatic_induction` and
   `explicit_memory` categories with category pass rate and layer calibration
   gated at `1.0`.
+- The benchmark gates `memory_evidence_ref_reachability` at `1.0` across all 29
+  positive cases, including the `automatic_induction` and `explicit_memory`
+  categories.
 
 ## Remaining Gaps Against The Target System
 
