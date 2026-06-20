@@ -746,12 +746,14 @@ def is_valid_memory_node_shape(row: dict) -> bool:
     for field in MEMORY_NODE_STRING_LIST_FIELDS:
         if not is_string_list(row.get(field)):
             return False
+    if not all(is_safe_memory_identifier(target) for target in row.get("supersedes", [])):
+        return False
     if not isinstance(row.get("evidence_refs"), list) or not all(
         is_valid_evidence_ref_shape(ref) for ref in row.get("evidence_refs", [])
     ):
         return False
     superseded_by = row.get("superseded_by")
-    return superseded_by is None or isinstance(superseded_by, str)
+    return superseded_by is None or is_safe_memory_identifier(superseded_by)
 
 
 def is_safe_raw_ref(ref: object) -> bool:
