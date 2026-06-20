@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -690,6 +691,27 @@ def is_valid_evidence_ref_shape(ref: object) -> bool:
     )
 
 
+def parse_memory_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def has_valid_memory_lifecycle(row: dict) -> bool:
+    first_seen = parse_memory_timestamp(row.get("first_seen"))
+    last_seen = parse_memory_timestamp(row.get("last_seen"))
+    return first_seen is not None and last_seen is not None and first_seen <= last_seen
+
+
 def is_valid_memory_node_shape(row: dict) -> bool:
     if set(row) != MEMORY_NODE_REQUIRED_FIELDS:
         return False
@@ -699,6 +721,8 @@ def is_valid_memory_node_shape(row: dict) -> bool:
     for field, allowed_values in MEMORY_NODE_ENUM_FIELDS.items():
         if row.get(field) not in allowed_values:
             return False
+    if not has_valid_memory_lifecycle(row):
+        return False
     if not is_positive_int(row.get("support_count")):
         return False
     for field in MEMORY_NODE_STRING_LIST_FIELDS:

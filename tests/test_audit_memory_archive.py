@@ -695,6 +695,49 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/global.jsonl:3 category=invalid_memory_node", combined)
             self.assertIn("memories/global.jsonl:4 category=invalid_memory_node", combined)
 
+    def test_audit_memory_archive_flags_invalid_memory_lifecycle_timestamps(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(valid_memory_node(memory_id="mem_bad_first_seen", first_seen="not-a-date"))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_bad_last_seen", last_seen="2026-99-99T00:00:00Z"))
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_inverted_seen_range",
+                        first_seen="2026-06-06T00:00:00Z",
+                        last_seen="2026-06-05T23:59:59Z",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/global.jsonl:1 category=invalid_memory_node", combined)
+            self.assertIn("memories/global.jsonl:2 category=invalid_memory_node", combined)
+            self.assertIn("memories/global.jsonl:3 category=invalid_memory_node", combined)
+
     def test_audit_memory_archive_flags_schema_violating_root_memory_nodes(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
