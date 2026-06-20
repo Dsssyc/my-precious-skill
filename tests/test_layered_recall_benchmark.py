@@ -2849,6 +2849,56 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("memory|domain|unsupported scoped recall", calls)
             self.assertIn("memory|project|unsupported scoped recall", calls)
 
+    def test_suppression_checks_scope_search_outputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            self.append_memory_records(
+                repo,
+                {
+                    "memory_id": "mem_scoped_forbidden",
+                    "topic": "superseded-permission-prompts",
+                    "text": "Forbidden scoped permission behavior",
+                    "derived_from": [SUMMARY_PATH],
+                    "raw_refs": [],
+                },
+            )
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "category": "knowledge_update",
+                    "expected_layer": "global",
+                    "expected_not_memory_id": "mem_scoped_forbidden",
+                    "stale_memory_id": "mem_scoped_forbidden",
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, calls_path = self.write_stub_search(root, mode="scope_suppression_leak")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            calls = calls_path.read_text(encoding="utf-8")
+            self.assertEqual(payload["scope_filter_recall"], 1.0)
+            self.assertEqual(payload["wrong_scope_suppression"], 1.0)
+            self.assertEqual(payload["negative_memory_suppression"], 0.0)
+            self.assertEqual(payload["stale_memory_suppression"], 0.0)
+            self.assertEqual(payload["update_consistency"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["negative_memory_suppression_hit"])
+            self.assertFalse(detail["stale_memory_suppression_hit"])
+            self.assertIn("negative_memory_suppression", detail["failed_checks"])
+            self.assertIn("stale_memory_suppression", detail["failed_checks"])
+            self.assertIn("memory|global|permission prompts", calls)
+
     def test_invalid_forbidden_output_pattern_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3135,6 +3185,28 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 if MODE == "scope_leaky" and depth == "memory" and scope not in ("all", "global"):
                     print(f"No memory hits for: {{query}}")
                     print("SCOPE-ONLY-LEAK")
+                    raise SystemExit(1)
+
+                if MODE == "scope_suppression_leak" and depth == "memory" and scope == "global":
+                    print(f"Top memory hits for: {{query}}")
+                    print()
+                    print("1. [global] " + MEMORY_TEXT)
+                    print("   source: memory")
+                    print("   why: " + memory_why())
+                    print("   memory_id: mem_permission")
+                    print("   drill:")
+                    print("     - " + SUMMARY_PATH)
+                    print()
+                    print("2. [global] Forbidden scoped permission behavior")
+                    print("   source: memory")
+                    print("   why: " + memory_why())
+                    print("   memory_id: mem_scoped_forbidden")
+                    print("   drill:")
+                    print("     - " + SUMMARY_PATH)
+                    raise SystemExit(0)
+
+                if MODE == "scope_suppression_leak" and depth == "memory" and scope not in ("all", "global"):
+                    print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
 
                 if depth == "memory":

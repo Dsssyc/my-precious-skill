@@ -1148,6 +1148,14 @@ def score_case(
     scope_blocks = parse_hit_blocks(scope_output) if scope_output else []
     wrong_scope_blocks = [block for output in wrong_scope_outputs for block in parse_hit_blocks(output)]
     abstain_scope_blocks = [block for output in abstain_scope_outputs for block in parse_hit_blocks(output)]
+    suppression_blocks = [
+        *memory_blocks,
+        *session_blocks,
+        *source_blocks,
+        *scope_blocks,
+        *wrong_scope_blocks,
+        *abstain_scope_blocks,
+    ]
     all_search_outputs = [memory_output, session_output, source_output, scope_output, *wrong_scope_outputs, *abstain_scope_outputs]
     combined_output = "\n".join([memory_output, session_output, source_output])
     expected_memory_id = optional_case_text(data, "expected_memory_id")
@@ -1215,8 +1223,8 @@ def score_case(
             answer_f1 = answer_token_f1(combined_output, reference_answers)
 
     no_result_hits = no_hits(memory_blocks, session_blocks, source_blocks, abstain_scope_blocks)
-    negative_suppressed = not blocks_contain_memory_ids(memory_blocks, negative_memory_ids, memory_records)
-    stale_suppressed = not blocks_contain_memory_ids(memory_blocks, stale_memory_ids, memory_records)
+    negative_suppressed = not blocks_contain_memory_ids(suppression_blocks, negative_memory_ids, memory_records)
+    stale_suppressed = not blocks_contain_memory_ids(suppression_blocks, stale_memory_ids, memory_records)
     update_expected = bool(is_positive and stale_memory_ids)
 
     return {

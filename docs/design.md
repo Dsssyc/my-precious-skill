@@ -233,8 +233,10 @@ Memora, and long-context retrieval stress tests:
 - `abstention_accuracy`: no memory is returned when a query is unsupported,
   including default memory/session/source search and scoped memory searches for
   each `global`, `domain`, and `project` layer.
-- `negative_memory_suppression`: explicitly forbidden memory IDs are absent.
-- `stale_memory_suppression`: superseded memory IDs are absent.
+- `negative_memory_suppression`: explicitly forbidden memory IDs are absent from
+  all executed hit blocks, including scoped memory searches.
+- `stale_memory_suppression`: superseded memory IDs are absent from all executed
+  hit blocks, including scoped memory searches.
 - `update_consistency`: the latest expected memory is found while stale memory
   is suppressed.
 - `privacy_boundary_pass_rate`: configured forbidden output patterns, such as
