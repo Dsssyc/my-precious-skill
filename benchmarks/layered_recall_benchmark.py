@@ -773,7 +773,7 @@ def memory_record_is_visible(block: str, record: dict) -> bool:
 
 
 def session_drilldown_hit(blocks: list[str], expected_summary_path: str) -> bool:
-    return any(expected_summary_path in block for block in blocks)
+    return expected_summary_path in block_result_paths(blocks)
 
 
 def source_reachability_hit(blocks: list[str], expected_summary_path: str, expected_source_anchor: str) -> bool:
@@ -895,7 +895,8 @@ def blocks_contain_memory_ids(blocks: list[str], memory_ids: list[str], records:
 def evidence_reachability_hit(blocks: list[str], required_paths: list[str]) -> bool:
     if not required_paths:
         return False
-    return all(any(required_path in block for block in blocks) for required_path in required_paths)
+    result_paths = set(block_result_paths(blocks))
+    return all(required_path in result_paths for required_path in required_paths)
 
 
 def safe_repo_file(repo: Path, path_text: str) -> Path | None:

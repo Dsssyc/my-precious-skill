@@ -661,6 +661,53 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 ],
             )
 
+    def test_layered_recall_benchmark_does_not_count_session_path_prefix_collision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="session_path_prefix_collision")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["session_drilldown_at_5"], 0.0)
+            self.assertFalse(detail["session_drilldown_hit"])
+            self.assertIn("session_drilldown_at_5", detail["failed_checks"])
+
+    def test_layered_recall_benchmark_does_not_count_evidence_path_prefix_collision(self):
+        evidence_path = SUMMARY_PATH.replace("/summary.md", "/evidence.md")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "required_evidence_paths": [evidence_path]})
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="evidence_path_prefix_collision")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["evidence_reachability"], 0.0)
+            self.assertFalse(detail["evidence_reachability_hit"])
+            self.assertIn("evidence_reachability", detail["failed_checks"])
+
     def test_layered_recall_benchmark_reports_memory_precision_at_5(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3072,6 +3119,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     print()
                     if MODE == "leaky_path":
                         print("1. /Users/private/summary.md")
+                    elif MODE == "session_path_prefix_collision":
+                        print("1. " + SUMMARY_PATH + ".bak")
                     else:
                         print("1. " + SUMMARY_PATH)
                     print("   source: index")
@@ -3101,6 +3150,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
+                        if MODE == "evidence_path_prefix_collision":
+                            print("     - " + SUMMARY_PATH.replace("/summary.md", "/evidence.md") + ".bak")
                         print("   source anchors:")
                         print("     - " + SOURCE_ANCHOR)
                         if MODE == "leaky_anchor":
