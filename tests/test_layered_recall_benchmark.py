@@ -691,6 +691,31 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(detail["case_pass"])
             self.assertNotIn("memory_precision_at_5", detail["failed_checks"])
 
+    def test_layered_recall_benchmark_does_not_count_memory_id_prefix_collision(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="prefix_collision")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["memory_recall_at_1"], 0.0)
+            self.assertEqual(payload["memory_recall_at_5"], 0.0)
+            self.assertEqual(payload["memory_precision_at_5"], 0.0)
+            self.assertEqual(payload["memory_relevant_count_at_5"], 0)
+            self.assertEqual(detail["memory_result_ids"], ["mem_permission_extra"])
+            self.assertIn("memory_recall_at_5", detail["failed_checks"])
+
     def test_layered_recall_benchmark_reports_memory_ndcg_at_5(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3008,6 +3033,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_unrelated")
                         print("   drill:")
                         print("     - sessions/other/summary.md")
+                    elif MODE == "prefix_collision":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] Prefix collision memory")
+                        print("   source: memory")
+                        print("   why: " + memory_why())
+                        print("   memory_id: mem_permission_extra")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
                     elif MODE == "rank_second" or (MODE == "rank_distribution" and "rank second" in query):
                         print(f"Top memory hits for: {{query}}")
                         print()

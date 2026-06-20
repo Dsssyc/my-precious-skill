@@ -678,6 +678,10 @@ def block_field_values(blocks: list[str], field_name: str) -> list[str]:
     return unique_texts(values)
 
 
+def block_memory_ids(block: str) -> list[str]:
+    return block_field_values([block], "memory_id")
+
+
 def block_reason_values(block: str) -> list[str]:
     reasons: list[str] = []
     for value in block_field_values([block], "why"):
@@ -802,8 +806,9 @@ def unsafe_source_anchor_count_at_5(blocks: list[str]) -> int:
 
 
 def block_contains_memory(block: str, memory_id: str, record: dict | None) -> bool:
-    if memory_id and memory_id in block:
-        return True
+    memory_ids = block_memory_ids(block)
+    if memory_ids:
+        return memory_id in memory_ids
     return record is not None and memory_record_is_visible(block, record)
 
 
