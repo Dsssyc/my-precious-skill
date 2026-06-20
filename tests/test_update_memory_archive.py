@@ -236,6 +236,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
     def test_update_memory_archive_induces_domain_memory_from_two_project_sessions(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+        search_script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -319,6 +320,26 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 if line.strip()
             ]
             self.assertIn(node["memory_id"], {row.get("memory_id") for row in indexed_rows})
+
+            search_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(search_script),
+                    "preserve evidence refs induced memories",
+                    "--repo",
+                    str(memory_repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("source: memory", search_result.stdout)
+            self.assertIn(f"memory_id: {node['memory_id']}", search_result.stdout)
+            self.assertIn("evidence:", search_result.stdout)
+            for ref in node["evidence_refs"]:
+                self.assertIn(f"{ref['path']}#{ref['quote_id']}", search_result.stdout)
 
     def test_build_memory_nodes_skips_automatic_candidates_without_summary_or_evidence(self):
         module = load_update_module()
