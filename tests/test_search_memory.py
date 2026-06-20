@@ -1618,6 +1618,65 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/06/17/quote-drill/summary.md", result.stdout)
         self.assertNotIn("sessions/2026/06/17/quote-drill/evidence.md", result.stdout)
 
+    def test_search_memory_default_memory_hit_shows_evidence_refs_without_raw_evidence_text(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/visible-evidence"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Visible Evidence\n", encoding="utf-8")
+            (session_dir / "evidence.md").write_text(
+                "ev_001: PRIVATE SUPPORTING EVIDENCE TEXT SHOULD NOT PRINT.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_visible_evidence_ref",
+                        "layer": "domain",
+                        "scope": "memory-retrieval",
+                        "topic": "visible-evidence",
+                        "text": "Visible evidence refs let agents verify induced memories without reading raw evidence.",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/visible-evidence/summary.md"],
+                        "evidence_refs": [
+                            {
+                                "path": "sessions/2026/06/17/visible-evidence/evidence.md",
+                                "quote_id": "ev_001",
+                            }
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "visible evidence refs induced memories",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source: memory", result.stdout)
+        self.assertIn("memory_id: mem_visible_evidence_ref", result.stdout)
+        self.assertIn("evidence:", result.stdout)
+        self.assertIn("sessions/2026/06/17/visible-evidence/evidence.md#ev_001", result.stdout)
+        self.assertNotIn("PRIVATE SUPPORTING EVIDENCE TEXT SHOULD NOT PRINT", result.stdout)
+
     def test_search_memory_sanitizes_sensitive_legacy_index_titles(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

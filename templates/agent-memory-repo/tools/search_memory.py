@@ -65,6 +65,7 @@ class Hit:
     scope: str = ""
     text: str = ""
     drill_paths: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
     raw_refs: tuple[str, ...] = ()
 
 
@@ -675,6 +676,34 @@ def iter_evidence_drill_paths(repo: Path, value: object) -> Iterable[str]:
             yield safe_path
 
 
+def iter_evidence_display_refs(repo: Path, value: object) -> Iterable[str]:
+    if isinstance(value, list):
+        for item in value:
+            yield from iter_evidence_display_refs(repo, item)
+        return
+    if isinstance(value, dict):
+        path = value.get("path")
+        quote_id = value.get("quote_id")
+        if not isinstance(path, str) or not isinstance(quote_id, str):
+            return
+        safe_path = safe_repo_relative_path(repo, path)
+        safe_quote_id = safe_display_scalar(quote_id, 80)
+        if (
+            not safe_path
+            or not safe_quote_id
+            or safe_quote_id == UNSAFE_DISPLAY_FIELD
+            or not is_reachable_drill_path(repo, safe_path)
+            or not evidence_quote_id_exists(repo / safe_path, quote_id)
+        ):
+            return
+        yield f"{safe_path}#{safe_quote_id}"
+        return
+    for path in iter_ref_paths(value):
+        safe_path = safe_repo_relative_path(repo, path)
+        if safe_path and is_reachable_drill_path(repo, safe_path):
+            yield safe_path
+
+
 def has_control_chars(text: str) -> bool:
     return any(ord(char) < 32 or ord(char) == 127 for char in text)
 
@@ -813,6 +842,10 @@ def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
     return unique_ordered(paths)
 
 
+def memory_evidence_refs(repo: Path, record: dict) -> tuple[str, ...]:
+    return unique_ordered(iter_evidence_display_refs(repo, record.get("evidence_refs")))
+
+
 def memory_hit_path(repo: Path, memory_id: str, line_no: int) -> Path:
     safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", memory_id).strip("._")
     if not safe_id:
@@ -934,6 +967,7 @@ def collect_memory_hits(
                 scope=safe_display_scalar(record.get("scope") or "", 120),
                 text=text,
                 drill_paths=memory_drill_paths(repo, record),
+                evidence_refs=memory_evidence_refs(repo, record),
                 raw_refs=sanitized_raw_refs(repo, record.get("raw_refs")),
             )
         )
@@ -1035,6 +1069,7 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
         if hit.memory_id and not current.memory_id:
             current.memory_id = hit.memory_id
         current.drill_paths = unique_ordered((*current.drill_paths, *hit.drill_paths))
+        current.evidence_refs = unique_ordered((*current.evidence_refs, *hit.evidence_refs))
         current.raw_refs = unique_ordered((*current.raw_refs, *hit.raw_refs))
         if current.source != hit.source:
             current.source = "mixed"
@@ -1093,6 +1128,9 @@ def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
     if drill_paths:
         lines.append("   drill:")
         lines.extend(f"     - {safe_display_path(path)}" for path in drill_paths)
+    if hit.evidence_refs:
+        lines.append("   evidence:")
+        lines.extend(f"     - {safe_display_path(ref)}" for ref in hit.evidence_refs)
     if depth == "source" and hit.raw_refs:
         lines.append("   source anchors:")
         lines.extend(f"     - {raw_ref}" for raw_ref in hit.raw_refs)
