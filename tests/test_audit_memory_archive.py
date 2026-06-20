@@ -1127,6 +1127,46 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("index/memories.jsonl:2 category=broken_supersession_ref", combined)
             self.assertIn("index/memories.jsonl:3 category=broken_supersession_ref", combined)
 
+    def test_audit_memory_archive_flags_non_reciprocal_supersession_references(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(valid_memory_node(memory_id="mem_current_missing_backref", supersedes=["mem_old_missing_backref"]))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_old_missing_backref"))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_old_missing_forwardref", superseded_by="mem_current_missing_forwardref"))
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_current_missing_forwardref"))
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("index/memories.jsonl:1 category=broken_supersession_ref", combined)
+            self.assertIn("index/memories.jsonl:3 category=broken_supersession_ref", combined)
+            self.assertNotIn("index/memories.jsonl:2 category=broken_supersession_ref", combined)
+            self.assertNotIn("index/memories.jsonl:4 category=broken_supersession_ref", combined)
+
     def test_audit_memory_archive_flags_unsafe_root_memory_raw_refs(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
