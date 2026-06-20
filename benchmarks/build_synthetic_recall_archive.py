@@ -11,6 +11,11 @@ from typing import Iterable
 
 
 UNSAFE_PATH = "[unsafe-path]"
+MEMORY_LAYER_FILES = {
+    "global": "global.jsonl",
+    "domain": "domains.jsonl",
+    "project": "projects.jsonl",
+}
 SENSITIVE_PATH_PATTERN = re.compile(
     r"(?i)(?:"
     r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
@@ -262,6 +267,28 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
         )
 
 
+def write_memory_root_files(repo: Path, records: list[dict]) -> None:
+    memories_dir = repo / "memories"
+    memories_dir.mkdir(parents=True, exist_ok=True)
+    by_layer: dict[str, list[dict]] = {layer: [] for layer in MEMORY_LAYER_FILES}
+    explicit_records: list[dict] = []
+    for record in records:
+        layer = str(record.get("layer") or "project")
+        if layer in by_layer:
+            by_layer[layer].append(record)
+        if record.get("source") == "explicit":
+            explicit_records.append(record)
+    for layer, file_name in MEMORY_LAYER_FILES.items():
+        write_text(
+            memories_dir / file_name,
+            "".join(json.dumps(record, sort_keys=True) + "\n" for record in by_layer[layer]),
+        )
+    write_text(
+        memories_dir / "explicit.jsonl",
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in explicit_records),
+    )
+
+
 def write_archive(repo: Path, cases: list[dict], *, include_superseded_distractors: bool = False) -> None:
     try:
         (repo / "index").mkdir(parents=True, exist_ok=True)
@@ -284,6 +311,7 @@ def write_archive(repo: Path, cases: list[dict], *, include_superseded_distracto
             "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
             encoding="utf-8",
         )
+        write_memory_root_files(repo, records)
     except OSError as exc:
         display_repo = safe_diagnostic_path(repo)
         display_error = safe_diagnostic_text(exc)

@@ -409,6 +409,20 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
             self.assertNotIn("cookie=", result.stdout)
             self.assertTrue((repo / "index" / "memories.jsonl").exists())
+            for file_name in ("global.jsonl", "domains.jsonl", "projects.jsonl", "explicit.jsonl"):
+                self.assertTrue((repo / "memories" / file_name).exists())
+            def read_rows(path):
+                return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+            indexed = {
+                row["memory_id"]: row
+                for row in read_rows(repo / "index" / "memories.jsonl")
+            }
+            durable = {}
+            for file_name in ("global.jsonl", "domains.jsonl", "projects.jsonl", "explicit.jsonl"):
+                for row in read_rows(repo / "memories" / file_name):
+                    durable.setdefault(row["memory_id"], row)
+            self.assertEqual(indexed, durable)
 
     def test_synthetic_builder_repo_write_error_reports_controlled_sanitized_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
