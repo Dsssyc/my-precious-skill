@@ -91,6 +91,10 @@ EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
     r"(?:现在|然后|接下来|顺便|再|请|帮我))"
 )
 REUSABLE_FACT_PREFIX = re.compile(r"(?i)^\s*reusable fact\s*[:\uFF1A]\s*(?P<text>.+)$")
+MEMORY_REFRESH_PATTERN = re.compile(
+    r"(?i)^\s*(?:updated|refresh(?:ed)?|replacement|replace(?:d)?|superseding)\s+fact\s*[:\uFF1A]\s*"
+    r"(?P<old>.+?)\s*(?:=>|->|\u2192)\s*(?P<new>.+)$"
+)
 SENSITIVE_EXPLICIT_MEMORY_MARKERS = (
     "[redacted_",
     "authorization:",
@@ -127,6 +131,7 @@ class MemoryCandidate:
     source_map_path: str
     source_updated_at: str
     tags: tuple[str, ...]
+    supersedes_texts: tuple[str, ...] = ()
 
 
 NOISE_MARKERS = (
@@ -2113,6 +2118,135 @@ def memory_id_for(layer: str, scope: str, text: str, source: str) -> str:
     return f"mem_{digest[:16]}"
 
 
+def memory_text_key(text: object) -> str:
+    return normalize_memory_text(str(text)).lower()
+
+
+def parse_memory_refresh_text(text: str) -> tuple[str, tuple[str, ...]]:
+    match = MEMORY_REFRESH_PATTERN.match(text)
+    if not match:
+        return text, ()
+    old_text = normalize_memory_text(match.group("old"))
+    new_text = normalize_memory_text(match.group("new"))
+    if (
+        not old_text
+        or not new_text
+        or old_text.lower() == new_text.lower()
+        or is_noisy_text(old_text)
+        or is_noisy_text(new_text)
+    ):
+        return text, ()
+    return new_text, (old_text,)
+
+
+def unique_strings(*values: object) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            item = item.strip()
+            if item and item not in seen:
+                seen.add(item)
+                out.append(item)
+    return out
+
+
+def unique_dicts(key_fields: tuple[str, ...], *values: object) -> list[dict]:
+    seen: set[tuple[str, ...]] = set()
+    out: list[dict] = []
+    for value in values:
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            key = tuple(str(item.get(field, "")).strip() for field in key_fields)
+            if not all(key) or key in seen:
+                continue
+            seen.add(key)
+            out.append({field: key[idx] for idx, field in enumerate(key_fields)})
+    return out
+
+
+def sorted_memory_times(*values: object) -> list[str]:
+    times = [str(value).strip() for value in values if isinstance(value, str) and value.strip()]
+    return sorted(set(times))
+
+
+def positive_int_value(value: object) -> int:
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+def merge_memory_node_provenance(existing: dict, incoming: dict) -> dict:
+    merged = dict(existing)
+    merged.update(incoming)
+    derived_from = unique_strings(existing.get("derived_from"), incoming.get("derived_from"))
+    evidence_refs = unique_dicts(("path", "quote_id"), existing.get("evidence_refs"), incoming.get("evidence_refs"))
+    raw_refs = unique_dicts(("path", "anchor"), existing.get("raw_refs"), incoming.get("raw_refs"))
+    supersedes = unique_strings(existing.get("supersedes"), incoming.get("supersedes"))
+    tags = sorted(set(unique_strings(existing.get("tags"), incoming.get("tags"))))
+    seen_times = sorted_memory_times(existing.get("first_seen"), incoming.get("first_seen"), existing.get("last_seen"), incoming.get("last_seen"))
+    merged["derived_from"] = derived_from
+    merged["evidence_refs"] = evidence_refs
+    merged["raw_refs"] = raw_refs
+    merged["supersedes"] = supersedes
+    merged["tags"] = tags
+    if seen_times:
+        merged["first_seen"] = seen_times[0]
+        merged["last_seen"] = seen_times[-1]
+    merged["support_count"] = max(
+        1,
+        len(derived_from),
+        len(evidence_refs),
+        positive_int_value(existing.get("support_count")),
+        positive_int_value(incoming.get("support_count")),
+    )
+    if merged.get("source") == "automatic" and merged["support_count"] >= 2:
+        merged["confidence"] = "high"
+    if incoming.get("superseded_by") is None and existing.get("superseded_by") is not None:
+        merged["superseded_by"] = existing.get("superseded_by")
+    return merged
+
+
+def merge_support_into_memory_node(node: dict, support: dict) -> None:
+    original_superseded_by = node.get("superseded_by")
+    merged = merge_memory_node_provenance(support, node)
+    node.update(merged)
+    node["superseded_by"] = original_superseded_by
+
+
+def add_supersession_link(current: dict, old: dict) -> None:
+    current_id = current.get("memory_id")
+    old_id = old.get("memory_id")
+    if not isinstance(current_id, str) or not isinstance(old_id, str) or current_id == old_id:
+        return
+    current["supersedes"] = unique_strings(current.get("supersedes"), [old_id])
+    old["superseded_by"] = current_id
+    merge_support_into_memory_node(current, old)
+
+
+def apply_memory_id_supersession_links(nodes: list[dict]) -> None:
+    by_id = {
+        memory_id: node
+        for node in nodes
+        if isinstance((memory_id := node.get("memory_id")), str) and memory_id
+    }
+    for node in nodes:
+        supersedes = node.get("supersedes", [])
+        if not isinstance(supersedes, list):
+            continue
+        for target_id in list(supersedes):
+            if not isinstance(target_id, str):
+                continue
+            target = by_id.get(target_id)
+            if target is not None:
+                add_supersession_link(node, target)
+
+
 def has_unsafe_raw_ref_path(text: str) -> bool:
     if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
         return True
@@ -2325,10 +2459,11 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
         if not summary_path or not evidence_path:
             continue
         for text, rationale in iter_memory_candidate_texts(row):
+            text, supersedes_texts = parse_memory_refresh_text(text)
             candidates.append(
                 MemoryCandidate(
                     text=text,
-                    rationale=rationale,
+                    rationale="Memory refresh captured in archived session." if supersedes_texts else rationale,
                     source="automatic",
                     topic=memory_topic(text, tags),
                     project=str(row.get("project", "")),
@@ -2339,9 +2474,29 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     source_map_path=str(row.get("source_map_path", "")),
                     source_updated_at=str(row.get("source_updated_at", "")),
                     tags=tags,
+                    supersedes_texts=supersedes_texts,
                 )
             )
     return candidates
+
+
+def apply_text_supersession_links(nodes: list[dict], refresh_targets_by_text: dict[str, set[str]]) -> None:
+    nodes_by_text: dict[str, list[dict]] = {}
+    for node in nodes:
+        key = memory_text_key(node.get("text", ""))
+        if key:
+            nodes_by_text.setdefault(key, []).append(node)
+    for current_text_key, target_texts in refresh_targets_by_text.items():
+        current_nodes = nodes_by_text.get(current_text_key, [])
+        if not current_nodes:
+            continue
+        for target_text in sorted(target_texts):
+            target_text_key = memory_text_key(target_text)
+            if target_text_key == current_text_key:
+                continue
+            for current in current_nodes:
+                for old in nodes_by_text.get(target_text_key, []):
+                    add_supersession_link(current, old)
 
 
 def build_memory_nodes(rows: list[dict]) -> list[dict]:
@@ -2351,9 +2506,17 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
         grouped.setdefault(key, []).append(candidate)
 
     nodes: list[dict] = []
+    refresh_targets_by_text: dict[str, set[str]] = {}
     for normalized_text in sorted(grouped):
         candidates = grouped[normalized_text]
         first = candidates[0]
+        refresh_targets = {
+            superseded_text
+            for candidate in candidates
+            for superseded_text in candidate.supersedes_texts
+        }
+        if refresh_targets:
+            refresh_targets_by_text.setdefault(normalized_text, set()).update(refresh_targets)
         support_projects = {
             candidate.project_path or candidate.project
             for candidate in candidates
@@ -2403,6 +2566,7 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
                 "tags": tags,
             }
         )
+    apply_text_supersession_links(nodes, refresh_targets_by_text)
     existing_ids = {str(node["memory_id"]) for node in nodes}
     for row in rows:
         explicit_texts = row.get("explicit_memories", [])
@@ -2483,10 +2647,14 @@ def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -
             if existing is not None:
                 if not prefer_same_content:
                     return
+                node = merge_memory_node_provenance(existing, node)
                 existing_id = existing.get("memory_id")
                 if isinstance(existing_id, str):
                     by_id.pop(existing_id, None)
             by_content[content_key] = node
+        existing_by_id = by_id.get(memory_id)
+        if existing_by_id is not None:
+            node = merge_memory_node_provenance(existing_by_id, node)
         by_id[memory_id] = node
 
     for node in load_existing_explicit_memory_nodes(memory_repo):
@@ -2498,6 +2666,7 @@ def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -
 
 def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
     nodes = merge_existing_explicit_memory_nodes(memory_repo, nodes)
+    apply_memory_id_supersession_links(nodes)
     memories_dir = memory_repo / "memories"
     if not is_safe_repo_path(memory_repo, memories_dir):
         raise SystemExit(f"Refusing to write unsafe archive memories path: {safe_diagnostic_path(memories_dir)}")

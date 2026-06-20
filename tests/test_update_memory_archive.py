@@ -447,6 +447,201 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
             self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
 
+    def test_update_memory_archive_merges_repeated_direct_explicit_memory_evidence(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            text = "Prefer evidence-bound memories over unsupported recollection."
+            support_refs = [
+                (
+                    "sessions/2026/06/20/direct-explicit-a/summary.md",
+                    "sessions/2026/06/20/direct-explicit-a/evidence.md",
+                    "ev_direct_a",
+                ),
+                (
+                    "sessions/2026/06/21/direct-explicit-b/summary.md",
+                    "sessions/2026/06/21/direct-explicit-b/evidence.md",
+                    "ev_direct_b",
+                ),
+            ]
+            for summary_rel, evidence_rel, quote_id in support_refs:
+                summary_path = memory_repo / summary_rel
+                evidence_path = memory_repo / evidence_rel
+                summary_path.parent.mkdir(parents=True)
+                summary_path.write_text(f"Summary supporting {text}\n", encoding="utf-8")
+                evidence_path.write_text(f"{quote_id}: Evidence supporting {text}\n", encoding="utf-8")
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(update_script),
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--source-dir",
+                        str(root),
+                        "--explicit-memory",
+                        text,
+                        "--explicit-layer",
+                        "global",
+                        "--explicit-scope",
+                        "global",
+                        "--explicit-summary-path",
+                        summary_rel,
+                        "--explicit-evidence-ref",
+                        f"{evidence_rel}#{quote_id}",
+                    ],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(rows), 1)
+            node = rows[0]
+            self.assertEqual(node["text"], text)
+            self.assertEqual(node["support_count"], 2)
+            self.assertEqual(
+                node["derived_from"],
+                [summary_rel for summary_rel, _, _ in support_refs],
+            )
+            self.assertEqual(
+                node["evidence_refs"],
+                [
+                    {"path": evidence_rel, "quote_id": quote_id}
+                    for _, evidence_rel, quote_id in support_refs
+                ],
+            )
+
+            audit = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
+
+    def test_update_memory_archive_refreshes_automatic_memory_with_supersession_links(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+        search_script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            old_source_dir = root / "records-old"
+            new_source_dir = root / "records-new"
+            project_old = root / "old-project"
+            project_new = root / "new-project"
+            old_source_dir.mkdir()
+            new_source_dir.mkdir()
+            project_old.mkdir()
+            project_new.mkdir()
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            old_fact = "Layered retrieval may omit evidence refs for induced memories."
+            new_fact = "Layered retrieval must preserve evidence refs for induced memories."
+            old_record = old_source_dir / "old.jsonl"
+            new_record = new_source_dir / "new.jsonl"
+            old_record.write_text(
+                json.dumps({"role": "user", "content": "Record the early layered retrieval behavior."})
+                + "\n"
+                + json.dumps({"role": "assistant", "content": f"Reusable fact: {old_fact}"})
+                + "\n",
+                encoding="utf-8",
+            )
+            new_record.write_text(
+                json.dumps({"role": "user", "content": "Refresh the layered retrieval behavior."})
+                + "\n"
+                + json.dumps({"role": "assistant", "content": f"Reusable fact: Updated fact: {old_fact} => {new_fact}"})
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(old_record, "2026-06-20T10:00:00Z")
+            set_mtime(new_record, "2026-06-21T10:00:00Z")
+
+            for source_dir, project_path in ((old_source_dir, project_old), (new_source_dir, project_new)):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(update_script),
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--source-dir",
+                        str(source_dir),
+                        "--project-path",
+                        str(project_path),
+                        "--source-agent",
+                        "synthetic-agent",
+                        "--rewrite-existing",
+                    ],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            old_node = next(row for row in rows if row.get("text") == old_fact)
+            current_node = next(row for row in rows if row.get("text") == new_fact)
+            self.assertEqual(current_node["supersedes"], [old_node["memory_id"]])
+            self.assertEqual(old_node["superseded_by"], current_node["memory_id"])
+            self.assertEqual(current_node["support_count"], 2)
+            self.assertEqual(len(current_node["derived_from"]), 2)
+            self.assertEqual(len(current_node["evidence_refs"]), 2)
+
+            search = subprocess.run(
+                [
+                    sys.executable,
+                    str(search_script),
+                    "preserve evidence refs induced memories",
+                    "--repo",
+                    str(memory_repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn(f"memory_id: {current_node['memory_id']}", search.stdout)
+            self.assertNotIn(f"memory_id: {old_node['memory_id']}", search.stdout)
+            self.assertNotIn(old_fact, search.stdout)
+            for ref in current_node["evidence_refs"]:
+                self.assertIn(f"{ref['path']}#{ref['quote_id']}", search.stdout)
+
+            audit = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
+
     def test_update_memory_archive_refuses_direct_explicit_memory_without_evidence(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
