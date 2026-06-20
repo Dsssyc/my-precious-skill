@@ -1231,6 +1231,22 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             detail = self.read_rows(details)[0]
             self.assertEqual(detail["memory_result_ids"], ["mem_permission"])
+            self.assertEqual(
+                detail["memory_results_at_5"],
+                [
+                    {
+                        "rank": 1,
+                        "memory_id": "mem_permission",
+                        "layer": "global",
+                        "reasons": [
+                            "field:text",
+                            "important-token-coverage",
+                            "matched:permission, prompts",
+                        ],
+                        "drill_paths": [SUMMARY_PATH],
+                    }
+                ],
+            )
             self.assertEqual(detail["session_result_paths"], [SUMMARY_PATH])
             self.assertEqual(detail["source_result_ids"], ["mem_permission"])
             self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
@@ -1258,6 +1274,33 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
             self.assertNotIn("cookie=", json.dumps(detail))
+
+    def test_layered_recall_benchmark_details_sanitize_sensitive_returned_reasons(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="sensitive_reason")
+
+            self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            detail = self.read_rows(details)[0]
+            reasons = detail["memory_results_at_5"][0]["reasons"]
+            self.assertEqual(
+                reasons,
+                [
+                    "[unsafe-result-identifier]",
+                    "important-token-coverage",
+                    "matched:permission, prompts",
+                ],
+            )
+            self.assertNotIn("field:session_id", json.dumps(detail))
 
     def test_layered_recall_benchmark_details_sanitize_unsafe_returned_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2625,6 +2668,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     return sys.argv[sys.argv.index(name) + 1]
 
                 def memory_why():
+                    if MODE == "sensitive_reason":
+                        return "field:session_id; important-token-coverage; matched:permission, prompts"
                     if MODE == "low_signal_memory":
                         return "low-signal-only; broad-field-only; matched:memory, session"
                     return "field:text; important-token-coverage; matched:permission, prompts"

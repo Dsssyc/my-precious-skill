@@ -496,6 +496,21 @@ def safe_result_identifiers(values: list[str]) -> list[str]:
     return unique_texts(identifier for value in values if (identifier := safe_result_identifier(value)))
 
 
+def safe_reason_identifier(value: str) -> str:
+    reason = value.strip()
+    if not reason:
+        return ""
+    if reason in EXPLAINABLE_MEMORY_REASONS or reason in UNEXPLAINABLE_MEMORY_REASONS:
+        if has_control_chars(reason) or SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(reason):
+            return UNSAFE_RESULT_IDENTIFIER
+        return clip(reason)
+    return safe_result_identifier(reason)
+
+
+def safe_reason_identifiers(values: list[str]) -> list[str]:
+    return unique_texts(identifier for value in values if (identifier := safe_reason_identifier(value)))
+
+
 def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float, scope: str = "all") -> str:
     display_query = safe_result_identifier(query)
     display_script = safe_diagnostic_path(search_script)
@@ -675,6 +690,26 @@ def block_result_paths(blocks: list[str]) -> list[str]:
     title_paths = [path for block in blocks if (path := block_title_path(block))]
     drill_paths = block_section_values(blocks, "drill")
     return unique_texts([*title_paths, *drill_paths])
+
+
+def memory_result_diagnostics(blocks: list[str]) -> list[dict]:
+    diagnostics: list[dict] = []
+    for rank, block in enumerate(blocks, 1):
+        if not is_memory_block(block):
+            continue
+        memory_ids = safe_result_identifiers(block_field_values([block], "memory_id"))
+        diagnostics.append(
+            {
+                "rank": rank,
+                "memory_id": memory_ids[0] if memory_ids else "",
+                "layer": safe_result_identifier(block_memory_layer(block)),
+                "reasons": safe_reason_identifiers(block_reason_values(block)),
+                "drill_paths": safe_result_identifiers(section_items(block, "drill")),
+            }
+        )
+        if len(diagnostics) >= 5:
+            break
+    return diagnostics
 
 
 def block_has_drill_path(block: str, expected_summary_path: str) -> bool:
@@ -981,6 +1016,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "update_consistency_hit": result["update_consistency_hit"],
         "privacy_boundary_pass": result["privacy_boundary_pass"],
         "memory_result_ids": result["memory_result_ids"],
+        "memory_results_at_5": result["memory_results_at_5"],
         "session_result_paths": result["session_result_paths"],
         "source_result_ids": result["source_result_ids"],
         "source_result_anchors": result["source_result_anchors"],
@@ -1126,6 +1162,7 @@ def score_case(
             forbidden_patterns,
         ),
         "memory_result_ids": safe_result_identifiers(block_field_values(memory_blocks, "memory_id")),
+        "memory_results_at_5": memory_result_diagnostics(memory_blocks),
         "session_result_paths": safe_result_identifiers(block_result_paths(session_blocks)),
         "source_result_ids": safe_result_identifiers(block_field_values(source_blocks, "memory_id")),
         "source_result_anchors": safe_result_identifiers(block_section_values(source_blocks, "source anchors")),
