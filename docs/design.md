@@ -232,7 +232,9 @@ Memora, and long-context retrieval stress tests:
 
 - `abstention_accuracy`: no memory is returned when a query is unsupported,
   including default memory/session/source search and scoped memory searches for
-  each `global`, `domain`, and `project` layer.
+  each `global`, `domain`, and `project` layer. Abstention outputs must be empty
+  or explicit `No memory hits for:` responses; unstructured non-no-hit text fails
+  the check even when it contains no parseable hit block.
 - `negative_memory_suppression`: explicitly forbidden memory IDs are absent from
   all executed hit blocks, including scoped memory searches.
 - `stale_memory_suppression`: superseded memory IDs are absent from all executed

@@ -246,8 +246,15 @@ def safe_category_name(case: dict) -> str:
     return safe_result_identifier(category_name(case))
 
 
-def no_hits(*block_groups: list[str]) -> bool:
-    return not any(block for blocks in block_groups for block in blocks)
+def no_hit_output(output: str) -> bool:
+    if parse_hit_blocks(output):
+        return False
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    return not lines or all(line.startswith(NO_HIT_MARKER) for line in lines)
+
+
+def no_hit_outputs(*outputs: str) -> bool:
+    return all(no_hit_output(output) for output in outputs)
 
 
 def new_totals() -> Totals:
@@ -1245,7 +1252,7 @@ def score_case(
             normalized_answer_hit = answer_normalized_reachability_hit(combined_output, reference_answers)
             answer_f1 = answer_token_f1(combined_output, reference_answers)
 
-    no_result_hits = no_hits(memory_blocks, session_blocks, source_blocks, abstain_scope_blocks)
+    no_result_hits = no_hit_outputs(memory_output, session_output, source_output, *abstain_scope_outputs)
     negative_suppressed = not blocks_contain_memory_ids(suppression_blocks, negative_memory_ids, memory_records)
     stale_suppressed = not blocks_contain_memory_ids(suppression_blocks, stale_memory_ids, memory_records)
     update_expected = bool(is_positive and stale_memory_ids)

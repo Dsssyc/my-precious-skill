@@ -2879,6 +2879,39 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("memory|domain|unsupported scoped recall", calls)
             self.assertIn("memory|project|unsupported scoped recall", calls)
 
+    def test_abstention_rejects_unstructured_non_nohit_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    "query": "unsupported unstructured recall",
+                    "category": "abstention",
+                    "expected_abstain": True,
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, calls_path = self.write_stub_search(root, mode="abstain_unstructured")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            calls = calls_path.read_text(encoding="utf-8")
+            self.assertEqual(payload["abstention_accuracy"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["abstention_hit"])
+            self.assertIn("abstention_accuracy", detail["failed_checks"])
+            self.assertIn("memory|all|unsupported unstructured recall", calls)
+            self.assertIn("memory|global|unsupported unstructured recall", calls)
+
     def test_suppression_checks_scope_search_outputs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3182,6 +3215,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 if MODE == "rank_distribution" and "missing" in query:
                     print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
+
+                if MODE == "abstain_unstructured":
+                    print("I found no structured hit, but here is unsupported memory-like content.")
+                    raise SystemExit(0)
 
                 if MODE == "abstain_scope_leaky":
                     if depth == "memory" and scope != "all":
