@@ -682,6 +682,22 @@ def is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
+def has_unsafe_identifier_path_reference(text: str) -> bool:
+    if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", text))
+
+
+def is_safe_memory_identifier(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return not (
+        has_control_chars(value)
+        or has_sensitive_identifier_token(value)
+        or has_unsafe_identifier_path_reference(value)
+    )
+
+
 def is_valid_evidence_ref_shape(ref: object) -> bool:
     return (
         isinstance(ref, dict)
@@ -714,6 +730,8 @@ def has_valid_memory_lifecycle(row: dict) -> bool:
 
 def is_valid_memory_node_shape(row: dict) -> bool:
     if set(row) != MEMORY_NODE_REQUIRED_FIELDS:
+        return False
+    if not is_safe_memory_identifier(row.get("memory_id")):
         return False
     for field in MEMORY_NODE_STRING_FIELDS:
         if not isinstance(row.get(field), str):
