@@ -29,6 +29,14 @@ CONFIG_CANDIDATES = (
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
 UNSAFE_DISPLAY_FIELD = "[unsafe-field]"
+ARCHIVE_INTERNAL_REF_ROOTS = (
+    "INDEX.md",
+    "config/projects.jsonl",
+    "index",
+    "memories",
+    "daily",
+    "sessions",
+)
 SENSITIVE_DISPLAY_PATTERN = re.compile(
     r"(?i)(?:"
     r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
@@ -540,6 +548,10 @@ def safe_repo_relative_path(repo: Path, path_text: object) -> str:
     return relative.as_posix()
 
 
+def is_archive_internal_ref_path(path_text: str) -> bool:
+    return any(path_text == root or path_text.startswith(f"{root}/") for root in ARCHIVE_INTERNAL_REF_ROOTS)
+
+
 def unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     out: list[str] = []
@@ -670,6 +682,8 @@ def sanitize_raw_ref(repo: Path, value: object) -> str:
         return UNSAFE_SOURCE_REF
     safe_path = safe_repo_relative_path(repo, path_text)
     if not safe_path:
+        return UNSAFE_SOURCE_REF
+    if is_archive_internal_ref_path(safe_path) and not (repo / safe_path).is_file():
         return UNSAFE_SOURCE_REF
     if safe_display_path(safe_path) == UNSAFE_DISPLAY_FIELD:
         return UNSAFE_SOURCE_REF

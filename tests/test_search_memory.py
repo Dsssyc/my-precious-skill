@@ -1015,6 +1015,62 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("/Users/private", result.stdout)
         self.assertNotIn("injected: yes", result.stdout)
 
+    def test_search_memory_depth_source_sanitizes_missing_internal_source_refs(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/missing-internal-source"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Missing Internal Source Ref\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_missing_internal_source_ref",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-depth",
+                        "text": "Broken internal source anchors should be sanitized before display.",
+                        "rationale": "Source-depth output should not present unreachable archive anchors as usable.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/missing-internal-source/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [
+                            {
+                                "path": "sessions/2026/06/17/missing-internal-source/source-map.json",
+                                "anchor": "source_record",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "broken internal source anchors",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("[unsafe-source-ref]", result.stdout)
+        self.assertNotIn("source-map.json", result.stdout)
+
     def test_search_memory_depth_source_sanitizes_sensitive_source_ref_anchors(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
