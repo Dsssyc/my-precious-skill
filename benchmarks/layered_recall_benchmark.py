@@ -20,6 +20,8 @@ DEFAULT_SEARCH_SCRIPT = "templates/agent-memory-repo/tools/search_memory.py"
 NO_HIT_MARKER = "No memory hits for:"
 DEFAULT_SEARCH_TIMEOUT_S = 30.0
 UNSAFE_RESULT_IDENTIFIER = "[unsafe-result-identifier]"
+UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
+UNSAFE_SOURCE_ANCHOR_MARKERS = {UNSAFE_RESULT_IDENTIFIER, UNSAFE_SOURCE_REF}
 EXPLAINABLE_MEMORY_REASON_PREFIXES = ("field:", "phrase:")
 EXPLAINABLE_MEMORY_REASONS = {"important-token-coverage", "project-context"}
 UNEXPLAINABLE_MEMORY_REASONS = {"low-signal-only", "broad-field-only"}
@@ -276,6 +278,7 @@ def new_totals() -> Totals:
         "source_precision_at_5": 0.0,
         "source_result_count_at_5": 0,
         "source_relevant_count_at_5": 0,
+        "unsafe_source_anchor_count_at_5": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
         "evidence_text_cases": 0,
@@ -389,6 +392,11 @@ def finalize_totals(totals: Totals) -> dict:
         ),
         "source_result_count_at_5": int(totals["source_result_count_at_5"]),
         "source_relevant_count_at_5": int(totals["source_relevant_count_at_5"]),
+        "unsafe_source_anchor_count_at_5": int(totals["unsafe_source_anchor_count_at_5"]),
+        "unsafe_source_anchor_rate_at_5": ratio(
+            totals["unsafe_source_anchor_count_at_5"],
+            totals["source_result_count_at_5"],
+        ),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "evidence_text_cases": int(totals["evidence_text_cases"]),
         "evidence_text_reachability": ratio(totals["evidence_text_hits"], totals["evidence_text_cases"]),
@@ -446,6 +454,7 @@ def add_result(totals: Totals, result: dict) -> None:
             totals["source_precision_at_5"] += result["source_precision_at_5"]
             totals["source_result_count_at_5"] += result["source_result_count_at_5"]
             totals["source_relevant_count_at_5"] += result["source_relevant_count_at_5"]
+            totals["unsafe_source_anchor_count_at_5"] += result["unsafe_source_anchor_count_at_5"]
         totals["evidence_cases"] += int(result["evidence_expected"])
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
         totals["evidence_text_cases"] += int(result["evidence_text_expected"])
@@ -784,6 +793,14 @@ def source_anchor_precision_at_5(blocks: list[str], expected_source_anchor: str)
     )
 
 
+def unsafe_source_anchor_count_at_5(blocks: list[str]) -> int:
+    anchors = block_section_values(blocks[:5], "source anchors")
+    return sum(
+        int(anchor in UNSAFE_SOURCE_ANCHOR_MARKERS or safe_result_identifier(anchor) == UNSAFE_RESULT_IDENTIFIER)
+        for anchor in anchors
+    )
+
+
 def block_contains_memory(block: str, memory_id: str, record: dict | None) -> bool:
     if memory_id and memory_id in block:
         return True
@@ -1070,6 +1087,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "source_precision_at_5": round(result["source_precision_at_5"], 6),
         "source_result_count_at_5": result["source_result_count_at_5"],
         "source_relevant_count_at_5": result["source_relevant_count_at_5"],
+        "unsafe_source_anchor_count_at_5": result["unsafe_source_anchor_count_at_5"],
+        "unsafe_source_anchor_rate_at_5": round(result["unsafe_source_anchor_rate_at_5"], 6),
         "case_pass": not checks,
         "failed_checks": checks,
         "latency_ms": round(result["latency_ms"], 3),
@@ -1134,6 +1153,7 @@ def score_case(
     wrong_scope_hit = False
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     source_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
+    unsafe_source_anchor_count = unsafe_source_anchor_count_at_5(source_blocks)
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         memory_ndcg = memory_ndcg_at_5(rank)
@@ -1197,6 +1217,8 @@ def score_case(
         "source_precision_at_5": source_precision.score,
         "source_result_count_at_5": source_precision.result_count,
         "source_relevant_count_at_5": source_precision.relevant_count,
+        "unsafe_source_anchor_count_at_5": unsafe_source_anchor_count,
+        "unsafe_source_anchor_rate_at_5": ratio(unsafe_source_anchor_count, source_precision.result_count),
         "evidence_expected": bool(is_positive and required_evidence_paths),
         "evidence_reachability_hit": evidence_hit,
         "evidence_text_expected": bool(is_positive and required_evidence_paths and reference_evidence),
@@ -1415,6 +1437,8 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "source_precision_at_5": detail.get("source_precision_at_5"),
                 "source_relevant_count_at_5": detail.get("source_relevant_count_at_5"),
                 "source_result_count_at_5": detail.get("source_result_count_at_5"),
+                "unsafe_source_anchor_count_at_5": detail.get("unsafe_source_anchor_count_at_5"),
+                "unsafe_source_anchor_rate_at_5": detail.get("unsafe_source_anchor_rate_at_5"),
                 "negative_memory_suppression_hit": detail.get("negative_memory_suppression_hit"),
                 "stale_memory_suppression_hit": detail.get("stale_memory_suppression_hit"),
                 "update_consistency_hit": detail.get("update_consistency_hit"),

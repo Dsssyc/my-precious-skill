@@ -1392,10 +1392,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["source_micro_precision_at_5"], 0.5)
             self.assertEqual(payload["source_result_count_at_5"], 2)
             self.assertEqual(payload["source_relevant_count_at_5"], 1)
+            self.assertEqual(payload["unsafe_source_anchor_count_at_5"], 1)
+            self.assertEqual(payload["unsafe_source_anchor_rate_at_5"], 0.5)
             self.assertIn("source_precision_at_5", detail)
             self.assertEqual(detail["source_precision_at_5"], 0.5)
             self.assertEqual(detail["source_result_count_at_5"], 2)
             self.assertEqual(detail["source_relevant_count_at_5"], 1)
+            self.assertEqual(detail["unsafe_source_anchor_count_at_5"], 1)
+            self.assertEqual(detail["unsafe_source_anchor_rate_at_5"], 0.5)
 
     def test_layered_recall_benchmark_details_sanitize_sensitive_returned_reasons(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1630,6 +1634,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "source_precision_at_5": 0.0,
                         "source_relevant_count_at_5": 0,
                         "source_result_count_at_5": 0,
+                        "unsafe_source_anchor_count_at_5": 0,
+                        "unsafe_source_anchor_rate_at_5": 0.0,
                         "negative_memory_suppression_hit": True,
                         "stale_memory_suppression_hit": True,
                         "update_consistency_hit": False,
