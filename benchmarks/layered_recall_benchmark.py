@@ -155,7 +155,8 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
                 )
     validate_case_archive_path(case, "expected_summary_path", path, line_no)
     validate_case_archive_path(case, "expected_source_anchor", path, line_no)
-    optional_case_texts(case, "required_evidence_paths", path, line_no)
+    for evidence_path in optional_case_texts(case, "required_evidence_paths", path, line_no):
+        validate_archive_relative_path(evidence_path, "required_evidence_paths", path, line_no)
     validate_forbidden_output_patterns(case, path, line_no)
 
 

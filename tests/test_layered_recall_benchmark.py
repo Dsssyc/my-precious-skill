@@ -890,13 +890,13 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     extra_args=["--details-jsonl", str(details)],
                 )
 
-                self.assertEqual(result.returncode, 0)
-                payload = json.loads(result.stdout)
-                self.assertEqual(payload["evidence_text_cases"], 1)
-                self.assertEqual(payload["evidence_text_reachability"], 0.0)
-                detail = self.read_rows(details)[0]
-                self.assertFalse(detail["evidence_text_reachability_hit"])
-                self.assertIn("evidence_text_reachability", detail["failed_checks"])
+                combined = result.stdout + result.stderr
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{cases}:1", result.stderr)
+                self.assertIn("unsafe archive path in benchmark case field", result.stderr)
+                self.assertIn("required_evidence_paths", result.stderr)
+                self.assertNotIn("Dedicated supporting evidence token", combined)
+                self.assertFalse(details.exists())
 
     def test_synthetic_builder_includes_reference_evidence_for_reachability(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2274,6 +2274,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         scenarios = (
             ("expected_summary_path", {"expected_summary_path": "../outside/summary.md"}),
             ("expected_source_anchor", {"expected_source_anchor": "../outside/raw.jsonl#message:1"}),
+            ("required_evidence_paths", {"required_evidence_paths": ["../outside/evidence.md"]}),
         )
         for field, override in scenarios:
             with self.subTest(field=field):
