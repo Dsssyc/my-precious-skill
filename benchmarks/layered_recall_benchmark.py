@@ -933,10 +933,20 @@ def blocks_contain_memory_ids(blocks: list[str], memory_ids: list[str], records:
     return False
 
 
-def evidence_reachability_hit(blocks: list[str], required_paths: list[str]) -> bool:
+def evidence_reachability_hit(
+    blocks: list[str],
+    expected_memory_id: str,
+    required_paths: list[str],
+    record: dict | None,
+) -> bool:
     if not required_paths:
         return False
-    result_paths = set(block_result_paths(blocks))
+    expected_memory_blocks = [
+        block
+        for block in blocks
+        if is_memory_block(block) and block_contains_memory(block, expected_memory_id, record)
+    ]
+    result_paths = set(block_result_paths(expected_memory_blocks))
     return all(required_path in result_paths for required_path in required_paths)
 
 
@@ -1258,7 +1268,12 @@ def score_case(
             )
             source_precision = source_anchor_precision_at_5(source_blocks, expected_source_anchor)
         if required_evidence_paths:
-            evidence_hit = evidence_reachability_hit(source_blocks + memory_blocks, required_evidence_paths)
+            evidence_hit = evidence_reachability_hit(
+                source_blocks + memory_blocks,
+                expected_memory_id,
+                required_evidence_paths,
+                expected_record,
+            )
         if required_evidence_paths and reference_evidence:
             evidence_text_hit = evidence_text_reachability_hit(repo, required_evidence_paths, reference_evidence)
         if reference_answers:
