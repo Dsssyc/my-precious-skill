@@ -376,6 +376,11 @@ MEMORY_NODE_ENUM_FIELDS = {
     "persistence": {"normal", "sticky"},
 }
 MEMORY_NODE_STRING_LIST_FIELDS = {"derived_from", "supersedes", "tags"}
+MEMORY_LAYER_ROOT_FILES = {
+    "global": "memories/global.jsonl",
+    "domain": "memories/domains.jsonl",
+    "project": "memories/projects.jsonl",
+}
 
 
 def has_sensitive_identifier_token(text: str) -> bool:
@@ -812,11 +817,29 @@ def audit_memory_references(repo: Path) -> list[Finding]:
     return findings
 
 
+def audit_memory_file_placement(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if relative == "index/memories.jsonl" or row.get("__invalid_json__"):
+            continue
+        if not is_valid_memory_node_shape(row):
+            continue
+        if relative == "memories/explicit.jsonl":
+            if row.get("source") != "explicit":
+                findings.append(Finding(relative, line_number, "memory_file_mismatch"))
+            continue
+        expected = MEMORY_LAYER_ROOT_FILES.get(str(row.get("layer", "")))
+        if expected is not None and relative != expected:
+            findings.append(Finding(relative, line_number, "memory_file_mismatch"))
+    return findings
+
+
 def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     findings: list[Finding] = []
     for path in sorted(iter_archive_files(repo)):
         findings.extend(scan_file(repo, path, check_process_updates))
     findings.extend(audit_memory_references(repo))
+    findings.extend(audit_memory_file_placement(repo))
     findings.extend(audit_memory_index_consistency(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 

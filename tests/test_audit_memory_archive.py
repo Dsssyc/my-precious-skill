@@ -739,6 +739,61 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             for line_number in range(1, 7):
                 self.assertIn(f"memories/global.jsonl:{line_number} category=invalid_memory_node", combined)
 
+    def test_audit_memory_archive_flags_memory_root_file_layer_mismatches(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            domain_in_global = valid_memory_node(memory_id="mem_domain_in_global", layer="domain", scope="memory")
+            project_in_domains = valid_memory_node(
+                memory_id="mem_project_in_domains",
+                layer="project",
+                scope="/repo/project",
+            )
+            automatic_in_explicit = valid_memory_node(memory_id="mem_auto_in_explicit", source="automatic")
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(domain_in_global, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "memories/domains.jsonl").write_text(
+                json.dumps(project_in_domains, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "memories/explicit.jsonl").write_text(
+                json.dumps(automatic_in_explicit, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memories.jsonl").write_text(
+                "".join(
+                    json.dumps(node, sort_keys=True) + "\n"
+                    for node in (domain_in_global, project_in_domains, automatic_in_explicit)
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/global.jsonl:1 category=memory_file_mismatch", combined)
+            self.assertIn("memories/domains.jsonl:1 category=memory_file_mismatch", combined)
+            self.assertIn("memories/explicit.jsonl:1 category=memory_file_mismatch", combined)
+            self.assertNotIn("category=memory_index_mismatch", combined)
+
     def test_audit_memory_archive_flags_broken_root_memory_references(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -834,6 +889,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 json.dumps(
                     valid_memory_node(
                         memory_id="mem_valid_root_raw_ref",
+                        source="explicit",
                         derived_from=["sessions/2026/06/05/root-valid-memory/summary.md"],
                         evidence_refs=[
                             {"path": "sessions/2026/06/05/root-valid-memory/evidence.md", "quote_id": "ev_001"}
