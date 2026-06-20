@@ -107,6 +107,8 @@ QUERY_STOP_TOKENS = {
     "been",
     "being",
     "by",
+    "can",
+    "could",
     "did",
     "do",
     "does",
@@ -118,6 +120,11 @@ QUERY_STOP_TOKENS = {
     "of",
     "on",
     "or",
+    "may",
+    "might",
+    "must",
+    "shall",
+    "should",
     "that",
     "the",
     "these",
@@ -131,6 +138,8 @@ QUERY_STOP_TOKENS = {
     "where",
     "which",
     "who",
+    "will",
+    "would",
     "why",
 }
 
@@ -287,6 +296,10 @@ def important_query_tokens(query_tokens: list[str]) -> list[str]:
     ]
 
 
+def meaningful_query_tokens(query_tokens: list[str]) -> list[str]:
+    return [token for token in query_tokens if token not in GENERIC_SEARCH_TOKENS]
+
+
 def query_phrases(query_tokens: list[str]) -> list[str]:
     phrases: list[str] = []
     for length in range(4, 1, -1):
@@ -335,7 +348,10 @@ def should_keep_match(query_tokens: list[str], matched_tokens: list[str], contex
     content_tokens = non_context_query_tokens(query_tokens, context_terms)
     important_tokens = important_query_tokens(content_tokens)
     if not important_tokens:
-        return True
+        meaningful_tokens = meaningful_query_tokens(content_tokens)
+        if not meaningful_tokens:
+            return True
+        return any(token in matched_tokens for token in meaningful_tokens)
     return any(token in matched_tokens for token in important_tokens)
 
 

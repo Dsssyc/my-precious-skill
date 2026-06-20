@@ -3301,6 +3301,53 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("query must contain at least one searchable token", result.stderr)
 
+    def test_search_memory_ignores_generic_memory_modal_overlap(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/20/modal-overlap"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: modal overlap\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_memory_should_noise",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "modal-overlap",
+                        "text": "Which memory should keep the old scheduler mode?",
+                        "source": "synthetic",
+                        "derived_from": ["sessions/2026/06/20/modal-overlap/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "Which memory should cache?",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No memory hits for: Which memory should cache?", result.stdout)
+        self.assertNotIn("mem_memory_should_noise", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
