@@ -502,7 +502,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                         "evidence_refs": [
                             {"path": "sessions/2026/06/05/valid-memory/evidence.md", "quote_id": "ev_001"}
                         ],
-                        "raw_refs": [{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1"}],
+                        "raw_refs": [{"path": "source-records/safe-gated/source.jsonl", "anchor": "message:1"}],
                         "supersedes": [],
                         "superseded_by": None,
                         "tags": ["audit"],
@@ -1018,7 +1018,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                         evidence_refs=[
                             {"path": "sessions/2026/06/05/root-valid-memory/evidence.md", "quote_id": "ev_001"}
                         ],
-                        raw_refs=[{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1"}],
+                        raw_refs=[{"path": "source-records/safe-gated/source.jsonl", "anchor": "message:1"}],
                     )
                 )
                 + "\n",
@@ -1322,6 +1322,20 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                         raw_refs=[{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1\nleak"}],
                     )
                 )
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_absolute_raw_ref",
+                        raw_refs=[{"path": "/external/safe-gated/source.jsonl", "anchor": "message:1"}],
+                    )
+                )
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_escaping_raw_ref",
+                        raw_refs=[{"path": "../outside/source.jsonl", "anchor": "message:2"}],
+                    )
+                )
                 + "\n",
                 encoding="utf-8",
             )
@@ -1337,6 +1351,8 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("memories/explicit.jsonl:1 category=unsafe_raw_ref", combined)
             self.assertIn("memories/explicit.jsonl:2 category=unsafe_raw_ref", combined)
+            self.assertIn("memories/explicit.jsonl:3 category=unsafe_raw_ref", combined)
+            self.assertIn("memories/explicit.jsonl:4 category=unsafe_raw_ref", combined)
 
     def test_audit_memory_archive_scans_memory_root_files(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

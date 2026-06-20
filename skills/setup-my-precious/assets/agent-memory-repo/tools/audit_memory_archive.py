@@ -769,6 +769,8 @@ def is_safe_raw_ref(ref: object) -> bool:
         return False
     if has_control_chars(path_text) or has_control_chars(anchor_text):
         return False
+    if has_unsafe_identifier_path_reference(path_text):
+        return False
     return not (has_sensitive_identifier_token(path_text) or has_sensitive_identifier_token(anchor_text))
 
 

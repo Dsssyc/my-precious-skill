@@ -233,6 +233,68 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "sessions/2026/06/02/beta/summary.md",
         ])
 
+    def test_build_memory_nodes_omits_unsafe_raw_ref_paths(self):
+        module = load_update_module()
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "/records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": ["Layered memories should not leak local source record paths."],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "explicit_memories": ["Prefer concise answers."],
+                "tags": ["memory"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": ["Safe archive-relative source anchors may be preserved."],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "explicit_memories": ["Use durable benchmark gates."],
+                "tags": ["memory"],
+            },
+            {
+                "session_id": "s3",
+                "project": "gamma",
+                "project_path": "/tmp/gamma",
+                "source_record": "../outside/gamma.jsonl",
+                "source_updated_at": "2026-06-03T10:00:00Z",
+                "summary_path": "sessions/2026/06/03/gamma/summary.md",
+                "evidence_path": "sessions/2026/06/03/gamma/evidence.md",
+                "reusable_facts": [],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "explicit_memories": ["Use source anchors only when safe."],
+                "tags": ["memory"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+
+        by_text = {node["text"]: node for node in nodes}
+        self.assertEqual(by_text["Layered memories should not leak local source record paths."]["raw_refs"], [])
+        self.assertEqual(
+            by_text["Safe archive-relative source anchors may be preserved."]["raw_refs"],
+            [{"path": "source-records/beta.jsonl", "anchor": "source_record"}],
+        )
+        self.assertEqual(by_text["Prefer concise answers."]["raw_refs"], [])
+        self.assertEqual(
+            by_text["Use durable benchmark gates."]["raw_refs"],
+            [{"path": "source-records/beta.jsonl", "anchor": "explicit_memory"}],
+        )
+        self.assertEqual(by_text["Use source anchors only when safe."]["raw_refs"], [])
+
     def test_collect_meta_skips_symlinked_meta_outside_archive(self):
         module = load_update_module()
 

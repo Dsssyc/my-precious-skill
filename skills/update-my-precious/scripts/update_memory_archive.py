@@ -2093,6 +2093,30 @@ def memory_id_for(layer: str, scope: str, text: str, source: str) -> str:
     return f"mem_{digest[:16]}"
 
 
+def has_unsafe_raw_ref_path(text: str) -> bool:
+    if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", text))
+
+
+def has_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def raw_ref_for_source_record(path: str, anchor: str) -> dict[str, str] | None:
+    path = path.strip()
+    anchor = anchor.strip()
+    if not path or not anchor:
+        return None
+    if has_control_chars(path) or has_control_chars(anchor):
+        return None
+    if has_unsafe_raw_ref_path(path):
+        return None
+    if any(pattern.search(path) or pattern.search(anchor) for pattern in REDACTION_PATTERNS.values()):
+        return None
+    return {"path": path, "anchor": anchor}
+
+
 def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, str]]:
     fields = (
         ("reusable_facts", "Reusable fact from archived session."),
@@ -2162,6 +2186,7 @@ def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
     summary_path = str(row.get("summary_path", ""))
     evidence_path = str(row.get("evidence_path", ""))
     source_record = str(row.get("source_record", ""))
+    raw_ref = raw_ref_for_source_record(source_record, "explicit_memory")
     layer = "global"
     scope = "global"
     return {
@@ -2179,7 +2204,7 @@ def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
         "last_seen": source_updated_at,
         "derived_from": [summary_path] if summary_path else [],
         "evidence_refs": [{"path": evidence_path, "quote_id": "ev_explicit_001"}] if evidence_path else [],
-        "raw_refs": [{"path": source_record, "anchor": "explicit_memory"}] if source_record else [],
+        "raw_refs": [raw_ref] if raw_ref else [],
         "supersedes": [],
         "superseded_by": None,
         "tags": sorted(set([*tags, topic, "explicit-memory"])),
@@ -2236,8 +2261,9 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
             )
         ]
         raw_refs = [
-            {"path": path, "anchor": "source_record"}
+            raw_ref
             for path in sorted({candidate.source_record for candidate in candidates if candidate.source_record})
+            if (raw_ref := raw_ref_for_source_record(path, "source_record")) is not None
         ]
         confidence = "high" if len(candidates) >= 2 or layer == "global" else "medium"
         tags = sorted({tag for candidate in candidates for tag in candidate.tags if tag} | {first.topic})
