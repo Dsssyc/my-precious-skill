@@ -201,12 +201,18 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
                 yield value
 
 
+def token_occurrence_count(haystack: str, token: str) -> int:
+    if any(ord(char) > 127 for char in token) or any(char in token for char in "_.-"):
+        return haystack.count(token)
+    return len(re.findall(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", haystack))
+
+
 def score_text(query_tokens: list[str], text: str, *, weight: int = 1) -> tuple[int, list[str]]:
     haystack = text.lower()
     matched: list[str] = []
     score = 0
     for token in query_tokens:
-        count = haystack.count(token)
+        count = token_occurrence_count(haystack, token)
         if count:
             matched.append(token)
             score += min(count, 5) * weight * token_importance(token)

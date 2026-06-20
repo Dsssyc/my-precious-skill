@@ -3189,6 +3189,53 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertIn("important-token-coverage", result.stdout)
 
+    def test_search_memory_does_not_match_ascii_query_token_inside_word(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/20/substring"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: substring\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_concatenate",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "string-joining",
+                        "text": "Concatenate archive fragments without a standalone feline keyword.",
+                        "source": "synthetic",
+                        "derived_from": ["sessions/2026/06/20/substring/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "cat",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No memory hits for: cat", result.stdout)
+        self.assertNotIn("mem_concatenate", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
