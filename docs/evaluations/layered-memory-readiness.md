@@ -8,16 +8,17 @@ where the packaged benchmark can overstate readiness, and what remains before
 the project can claim a full non-project-boundary layered memory system.
 
 The conclusion is intentionally narrow: the current benchmark is a repeatable
-local quality gate for retrieval, drilldown, stale suppression, abstention, and
-privacy-boundary behavior on synthetic archives. It is not a direct leaderboard
-score against public long-memory systems such as MemPalace, LongMemEval,
-LoCoMo, Memora, or RULER-style long-context retrieval tests.
+local quality gate for retrieval, drilldown, stale suppression, lifecycle-link
+reciprocity, abstention, and privacy-boundary behavior on synthetic archives. It
+is not a direct leaderboard score against public long-memory systems such as
+MemPalace, LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval
+tests.
 
 ## Current Baseline
 
 Baseline date: 2026-06-20
 
-Code point used for the benchmark harness: `49ea91e`
+Code point used for the benchmark harness: `98d54ba`
 
 Case file:
 `benchmarks/cases/layered_recall_synthetic.jsonl`
@@ -32,15 +33,15 @@ Baseline commands:
 
 ```bash
 python3 benchmarks/build_synthetic_recall_archive.py \
-  --repo /tmp/my-precious-layered-final-audit \
-  --cases benchmarks/cases/layered_recall_synthetic.jsonl
+  --repo /tmp/my-precious-layered-lifecycle-baseline-98d54ba \
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
+  --include-superseded-distractors
 
 python3 benchmarks/layered_recall_benchmark.py \
-  --repo /tmp/my-precious-layered-final-audit \
+  --repo /tmp/my-precious-layered-lifecycle-baseline-98d54ba \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/my-precious-layered-final-details.jsonl \
-  --failures-json /tmp/my-precious-layered-final-failures.json \
+  --details-jsonl /tmp/my-precious-layered-lifecycle-details-98d54ba.jsonl \
   --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
   --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json
 ```
@@ -70,6 +71,8 @@ Baseline result:
 | source_micro_precision_at_5 | 0.24786324786324787 |
 | memory_evidence_ref_cases | 29 |
 | memory_evidence_ref_reachability | 1.0 |
+| lifecycle_supersession_cases | 9 |
+| lifecycle_supersession_reciprocity | 1.0 |
 | evidence_reachability | 1.0 |
 | evidence_text_reachability | 1.0 |
 | answer_reachability | 1.0 |
@@ -83,8 +86,8 @@ Baseline result:
 | failed_case_count | 0 |
 | case_pass_rate | 1.0 |
 
-Latency for this local run was `9834.587 ms` total, `289.253 ms` mean per case,
-and `447.586 ms` max per case. Treat these as local smoke-test timings, not a
+Latency for this local run was `9999.748 ms` total, `294.110 ms` mean per case,
+and `451.506 ms` max per case. Treat these as local smoke-test timings, not a
 performance claim; they depend on the local Python runtime, filesystem cache,
 and machine load.
 
@@ -265,12 +268,20 @@ Measured:
 - `stale_memory_suppression`: superseded memory IDs do not appear.
 - `update_consistency`: the latest expected memory is found while stale memory
   is suppressed.
+- `lifecycle_supersession_cases`: stale/update cases whose synthetic archive
+  contains an expected supersession relationship.
+- `lifecycle_supersession_reciprocity`: the current memory lists every stale
+  memory ID in `supersedes`, and each stale memory points back through
+  `superseded_by`.
 
 Recent hardening:
 
 - Abstention and suppression are checked across default and scoped searches.
 - Unstructured non-no-hit output is rejected even when it does not parse as a
   hit block.
+- The packaged synthetic gate now uses `--include-superseded-distractors` and
+  checks lifecycle reciprocity directly instead of inferring lifecycle health
+  only from search-result suppression.
 
 Not measured:
 
@@ -384,6 +395,13 @@ The current implementation can be trusted for these bounded claims:
 - The benchmark gates `memory_evidence_ref_reachability` at `1.0` across all 29
   positive cases, including the `automatic_induction` and `explicit_memory`
   categories.
+- Repeated exact explicit memories merge support and evidence instead of
+  creating duplicate high-level memory nodes.
+- A synthetic updated fact can create a current memory, mark the previous memory
+  as superseded, preserve evidence traceability, and keep search results on the
+  active current memory.
+- The benchmark gates `lifecycle_supersession_reciprocity` at `1.0` across the
+  9 packaged stale/update cases that include superseded distractors.
 
 ## Remaining Gaps Against The Target System
 
@@ -401,9 +419,10 @@ Current gaps:
   private histories.
 - Direct explicit-memory writes exist in the reusable updater, but runtime-level
   adapters and governing-prompt integration still need policy design.
-- The system has `global`, `domain`, and `project` memory files, but lifecycle
-  operations such as support-count update, contradiction handling, supersession,
-  decay, and confidence revision are still incomplete.
+- The system has `global`, `domain`, and `project` memory files, and now has a
+  minimum exact-match lifecycle loop for support merge and refresh/supersession.
+  Contradiction handling, partial supersession, decay, and confidence revision
+  are still incomplete.
 - Raw/source reachability is represented by anchors, not by a fully gated
   drilldown workflow that can safely walk all the way to original chat records.
 - The benchmark has three `evidence_text` cases; this is a better guard than
@@ -440,15 +459,17 @@ this convergence audit as open-ended optimization.
 
 ## Recommendation
 
-Proceed from the minimum verifiable slice to lifecycle and consolidation
+Proceed from the minimum verifiable lifecycle slice to deeper consolidation
 architecture.
 
 The system now has a bounded proof that high-level memories can be induced from
 synthetic session events and that direct explicit memories can be written only
-with evidence. It still does not satisfy the full target design. The next
-valuable work is no longer broad benchmark exploration; it is making the write
-path durable under realistic memory evolution: promotion, merge, refresh,
-supersession, confidence revision, and gated source drilldown.
+with evidence. It also has a synthetic proof for exact support merge and
+refresh/supersession links. It still does not satisfy the full target design.
+The next valuable work is no longer broad benchmark exploration; it is making
+the write path durable under realistic memory evolution: semantic promotion,
+non-exact merge, contradiction handling, partial supersession, confidence
+revision, and gated source drilldown.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -457,9 +478,10 @@ supersession, confidence revision, and gated source drilldown.
    consolidation stage that can merge repeated facts, preserve contradictory
    evidence, and avoid process-noise promotion.
 
-2. Implement lifecycle operations.
-   Add explicit support for refresh, supersession, contradiction handling,
-   confidence revision, decay, and support-count updates.
+2. Deepen lifecycle operations.
+   Extend the exact-match merge/refresh path to handle contradiction,
+   confidence revision, decay, partial supersession, and non-literal
+   support-count updates.
 
 3. Reduce project-boundary centrality.
    Treat project as one retrieval scope rather than the primary storage and

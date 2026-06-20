@@ -191,6 +191,7 @@ summary session output. These metrics are reported as `memory_recall_at_1`,
 `session_drilldown_at_5`, `evidence_reachability`,
 `evidence_text_cases`, `evidence_text_reachability`, `source_reachability`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
+`lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
 `case_pass_rate`. Exact answer
 reachability is strict text reachability. Normalized reachability ignores case
@@ -246,6 +247,9 @@ Memora, and long-context retrieval stress tests:
   hit blocks, including scoped memory searches.
 - `update_consistency`: the latest expected memory is found while stale memory
   is suppressed.
+- `lifecycle_supersession_reciprocity`: the current memory lists every stale
+  memory ID in `supersedes`, and each stale memory points back through
+  `superseded_by`.
 - `privacy_boundary_pass_rate`: configured forbidden output patterns, such as
   raw transcript or secret-like snippets, are not printed.
 
@@ -253,7 +257,9 @@ Search treats memory records with a non-empty `superseded_by` field as
 inactive. The synthetic archive builder can add superseded distractor records
 with strong query overlap so `stale_memory_suppression` and
 `update_consistency` exercise that behavior instead of only testing clean
-indexes.
+indexes. The packaged synthetic quality gate uses those distractors to measure
+`lifecycle_supersession_cases` and `lifecycle_supersession_reciprocity`
+directly.
 
 Benchmark case files are JSONL. Positive cases require `query`,
 `expected_memory_id`, `expected_summary_path`, and `expected_source_anchor`.
@@ -307,7 +313,8 @@ lower it for CI smoke tests.
 The packaged synthetic gates intentionally split lower-bound and upper-bound
 checks: `benchmarks/quality-gates/layered_recall_synthetic.json` covers the
 synthetic suite dimensions, rank coverage, evidence-text reachability, answer
-reachability, pass-rate metrics, and denominator counts, while
+reachability, lifecycle supersession reciprocity, pass-rate metrics, and
+denominator counts, while
 `benchmarks/quality-gates/layered_recall_synthetic_max.json` enforces upper
 bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`, and rank
 mean/median caps. Additional answer-metric gates should be added to custom

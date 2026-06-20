@@ -343,7 +343,8 @@ stress tests:
   `answer_token_f1` for reference-answer snippets that should be present in
   recalled memory/session/source output
 - `abstention_accuracy`, `negative_memory_suppression`,
-  `stale_memory_suppression`, and `update_consistency`
+  `stale_memory_suppression`, `update_consistency`,
+  `lifecycle_supersession_cases`, and `lifecycle_supersession_reciprocity`
 - `privacy_boundary_pass_rate`, total `latency_ms`, `latency_mean_ms`,
   `latency_max_ms`, and per-category summaries
 - denominator counts such as `positive_cases`, `answer_cases`, `stale_cases`,
@@ -428,7 +429,8 @@ archive and run the benchmark against the real search script:
 ```bash
 python benchmarks/build_synthetic_recall_archive.py \
   --repo /tmp/my-precious-synthetic-archive \
-  --cases benchmarks/cases/layered_recall_synthetic.jsonl
+  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
+  --include-superseded-distractors
 
 python benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my-precious-synthetic-archive \
@@ -441,8 +443,9 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 `--details-jsonl` writes one row per case with rank, drill-down, source,
-evidence, abstention, stale-suppression, privacy outcomes, safe case metadata,
-and a `failed_checks` list naming the failed applicable metrics for that case.
+evidence, abstention, stale-suppression, lifecycle-supersession, privacy
+outcomes, safe case metadata, and a `failed_checks` list naming the failed
+applicable metrics for that case.
 The detail rows include benchmark source, temporal scope, expected stale or
 negative memory IDs, stable case IDs when provided, required evidence paths,
 and forbidden-pattern counts, but they do not render raw `reference_answer` or
@@ -470,6 +473,7 @@ example:
 {
   "answer_normalized_reachability": 0.9,
   "categories.knowledge_update.update_consistency": 1.0,
+  "lifecycle_supersession_reciprocity": 1.0,
   "memory_recall_at_5": 0.95,
   "privacy_boundary_pass_rate": 1.0
 }
@@ -479,7 +483,7 @@ Direct `--fail-under` arguments override duplicate metric keys loaded from
 threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
 gate covers the synthetic suite's recall, rank coverage, source/evidence,
 evidence-text reachability, answer reachability, abstention, stale/update,
-privacy, and denominator-count checks. The paired
+lifecycle reciprocity, privacy, and denominator-count checks. The paired
 `benchmarks/quality-gates/layered_recall_synthetic_max.json`
 uses `--fail-over-file` for upper-bound checks such as `failed_case_count`,
 `memory_rank_missing_cases`, `memory_rank_mean`, and `memory_rank_median`. Add
@@ -489,8 +493,10 @@ subprocess has a default 30 second timeout; set finite positive
 `--search-timeout-s` values lower for CI smoke tests or higher for large local
 archives.
 
-To stress stale-memory suppression, add superseded distractor nodes that share
-the same query terms but must not appear in search output:
+The packaged quality-gate command above includes superseded distractor nodes so
+`lifecycle_supersession_cases` has a non-zero denominator. To stress
+stale-memory suppression manually, add the same option when building a temporary
+archive:
 
 ```bash
 python benchmarks/build_synthetic_recall_archive.py \
