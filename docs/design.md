@@ -205,7 +205,7 @@ context, while rejecting low-signal-only or broad-field-only explanations.
 the expected memory from the requested `global`, `domain`, or `project` layer.
 `scope_filter_recall` reruns those `expected_layer` cases with
 `search_memory.py --scope <expected_layer>` and checks that the expected memory
-is still reachable inside the scoped layer.
+is still reachable with a returned memory layer matching the requested scope.
 `wrong_scope_suppression` runs the same cases against the other memory layers
 and checks that the expected memory is not returned from an incorrect scope.
 Token F1 uses the best contiguous output-token window against the reference

@@ -835,6 +835,23 @@ def memory_hit_rank(
     return None
 
 
+def memory_hit_rank_in_layer(
+    blocks: list[str],
+    expected_memory_id: str,
+    expected_summary_path: str,
+    record: dict | None,
+    expected_layer: str,
+) -> int | None:
+    for rank, block in enumerate(blocks, 1):
+        if block_memory_layer(block) != expected_layer:
+            continue
+        if not is_memory_block(block) or not block_has_drill_path(block, expected_summary_path):
+            continue
+        if block_contains_memory(block, expected_memory_id, record):
+            return rank
+    return None
+
+
 def memory_ndcg_at_5(memory_rank: int | None) -> float:
     if memory_rank is None or memory_rank > 5:
         return 0.0
@@ -1204,7 +1221,13 @@ def score_case(
                 expected_layer,
             )
         if expected_layer:
-            scope_rank = memory_hit_rank(scope_blocks, expected_memory_id, expected_summary_path, expected_record)
+            scope_rank = memory_hit_rank_in_layer(
+                scope_blocks,
+                expected_memory_id,
+                expected_summary_path,
+                expected_record,
+                expected_layer,
+            )
             scope_hit = bool(scope_rank is not None and scope_rank <= 5)
             wrong_scope_hit = not bool(
                 memory_hit_rank(wrong_scope_blocks, expected_memory_id, expected_summary_path, expected_record)

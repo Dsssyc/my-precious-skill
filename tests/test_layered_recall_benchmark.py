@@ -1261,6 +1261,36 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertFalse(detail["scope_filter_hit"])
             self.assertIn("scope_filter_recall", detail["failed_checks"])
 
+    def test_scope_filtered_recall_requires_requested_layer(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "expected_layer": "global"})
+            details = root / "details.jsonl"
+            search_script, calls_path = self.write_stub_search(root, mode="scope_wrong_layer")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            calls = calls_path.read_text(encoding="utf-8")
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["layer_calibration"], 1.0)
+            self.assertEqual(payload["scope_filter_cases"], 1)
+            self.assertEqual(payload["scope_filter_recall"], 0.0)
+            self.assertEqual(payload["wrong_scope_suppression"], 1.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["scope_filter_hit"])
+            self.assertIn("scope_filter_recall", detail["failed_checks"])
+            self.assertIn("memory|global|permission prompts", calls)
+
     def test_layered_recall_benchmark_flags_wrong_scope_memory_leak(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3168,6 +3198,21 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     raise SystemExit(1)
 
                 if MODE == "scope_filter_missing" and depth == "memory" and scope != "all":
+                    print(f"No memory hits for: {{query}}")
+                    raise SystemExit(1)
+
+                if MODE == "scope_wrong_layer" and depth == "memory" and scope == "global":
+                    print(f"Top memory hits for: {{query}}")
+                    print()
+                    print("1. [domain] " + MEMORY_TEXT)
+                    print("   source: memory")
+                    print("   why: " + memory_why())
+                    print("   memory_id: mem_permission")
+                    print("   drill:")
+                    print("     - " + SUMMARY_PATH)
+                    raise SystemExit(0)
+
+                if MODE == "scope_wrong_layer" and depth == "memory" and scope not in ("all", "global"):
                     print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
 
