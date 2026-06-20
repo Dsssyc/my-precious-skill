@@ -1341,6 +1341,7 @@ def failed_case_summaries(details: list[dict]) -> list[dict]:
                 "memory_relevant_count_at_5": detail.get("memory_relevant_count_at_5"),
                 "memory_result_count_at_5": detail.get("memory_result_count_at_5"),
                 "memory_result_ids": detail.get("memory_result_ids", []),
+                "memory_results_at_5": detail.get("memory_results_at_5", []),
                 "session_drilldown_hit": detail.get("session_drilldown_hit"),
                 "session_result_paths": detail.get("session_result_paths", []),
                 "evidence_reachability_hit": detail.get("evidence_reachability_hit"),

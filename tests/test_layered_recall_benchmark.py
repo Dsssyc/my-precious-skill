@@ -1475,6 +1475,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         "memory_relevant_count_at_5": 0,
                         "memory_result_count_at_5": 0,
                         "memory_result_ids": [],
+                        "memory_results_at_5": [],
                         "session_drilldown_hit": False,
                         "session_result_paths": [],
                         "evidence_reachability_hit": False,
@@ -1574,6 +1575,47 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
             self.assertNotIn("/Users/private", json.dumps(failure_payload))
             self.assertNotIn("../outside", json.dumps(failure_payload))
+
+    def test_layered_recall_benchmark_failures_json_includes_memory_result_diagnostics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            failures = root / "failures.json"
+            search_script, _ = self.write_stub_search(root, mode="low_signal_memory")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=[
+                    "--fail-over",
+                    "failed_case_count=0",
+                    "--failures-json",
+                    str(failures),
+                ],
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            failure_payload = json.loads(failures.read_text(encoding="utf-8"))
+            failed_case = failure_payload["failed_cases"][0]
+            self.assertEqual(
+                failed_case["memory_results_at_5"],
+                [
+                    {
+                        "rank": 1,
+                        "memory_id": "mem_permission",
+                        "layer": "global",
+                        "reasons": [
+                            "low-signal-only",
+                            "broad-field-only",
+                            "matched:memory, session",
+                        ],
+                        "drill_paths": [SUMMARY_PATH],
+                    }
+                ],
+            )
 
     def test_layered_recall_benchmark_failures_json_includes_answer_diagnostics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
