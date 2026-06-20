@@ -644,6 +644,25 @@ def iter_memory_node_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
                 yield relative, line_number, {"__invalid_json__": True}
 
 
+def iter_session_meta_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
+    sessions_dir = repo / "sessions"
+    if not sessions_dir.is_dir():
+        return
+    for path in sorted(sessions_dir.glob("**/meta.json")):
+        if not path.is_file() or not is_allowed_path(path, repo):
+            continue
+        relative = path.relative_to(repo).as_posix()
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            yield relative, 1, {"__invalid_json__": True}
+            continue
+        if isinstance(value, dict):
+            yield relative, 1, value
+        else:
+            yield relative, 1, {"__invalid_json__": True}
+
+
 def safe_archive_ref_path(repo: Path, path_text: str) -> Path | None:
     if not path_text:
         return None
@@ -970,10 +989,29 @@ def audit_memory_file_placement(repo: Path) -> list[Finding]:
     return findings
 
 
+def audit_session_source_map_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative, line_number, row in iter_session_meta_rows(repo):
+        if row.get("__invalid_json__"):
+            continue
+        source_map_path = row.get("source_map_path")
+        if source_map_path in (None, ""):
+            continue
+        expected_source_map = (PurePosixPath(relative).parent / "source-map.json").as_posix()
+        if (
+            not isinstance(source_map_path, str)
+            or source_map_path.strip() != expected_source_map
+            or safe_archive_ref_path(repo, source_map_path) is None
+        ):
+            findings.append(Finding(relative, line_number, "broken_source_map_ref"))
+    return findings
+
+
 def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     findings: list[Finding] = []
     for path in sorted(iter_archive_files(repo)):
         findings.extend(scan_file(repo, path, check_process_updates))
+    findings.extend(audit_session_source_map_refs(repo))
     findings.extend(audit_memory_references(repo))
     findings.extend(audit_memory_file_placement(repo))
     findings.extend(audit_memory_id_uniqueness(repo))

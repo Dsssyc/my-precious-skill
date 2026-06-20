@@ -620,6 +620,125 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("index/memories.jsonl:1 category=unsafe_raw_ref", combined)
 
+    def test_audit_memory_archive_flags_missing_meta_source_map_paths(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/missing-source-map-meta"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for source map metadata validation.\n", encoding="utf-8")
+            (entry_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "summary_path": "sessions/2026/06/05/missing-source-map-meta/summary.md",
+                        "source_map_path": "sessions/2026/06/05/missing-source-map-meta/source-map.json",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sessions/2026/06/05/missing-source-map-meta/meta.json:1 category=broken_source_map_ref", combined)
+
+    def test_audit_memory_archive_flags_cross_entry_meta_source_map_paths(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/cross-source-map-meta"
+            other_dir = memory_repo / "sessions/2026/06/05/other-source-map"
+            entry_dir.mkdir(parents=True)
+            other_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for cross-entry source map validation.\n", encoding="utf-8")
+            (other_dir / "source-map.json").write_text("{}\n", encoding="utf-8")
+            (entry_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "summary_path": "sessions/2026/06/05/cross-source-map-meta/summary.md",
+                        "source_map_path": "sessions/2026/06/05/other-source-map/source-map.json",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sessions/2026/06/05/cross-source-map-meta/meta.json:1 category=broken_source_map_ref", combined)
+
+    def test_audit_memory_archive_allows_valid_meta_source_map_paths(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/valid-source-map-meta"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for valid source map metadata.\n", encoding="utf-8")
+            (entry_dir / "source-map.json").write_text("{}\n", encoding="utf-8")
+            (entry_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "summary_path": "sessions/2026/06/05/valid-source-map-meta/summary.md",
+                        "source_map_path": "sessions/2026/06/05/valid-source-map-meta/source-map.json",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_audit_memory_archive_flags_missing_evidence_quote_id(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
