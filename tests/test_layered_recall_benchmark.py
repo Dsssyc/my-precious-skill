@@ -2523,6 +2523,27 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn(f"{cases}:1", result.stderr)
             self.assertIn("invalid forbidden_output_patterns[0]", result.stderr)
 
+    def test_expected_memory_id_must_not_be_also_forbidden_or_stale(self):
+        for conflicting_key in ("expected_not_memory_id", "stale_memory_id"):
+            with self.subTest(conflicting_key=conflicting_key):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    repo = self.create_repo(root)
+                    cases = self.write_cases(
+                        root,
+                        {
+                            **self.valid_case(),
+                            conflicting_key: "mem_permission",
+                        },
+                    )
+                    search_script, _ = self.write_stub_search(root)
+
+                    result = self.run_benchmark(repo, cases, search_script, check=False)
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"{cases}:1", result.stderr)
+                    self.assertIn(f"expected_memory_id must not also appear in {conflicting_key}", result.stderr)
+
     def test_layered_recall_benchmark_reports_metric_denominators(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

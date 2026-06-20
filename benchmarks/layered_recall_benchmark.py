@@ -146,6 +146,13 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
         "temporal_scope",
     ):
         optional_case_text_or_texts(case, key, path, line_no)
+    expected_memory_id = optional_case_text(case, "expected_memory_id")
+    if expected_memory_id:
+        for key in ("expected_not_memory_id", "stale_memory_id"):
+            if expected_memory_id in case_texts(case, key):
+                raise SystemExit(
+                    f"{case_location(path, line_no)}: expected_memory_id must not also appear in {key}"
+                )
     optional_case_texts(case, "required_evidence_paths", path, line_no)
     validate_forbidden_output_patterns(case, path, line_no)
 
