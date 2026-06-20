@@ -1515,6 +1515,58 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
 
+    def test_search_memory_skips_missing_memory_drill_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/reachable-drill"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Reachable Drill\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_reachable_drill",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "drill-reachability",
+                        "text": "Reachable drill token should not advertise missing supporting files.",
+                        "source": "explicit",
+                        "derived_from": [
+                            "sessions/2026/06/17/reachable-drill/summary.md",
+                            "sessions/2026/06/17/missing-drill/summary.md",
+                        ],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/missing-drill/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "reachable drill token",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("drill:", result.stdout)
+        self.assertIn("sessions/2026/06/17/reachable-drill/summary.md", result.stdout)
+        self.assertNotIn("sessions/2026/06/17/missing-drill/summary.md", result.stdout)
+        self.assertNotIn("sessions/2026/06/17/missing-drill/evidence.md", result.stdout)
+
     def test_search_memory_sanitizes_sensitive_legacy_index_titles(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

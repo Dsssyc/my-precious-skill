@@ -552,6 +552,10 @@ def is_archive_internal_ref_path(path_text: str) -> bool:
     return any(path_text == root or path_text.startswith(f"{root}/") for root in ARCHIVE_INTERNAL_REF_ROOTS)
 
 
+def is_reachable_drill_path(repo: Path, path_text: str) -> bool:
+    return not is_archive_internal_ref_path(path_text) or (repo / path_text).is_file()
+
+
 def unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     out: list[str] = []
@@ -706,11 +710,11 @@ def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
     paths: list[str] = []
     for path in iter_ref_paths(record.get("derived_from")):
         safe_path = safe_repo_relative_path(repo, path)
-        if safe_path:
+        if safe_path and is_reachable_drill_path(repo, safe_path):
             paths.append(safe_path)
     for path in iter_ref_paths(record.get("evidence_refs")):
         safe_path = safe_repo_relative_path(repo, path)
-        if safe_path:
+        if safe_path and is_reachable_drill_path(repo, safe_path):
             paths.append(safe_path)
     return unique_ordered(paths)
 
