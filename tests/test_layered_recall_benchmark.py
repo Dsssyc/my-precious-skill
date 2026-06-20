@@ -144,6 +144,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 payload["source_relevant_count_at_5"] / payload["source_result_count_at_5"],
             )
             self.assertEqual(payload["evidence_reachability"], 1.0)
+            self.assertEqual(payload["memory_evidence_ref_cases"], payload["positive_cases"])
+            self.assertEqual(payload["memory_evidence_ref_reachability"], 1.0)
             self.assertEqual(payload["evidence_text_cases"], 3)
             self.assertEqual(payload["evidence_text_reachability"], 1.0)
             self.assertEqual(payload["answer_cases"], 11)
@@ -166,8 +168,16 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["abstention"]["case_pass_rate"], 1.0)
             self.assertEqual(payload["categories"]["automatic_induction"]["case_pass_rate"], 1.0)
             self.assertEqual(payload["categories"]["automatic_induction"]["layer_calibration"], 1.0)
+            self.assertEqual(
+                payload["categories"]["automatic_induction"]["memory_evidence_ref_reachability"],
+                1.0,
+            )
             self.assertEqual(payload["categories"]["explicit_memory"]["case_pass_rate"], 1.0)
             self.assertEqual(payload["categories"]["explicit_memory"]["layer_calibration"], 1.0)
+            self.assertEqual(
+                payload["categories"]["explicit_memory"]["memory_evidence_ref_reachability"],
+                1.0,
+            )
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
             self.assertEqual(payload["categories"]["privacy_boundary"]["privacy_boundary_pass_rate"], 1.0)
 
@@ -211,6 +221,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
             self.assertEqual(lower_gates["memory_explainability"], 1.0)
             self.assertEqual(lower_gates["memory_explainability_cases"], 29)
+            self.assertEqual(lower_gates["memory_evidence_ref_cases"], 29)
+            self.assertEqual(lower_gates["memory_evidence_ref_reachability"], 1.0)
             self.assertEqual(lower_gates["layer_calibration"], 1.0)
             self.assertEqual(lower_gates["layer_calibration_cases"], 5)
             self.assertEqual(lower_gates["scope_filter_recall"], 1.0)
@@ -232,8 +244,16 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             self.assertEqual(lower_gates["categories.automatic_induction.case_pass_rate"], 1.0)
             self.assertEqual(lower_gates["categories.automatic_induction.layer_calibration"], 1.0)
+            self.assertEqual(
+                lower_gates["categories.automatic_induction.memory_evidence_ref_reachability"],
+                1.0,
+            )
             self.assertEqual(lower_gates["categories.explicit_memory.case_pass_rate"], 1.0)
             self.assertEqual(lower_gates["categories.explicit_memory.layer_calibration"], 1.0)
+            self.assertEqual(
+                lower_gates["categories.explicit_memory.memory_evidence_ref_reachability"],
+                1.0,
+            )
             subprocess.run(
                 [
                     sys.executable,
@@ -276,6 +296,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
             self.assertGreaterEqual(payload["memory_explainability"], lower_gates["memory_explainability"])
             self.assertGreaterEqual(payload["memory_explainability_cases"], lower_gates["memory_explainability_cases"])
+            self.assertGreaterEqual(payload["memory_evidence_ref_cases"], lower_gates["memory_evidence_ref_cases"])
+            self.assertGreaterEqual(
+                payload["memory_evidence_ref_reachability"],
+                lower_gates["memory_evidence_ref_reachability"],
+            )
             self.assertGreaterEqual(payload["layer_calibration"], lower_gates["layer_calibration"])
             self.assertGreaterEqual(payload["layer_calibration_cases"], lower_gates["layer_calibration_cases"])
             self.assertGreaterEqual(payload["scope_filter_recall"], lower_gates["scope_filter_recall"])
@@ -1239,6 +1264,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     "session_drilldown_at_5",
                     "source_reachability",
                     "evidence_reachability",
+                    "memory_evidence_ref_reachability",
                     "answer_reachability",
                     "answer_normalized_reachability",
                     "answer_token_f1",

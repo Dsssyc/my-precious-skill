@@ -294,6 +294,8 @@ def new_totals() -> Totals:
         "source_result_count_at_5": 0,
         "source_relevant_count_at_5": 0,
         "unsafe_source_anchor_count_at_5": 0,
+        "memory_evidence_ref_cases": 0,
+        "memory_evidence_ref_hits": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
         "evidence_text_cases": 0,
@@ -412,6 +414,11 @@ def finalize_totals(totals: Totals) -> dict:
             totals["unsafe_source_anchor_count_at_5"],
             totals["source_result_count_at_5"],
         ),
+        "memory_evidence_ref_cases": int(totals["memory_evidence_ref_cases"]),
+        "memory_evidence_ref_reachability": ratio(
+            totals["memory_evidence_ref_hits"],
+            totals["memory_evidence_ref_cases"],
+        ),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "evidence_text_cases": int(totals["evidence_text_cases"]),
         "evidence_text_reachability": ratio(totals["evidence_text_hits"], totals["evidence_text_cases"]),
@@ -472,6 +479,8 @@ def add_result(totals: Totals, result: dict) -> None:
             totals["unsafe_source_anchor_count_at_5"] += result["unsafe_source_anchor_count_at_5"]
         totals["evidence_cases"] += int(result["evidence_expected"])
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
+        totals["memory_evidence_ref_cases"] += int(result["evidence_expected"])
+        totals["memory_evidence_ref_hits"] += int(result["memory_evidence_ref_reachability_hit"])
         totals["evidence_text_cases"] += int(result["evidence_text_expected"])
         totals["evidence_text_hits"] += int(result["evidence_text_reachability_hit"])
         totals["answer_cases"] += int(result["answer_expected"])
@@ -981,6 +990,22 @@ def evidence_reachability_hit(
     return all(required_path in result_paths for required_path in required_paths)
 
 
+def evidence_ref_matches_path(evidence_ref: str, required_path: str) -> bool:
+    return evidence_ref == required_path or evidence_ref.startswith(f"{required_path}#")
+
+
+def memory_evidence_ref_reachability_hit(
+    blocks: list[str],
+    expected_memory_id: str,
+    required_paths: list[str],
+    record: dict | None,
+) -> bool:
+    if not required_paths:
+        return False
+    evidence_refs = block_section_values(expected_memory_blocks(blocks, expected_memory_id, record), "evidence")
+    return all(any(evidence_ref_matches_path(ref, required_path) for ref in evidence_refs) for required_path in required_paths)
+
+
 def safe_repo_file(repo: Path, path_text: str) -> Path | None:
     if not path_text.strip():
         return None
@@ -1110,6 +1135,8 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("source_reachability")
         if result["evidence_expected"] and not result["evidence_reachability_hit"]:
             checks.append("evidence_reachability")
+        if result["evidence_expected"] and not result["memory_evidence_ref_reachability_hit"]:
+            checks.append("memory_evidence_ref_reachability")
         if result["evidence_text_expected"] and not result["evidence_text_reachability_hit"]:
             checks.append("evidence_text_reachability")
         if result["answer_expected"]:
@@ -1169,6 +1196,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
         "source_reachability_hit": result["source_reachability_hit"],
+        "memory_evidence_ref_reachability_hit": result["memory_evidence_ref_reachability_hit"],
         "evidence_reachability_hit": result["evidence_reachability_hit"],
         "evidence_text_reachability_hit": result["evidence_text_reachability_hit"],
         "answer_expected": result["answer_expected"],
@@ -1272,6 +1300,7 @@ def score_case(
     session_hit = False
     source_hit = False
     evidence_hit = False
+    memory_evidence_ref_hit = False
     evidence_text_hit = False
     answer_hit = False
     normalized_answer_hit = False
@@ -1336,6 +1365,12 @@ def score_case(
                 required_evidence_paths,
                 expected_record,
             )
+            memory_evidence_ref_hit = memory_evidence_ref_reachability_hit(
+                memory_blocks,
+                expected_memory_id,
+                required_evidence_paths,
+                expected_record,
+            )
         if required_evidence_paths and reference_evidence:
             evidence_text_hit = evidence_text_reachability_hit(repo, required_evidence_paths, reference_evidence)
         if reference_answers:
@@ -1387,6 +1422,7 @@ def score_case(
         "unsafe_source_anchor_rate_at_5": ratio(unsafe_source_anchor_count, source_precision.result_count),
         "evidence_expected": bool(is_positive and required_evidence_paths),
         "evidence_reachability_hit": evidence_hit,
+        "memory_evidence_ref_reachability_hit": memory_evidence_ref_hit,
         "evidence_text_expected": bool(is_positive and required_evidence_paths and reference_evidence),
         "evidence_text_reachability_hit": evidence_text_hit,
         "answer_expected": bool(is_positive and reference_answers),
