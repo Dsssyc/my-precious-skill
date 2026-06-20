@@ -663,6 +663,25 @@ def iter_session_meta_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
             yield relative, 1, {"__invalid_json__": True}
 
 
+def iter_session_source_map_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
+    sessions_dir = repo / "sessions"
+    if not sessions_dir.is_dir():
+        return
+    for path in sorted(sessions_dir.glob("**/source-map.json")):
+        if not path.is_file() or not is_allowed_path(path, repo):
+            continue
+        relative = path.relative_to(repo).as_posix()
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            yield relative, 1, {"__invalid_json__": True}
+            continue
+        if isinstance(value, dict):
+            yield relative, 1, value
+        else:
+            yield relative, 1, {"__invalid_json__": True}
+
+
 def safe_archive_ref_path(repo: Path, path_text: str) -> Path | None:
     if not path_text:
         return None
@@ -1005,6 +1024,9 @@ def audit_session_source_map_refs(repo: Path) -> list[Finding]:
             or safe_archive_ref_path(repo, source_map_path) is None
         ):
             findings.append(Finding(relative, line_number, "broken_source_map_ref"))
+    for relative, line_number, row in iter_session_source_map_rows(repo):
+        if row.get("__invalid_json__"):
+            findings.append(Finding(relative, line_number, "invalid_json"))
     return findings
 
 
