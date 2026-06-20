@@ -933,6 +933,14 @@ def blocks_contain_memory_ids(blocks: list[str], memory_ids: list[str], records:
     return False
 
 
+def expected_memory_blocks(blocks: list[str], expected_memory_id: str, record: dict | None) -> list[str]:
+    return [
+        block
+        for block in blocks
+        if is_memory_block(block) and block_contains_memory(block, expected_memory_id, record)
+    ]
+
+
 def evidence_reachability_hit(
     blocks: list[str],
     expected_memory_id: str,
@@ -941,12 +949,7 @@ def evidence_reachability_hit(
 ) -> bool:
     if not required_paths:
         return False
-    expected_memory_blocks = [
-        block
-        for block in blocks
-        if is_memory_block(block) and block_contains_memory(block, expected_memory_id, record)
-    ]
-    result_paths = set(block_result_paths(expected_memory_blocks))
+    result_paths = set(block_result_paths(expected_memory_blocks(blocks, expected_memory_id, record)))
     return all(required_path in result_paths for required_path in required_paths)
 
 
@@ -987,6 +990,19 @@ def evidence_text_reachability_hit(repo: Path, evidence_paths: list[str], refere
     if not evidence_texts:
         return False
     return all(any(snippet in text for text in evidence_texts) for snippet in reference_evidence)
+
+
+def answer_context_blocks(
+    memory_blocks: list[str],
+    session_blocks: list[str],
+    source_blocks: list[str],
+    expected_memory_id: str,
+    expected_summary_path: str,
+    record: dict | None,
+) -> list[str]:
+    memory_context = expected_memory_blocks(memory_blocks + source_blocks, expected_memory_id, record)
+    session_context = [block for block in session_blocks if expected_summary_path in block_result_paths([block])]
+    return [*memory_context, *session_context]
 
 
 def answer_reachability_hit(blocks: list[str], reference_answers: list[str]) -> bool:
@@ -1277,9 +1293,18 @@ def score_case(
         if required_evidence_paths and reference_evidence:
             evidence_text_hit = evidence_text_reachability_hit(repo, required_evidence_paths, reference_evidence)
         if reference_answers:
-            answer_hit = answer_reachability_hit(memory_blocks + session_blocks + source_blocks, reference_answers)
-            normalized_answer_hit = answer_normalized_reachability_hit(combined_output, reference_answers)
-            answer_f1 = answer_token_f1(combined_output, reference_answers)
+            answer_blocks = answer_context_blocks(
+                memory_blocks,
+                session_blocks,
+                source_blocks,
+                expected_memory_id,
+                expected_summary_path,
+                expected_record,
+            )
+            answer_output = "\n".join(answer_blocks)
+            answer_hit = answer_reachability_hit(answer_blocks, reference_answers)
+            normalized_answer_hit = answer_normalized_reachability_hit(answer_output, reference_answers)
+            answer_f1 = answer_token_f1(answer_output, reference_answers)
 
     no_result_hits = no_hit_outputs(memory_output, session_output, source_output, *abstain_scope_outputs)
     negative_suppressed = not blocks_contain_memory_ids(suppression_blocks, negative_memory_ids, memory_records)

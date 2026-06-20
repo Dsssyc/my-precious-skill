@@ -945,6 +945,37 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(rows[0]["answer_normalized_reachability_hit"])
             self.assertEqual(rows[0]["answer_token_f1"], 1.0)
 
+    def test_answer_reachability_requires_expected_memory_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, {**self.valid_case(), "reference_answer": "Zebra isotope lantern."})
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="answer_wrong_memory")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertEqual(payload["answer_reachability"], 0.0)
+            self.assertEqual(payload["answer_normalized_reachability"], 0.0)
+            self.assertEqual(payload["answer_token_f1"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["answer_reachability_hit"])
+            self.assertFalse(detail["answer_normalized_reachability_hit"])
+            self.assertEqual(detail["answer_token_f1"], 0.0)
+            self.assertIn("answer_reachability", detail["failed_checks"])
+            self.assertIn("answer_normalized_reachability", detail["failed_checks"])
+            self.assertIn("answer_token_f1", detail["failed_checks"])
+
     def test_synthetic_builder_includes_reference_answer_for_reachability(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3498,6 +3529,24 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_other")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH.replace("/summary.md", "/evidence.md"))
+                    elif MODE == "answer_wrong_memory":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [global] " + MEMORY_TEXT)
+                        print("   source: memory")
+                        print("   why: " + memory_why())
+                        print("   memory_id: mem_permission")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                        print("   source anchors:")
+                        print("     - " + SOURCE_ANCHOR)
+                        print()
+                        print("2. [global] Zebra isotope lantern.")
+                        print("   source: memory")
+                        print("   why: field:text; matched:zebra")
+                        print("   memory_id: mem_other")
+                        print("   drill:")
+                        print("     - sessions/other/summary.md")
                     else:
                         print(f"Top memory hits for: {{query}}")
                         print()
