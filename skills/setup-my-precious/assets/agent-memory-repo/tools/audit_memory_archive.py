@@ -741,7 +741,9 @@ def is_valid_evidence_ref_shape(ref: object) -> bool:
         isinstance(ref, dict)
         and set(ref) == {"path", "quote_id"}
         and isinstance(ref.get("path"), str)
+        and bool(ref.get("path", "").strip())
         and isinstance(ref.get("quote_id"), str)
+        and bool(ref.get("quote_id", "").strip())
     )
 
 
@@ -781,13 +783,17 @@ def is_valid_memory_node_shape(row: dict) -> bool:
         return False
     if not is_positive_int(row.get("support_count")):
         return False
-    for field in MEMORY_NODE_STRING_LIST_FIELDS:
+    derived_from = row.get("derived_from")
+    if not is_string_list(derived_from) or not derived_from:
+        return False
+    for field in MEMORY_NODE_STRING_LIST_FIELDS - {"derived_from"}:
         if not is_string_list(row.get(field)):
             return False
     if not all(is_safe_memory_identifier(target) for target in row.get("supersedes", [])):
         return False
-    if not isinstance(row.get("evidence_refs"), list) or not all(
-        is_valid_evidence_ref_shape(ref) for ref in row.get("evidence_refs", [])
+    evidence_refs = row.get("evidence_refs")
+    if not isinstance(evidence_refs, list) or not evidence_refs or not all(
+        is_valid_evidence_ref_shape(ref) for ref in evidence_refs
     ):
         return False
     superseded_by = row.get("superseded_by")

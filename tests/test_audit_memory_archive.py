@@ -31,6 +31,18 @@ def valid_memory_node(**overrides):
     return node
 
 
+def write_memory_node_provenance(memory_repo, slug, quote_id="ev_001"):
+    entry_rel = f"sessions/2026/06/05/{slug}"
+    entry_dir = memory_repo / entry_rel
+    entry_dir.mkdir(parents=True)
+    (entry_dir / "summary.md").write_text(f"Summary for {slug} memory audit.\n", encoding="utf-8")
+    (entry_dir / "evidence.md").write_text(f"{quote_id}: Evidence for {slug} memory audit.\n", encoding="utf-8")
+    return {
+        "derived_from": [f"{entry_rel}/summary.md"],
+        "evidence_refs": [{"path": f"{entry_rel}/evidence.md", "quote_id": quote_id}],
+    }
+
+
 class AuditMemoryArchiveTests(unittest.TestCase):
     def test_audit_memory_archive_flags_noise_and_secrets_without_leaking_values(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
@@ -935,6 +947,54 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("category=broken_memory_ref", combined)
             self.assertIn("index/memories.jsonl", combined)
 
+    def test_audit_memory_archive_flags_memory_nodes_without_required_provenance(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            missing_derived = valid_memory_node(
+                memory_id="mem_missing_derived",
+                derived_from=[],
+                evidence_refs=[{"path": "sessions/2026/06/05/provenance/evidence.md", "quote_id": "ev_001"}],
+            )
+            missing_evidence = valid_memory_node(
+                memory_id="mem_missing_evidence",
+                derived_from=["sessions/2026/06/05/provenance/summary.md"],
+                evidence_refs=[],
+            )
+            entry_dir = memory_repo / "sessions/2026/06/05/provenance"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for provenance audit.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for provenance audit.\n", encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(missing_derived, sort_keys=True)
+                + "\n"
+                + json.dumps(missing_evidence, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("index/memories.jsonl:1 category=invalid_memory_node", combined)
+            self.assertIn("index/memories.jsonl:2 category=invalid_memory_node", combined)
+
     def test_audit_memory_archive_flags_invalid_memory_node_rows(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -1232,13 +1292,24 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 text=True,
             )
 
-            domain_in_global = valid_memory_node(memory_id="mem_domain_in_global", layer="domain", scope="memory")
+            provenance = write_memory_node_provenance(memory_repo, "file-layer-mismatch")
+            domain_in_global = valid_memory_node(
+                memory_id="mem_domain_in_global",
+                layer="domain",
+                scope="memory",
+                **provenance,
+            )
             project_in_domains = valid_memory_node(
                 memory_id="mem_project_in_domains",
                 layer="project",
                 scope="/repo/project",
+                **provenance,
             )
-            automatic_in_explicit = valid_memory_node(memory_id="mem_auto_in_explicit", source="automatic")
+            automatic_in_explicit = valid_memory_node(
+                memory_id="mem_auto_in_explicit",
+                source="automatic",
+                **provenance,
+            )
             (memory_repo / "memories/global.jsonl").write_text(
                 json.dumps(domain_in_global, sort_keys=True) + "\n",
                 encoding="utf-8",
@@ -1293,6 +1364,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 scope="global",
                 source="explicit",
                 persistence="sticky",
+                **write_memory_node_provenance(memory_repo, "explicit-outside-root"),
             )
             (memory_repo / "memories/global.jsonl").write_text(
                 json.dumps(misplaced_explicit, sort_keys=True) + "\n",
@@ -1582,12 +1654,13 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 text=True,
             )
 
+            provenance = write_memory_node_provenance(memory_repo, "broken-supersession")
             (memory_repo / "index/memories.jsonl").write_text(
-                json.dumps(valid_memory_node(memory_id="mem_current", supersedes=["mem_missing_old"]))
+                json.dumps(valid_memory_node(memory_id="mem_current", supersedes=["mem_missing_old"], **provenance))
                 + "\n"
-                + json.dumps(valid_memory_node(memory_id="mem_old", superseded_by="mem_missing_new"))
+                + json.dumps(valid_memory_node(memory_id="mem_old", superseded_by="mem_missing_new", **provenance))
                 + "\n"
-                + json.dumps(valid_memory_node(memory_id="mem_self", supersedes=["mem_self"]))
+                + json.dumps(valid_memory_node(memory_id="mem_self", supersedes=["mem_self"], **provenance))
                 + "\n",
                 encoding="utf-8",
             )
@@ -1619,14 +1692,27 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 text=True,
             )
 
+            provenance = write_memory_node_provenance(memory_repo, "non-reciprocal-supersession")
             (memory_repo / "index/memories.jsonl").write_text(
-                json.dumps(valid_memory_node(memory_id="mem_current_missing_backref", supersedes=["mem_old_missing_backref"]))
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_current_missing_backref",
+                        supersedes=["mem_old_missing_backref"],
+                        **provenance,
+                    )
+                )
                 + "\n"
-                + json.dumps(valid_memory_node(memory_id="mem_old_missing_backref"))
+                + json.dumps(valid_memory_node(memory_id="mem_old_missing_backref", **provenance))
                 + "\n"
-                + json.dumps(valid_memory_node(memory_id="mem_old_missing_forwardref", superseded_by="mem_current_missing_forwardref"))
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_old_missing_forwardref",
+                        superseded_by="mem_current_missing_forwardref",
+                        **provenance,
+                    )
+                )
                 + "\n"
-                + json.dumps(valid_memory_node(memory_id="mem_current_missing_forwardref"))
+                + json.dumps(valid_memory_node(memory_id="mem_current_missing_forwardref", **provenance))
                 + "\n",
                 encoding="utf-8",
             )
@@ -1659,12 +1745,14 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 text=True,
             )
 
+            provenance = write_memory_node_provenance(memory_repo, "cyclic-supersession")
             (memory_repo / "index/memories.jsonl").write_text(
                 json.dumps(
                     valid_memory_node(
                         memory_id="mem_cycle_a",
                         supersedes=["mem_cycle_b"],
                         superseded_by="mem_cycle_b",
+                        **provenance,
                     )
                 )
                 + "\n"
@@ -1673,6 +1761,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                         memory_id="mem_cycle_b",
                         supersedes=["mem_cycle_a"],
                         superseded_by="mem_cycle_a",
+                        **provenance,
                     )
                 )
                 + "\n",
