@@ -1027,6 +1027,22 @@ def audit_session_source_map_refs(repo: Path) -> list[Finding]:
     for relative, line_number, row in iter_session_source_map_rows(repo):
         if row.get("__invalid_json__"):
             findings.append(Finding(relative, line_number, "invalid_json"))
+            continue
+        entry_dir = PurePosixPath(relative).parent
+        expected_paths = {
+            "summary_path": (entry_dir / "summary.md").as_posix(),
+            "evidence_path": (entry_dir / "evidence.md").as_posix(),
+            "source_map_path": (entry_dir / "source-map.json").as_posix(),
+        }
+        for field, expected_path in expected_paths.items():
+            value = row.get(field)
+            if (
+                not isinstance(value, str)
+                or value.strip() != expected_path
+                or safe_archive_ref_path(repo, value) is None
+            ):
+                findings.append(Finding(relative, line_number, "broken_source_map_ref"))
+                break
     return findings
 
 
