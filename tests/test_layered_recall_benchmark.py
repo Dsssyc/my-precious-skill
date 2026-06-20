@@ -15,6 +15,7 @@ SYNTHETIC_CASES = Path("benchmarks/cases/layered_recall_synthetic.jsonl").resolv
 SYNTHETIC_QUALITY_GATES = Path("benchmarks/quality-gates/layered_recall_synthetic.json").resolve()
 SYNTHETIC_MAX_QUALITY_GATES = Path("benchmarks/quality-gates/layered_recall_synthetic_max.json").resolve()
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+AUDIT_SCRIPT = Path("templates/agent-memory-repo/tools/audit_memory_archive.py").resolve()
 SUMMARY_PATH = "sessions/2026/06/04/source/summary.md"
 SOURCE_ANCHOR = "records/private.jsonl#message:42"
 MEMORY_TEXT = "Avoid repeated permission prompts after permission is granted."
@@ -154,6 +155,34 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["categories"]["abstention"]["case_pass_rate"], 1.0)
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
             self.assertEqual(payload["categories"]["privacy_boundary"]["privacy_boundary_pass_rate"], 1.0)
+
+    def test_packaged_synthetic_archive_passes_archive_audit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(AUDIT_SCRIPT), "--memory-repo", str(repo)],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_packaged_synthetic_cases_pass_packaged_quality_gates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
