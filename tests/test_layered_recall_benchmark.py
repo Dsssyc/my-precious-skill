@@ -2229,6 +2229,26 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", result.stderr)
             self.assertNotIn("cookie=", result.stderr)
 
+    def test_benchmark_case_archive_paths_must_not_escape_repo(self):
+        scenarios = (
+            ("expected_summary_path", {"expected_summary_path": "../outside/summary.md"}),
+            ("expected_source_anchor", {"expected_source_anchor": "../outside/raw.jsonl#message:1"}),
+        )
+        for field, override in scenarios:
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    repo = self.create_repo(root)
+                    cases = self.write_cases(root, {**self.valid_case(), **override})
+                    search_script, _ = self.write_stub_search(root)
+
+                    result = self.run_benchmark(repo, cases, search_script, check=False)
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"{cases}:1", result.stderr)
+                    self.assertIn("unsafe archive path in benchmark case field", result.stderr)
+                    self.assertIn(field, result.stderr)
+
     def test_invalid_source_benchmark_type_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

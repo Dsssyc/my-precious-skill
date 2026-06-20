@@ -153,8 +153,21 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
                 raise SystemExit(
                     f"{case_location(path, line_no)}: expected_memory_id must not also appear in {key}"
                 )
+    validate_case_archive_path(case, "expected_summary_path", path, line_no)
+    validate_case_archive_path(case, "expected_source_anchor", path, line_no)
     optional_case_texts(case, "required_evidence_paths", path, line_no)
     validate_forbidden_output_patterns(case, path, line_no)
+
+
+def validate_case_archive_path(case: dict, key: str, path: Path, line_no: int) -> None:
+    value = optional_case_text(case, key)
+    if value:
+        validate_archive_relative_path(value, key, path, line_no)
+
+
+def validate_archive_relative_path(value: str, key: str, path: Path, line_no: int) -> None:
+    if has_unsafe_path_reference(value):
+        raise SystemExit(f"{case_location(path, line_no)}: unsafe archive path in benchmark case field: {key}")
 
 
 def optional_case_text_or_texts(case: dict, key: str, path: Path, line_no: int) -> list[str]:
