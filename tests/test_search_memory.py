@@ -3236,6 +3236,71 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("No memory hits for: cat", result.stdout)
         self.assertNotIn("mem_concatenate", result.stdout)
 
+    def test_search_memory_ignores_question_stopword_only_overlap(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/20/stopwords"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: stopwords\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_question_noise",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "question-noise",
+                        "text": "Which project is it in?",
+                        "source": "synthetic",
+                        "derived_from": ["sessions/2026/06/20/stopwords/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "Which repo is it in?",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No memory hits for: Which repo is it in?", result.stdout)
+        self.assertNotIn("mem_question_noise", result.stdout)
+
+    def test_search_memory_rejects_query_with_only_stopwords(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "What is it?",
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("query must contain at least one searchable token", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

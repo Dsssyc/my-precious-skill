@@ -96,6 +96,43 @@ GENERIC_SEARCH_TOKENS = {
     "update",
     "workflow",
 }
+QUERY_STOP_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "being",
+    "by",
+    "did",
+    "do",
+    "does",
+    "for",
+    "how",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "these",
+    "this",
+    "those",
+    "to",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+}
 
 
 def tokenize(text: str) -> list[str]:
@@ -110,6 +147,11 @@ def unique_tokens(text: str) -> list[str]:
             seen.add(token)
             out.append(token)
     return out
+
+
+def unique_query_tokens(text: str) -> list[str]:
+    tokens = unique_tokens(text)
+    return [token for token in tokens if token not in QUERY_STOP_TOKENS]
 
 
 def compact_whitespace(text: str) -> str:
@@ -1103,7 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit <= 0:
         raise SystemExit("--limit must be greater than 0")
 
-    query_tokens = unique_tokens(args.query)
+    query_tokens = unique_query_tokens(args.query)
     if not query_tokens:
         raise SystemExit("query must contain at least one searchable token")
 

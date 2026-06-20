@@ -105,7 +105,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
 
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["cases"], 30)
+            self.assertEqual(payload["cases"], 31)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
             self.assertGreaterEqual(payload["memory_precision_at_5"], 0.25)
@@ -159,7 +159,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(payload["latency_mean_ms"], 0)
             self.assertGreaterEqual(payload["latency_max_ms"], payload["latency_mean_ms"])
             self.assertLessEqual(payload["latency_max_ms"], payload["latency_ms"])
-            self.assertEqual(payload["categories"]["abstention"]["cases"], 3)
+            self.assertEqual(payload["categories"]["abstention"]["cases"], 4)
             self.assertEqual(payload["categories"]["abstention"]["failed_case_count"], 0)
             self.assertEqual(payload["categories"]["abstention"]["case_pass_rate"], 1.0)
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
@@ -260,7 +260,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 for line in details.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            self.assertEqual(payload["cases"], 30)
+            self.assertEqual(payload["cases"], 31)
             self.assertEqual(payload["answer_cases"], 9)
             self.assertGreaterEqual(payload["memory_precision_at_5"], lower_gates["memory_precision_at_5"])
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
@@ -299,7 +299,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["failed_case_count"], 0)
             self.assertEqual(payload["case_pass_rate"], 1.0)
-            self.assertEqual(len(detail_rows), 30)
+            self.assertEqual(len(detail_rows), 31)
             self.assertEqual(detail_rows[0]["case_id"], "synthetic:info_permission_prompt")
             self.assertEqual(detail_rows[-1]["case_id"], "synthetic:scope_domain_benchmark")
 
@@ -344,7 +344,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
 
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["cases"], 30)
+            self.assertEqual(payload["cases"], 31)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
