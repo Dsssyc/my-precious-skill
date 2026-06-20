@@ -221,6 +221,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
             self.assertEqual(upper_gates["memory_rank_median"], 1.0)
             self.assertEqual(upper_gates["source_result_count_at_5"], 104)
+            self.assertEqual(upper_gates["unsafe_source_anchor_count_at_5"], 0)
+            self.assertEqual(upper_gates["unsafe_source_anchor_rate_at_5"], 0.0)
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
             subprocess.run(
                 [
@@ -281,6 +283,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(payload["source_micro_precision_at_5"], lower_gates["source_micro_precision_at_5"])
             self.assertGreaterEqual(payload["source_relevant_count_at_5"], lower_gates["source_relevant_count_at_5"])
             self.assertLessEqual(payload["source_result_count_at_5"], upper_gates["source_result_count_at_5"])
+            self.assertLessEqual(
+                payload["unsafe_source_anchor_count_at_5"],
+                upper_gates["unsafe_source_anchor_count_at_5"],
+            )
+            self.assertLessEqual(
+                payload["unsafe_source_anchor_rate_at_5"],
+                upper_gates["unsafe_source_anchor_rate_at_5"],
+            )
             self.assertEqual(payload["answer_reachability"], 1.0)
             self.assertGreaterEqual(payload["evidence_text_cases"], lower_gates["evidence_text_cases"])
             self.assertGreaterEqual(payload["evidence_text_reachability"], lower_gates["evidence_text_reachability"])
