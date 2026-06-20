@@ -993,6 +993,7 @@ def audit_session_source_map_refs(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
     for relative, line_number, row in iter_session_meta_rows(repo):
         if row.get("__invalid_json__"):
+            findings.append(Finding(relative, line_number, "invalid_json"))
             continue
         source_map_path = row.get("source_map_path")
         if source_map_path in (None, ""):

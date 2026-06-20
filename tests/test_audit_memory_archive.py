@@ -739,6 +739,36 @@ class AuditMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_audit_memory_archive_flags_invalid_session_meta_json(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/06/05/invalid-meta-json"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for invalid meta JSON validation.\n", encoding="utf-8")
+            (entry_dir / "meta.json").write_text('{"source_map_path": ', encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sessions/2026/06/05/invalid-meta-json/meta.json:1 category=invalid_json", combined)
+
     def test_audit_memory_archive_flags_missing_evidence_quote_id(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
