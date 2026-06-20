@@ -504,10 +504,22 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
 
             self.assertTrue((memory_repo / "index/memories.jsonl").exists())
-            memory_index = (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8")
+            memory_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            memory_index = "\n".join(json.dumps(row, sort_keys=True) for row in memory_rows)
             self.assertIn("Hybrid lexical search", memory_index)
             self.assertTrue((memory_repo / "memories/projects.jsonl").exists())
             self.assertIn("Hybrid lexical search", (memory_repo / "memories/projects.jsonl").read_text(encoding="utf-8"))
+            automatic_node = next(row for row in memory_rows if "Hybrid lexical search" in row["text"])
+            expected_source_map = str(Path(automatic_node["derived_from"][0]).with_name("source-map.json"))
+            self.assertEqual(
+                automatic_node["raw_refs"],
+                [{"path": expected_source_map, "anchor": "source_record"}],
+            )
+            meta = json.loads((memory_repo / Path(automatic_node["derived_from"][0]).parent / "meta.json").read_text(encoding="utf-8"))
+            self.assertEqual(meta["source_map_path"], expected_source_map)
 
     def test_update_memory_archive_preserves_existing_explicit_memory_nodes(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

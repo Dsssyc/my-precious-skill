@@ -123,6 +123,7 @@ class MemoryCandidate:
     summary_path: str
     evidence_path: str
     source_record: str
+    source_map_path: str
     source_updated_at: str
     tags: tuple[str, ...]
 
@@ -1939,6 +1940,7 @@ def write_record(
     archived_at = utc_now()
     rel_summary = destination.relative_to(memory_repo) / "summary.md"
     rel_evidence = destination.relative_to(memory_repo) / "evidence.md"
+    rel_source_map = destination.relative_to(memory_repo) / "source-map.json"
 
     source_title = f"{project_name}: {record.path.name}"
     title = memory_title(summary_data, source_title)
@@ -2005,6 +2007,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "archived_at": isoformat(archived_at),
         "summary_path": str(rel_summary),
         "evidence_path": str(rel_evidence),
+        "source_map_path": str(rel_source_map),
         "archive_status": archive_status,
         "redaction_status": redaction_status,
         "contains_raw_transcript": False,
@@ -2027,6 +2030,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "archive_entry": str(destination.relative_to(memory_repo)),
         "summary_path": str(rel_summary),
         "evidence_path": str(rel_evidence),
+        "source_map_path": str(rel_source_map),
         "contains_raw_transcript": False,
         "evidence_policy": "short_redacted_snippets",
     }
@@ -2117,6 +2121,10 @@ def raw_ref_for_source_record(path: str, anchor: str) -> dict[str, str] | None:
     return {"path": path, "anchor": anchor}
 
 
+def raw_ref_for_source_fields(source_record: str, source_map_path: str, anchor: str) -> dict[str, str] | None:
+    return raw_ref_for_source_record(source_record, anchor) or raw_ref_for_source_record(source_map_path, anchor)
+
+
 def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, str]]:
     fields = (
         ("reusable_facts", "Reusable fact from archived session."),
@@ -2186,7 +2194,8 @@ def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
     summary_path = str(row.get("summary_path", ""))
     evidence_path = str(row.get("evidence_path", ""))
     source_record = str(row.get("source_record", ""))
-    raw_ref = raw_ref_for_source_record(source_record, "explicit_memory")
+    source_map_path = str(row.get("source_map_path", ""))
+    raw_ref = raw_ref_for_source_fields(source_record, source_map_path, "explicit_memory")
     layer = "global"
     scope = "global"
     return {
@@ -2227,6 +2236,7 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     summary_path=str(row.get("summary_path", "")),
                     evidence_path=str(row.get("evidence_path", "")),
                     source_record=str(row.get("source_record", "")),
+                    source_map_path=str(row.get("source_map_path", "")),
                     source_updated_at=str(row.get("source_updated_at", "")),
                     tags=tags,
                 )
@@ -2262,8 +2272,14 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
         ]
         raw_refs = [
             raw_ref
-            for path in sorted({candidate.source_record for candidate in candidates if candidate.source_record})
-            if (raw_ref := raw_ref_for_source_record(path, "source_record")) is not None
+            for source_record, source_map_path in sorted(
+                {
+                    (candidate.source_record, candidate.source_map_path)
+                    for candidate in candidates
+                    if candidate.source_record or candidate.source_map_path
+                }
+            )
+            if (raw_ref := raw_ref_for_source_fields(source_record, source_map_path, "source_record")) is not None
         ]
         confidence = "high" if len(candidates) >= 2 or layer == "global" else "medium"
         tags = sorted({tag for candidate in candidates for tag in candidate.tags if tag} | {first.topic})
