@@ -175,10 +175,11 @@ Positive cases check whether the correct high-level memory appears at rank 1 or
 within the top 5, whether the memory can drill down to the supporting session,
 what fraction of returned top-5 memory hits match the expected memory, whether
 required evidence paths are reachable from the expected memory, and whether
-source anchors are available on the expected memory at source depth. Cases with
-`reference_answer` also check whether the exact answer snippet is reachable in
-expected-memory memory/source output or the expected summary session output.
-These metrics are reported as `memory_recall_at_1`, `memory_recall_at_5`,
+source anchors are available on the expected memory's `source: memory` block at
+source depth. Cases with `reference_answer` also check whether the exact answer
+snippet is reachable in expected-memory memory/source output or the expected
+summary session output. These metrics are reported as `memory_recall_at_1`,
+`memory_recall_at_5`,
 `memory_precision_at_5`, `memory_micro_precision_at_5`,
 `memory_result_count_at_5`, `memory_relevant_count_at_5`, `memory_mrr`,
 `memory_ndcg_at_5`, `memory_ranked_cases`, `memory_rank_missing_cases`,
@@ -203,7 +204,8 @@ whether ranked expected-memory hits carry high-signal `why:` reasons such as
 structured field matches, phrase matches, important token coverage, or project
 context, while rejecting low-signal-only or broad-field-only explanations.
 `source_precision_at_5` counts all top-5 returned source anchors in the
-denominator, but only anchors on the expected memory block are relevant.
+denominator, but only anchors on the expected memory's `source: memory` block
+are relevant.
 `layer_calibration` measures whether cases that declare `expected_layer` return
 the expected memory from the requested `global`, `domain`, or `project` layer.
 `scope_filter_recall` reruns those `expected_layer` cases with

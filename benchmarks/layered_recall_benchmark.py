@@ -800,6 +800,8 @@ def source_reachability_hit(
     record: dict | None,
 ) -> bool:
     for block in blocks:
+        if not is_memory_block(block):
+            continue
         if not block_contains_memory(block, expected_memory_id, record):
             continue
         if not block_has_drill_path(block, expected_summary_path):
@@ -820,7 +822,11 @@ def source_anchor_precision_at_5(
     if not anchors:
         return MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     relevant = sum(
-        int(block_contains_memory(block, expected_memory_id, record) and anchor == expected_source_anchor)
+        int(
+            is_memory_block(block)
+            and block_contains_memory(block, expected_memory_id, record)
+            and anchor == expected_source_anchor
+        )
         for block in top_blocks
         for anchor in section_items(block, "source anchors")
     )
