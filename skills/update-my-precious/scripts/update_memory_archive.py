@@ -90,6 +90,7 @@ EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
     r"(?i)[,;.!?，；。！？]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
     r"(?:现在|然后|接下来|顺便|再|请|帮我))"
 )
+REUSABLE_FACT_PREFIX = re.compile(r"(?i)^\s*reusable fact\s*[:\uFF1A]\s*(?P<text>.+)$")
 SENSITIVE_EXPLICIT_MEMORY_MARKERS = (
     "[redacted_",
     "authorization:",
@@ -1146,6 +1147,7 @@ def durable_memory_text(text: str) -> str:
     if is_process_update(text):
         return ""
     candidate = strip_skill_invocation_prefix(text)
+    candidate = strip_reusable_fact_prefix(candidate)
     cleaned = clean_title_candidate(candidate) if is_raw_prompt_text(candidate) else clip(candidate)
     if (
         not cleaned
@@ -1156,6 +1158,11 @@ def durable_memory_text(text: str) -> str:
     ):
         return ""
     return cleaned
+
+
+def strip_reusable_fact_prefix(text: str) -> str:
+    match = REUSABLE_FACT_PREFIX.match(text)
+    return match.group("text").strip() if match else text
 
 
 def durable_user_memory_text(text: str) -> str:
@@ -1315,6 +1322,18 @@ def markdown_text_section(title: str, value: object) -> str:
 
 def strip_trailing_whitespace_lines(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+
+
+def render_evidence_body(evidence_lines: list[str], explicit_memories: list[str]) -> str:
+    lines: list[str] = []
+    for idx, line in enumerate(evidence_lines, 1):
+        lines.append(f"ev_{idx:03d}: {line}")
+        lines.append(f"- {line}")
+    for idx, text in enumerate(explicit_memories, 1):
+        if text not in evidence_lines:
+            lines.append(f"ev_explicit_{idx:03d}: {text}")
+            lines.append(f"- {text}")
+    return "\n".join(lines)
 
 
 def is_process_update(text: str) -> bool:
@@ -1981,10 +2000,7 @@ See `evidence.md` for short redacted snippets that support the summary.
     summary = strip_trailing_whitespace_lines(summary)
 
     evidence_lines = summary_data["evidence"]
-    if evidence_lines:
-        evidence_body = "\n".join(f"- {line}" for line in evidence_lines)
-    else:
-        evidence_body = ""
+    evidence_body = render_evidence_body(evidence_lines, explicit_memories)
     evidence = (
         f"# Evidence: {title}\n\n"
         f"Source record: `{record.path}`\n"
@@ -2136,7 +2152,7 @@ def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, s
         if not isinstance(value, list):
             continue
         for item in value:
-            text = normalize_memory_text(str(item))
+            text = normalize_memory_text(strip_reusable_fact_prefix(str(item)))
             if text and not is_noisy_text(text):
                 yield text, rationale
 
@@ -2264,11 +2280,8 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
         seen_times = sorted(candidate.source_updated_at for candidate in candidates if candidate.source_updated_at)
         derived_from = sorted({candidate.summary_path for candidate in candidates if candidate.summary_path})
         evidence_refs = [
-            {"path": path, "quote_id": f"ev_{idx:03d}"}
-            for idx, path in enumerate(
-                sorted({candidate.evidence_path for candidate in candidates if candidate.evidence_path}),
-                1,
-            )
+            {"path": path, "quote_id": "ev_001"}
+            for path in sorted({candidate.evidence_path for candidate in candidates if candidate.evidence_path})
         ]
         raw_refs = [
             raw_ref

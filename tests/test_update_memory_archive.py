@@ -233,6 +233,93 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "sessions/2026/06/02/beta/summary.md",
         ])
 
+    def test_update_memory_archive_induces_domain_memory_from_two_project_sessions(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            alpha_source_dir = root / "records-alpha"
+            beta_source_dir = root / "records-beta"
+            project_alpha = root / "alpha"
+            project_beta = root / "beta"
+            alpha_source_dir.mkdir()
+            beta_source_dir.mkdir()
+            project_alpha.mkdir()
+            project_beta.mkdir()
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            fact = "Layered retrieval should preserve evidence refs for induced memories."
+            alpha_record = alpha_source_dir / "alpha.jsonl"
+            beta_record = beta_source_dir / "beta.jsonl"
+            alpha_record.write_text(
+                json.dumps({"role": "user", "content": "We need a reusable layered retrieval rule."})
+                + "\n"
+                + json.dumps({"role": "assistant", "content": f"Reusable fact: {fact}"})
+                + "\n",
+                encoding="utf-8",
+            )
+            beta_record.write_text(
+                json.dumps({"role": "user", "content": "Apply the same memory retrieval rule in another project."})
+                + "\n"
+                + json.dumps({"role": "assistant", "content": f"Reusable fact: {fact}"})
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(alpha_record, "2026-06-20T10:00:00Z")
+            set_mtime(beta_record, "2026-06-20T11:00:00Z")
+
+            for source_dir, project_path in ((alpha_source_dir, project_alpha), (beta_source_dir, project_beta)):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(update_script),
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--source-dir",
+                        str(source_dir),
+                        "--project-path",
+                        str(project_path),
+                        "--source-agent",
+                        "synthetic-agent",
+                        "--rewrite-existing",
+                    ],
+                    check=True,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+            domain_rows = [
+                json.loads(line)
+                for line in (memory_repo / "memories/domains.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            induced = [row for row in domain_rows if row.get("text") == fact]
+            self.assertEqual(len(induced), 1)
+            node = induced[0]
+            self.assertEqual(node["source"], "automatic")
+            self.assertEqual(node["layer"], "domain")
+            self.assertEqual(node["support_count"], 2)
+            self.assertEqual(len(node["derived_from"]), 2)
+            self.assertEqual(len(node["evidence_refs"]), 2)
+            for ref in node["evidence_refs"]:
+                evidence_text = (memory_repo / ref["path"]).read_text(encoding="utf-8")
+                self.assertIn(ref["quote_id"], evidence_text)
+            indexed_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertIn(node["memory_id"], {row.get("memory_id") for row in indexed_rows})
+
     def test_build_memory_nodes_omits_unsafe_raw_ref_paths(self):
         module = load_update_module()
         rows = [
