@@ -1563,6 +1563,26 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
             self.assertNotIn("cookie=", json.dumps(detail))
 
+    def test_source_result_ids_ignore_non_memory_blocks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(root, self.valid_case())
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root, mode="source_non_memory_anchor")
+
+            self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            detail = self.read_rows(details)[0]
+            self.assertEqual(detail["source_result_ids"], [])
+            self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
+
     def test_layered_recall_benchmark_reports_source_anchor_precision(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

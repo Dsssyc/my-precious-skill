@@ -272,6 +272,9 @@ The benchmark can also write per-case details as JSONL, including a
 `case_pass` boolean, precision count fields, and `failed_checks` list for each
 case, source benchmark, temporal scope, stale or negative memory IDs, stable
 case IDs when provided, required evidence paths, and forbidden-pattern counts.
+Returned memory ID diagnostics are taken only from `source: memory` hit blocks;
+source anchor diagnostics still report returned source-depth anchors after
+sanitization.
 When present, `reference_evidence` is checked against required evidence files
 with exact-text reachability and is counted by `evidence_text_cases`.
 Details also include safe returned identifiers such as memory result IDs,

@@ -689,6 +689,10 @@ def block_memory_ids(block: str) -> list[str]:
     return block_field_values([block], "memory_id")
 
 
+def memory_block_field_values(blocks: list[str], field_name: str) -> list[str]:
+    return block_field_values([block for block in blocks if is_memory_block(block)], field_name)
+
+
 def block_reason_values(block: str) -> list[str]:
     reasons: list[str] = []
     for value in block_field_values([block], "why"):
@@ -1374,10 +1378,10 @@ def score_case(
             all_search_outputs,
             forbidden_patterns,
         ),
-        "memory_result_ids": safe_result_identifiers(block_field_values(memory_blocks, "memory_id")),
+        "memory_result_ids": safe_result_identifiers(memory_block_field_values(memory_blocks, "memory_id")),
         "memory_results_at_5": memory_result_diagnostics(memory_blocks),
         "session_result_paths": safe_result_identifiers(block_result_paths(session_blocks)),
-        "source_result_ids": safe_result_identifiers(block_field_values(source_blocks, "memory_id")),
+        "source_result_ids": safe_result_identifiers(memory_block_field_values(source_blocks, "memory_id")),
         "source_result_anchors": safe_result_identifiers(block_section_values(source_blocks, "source anchors")),
         "latency_ms": latency_ms,
     }
