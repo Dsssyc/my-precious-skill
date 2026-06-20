@@ -734,6 +734,14 @@ def block_memory_layer(block: str) -> str:
     return match.group(1).strip()
 
 
+def block_memory_title(block: str) -> str:
+    first_line = block.splitlines()[0] if block.splitlines() else ""
+    match = re.match(r"^\d+\.\s+\[[^\]]+\]\s+(.+)$", first_line)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
 def block_result_paths(blocks: list[str]) -> list[str]:
     title_paths = [path for block in blocks if (path := block_title_path(block))]
     drill_paths = block_section_values(blocks, "drill")
@@ -765,11 +773,12 @@ def block_has_drill_path(block: str, expected_summary_path: str) -> bool:
 
 
 def memory_record_is_visible(block: str, record: dict) -> bool:
+    title = block_memory_title(block)
     text = record.get("text")
-    if isinstance(text, str) and clip(text) in block:
+    if isinstance(text, str) and title == clip(text):
         return True
     topic = record.get("topic")
-    return isinstance(topic, str) and topic in block
+    return isinstance(topic, str) and title == topic
 
 
 def session_drilldown_hit(blocks: list[str], expected_summary_path: str) -> bool:
