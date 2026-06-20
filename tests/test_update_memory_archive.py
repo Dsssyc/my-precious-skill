@@ -670,6 +670,12 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
                 ],
             )
+            layer_rows = [
+                json.loads(line)
+                for name in ("global.jsonl", "domains.jsonl", "projects.jsonl")
+                for line in (memory_repo / "memories" / name).read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual([row for row in layer_rows if row["source"] == "explicit"], [])
 
     def test_update_memory_archive_dedupes_existing_explicit_node_by_text(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

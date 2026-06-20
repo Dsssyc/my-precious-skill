@@ -2411,6 +2411,7 @@ def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
         layer = str(node.get("layer", "project"))
         if node.get("source") == "explicit":
             explicit_nodes.append(node)
+            continue
         if layer in by_layer:
             by_layer[layer].append(node)
 
