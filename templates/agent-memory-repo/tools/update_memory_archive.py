@@ -2236,6 +2236,86 @@ def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
     }
 
 
+def archive_ref_path(memory_repo: Path, path_text: str) -> Path | None:
+    path_text = path_text.strip()
+    if not path_text or has_unsafe_raw_ref_path(path_text):
+        return None
+    candidate = memory_repo / path_text
+    try:
+        repo_resolved = memory_repo.resolve()
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(repo_resolved)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
+
+
+def existing_archive_ref(memory_repo: Path, path_text: str) -> bool:
+    return archive_ref_path(memory_repo, path_text) is not None
+
+
+def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
+    if not quote_id.strip():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
+
+
+def parse_archive_ref(value: str, option_name: str) -> tuple[str, str]:
+    if "#" not in value:
+        raise SystemExit(f"{option_name} must use PATH#ANCHOR")
+    path, anchor = value.split("#", 1)
+    path = path.strip()
+    anchor = anchor.strip()
+    if not path or not anchor:
+        raise SystemExit(f"{option_name} must use PATH#ANCHOR")
+    return path, anchor
+
+
+def is_safe_direct_raw_ref(ref: dict[str, str]) -> bool:
+    return raw_ref_for_source_record(ref["path"], ref["anchor"]) is not None
+
+
+def direct_explicit_memory_node(
+    text: str,
+    layer: str,
+    scope: str,
+    summary_path: str,
+    evidence_refs: list[dict],
+    raw_refs: list[dict],
+    now: str,
+) -> dict:
+    cleaned = clean_explicit_memory_text(text)
+    if not cleaned or is_sensitive_explicit_memory_text(cleaned) or is_noisy_text(cleaned):
+        raise SystemExit("explicit memory text is empty, noisy, or sensitive")
+    topic = memory_topic(cleaned, [])
+    return {
+        "memory_id": memory_id_for(layer, scope, cleaned, "explicit"),
+        "layer": layer,
+        "scope": scope,
+        "topic": topic,
+        "text": cleaned,
+        "rationale": "Explicit memory requested by the user or governing prompt.",
+        "source": "explicit",
+        "confidence": "high",
+        "persistence": "sticky",
+        "support_count": 1,
+        "first_seen": now,
+        "last_seen": now,
+        "derived_from": [summary_path],
+        "evidence_refs": evidence_refs,
+        "raw_refs": raw_refs,
+        "supersedes": [],
+        "superseded_by": None,
+        "tags": sorted({topic, "explicit-memory"}),
+    }
+
+
 def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
     candidates: list[MemoryCandidate] = []
     for row in rows:
@@ -2664,6 +2744,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Only archive source records that explicitly identify the current project path",
     )
+    parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
+    parser.add_argument(
+        "--explicit-layer",
+        choices=("global", "domain", "project"),
+        default="global",
+        help="Layer for --explicit-memory",
+    )
+    parser.add_argument("--explicit-scope", default="global", help="Scope for --explicit-memory")
+    parser.add_argument("--explicit-summary-path", help="Archive-relative summary path supporting --explicit-memory")
+    parser.add_argument(
+        "--explicit-evidence-ref",
+        action="append",
+        default=[],
+        help="Archive evidence ref PATH#QUOTE_ID for --explicit-memory",
+    )
+    parser.add_argument(
+        "--explicit-raw-ref",
+        action="append",
+        default=[],
+        help="Optional raw/source ref PATH#ANCHOR for --explicit-memory",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show records that would be archived")
     return parser.parse_args(argv)
 
@@ -2680,6 +2781,47 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"source directory not found: {safe_diagnostic_path(source_dir)}")
     if source_dir == project_path:
         print("warning: source-dir equals project-path; ensure this directory contains session records, not general source files", file=sys.stderr)
+
+    if args.explicit_memory:
+        if not args.explicit_summary_path:
+            raise SystemExit("--explicit-summary-path is required with --explicit-memory")
+        if not args.explicit_evidence_ref:
+            raise SystemExit("--explicit-evidence-ref is required with --explicit-memory")
+        summary_path = args.explicit_summary_path.strip()
+        if not existing_archive_ref(memory_repo, summary_path):
+            raise SystemExit("--explicit-summary-path must point to an existing archive file")
+        evidence_refs = []
+        for value in args.explicit_evidence_ref:
+            path, quote_id = parse_archive_ref(value, "--explicit-evidence-ref")
+            evidence_path = archive_ref_path(memory_repo, path)
+            if evidence_path is None or not evidence_quote_id_exists(evidence_path, quote_id):
+                raise SystemExit("--explicit-evidence-ref must point to an existing evidence quote")
+            evidence_refs.append({"path": path, "quote_id": quote_id})
+        raw_refs = []
+        for value in args.explicit_raw_ref:
+            path, anchor = parse_archive_ref(value, "--explicit-raw-ref")
+            ref = {"path": path, "anchor": anchor}
+            if not is_safe_direct_raw_ref(ref):
+                raise SystemExit("--explicit-raw-ref is unsafe")
+            raw_refs.append(ref)
+        now = isoformat(datetime.now(UTC))
+        direct_nodes = [
+            direct_explicit_memory_node(
+                text,
+                args.explicit_layer,
+                args.explicit_scope,
+                summary_path,
+                evidence_refs,
+                raw_refs,
+                now,
+            )
+            for text in args.explicit_memory
+        ]
+        existing_rows = collect_meta(memory_repo)
+        generated_nodes = build_memory_nodes(existing_rows)
+        write_memory_nodes(memory_repo, [*generated_nodes, *direct_nodes])
+        rebuild_indexes(memory_repo)
+        return 0
 
     latest, archived_hashes, archived_source_hashes = archived_project_state(memory_repo, project_path)
     records = discover_records(

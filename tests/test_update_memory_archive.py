@@ -355,6 +355,70 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
         self.assertEqual(nodes, [])
 
+    def test_update_memory_archive_can_write_direct_explicit_memory_with_evidence(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            entry_dir = memory_repo / "sessions/2026/06/20/direct-explicit"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary supporting direct explicit memory.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text(
+                "ev_direct_001: User explicitly requested this durable rule.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(root),
+                    "--explicit-memory",
+                    "Prefer evidence-bound memories over unsupported recollection.",
+                    "--explicit-layer",
+                    "global",
+                    "--explicit-scope",
+                    "global",
+                    "--explicit-summary-path",
+                    "sessions/2026/06/20/direct-explicit/summary.md",
+                    "--explicit-evidence-ref",
+                    "sessions/2026/06/20/direct-explicit/evidence.md#ev_direct_001",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(rows), 1)
+            node = rows[0]
+            self.assertEqual(node["source"], "explicit")
+            self.assertEqual(node["persistence"], "sticky")
+            self.assertEqual(node["layer"], "global")
+            self.assertEqual(node["derived_from"], ["sessions/2026/06/20/direct-explicit/summary.md"])
+            self.assertEqual(
+                node["evidence_refs"],
+                [{"path": "sessions/2026/06/20/direct-explicit/evidence.md", "quote_id": "ev_direct_001"}],
+            )
+            self.assertIn(node["memory_id"], (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8"))
+
     def test_build_memory_nodes_omits_unsafe_raw_ref_paths(self):
         module = load_update_module()
         rows = [
