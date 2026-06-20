@@ -998,6 +998,9 @@ def audit_memory_file_placement(repo: Path) -> list[Finding]:
             continue
         if not is_valid_memory_node_shape(row):
             continue
+        if row.get("source") == "explicit" and relative != "memories/explicit.jsonl":
+            findings.append(Finding(relative, line_number, "memory_file_mismatch"))
+            continue
         if relative == "memories/explicit.jsonl":
             if row.get("source") != "explicit":
                 findings.append(Finding(relative, line_number, "memory_file_mismatch"))

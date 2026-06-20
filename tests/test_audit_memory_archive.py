@@ -1273,6 +1273,48 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/explicit.jsonl:1 category=memory_file_mismatch", combined)
             self.assertNotIn("category=memory_index_mismatch", combined)
 
+    def test_audit_memory_archive_flags_explicit_nodes_outside_explicit_root(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            misplaced_explicit = valid_memory_node(
+                memory_id="mem_explicit_in_global",
+                layer="global",
+                scope="global",
+                source="explicit",
+                persistence="sticky",
+            )
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(misplaced_explicit, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(misplaced_explicit, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("memories/global.jsonl:1 category=memory_file_mismatch", combined)
+            self.assertNotIn("category=memory_index_mismatch", combined)
+
     def test_audit_memory_archive_flags_broken_root_memory_references(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
