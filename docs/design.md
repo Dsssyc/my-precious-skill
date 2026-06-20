@@ -230,7 +230,9 @@ being printed verbatim. Unsafe memory metadata fields are rendered as
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:
 
-- `abstention_accuracy`: no memory is returned when a query is unsupported.
+- `abstention_accuracy`: no memory is returned when a query is unsupported,
+  including default memory/session/source search and scoped memory searches for
+  each `global`, `domain`, and `project` layer.
 - `negative_memory_suppression`: explicitly forbidden memory IDs are absent.
 - `stale_memory_suppression`: superseded memory IDs are absent.
 - `update_consistency`: the latest expected memory is found while stale memory

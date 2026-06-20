@@ -1120,6 +1120,8 @@ def score_case(
     data = case.data
     query = required_case_text(data, "query", case.path, case.line_no)
     expected_layer = optional_case_text(data, "expected_layer")
+    expected_abstain = data.get("expected_abstain") is True
+    is_positive = positive_case(data)
 
     started = time.perf_counter()
     memory_output = run_search(search_script, repo, query, "memory", search_timeout_s)
@@ -1127,7 +1129,13 @@ def score_case(
     source_output = run_search(search_script, repo, query, "source", search_timeout_s)
     scope_output = ""
     wrong_scope_outputs: list[str] = []
-    if positive_case(data) and expected_layer:
+    abstain_scope_outputs: list[str] = []
+    if expected_abstain:
+        for abstain_scope in MEMORY_LAYERS:
+            abstain_scope_outputs.append(
+                run_search(search_script, repo, query, "memory", search_timeout_s, abstain_scope)
+            )
+    elif is_positive and expected_layer:
         scope_output = run_search(search_script, repo, query, "memory", search_timeout_s, expected_layer)
         for wrong_scope in MEMORY_LAYERS:
             if wrong_scope != expected_layer:
@@ -1139,10 +1147,9 @@ def score_case(
     source_blocks = parse_hit_blocks(source_output)
     scope_blocks = parse_hit_blocks(scope_output) if scope_output else []
     wrong_scope_blocks = [block for output in wrong_scope_outputs for block in parse_hit_blocks(output)]
-    all_search_outputs = [memory_output, session_output, source_output, scope_output, *wrong_scope_outputs]
+    abstain_scope_blocks = [block for output in abstain_scope_outputs for block in parse_hit_blocks(output)]
+    all_search_outputs = [memory_output, session_output, source_output, scope_output, *wrong_scope_outputs, *abstain_scope_outputs]
     combined_output = "\n".join([memory_output, session_output, source_output])
-    expected_abstain = data.get("expected_abstain") is True
-    is_positive = positive_case(data)
     expected_memory_id = optional_case_text(data, "expected_memory_id")
     expected_summary_path = optional_case_text(data, "expected_summary_path")
     expected_source_anchor = optional_case_text(data, "expected_source_anchor")
@@ -1207,7 +1214,7 @@ def score_case(
             normalized_answer_hit = answer_normalized_reachability_hit(combined_output, reference_answers)
             answer_f1 = answer_token_f1(combined_output, reference_answers)
 
-    no_result_hits = no_hits(memory_blocks, session_blocks, source_blocks)
+    no_result_hits = no_hits(memory_blocks, session_blocks, source_blocks, abstain_scope_blocks)
     negative_suppressed = not blocks_contain_memory_ids(memory_blocks, negative_memory_ids, memory_records)
     stale_suppressed = not blocks_contain_memory_ids(memory_blocks, stale_memory_ids, memory_records)
     update_expected = bool(is_positive and stale_memory_ids)

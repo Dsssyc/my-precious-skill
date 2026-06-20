@@ -2811,6 +2811,44 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertFalse(detail["privacy_boundary_pass"])
             self.assertIn("privacy_boundary_pass_rate", detail["failed_checks"])
 
+    def test_abstention_checks_scope_search_outputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    "query": "unsupported scoped recall",
+                    "category": "abstention",
+                    "expected_abstain": True,
+                    "forbidden_output_patterns": ["SCOPED-ABSTAIN-LEAK"],
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, calls_path = self.write_stub_search(root, mode="abstain_scope_leaky")
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                check=False,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            calls = calls_path.read_text(encoding="utf-8")
+            self.assertEqual(payload["abstention_accuracy"], 0.0)
+            self.assertEqual(payload["privacy_boundary_pass_rate"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertFalse(detail["abstention_hit"])
+            self.assertFalse(detail["privacy_boundary_pass"])
+            self.assertIn("abstention_accuracy", detail["failed_checks"])
+            self.assertIn("privacy_boundary_pass_rate", detail["failed_checks"])
+            self.assertIn("memory|global|unsupported scoped recall", calls)
+            self.assertIn("memory|domain|unsupported scoped recall", calls)
+            self.assertIn("memory|project|unsupported scoped recall", calls)
+
     def test_invalid_forbidden_output_pattern_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -3062,6 +3100,20 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     raise SystemExit(1)
 
                 if MODE == "rank_distribution" and "missing" in query:
+                    print(f"No memory hits for: {{query}}")
+                    raise SystemExit(1)
+
+                if MODE == "abstain_scope_leaky":
+                    if depth == "memory" and scope != "all":
+                        print(f"Top memory hits for: {{query}}")
+                        print()
+                        print("1. [" + scope + "] SCOPED-ABSTAIN-LEAK")
+                        print("   source: memory")
+                        print("   why: " + memory_why())
+                        print("   memory_id: mem_scoped_abstain_leak")
+                        print("   drill:")
+                        print("     - " + SUMMARY_PATH)
+                        raise SystemExit(0)
                     print(f"No memory hits for: {{query}}")
                     raise SystemExit(1)
 
