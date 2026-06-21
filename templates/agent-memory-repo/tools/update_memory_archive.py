@@ -2172,7 +2172,7 @@ def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, s
             continue
         for item in value:
             text = normalize_memory_text(strip_reusable_fact_prefix(str(item)))
-            if text and not is_noisy_text(text):
+            if text and not is_noisy_text(text) and not is_low_signal_memory_text(text):
                 yield text, rationale
 
 
@@ -2371,7 +2371,18 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
     return candidates
 
 
-def build_memory_nodes(rows: list[dict]) -> list[dict]:
+def evidence_ref_for_path(memory_repo: Path | None, path: str) -> dict[str, str] | None:
+    if not path:
+        return None
+    quote_id = "ev_001"
+    if memory_repo is not None:
+        evidence_path = archive_ref_path(memory_repo, path)
+        if evidence_path is None or not evidence_quote_id_exists(evidence_path, quote_id):
+            return None
+    return {"path": path, "quote_id": quote_id}
+
+
+def build_memory_nodes(rows: list[dict], memory_repo: Path | None = None) -> list[dict]:
     grouped: dict[str, list[MemoryCandidate]] = {}
     for candidate in memory_candidates_from_meta(rows):
         key = memory_consolidation_key(candidate.text)
@@ -2408,8 +2419,9 @@ def build_memory_nodes(rows: list[dict]) -> list[dict]:
         seen_times = sorted(candidate.source_updated_at for candidate in candidates if candidate.source_updated_at)
         derived_from = sorted({candidate.summary_path for candidate in candidates if candidate.summary_path})
         evidence_refs = [
-            {"path": path, "quote_id": "ev_001"}
+            ref
             for path in sorted({candidate.evidence_path for candidate in candidates if candidate.evidence_path})
+            if (ref := evidence_ref_for_path(memory_repo, path)) is not None
         ]
         raw_refs = [
             raw_ref
@@ -2477,9 +2489,52 @@ def collect_meta(memory_repo: Path) -> list[dict]:
         except (OSError, json.JSONDecodeError):
             continue
         if isinstance(meta, dict):
+            source_map_path = meta_path.parent / "source-map.json"
+            if (
+                not meta.get("source_map_path")
+                and source_map_path.is_file()
+                and is_safe_repo_path(memory_repo, source_map_path)
+            ):
+                meta["source_map_path"] = source_map_path.relative_to(memory_repo).as_posix()
             rows.append(meta)
     rows.sort(key=lambda row: row.get("source_updated_at", ""), reverse=True)
     return rows
+
+
+def repair_legacy_source_map_paths(memory_repo: Path, rows: list[dict]) -> None:
+    for row in rows:
+        source_map_path = row.get("source_map_path")
+        summary_path = row.get("summary_path")
+        evidence_path = row.get("evidence_path")
+        if not (
+            isinstance(source_map_path, str)
+            and isinstance(summary_path, str)
+            and isinstance(evidence_path, str)
+        ):
+            continue
+        source_map_file = archive_ref_path(memory_repo, source_map_path)
+        if source_map_file is None or not source_map_file.is_file():
+            continue
+        try:
+            source_map = json.loads(source_map_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(source_map, dict):
+            continue
+        expected = {
+            "summary_path": summary_path,
+            "evidence_path": evidence_path,
+            "source_map_path": source_map_path,
+        }
+        if all(source_map.get(key) == value for key, value in expected.items()):
+            continue
+        source_map.update(expected)
+        write_safe_archive_text(
+            memory_repo,
+            source_map_file,
+            json.dumps(source_map, indent=2, sort_keys=True) + "\n",
+            "source-map file",
+        )
 
 
 def load_existing_explicit_memory_nodes(memory_repo: Path) -> list[dict]:
@@ -2733,7 +2788,8 @@ def rebuild_indexes(memory_repo: Path) -> None:
         raise SystemExit(f"Refusing to write unsafe archive index path: {safe_diagnostic_path(index_dir)}")
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
-    memory_nodes = build_memory_nodes(rows)
+    repair_legacy_source_map_paths(memory_repo, rows)
+    memory_nodes = build_memory_nodes(rows, memory_repo)
     memory_nodes = write_memory_nodes(memory_repo, memory_nodes)
     review_candidates = build_memory_review_candidates(memory_nodes)
     consolidation_traces = build_memory_consolidation_traces(memory_nodes, review_candidates)
@@ -2754,6 +2810,7 @@ def rebuild_indexes(memory_repo: Path) -> None:
             "reusable_facts": row.get("reusable_facts", []),
             "summary_path": row.get("summary_path", ""),
             "evidence_path": row.get("evidence_path", ""),
+            "source_map_path": row.get("source_map_path", ""),
             "source_updated_at": row.get("source_updated_at", ""),
             "archive_status": row.get("archive_status", ""),
             "unresolved_count": len(row.get("unresolved_tasks", [])) if isinstance(row.get("unresolved_tasks"), list) else 0,

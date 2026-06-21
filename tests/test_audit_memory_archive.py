@@ -1010,8 +1010,8 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 derived_from=[],
                 evidence_refs=[{"path": "sessions/2026/06/05/provenance/evidence.md", "quote_id": "ev_001"}],
             )
-            missing_evidence = valid_memory_node(
-                memory_id="mem_missing_evidence",
+            summary_only_provenance = valid_memory_node(
+                memory_id="mem_summary_only_provenance",
                 derived_from=["sessions/2026/06/05/provenance/summary.md"],
                 evidence_refs=[],
             )
@@ -1022,7 +1022,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             (memory_repo / "index/memories.jsonl").write_text(
                 json.dumps(missing_derived, sort_keys=True)
                 + "\n"
-                + json.dumps(missing_evidence, sort_keys=True)
+                + json.dumps(summary_only_provenance, sort_keys=True)
                 + "\n",
                 encoding="utf-8",
             )
@@ -1037,7 +1037,44 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("index/memories.jsonl:1 category=invalid_memory_node", combined)
-            self.assertIn("index/memories.jsonl:2 category=invalid_memory_node", combined)
+            self.assertNotIn("index/memories.jsonl:2 category=invalid_memory_node", combined)
+
+    def test_audit_memory_archive_scans_memory_jsonl_quality_fields_not_raw_json(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            node = valid_memory_node(
+                memory_id="mem-dry-run-found-record-identifier",
+                text="Layered migration keeps durable memory nodes searchable.",
+                **write_memory_node_provenance(memory_repo, "raw-json-quality"),
+            )
+            (memory_repo / "memories/global.jsonl").write_text(
+                json.dumps(node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 0, combined)
 
     def test_audit_memory_archive_flags_invalid_memory_node_rows(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

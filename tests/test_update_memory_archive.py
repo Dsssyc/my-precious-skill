@@ -233,6 +233,31 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "sessions/2026/06/02/beta/summary.md",
         ])
 
+    def test_build_memory_nodes_filters_low_signal_reusable_facts(self):
+        module = load_update_module()
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [
+                    "DONE",
+                    "Layered migration should preserve durable memory facts.",
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "migration"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+
+        self.assertEqual([node["text"] for node in nodes], ["Layered migration should preserve durable memory facts."])
+
     def test_build_memory_nodes_semantically_merges_paraphrased_reusable_facts(self):
         module = load_update_module()
         rows = [
@@ -501,6 +526,66 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     for row in trace_rows
                 )
             )
+
+    def test_rebuild_indexes_handles_legacy_meta_without_quote_refs(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            entry_dir = memory_repo / "sessions/2026/06/21/legacy"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for legacy session\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text(
+                "Legacy evidence has no explicit quote label.\n",
+                encoding="utf-8",
+            )
+            (entry_dir / "source-map.json").write_text("{}\n", encoding="utf-8")
+            (entry_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "session_id": "legacy-session",
+                        "project": "legacy",
+                        "project_path": "/tmp/legacy",
+                        "source_record": "/records/legacy.jsonl",
+                        "source_updated_at": "2026-06-21T10:00:00Z",
+                        "summary_path": "sessions/2026/06/21/legacy/summary.md",
+                        "evidence_path": "sessions/2026/06/21/legacy/evidence.md",
+                        "reusable_facts": [
+                            "Layered migration should preserve reachable session refs without invented quote ids."
+                        ],
+                        "decisions": [],
+                        "unresolved_tasks": [],
+                        "tags": ["layered-migration"],
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            module.rebuild_indexes(memory_repo)
+
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            memory_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            source_map = json.loads((entry_dir / "source-map.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            session_rows[0]["source_map_path"],
+            "sessions/2026/06/21/legacy/source-map.json",
+        )
+        self.assertEqual(source_map["summary_path"], "sessions/2026/06/21/legacy/summary.md")
+        self.assertEqual(source_map["evidence_path"], "sessions/2026/06/21/legacy/evidence.md")
+        self.assertEqual(source_map["source_map_path"], "sessions/2026/06/21/legacy/source-map.json")
+        self.assertEqual(memory_rows[0]["derived_from"], ["sessions/2026/06/21/legacy/summary.md"])
+        self.assertEqual(memory_rows[0]["evidence_refs"], [])
 
     def test_memory_consolidation_trace_explains_lifecycle_decisions(self):
         module = load_update_module()

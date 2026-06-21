@@ -473,7 +473,7 @@ def iter_archive_files(repo: Path) -> Iterable[Path]:
 
 
 def extract_quality_text(relative: str, line: str) -> str:
-    if not relative.startswith("index/") or not relative.endswith(".jsonl"):
+    if not (relative.startswith("index/") or relative.startswith("memories/")) or not relative.endswith(".jsonl"):
         return line
     try:
         value = json.loads(line)
@@ -498,6 +498,8 @@ def extract_quality_text(relative: str, line: str) -> str:
         "index/memories.jsonl": ("text", "rationale", "topic", "scope", "tags"),
     }
     keys = keys_by_file.get(relative)
+    if keys is None and relative.startswith("memories/") and relative.endswith(".jsonl"):
+        keys = ("text", "rationale", "topic", "scope", "tags")
     if not keys:
         return line
 
@@ -814,9 +816,7 @@ def is_valid_memory_node_shape(row: dict) -> bool:
             if value is not None and not is_safe_memory_identifier(value):
                 return False
     evidence_refs = row.get("evidence_refs")
-    if not isinstance(evidence_refs, list) or not evidence_refs or not all(
-        is_valid_evidence_ref_shape(ref) for ref in evidence_refs
-    ):
+    if not isinstance(evidence_refs, list) or not all(is_valid_evidence_ref_shape(ref) for ref in evidence_refs):
         return False
     superseded_by = row.get("superseded_by")
     return superseded_by is None or is_safe_memory_identifier(superseded_by)
