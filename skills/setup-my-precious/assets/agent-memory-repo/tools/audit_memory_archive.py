@@ -357,6 +357,12 @@ MEMORY_NODE_REQUIRED_FIELDS = {
     "superseded_by",
     "tags",
 }
+MEMORY_NODE_OPTIONAL_FIELDS = {
+    "contradicts",
+    "contradicted_by",
+    "deprecates",
+    "deprecated_by",
+}
 MEMORY_NODE_STRING_FIELDS = {
     "memory_id",
     "layer",
@@ -377,6 +383,8 @@ MEMORY_NODE_ENUM_FIELDS = {
     "persistence": {"normal", "sticky"},
 }
 MEMORY_NODE_STRING_LIST_FIELDS = {"derived_from", "supersedes", "tags"}
+MEMORY_NODE_OPTIONAL_STRING_FIELDS = {"deprecated_by"}
+MEMORY_NODE_OPTIONAL_STRING_LIST_FIELDS = {"contradicts", "contradicted_by", "deprecates"}
 MEMORY_LAYER_ROOT_FILES = {
     "global": "memories/global.jsonl",
     "domain": "memories/domains.jsonl",
@@ -769,7 +777,10 @@ def has_valid_memory_lifecycle(row: dict) -> bool:
 
 
 def is_valid_memory_node_shape(row: dict) -> bool:
-    if set(row) != MEMORY_NODE_REQUIRED_FIELDS:
+    row_fields = set(row)
+    if not MEMORY_NODE_REQUIRED_FIELDS.issubset(row_fields):
+        return False
+    if not row_fields.issubset(MEMORY_NODE_REQUIRED_FIELDS | MEMORY_NODE_OPTIONAL_FIELDS):
         return False
     if not is_safe_memory_identifier(row.get("memory_id")):
         return False
@@ -791,6 +802,17 @@ def is_valid_memory_node_shape(row: dict) -> bool:
             return False
     if not all(is_safe_memory_identifier(target) for target in row.get("supersedes", [])):
         return False
+    for field in MEMORY_NODE_OPTIONAL_STRING_LIST_FIELDS:
+        if field in row:
+            if not is_string_list(row.get(field)):
+                return False
+            if not all(is_safe_memory_identifier(target) for target in row.get(field, [])):
+                return False
+    for field in MEMORY_NODE_OPTIONAL_STRING_FIELDS:
+        if field in row:
+            value = row.get(field)
+            if value is not None and not is_safe_memory_identifier(value):
+                return False
     evidence_refs = row.get("evidence_refs")
     if not isinstance(evidence_refs, list) or not evidence_refs or not all(
         is_valid_evidence_ref_shape(ref) for ref in evidence_refs
@@ -905,6 +927,90 @@ def audit_memory_supersession_refs(repo: Path) -> list[Finding]:
         )
         if broken_supersedes or broken_superseded_by or cyclic_supersedes:
             findings.append(Finding(relative, line_number, "broken_supersession_ref"))
+    return findings
+
+
+def audit_memory_contradiction_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    valid_rows: list[tuple[str, int, dict]] = []
+    rows_by_id: dict[str, list[dict]] = {}
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str):
+            continue
+        valid_rows.append((relative, line_number, row))
+        rows_by_id.setdefault(memory_id, []).append(row)
+
+    for relative, line_number, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        contradicts = row.get("contradicts", [])
+        contradicted_by = row.get("contradicted_by", [])
+        broken_contradicts = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(memory_id in target_row.get("contradicted_by", []) for target_row in rows_by_id[target])
+            for target in contradicts
+        )
+        broken_contradicted_by = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(memory_id in target_row.get("contradicts", []) for target_row in rows_by_id[target])
+            for target in contradicted_by
+        )
+        if broken_contradicts or broken_contradicted_by:
+            findings.append(Finding(relative, line_number, "broken_contradiction_ref"))
+    return findings
+
+
+def audit_memory_deprecation_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    valid_rows: list[tuple[str, int, dict]] = []
+    rows_by_id: dict[str, list[dict]] = {}
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str):
+            continue
+        valid_rows.append((relative, line_number, row))
+        rows_by_id.setdefault(memory_id, []).append(row)
+
+    for relative, line_number, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        deprecates = row.get("deprecates", [])
+        deprecated_by = row.get("deprecated_by")
+        broken_deprecates = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(target_row.get("deprecated_by") == memory_id for target_row in rows_by_id[target])
+            for target in deprecates
+        )
+        broken_deprecated_by = isinstance(deprecated_by, str) and (
+            deprecated_by == memory_id
+            or deprecated_by not in rows_by_id
+            or not all(memory_id in target_row.get("deprecates", []) for target_row in rows_by_id[deprecated_by])
+        )
+        if broken_deprecates or broken_deprecated_by:
+            findings.append(Finding(relative, line_number, "broken_deprecation_ref"))
+    return findings
+
+
+def audit_memory_lifecycle_states(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        supersedes = row.get("supersedes", [])
+        superseded_by = row.get("superseded_by")
+        deprecates = row.get("deprecates", [])
+        deprecated_by = row.get("deprecated_by")
+        if isinstance(superseded_by, str) and isinstance(deprecated_by, str):
+            findings.append(Finding(relative, line_number, "invalid_memory_lifecycle_state"))
+            continue
+        if isinstance(supersedes, list) and supersedes and isinstance(deprecates, list) and deprecates:
+            findings.append(Finding(relative, line_number, "invalid_memory_lifecycle_state"))
     return findings
 
 
@@ -1064,6 +1170,9 @@ def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     findings.extend(audit_memory_file_placement(repo))
     findings.extend(audit_memory_id_uniqueness(repo))
     findings.extend(audit_memory_supersession_refs(repo))
+    findings.extend(audit_memory_contradiction_refs(repo))
+    findings.extend(audit_memory_deprecation_refs(repo))
+    findings.extend(audit_memory_lifecycle_states(repo))
     findings.extend(audit_memory_index_consistency(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 

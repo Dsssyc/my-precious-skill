@@ -233,6 +233,474 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "sessions/2026/06/02/beta/summary.md",
         ])
 
+    def test_build_memory_nodes_semantically_merges_paraphrased_reusable_facts(self):
+        module = load_update_module()
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [
+                    "Layered retrieval must preserve evidence refs for induced memories."
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [
+                    "Induced layered memories should retain their evidence references during retrieval."
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        self.assertEqual(node["text"], "Layered retrieval must preserve evidence refs for induced memories.")
+        self.assertEqual(node["layer"], "domain")
+        self.assertEqual(node["confidence"], "high")
+        self.assertEqual(node["support_count"], 2)
+        self.assertEqual(node["last_seen"], "2026-06-02T10:00:00Z")
+        self.assertEqual(
+            node["derived_from"],
+            [
+                "sessions/2026/06/01/alpha/summary.md",
+                "sessions/2026/06/02/beta/summary.md",
+            ],
+        )
+        self.assertEqual(
+            node["evidence_refs"],
+            [
+                {"path": "sessions/2026/06/01/alpha/evidence.md", "quote_id": "ev_001"},
+                {"path": "sessions/2026/06/02/beta/evidence.md", "quote_id": "ev_001"},
+            ],
+        )
+
+    def test_build_memory_nodes_links_semantic_contradictions(self):
+        module = load_update_module()
+        old_fact = "Layered retrieval must preserve evidence refs for induced memories."
+        current_fact = "Layered retrieval must not preserve evidence refs for induced memories."
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [old_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [current_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+        by_text = {node["text"]: node for node in nodes}
+        old_node = by_text[old_fact]
+        current_node = by_text[current_fact]
+
+        self.assertEqual(current_node["contradicts"], [old_node["memory_id"]])
+        self.assertEqual(old_node["contradicted_by"], [current_node["memory_id"]])
+        self.assertEqual(current_node["support_count"], 2)
+        self.assertEqual(current_node["last_seen"], "2026-06-02T10:00:00Z")
+        self.assertEqual(len(current_node["evidence_refs"]), 2)
+
+    def test_build_memory_nodes_links_semantic_partial_supersession(self):
+        module = load_update_module()
+        old_fact = "Layered retrieval should preserve evidence refs and raw source anchors for induced memories."
+        current_fact = "Layered retrieval should preserve evidence refs for induced memories."
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [old_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [current_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+        by_text = {node["text"]: node for node in nodes}
+        old_node = by_text[old_fact]
+        current_node = by_text[current_fact]
+
+        self.assertEqual(current_node["supersedes"], [old_node["memory_id"]])
+        self.assertEqual(old_node["superseded_by"], current_node["memory_id"])
+        self.assertEqual(current_node["support_count"], 2)
+        self.assertEqual(current_node["last_seen"], "2026-06-02T10:00:00Z")
+        self.assertEqual(len(current_node["derived_from"]), 2)
+        self.assertEqual(len(current_node["evidence_refs"]), 2)
+
+    def test_build_memory_nodes_does_not_partially_supersede_scope_narrowing(self):
+        module = load_update_module()
+        old_fact = "Layered retrieval should preserve evidence refs for project-specific induced memories."
+        current_fact = "Layered retrieval should preserve evidence refs for induced memories."
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [old_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [current_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+        by_text = {node["text"]: node for node in nodes}
+
+        self.assertEqual(len(nodes), 2)
+        self.assertEqual(by_text[current_fact]["supersedes"], [])
+        self.assertIsNone(by_text[old_fact]["superseded_by"])
+
+    def test_rebuild_indexes_writes_ambiguity_review_queue_and_skip_trace(self):
+        module = load_update_module()
+        old_fact = "Layered retrieval should preserve evidence refs for project-specific induced memories."
+        current_fact = "Layered retrieval should preserve evidence refs for induced memories."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            rows = [
+                {
+                    "session_id": "s1",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/alpha.jsonl",
+                    "source_updated_at": "2026-06-01T10:00:00Z",
+                    "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                    "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                    "reusable_facts": [old_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["memory", "retrieval"],
+                },
+                {
+                    "session_id": "s2",
+                    "project": "beta",
+                    "project_path": "/tmp/beta",
+                    "source_record": "source-records/beta.jsonl",
+                    "source_updated_at": "2026-06-02T10:00:00Z",
+                    "summary_path": "sessions/2026/06/02/beta/summary.md",
+                    "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                    "reusable_facts": [current_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["memory", "retrieval"],
+                },
+            ]
+            for row in rows:
+                entry_dir = memory_repo / Path(row["summary_path"]).parent
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {row['session_id']}\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text("ev_001: Redacted evidence\n", encoding="utf-8")
+                (entry_dir / "meta.json").write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+
+            module.rebuild_indexes(memory_repo)
+
+            nodes = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            by_text = {node["text"]: node for node in nodes}
+            old_node = by_text[old_fact]
+            current_node = by_text[current_fact]
+            self.assertEqual(current_node["supersedes"], [])
+            self.assertIsNone(old_node["superseded_by"])
+
+            review_candidates = [
+                json.loads(line)
+                for line in (memory_repo / "index/memory_review_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(review_candidates), 1)
+            self.assertEqual(review_candidates[0]["candidate_type"], "ambiguous_semantic_lifecycle")
+            self.assertEqual(review_candidates[0]["current_memory_id"], current_node["memory_id"])
+            self.assertEqual(review_candidates[0]["older_memory_id"], old_node["memory_id"])
+            self.assertEqual(review_candidates[0]["recommended_action"], "manual_review")
+
+            trace_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memory_consolidation_trace.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertTrue(
+                any(
+                    row.get("decision") == "skip"
+                    and row.get("reason") == "ambiguous_scope_narrowing_requires_review"
+                    and row.get("current_memory_id") == current_node["memory_id"]
+                    and row.get("target_memory_id") == old_node["memory_id"]
+                    for row in trace_rows
+                )
+            )
+
+    def test_memory_consolidation_trace_explains_lifecycle_decisions(self):
+        module = load_update_module()
+        nodes = [
+            {
+                "memory_id": "mem_merge",
+                "source": "automatic",
+                "support_count": 2,
+                "supersedes": [],
+                "contradicts": [],
+                "deprecates": [],
+            },
+            {
+                "memory_id": "mem_current",
+                "source": "automatic",
+                "support_count": 1,
+                "supersedes": ["mem_old"],
+                "contradicts": ["mem_conflict"],
+                "deprecates": ["mem_deleted"],
+            },
+        ]
+        review_candidates = [
+            {
+                "reason": "ambiguous_scope_narrowing_requires_review",
+                "current_memory_id": "mem_current",
+                "older_memory_id": "mem_scope_specific",
+            }
+        ]
+
+        traces = module.build_memory_consolidation_traces(nodes, review_candidates)
+        decisions = {(row.get("decision"), row.get("reason")) for row in traces}
+
+        self.assertIn(("merge", "same_consolidation_key_support_merge"), decisions)
+        self.assertIn(("supersede", "confirmed_supersession_link"), decisions)
+        self.assertIn(("contradict", "confirmed_contradiction_link"), decisions)
+        self.assertIn(("deprecate", "confirmed_deprecation_link"), decisions)
+        self.assertIn(("skip", "ambiguous_scope_narrowing_requires_review"), decisions)
+
+    def test_build_memory_nodes_lowers_confidence_for_contradicted_memory(self):
+        module = load_update_module()
+        old_fact = "Layered retrieval must preserve evidence refs for induced memories."
+        current_fact = "Layered retrieval must not preserve evidence refs for induced memories."
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [old_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [
+                    "Induced layered memories should retain their evidence references during retrieval."
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s3",
+                "project": "gamma",
+                "project_path": "/tmp/gamma",
+                "source_record": "source-records/gamma.jsonl",
+                "source_updated_at": "2026-06-03T10:00:00Z",
+                "summary_path": "sessions/2026/06/03/gamma/summary.md",
+                "evidence_path": "sessions/2026/06/03/gamma/evidence.md",
+                "reusable_facts": [current_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+        by_text = {node["text"]: node for node in nodes}
+        old_node = by_text[old_fact]
+        current_node = by_text[current_fact]
+
+        self.assertEqual(old_node["confidence"], "low")
+        self.assertEqual(current_node["confidence"], "high")
+        self.assertEqual(current_node["contradicts"], [old_node["memory_id"]])
+        self.assertEqual(old_node["contradicted_by"], [current_node["memory_id"]])
+        self.assertEqual(len(current_node["evidence_refs"]), 3)
+
+    def test_build_memory_nodes_preserves_current_side_of_multi_hop_contradiction_chain(self):
+        module = load_update_module()
+        first_fact = "Layered retrieval must preserve evidence refs for induced memories."
+        contradicted_fact = "Layered retrieval must not preserve evidence refs for induced memories."
+        final_fact = "Induced layered memories should retain their evidence references during retrieval."
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-05-01T10:00:00Z",
+                "summary_path": "sessions/2026/05/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/05/01/alpha/evidence.md",
+                "reusable_facts": [first_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/beta/summary.md",
+                "evidence_path": "sessions/2026/06/01/beta/evidence.md",
+                "reusable_facts": [contradicted_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s3",
+                "project": "gamma",
+                "project_path": "/tmp/gamma",
+                "source_record": "source-records/gamma.jsonl",
+                "source_updated_at": "2026-07-01T10:00:00Z",
+                "summary_path": "sessions/2026/07/01/gamma/summary.md",
+                "evidence_path": "sessions/2026/07/01/gamma/evidence.md",
+                "reusable_facts": [final_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+        by_text = {node["text"]: node for node in nodes}
+        current_node = by_text[first_fact]
+        contradicted_node = by_text[contradicted_fact]
+
+        self.assertEqual(current_node["support_count"], 3)
+        self.assertEqual(current_node["last_seen"], "2026-07-01T10:00:00Z")
+        self.assertEqual(current_node["contradicts"], [contradicted_node["memory_id"]])
+        self.assertEqual(contradicted_node["contradicted_by"], [current_node["memory_id"]])
+        self.assertEqual(contradicted_node["confidence"], "low")
+        self.assertEqual(len(current_node["evidence_refs"]), 3)
+
+    def test_build_memory_nodes_links_deprecated_memory_without_losing_evidence(self):
+        module = load_update_module()
+        deprecated_fact = "Layered retrieval should keep raw transcript uploads disabled by default."
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [deprecated_fact],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+            {
+                "session_id": "s2",
+                "project": "beta",
+                "project_path": "/tmp/beta",
+                "source_record": "source-records/beta.jsonl",
+                "source_updated_at": "2026-06-02T10:00:00Z",
+                "summary_path": "sessions/2026/06/02/beta/summary.md",
+                "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                "reusable_facts": [
+                    "Deprecated fact: Layered retrieval should keep raw transcript uploads disabled by default."
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory", "retrieval"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+        by_text = {node["text"]: node for node in nodes}
+        deprecated_node = by_text[deprecated_fact]
+        deprecation_node = next(node for node in nodes if node.get("deprecates"))
+
+        self.assertEqual(deprecation_node["deprecates"], [deprecated_node["memory_id"]])
+        self.assertEqual(deprecated_node["deprecated_by"], deprecation_node["memory_id"])
+        self.assertEqual(deprecated_node["confidence"], "low")
+        self.assertEqual(len(deprecation_node["evidence_refs"]), 2)
+
     def test_update_memory_archive_induces_domain_memory_from_two_project_sessions(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()

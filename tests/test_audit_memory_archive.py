@@ -1775,6 +1775,150 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("index/memories.jsonl:2 category=broken_supersession_ref", combined)
             self.assertNotIn("index/memories.jsonl:4 category=broken_supersession_ref", combined)
 
+    def test_audit_memory_archive_flags_broken_contradiction_references(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            provenance = write_memory_node_provenance(memory_repo, "broken-contradiction")
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_current_missing_backref",
+                        contradicts=["mem_old_missing_backref"],
+                        **provenance,
+                    )
+                )
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_old_missing_backref", **provenance))
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_old_missing_forwardref",
+                        contradicted_by=["mem_current_missing_forwardref"],
+                        **provenance,
+                    )
+                )
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_current_missing_forwardref", **provenance))
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_self_contradiction",
+                        contradicts=["mem_self_contradiction"],
+                        **provenance,
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("index/memories.jsonl:1 category=broken_contradiction_ref", combined)
+            self.assertIn("index/memories.jsonl:3 category=broken_contradiction_ref", combined)
+            self.assertIn("index/memories.jsonl:5 category=broken_contradiction_ref", combined)
+            self.assertNotIn("index/memories.jsonl:2 category=broken_contradiction_ref", combined)
+            self.assertNotIn("index/memories.jsonl:4 category=broken_contradiction_ref", combined)
+
+    def test_audit_memory_archive_flags_broken_deprecation_references_and_illegal_states(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            provenance = write_memory_node_provenance(memory_repo, "broken-deprecation")
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_marker_missing_backref",
+                        deprecates=["mem_old_missing_backref"],
+                        **provenance,
+                    )
+                )
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_old_missing_backref", **provenance))
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_old_missing_forwardref",
+                        deprecated_by="mem_marker_missing_forwardref",
+                        **provenance,
+                    )
+                )
+                + "\n"
+                + json.dumps(valid_memory_node(memory_id="mem_marker_missing_forwardref", **provenance))
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_self_deprecation",
+                        deprecates=["mem_self_deprecation"],
+                        **provenance,
+                    )
+                )
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_illegal_dual_retired",
+                        superseded_by="mem_replacement",
+                        deprecated_by="mem_deprecation_marker",
+                        **provenance,
+                    )
+                )
+                + "\n"
+                + json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_illegal_marker_replaced",
+                        supersedes=["mem_old_target"],
+                        deprecates=["mem_old_target"],
+                        **provenance,
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("index/memories.jsonl:1 category=broken_deprecation_ref", combined)
+            self.assertIn("index/memories.jsonl:3 category=broken_deprecation_ref", combined)
+            self.assertIn("index/memories.jsonl:5 category=broken_deprecation_ref", combined)
+            self.assertIn("index/memories.jsonl:6 category=invalid_memory_lifecycle_state", combined)
+            self.assertIn("index/memories.jsonl:7 category=invalid_memory_lifecycle_state", combined)
+            self.assertNotIn("index/memories.jsonl:2 category=broken_deprecation_ref", combined)
+            self.assertNotIn("index/memories.jsonl:4 category=broken_deprecation_ref", combined)
+
     def test_audit_memory_archive_flags_supersession_refs_masked_by_other_copies(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

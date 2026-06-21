@@ -157,6 +157,12 @@ def validate_case_memory_identifiers(case: dict) -> None:
         validate_case_memory_identifier(case.get("expected_memory_id"), "expected_memory_id")
     for stale_id in text_list(case.get("stale_memory_id")):
         validate_case_memory_identifier(stale_id, "stale_memory_id")
+    for contradicted_id in text_list(case.get("contradicted_memory_id")):
+        validate_case_memory_identifier(contradicted_id, "contradicted_memory_id")
+    for deprecated_id in text_list(case.get("deprecated_memory_id")):
+        validate_case_memory_identifier(deprecated_id, "deprecated_memory_id")
+    for false_merge_id in text_list(case.get("semantic_false_merge_memory_id")):
+        validate_case_memory_identifier(false_merge_id, "semantic_false_merge_memory_id")
 
 
 def memory_layer(case: dict) -> str:
@@ -201,7 +207,7 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
         text_parts.append(answer_text)
     text_parts.append(f"{query} {query} {query}.")
     is_explicit_memory = category == "explicit_memory"
-    return {
+    record = {
         "memory_id": memory_id,
         "layer": memory_layer(case),
         "scope": "synthetic",
@@ -221,6 +227,10 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
         "superseded_by": None,
         "tags": [category, "synthetic-benchmark", str(case.get("source_benchmark") or "synthetic")],
     }
+    contradicted_ids = text_list(case.get("contradicted_memory_id"))
+    if include_superseded_refs and contradicted_ids:
+        record["contradicts"] = contradicted_ids
+    return record
 
 
 def build_superseded_distractor_records(case: dict) -> list[dict]:
@@ -256,6 +266,127 @@ def build_superseded_distractor_records(case: dict) -> list[dict]:
                     category,
                     "synthetic-benchmark",
                     "superseded-distractor",
+                    str(case.get("source_benchmark") or "synthetic"),
+                ],
+            }
+        )
+    for contradicted_id in text_list(case.get("contradicted_memory_id")):
+        if contradicted_id == expected_memory_id:
+            continue
+        records.append(
+            {
+                "memory_id": contradicted_id,
+                "layer": memory_layer(case),
+                "scope": "synthetic",
+                "topic": category.replace("_", "-"),
+                "text": f"Synthetic contradicted distractor target: {contradicted_id}. {query} {query} {query}.",
+                "rationale": f"Contradicted synthetic distractor for: {query}.",
+                "source": "automatic",
+                "confidence": "high",
+                "persistence": "normal",
+                "support_count": max(1, len(summary_paths), len(evidence_paths)),
+                "first_seen": "2026-06-18",
+                "last_seen": "2026-06-18",
+                "derived_from": summary_paths,
+                "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
+                "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
+                "supersedes": [],
+                "superseded_by": None,
+                "contradicted_by": [expected_memory_id],
+                "tags": [
+                    category,
+                    "synthetic-benchmark",
+                    "contradicted-distractor",
+                    str(case.get("source_benchmark") or "synthetic"),
+                ],
+            }
+        )
+    for deprecated_id in text_list(case.get("deprecated_memory_id")):
+        if deprecated_id == expected_memory_id:
+            continue
+        marker_id = f"{expected_memory_id}_deprecation"
+        records.append(
+            {
+                "memory_id": deprecated_id,
+                "layer": memory_layer(case),
+                "scope": "synthetic",
+                "topic": category.replace("_", "-"),
+                "text": f"Synthetic deprecated distractor target: {deprecated_id}. {query} {query} {query}.",
+                "rationale": f"Deprecated synthetic distractor for: {query}.",
+                "source": "automatic",
+                "confidence": "low",
+                "persistence": "normal",
+                "support_count": max(1, len(summary_paths), len(evidence_paths)),
+                "first_seen": "2026-05-18",
+                "last_seen": "2026-05-18",
+                "derived_from": summary_paths,
+                "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
+                "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
+                "supersedes": [],
+                "superseded_by": None,
+                "deprecated_by": marker_id,
+                "tags": [
+                    category,
+                    "synthetic-benchmark",
+                    "deprecated-distractor",
+                    str(case.get("source_benchmark") or "synthetic"),
+                ],
+            }
+        )
+        records.append(
+            {
+                "memory_id": marker_id,
+                "layer": memory_layer(case),
+                "scope": "synthetic",
+                "topic": category.replace("_", "-"),
+                "text": f"Synthetic deprecation marker for: {deprecated_id}. {query}.",
+                "rationale": f"Deprecation marker for: {query}.",
+                "source": "automatic",
+                "confidence": "high",
+                "persistence": "normal",
+                "support_count": max(1, len(summary_paths), len(evidence_paths)),
+                "first_seen": "2026-06-19",
+                "last_seen": "2026-06-19",
+                "derived_from": summary_paths,
+                "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
+                "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
+                "supersedes": [],
+                "superseded_by": None,
+                "deprecates": [deprecated_id],
+                "tags": [
+                    category,
+                    "synthetic-benchmark",
+                    "deprecation-marker",
+                    str(case.get("source_benchmark") or "synthetic"),
+                ],
+            }
+        )
+    for false_merge_id in text_list(case.get("semantic_false_merge_memory_id")):
+        if false_merge_id == expected_memory_id:
+            continue
+        records.append(
+            {
+                "memory_id": false_merge_id,
+                "layer": memory_layer(case),
+                "scope": "synthetic",
+                "topic": category.replace("_", "-"),
+                "text": f"Synthetic near-miss false merge distractor target: {false_merge_id}. {query}.",
+                "rationale": f"Near-miss false merge distractor for: {query}.",
+                "source": "automatic",
+                "confidence": "high",
+                "persistence": "normal",
+                "support_count": 1,
+                "first_seen": "2026-06-18",
+                "last_seen": "2026-06-18",
+                "derived_from": summary_paths,
+                "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
+                "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
+                "supersedes": [],
+                "superseded_by": None,
+                "tags": [
+                    category,
+                    "synthetic-benchmark",
+                    "false-merge-distractor",
                     str(case.get("source_benchmark") or "synthetic"),
                 ],
             }

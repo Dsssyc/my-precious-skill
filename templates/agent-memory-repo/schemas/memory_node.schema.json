@@ -62,6 +62,10 @@
     },
     "supersedes": { "type": "array", "items": { "type": "string" } },
     "superseded_by": { "type": ["string", "null"] },
+    "contradicts": { "type": "array", "items": { "type": "string" } },
+    "contradicted_by": { "type": "array", "items": { "type": "string" } },
+    "deprecates": { "type": "array", "items": { "type": "string" } },
+    "deprecated_by": { "type": ["string", "null"] },
     "tags": { "type": "array", "items": { "type": "string" } }
   }
 }

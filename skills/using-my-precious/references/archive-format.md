@@ -102,7 +102,21 @@ Each memory node should contain:
   `anchor`.
 - `supersedes`: older memory IDs this node replaces.
 - `superseded_by`: newer memory ID that replaces this node, or `null`.
+- `contradicts`: older memory IDs this node contradicts.
+- `contradicted_by`: newer memory IDs that contradict this node.
+- `deprecates`: older memory IDs this node retires without replacement.
+- `deprecated_by`: newer deprecation marker memory ID that retires this node.
 - `tags`: search and filtering tags.
+
+Updater diagnostics may also write internal index sidecars:
+
+- `index/memory_review_candidates.jsonl`: ambiguous semantic lifecycle pairs
+  that require manual review before one memory retires another.
+- `index/memory_consolidation_trace.jsonl`: aggregate decision traces for
+  merge, supersede, contradict, deprecate, and skip decisions.
+
+These sidecars should reference memory IDs and decision metadata rather than
+raw source content.
 
 Sessions remain event-level evidence. A memory node should point to session
 summaries or evidence snippets for support instead of duplicating the full

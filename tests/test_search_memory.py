@@ -45,6 +45,34 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/05/14/example/summary.md", result.stdout)
         self.assertIn("index:sessions.jsonl", result.stdout)
 
+    def test_search_memory_ignores_internal_review_and_trace_indexes(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            (repo / "index/memory_review_candidates.jsonl").write_text(
+                '{"reason":"diagnostic-only-token","current_memory_id":"mem_current"}\n',
+                encoding="utf-8",
+            )
+            (repo / "index/memory_consolidation_trace.jsonl").write_text(
+                '{"decision":"skip","reason":"diagnostic-only-token"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(script), "diagnostic-only-token", "--repo", str(repo)],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No memory hits for: diagnostic-only-token", result.stdout)
+        self.assertNotIn("memory_review_candidates.jsonl", result.stdout)
+        self.assertNotIn("memory_consolidation_trace.jsonl", result.stdout)
+
     def test_search_memory_sanitizes_archive_path_display(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
@@ -552,6 +580,194 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertIn("latest active policy", result.stdout)
         self.assertNotIn("stale forward-only policy", result.stdout)
+
+    def test_search_memory_skips_confirmed_contradicted_memory_nodes(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            old_entry = repo / "sessions/2026/06/17/layered-old"
+            current_entry = repo / "sessions/2026/06/18/layered-current"
+            old_entry.mkdir(parents=True)
+            current_entry.mkdir(parents=True)
+            (old_entry / "evidence.md").write_text(
+                "ev_001: Old evidence for the preserve evidence refs policy.\n",
+                encoding="utf-8",
+            )
+            (current_entry / "evidence.md").write_text(
+                "ev_001: Current evidence for the must not preserve evidence refs policy.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_layered_v1",
+                        "layer": "domain",
+                        "scope": "domain:memory-retrieval",
+                        "topic": "memory-retrieval",
+                        "text": "layered retrieval must preserve evidence refs old contradicted policy",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/layered-old/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/layered-old/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                        "contradicted_by": ["mem_layered_current"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_layered_current",
+                        "layer": "domain",
+                        "scope": "domain:memory-retrieval",
+                        "topic": "memory-retrieval",
+                        "text": "layered retrieval must not preserve evidence refs current active policy",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": [
+                            "sessions/2026/06/17/layered-old/summary.md",
+                            "sessions/2026/06/18/layered-current/summary.md",
+                        ],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/layered-old/evidence.md", "quote_id": "ev_001"},
+                            {"path": "sessions/2026/06/18/layered-current/evidence.md", "quote_id": "ev_001"},
+                        ],
+                        "raw_refs": [],
+                        "contradicts": ["mem_layered_v1"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "layered retrieval preserve evidence refs policy",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_layered_current", result.stdout)
+        self.assertNotIn("memory_id: mem_layered_v1", result.stdout)
+        self.assertIn("sessions/2026/06/17/layered-old/evidence.md#ev_001", result.stdout)
+        self.assertIn("sessions/2026/06/18/layered-current/evidence.md#ev_001", result.stdout)
+
+    def test_search_memory_skips_confirmed_deprecated_memory_nodes_and_markers(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            deprecated_entry = repo / "sessions/2026/06/17/deprecated"
+            active_entry = repo / "sessions/2026/06/18/active"
+            deprecated_entry.mkdir(parents=True)
+            active_entry.mkdir(parents=True)
+            (deprecated_entry / "evidence.md").write_text(
+                "ev_001: Raw transcript uploads disabled by default old policy.\n",
+                encoding="utf-8",
+            )
+            (active_entry / "evidence.md").write_text(
+                "ev_001: Active drilldown policy keeps raw transcript uploads gated.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_raw_uploads_old",
+                        "layer": "domain",
+                        "scope": "domain:memory-retrieval",
+                        "topic": "memory-retrieval",
+                        "text": "raw transcript uploads disabled by default old deprecated policy",
+                        "source": "automatic",
+                        "confidence": "low",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/17/deprecated/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/deprecated/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                        "deprecated_by": "mem_raw_uploads_deprecation",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_raw_uploads_deprecation",
+                        "layer": "domain",
+                        "scope": "domain:memory-retrieval",
+                        "topic": "memory-retrieval",
+                        "text": "deprecated fact raw transcript uploads disabled by default tombstone marker",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": [
+                            "sessions/2026/06/17/deprecated/summary.md",
+                            "sessions/2026/06/18/active/summary.md",
+                        ],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/deprecated/evidence.md", "quote_id": "ev_001"},
+                            {"path": "sessions/2026/06/18/active/evidence.md", "quote_id": "ev_001"},
+                        ],
+                        "raw_refs": [],
+                        "deprecates": ["mem_raw_uploads_old"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_raw_uploads_active",
+                        "layer": "domain",
+                        "scope": "domain:memory-retrieval",
+                        "topic": "memory-retrieval",
+                        "text": "raw transcript uploads require gated source drilldown active policy",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/06/18/active/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/18/active/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "raw transcript uploads policy",
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_raw_uploads_active", result.stdout)
+        self.assertNotIn("memory_id: mem_raw_uploads_old", result.stdout)
+        self.assertNotIn("memory_id: mem_raw_uploads_deprecation", result.stdout)
 
     def test_search_memory_ignores_unsafe_supersession_claims(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()

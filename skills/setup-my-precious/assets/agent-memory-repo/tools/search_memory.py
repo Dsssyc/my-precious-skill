@@ -902,6 +902,54 @@ def collect_forward_superseded_ids(supersedes_by_memory_id: dict[str, set[str]])
     return superseded_ids
 
 
+def collect_contradicts_by_memory_id(records: list[dict]) -> dict[str, set[str]]:
+    contradicts_by_memory_id: dict[str, set[str]] = {}
+    for record in records:
+        if not has_valid_memory_lifecycle(record):
+            continue
+        memory_id = record.get("memory_id")
+        if not is_safe_memory_identifier(memory_id):
+            continue
+        contradicts = record.get("contradicts", [])
+        if not isinstance(contradicts, list):
+            continue
+        for target in contradicts:
+            if is_safe_memory_identifier(target) and target != memory_id:
+                contradicts_by_memory_id.setdefault(memory_id, set()).add(target)
+    return contradicts_by_memory_id
+
+
+def collect_forward_contradicted_ids(contradicts_by_memory_id: dict[str, set[str]]) -> set[str]:
+    contradicted_ids: set[str] = set()
+    for contradicted in contradicts_by_memory_id.values():
+        contradicted_ids.update(contradicted)
+    return contradicted_ids
+
+
+def collect_deprecates_by_memory_id(records: list[dict]) -> dict[str, set[str]]:
+    deprecates_by_memory_id: dict[str, set[str]] = {}
+    for record in records:
+        if not has_valid_memory_lifecycle(record):
+            continue
+        memory_id = record.get("memory_id")
+        if not is_safe_memory_identifier(memory_id):
+            continue
+        deprecates = record.get("deprecates", [])
+        if not isinstance(deprecates, list):
+            continue
+        for target in deprecates:
+            if is_safe_memory_identifier(target) and target != memory_id:
+                deprecates_by_memory_id.setdefault(memory_id, set()).add(target)
+    return deprecates_by_memory_id
+
+
+def collect_forward_deprecated_ids(deprecates_by_memory_id: dict[str, set[str]]) -> set[str]:
+    deprecated_ids: set[str] = set()
+    for deprecated in deprecates_by_memory_id.values():
+        deprecated_ids.update(deprecated)
+    return deprecated_ids
+
+
 def has_confirmed_superseded_by(record: dict, supersedes_by_memory_id: dict[str, set[str]]) -> bool:
     memory_id = record.get("memory_id")
     superseded_by = record.get("superseded_by")
@@ -910,6 +958,33 @@ def has_confirmed_superseded_by(record: dict, supersedes_by_memory_id: dict[str,
         and is_safe_memory_identifier(superseded_by)
         and memory_id in supersedes_by_memory_id.get(superseded_by, set())
     )
+
+
+def has_confirmed_contradicted_by(record: dict, contradicts_by_memory_id: dict[str, set[str]]) -> bool:
+    memory_id = record.get("memory_id")
+    contradicted_by = record.get("contradicted_by", [])
+    if not is_safe_memory_identifier(memory_id) or not isinstance(contradicted_by, list):
+        return False
+    return any(
+        is_safe_memory_identifier(current_id)
+        and memory_id in contradicts_by_memory_id.get(current_id, set())
+        for current_id in contradicted_by
+    )
+
+
+def has_confirmed_deprecated_by(record: dict, deprecates_by_memory_id: dict[str, set[str]]) -> bool:
+    memory_id = record.get("memory_id")
+    deprecated_by = record.get("deprecated_by")
+    return (
+        is_safe_memory_identifier(memory_id)
+        and is_safe_memory_identifier(deprecated_by)
+        and memory_id in deprecates_by_memory_id.get(deprecated_by, set())
+    )
+
+
+def has_deprecation_marker(record: dict) -> bool:
+    deprecates = record.get("deprecates", [])
+    return isinstance(deprecates, list) and any(is_safe_memory_identifier(item) for item in deprecates)
 
 
 def collect_memory_hits(
@@ -925,12 +1000,24 @@ def collect_memory_hits(
     records = list(iter_jsonl(index_path))
     supersedes_by_memory_id = collect_supersedes_by_memory_id(records)
     forward_superseded_ids = collect_forward_superseded_ids(supersedes_by_memory_id)
+    contradicts_by_memory_id = collect_contradicts_by_memory_id(records)
+    forward_contradicted_ids = collect_forward_contradicted_ids(contradicts_by_memory_id)
+    deprecates_by_memory_id = collect_deprecates_by_memory_id(records)
+    forward_deprecated_ids = collect_forward_deprecated_ids(deprecates_by_memory_id)
     for line_no, record in enumerate(records, 1):
         raw_memory_id = str(record.get("memory_id") or "")
         layer = safe_display_scalar(record.get("layer") or "", 60)
         if scope != "all" and layer != scope:
             continue
-        if raw_memory_id in forward_superseded_ids or has_confirmed_superseded_by(record, supersedes_by_memory_id):
+        if (
+            raw_memory_id in forward_superseded_ids
+            or has_confirmed_superseded_by(record, supersedes_by_memory_id)
+            or raw_memory_id in forward_contradicted_ids
+            or has_confirmed_contradicted_by(record, contradicts_by_memory_id)
+            or raw_memory_id in forward_deprecated_ids
+            or has_confirmed_deprecated_by(record, deprecates_by_memory_id)
+            or has_deprecation_marker(record)
+        ):
             continue
         if not has_valid_memory_lifecycle(record):
             continue

@@ -261,7 +261,9 @@ python ~/repos/agent-memory/tools/search_memory.py "private session archive"
 使用 depth 控制继续下钻到支持它的 sessions、evidence 或受保护的 source
 anchors。source anchors 会被当作不可信显示数据处理，不安全的 anchor 文本会被
 替换为 `[unsafe-source-ref]`；不安全的 metadata 字段会显示为 `[unsafe-field]`。
-带有非空 `superseded_by` 字段的 memory node 会被视为非活跃记忆，并被搜索跳过。
+带有已确认 `superseded_by`、`contradicted_by` 或 `deprecated_by` lifecycle
+links 的 memory node 会被视为非活跃记忆，并被搜索跳过；deprecation marker
+nodes 默认也会被跳过。
 只有用户明确要求 source reachability 时，才使用 `--depth source`：
 
 ```bash
@@ -510,6 +512,15 @@ skills/using-my-precious/references/archive-format.md
 - 通用 archive format reference。
 - 分层的 global、domain 和 project memory nodes，可下钻到 session、
   evidence 和 source anchors。
+- 面向 automatic memory nodes 的轻依赖 semantic consolidation，支持
+  paraphrase support merge、false partial-supersession guards、
+  contradiction links、deprecation links、partial supersession、retired node
+  confidence revision 和 robustness benchmark gates。
+- 面向语义 lifecycle 模糊关系的 review queue，以及解释 merge、supersede、
+  contradict、deprecate 和 skip 决策的 consolidation trace index。
+- privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、
+  suppression、lifecycle、top-k noise 和 provenance 指标，不渲染 memory text、
+  evidence text、source paths 或 raw anchors。
 - 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
   boost 和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。
@@ -578,11 +589,13 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
+  skills/update-my-precious/scripts/memory_consolidation.py \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
+  templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/render_scheduler.py \
   templates/agent-memory-repo/tools/sync_memory_archive.py

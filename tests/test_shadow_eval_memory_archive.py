@@ -1,0 +1,249 @@
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SCRIPT = Path("templates/agent-memory-repo/tools/shadow_eval_memory_archive.py").resolve()
+AUDIT_SCRIPT = Path("templates/agent-memory-repo/tools/audit_memory_archive.py").resolve()
+SYNTHETIC_ARCHIVE_BUILDER = Path("benchmarks/build_synthetic_recall_archive.py").resolve()
+SYNTHETIC_CASES = Path("benchmarks/cases/layered_recall_synthetic.jsonl").resolve()
+
+
+def write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
+def write_minimal_archive(repo: Path) -> None:
+    (repo / "index").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted/summary.md").write_text(
+        "# Session: Redacted fixture\n\n"
+        "A public summary mentions shadow recall marker without private source text.\n",
+        encoding="utf-8",
+    )
+    (repo / "sessions/2026/06/21/redacted/evidence.md").write_text(
+        "# Evidence\n\n"
+        "redacted_ev_001:\n"
+        "SECRET_SOURCE_SNIPPET must not appear in shadow eval output.\n",
+        encoding="utf-8",
+    )
+    records = [
+            {
+                "memory_id": "mem_shadow_current",
+                "layer": "global",
+                "scope": "global",
+                "topic": "shadow-eval",
+                "text": "Shadow recall marker should retrieve the current memory. "
+                "Shadow recall marker current target.",
+                "source": "automatic",
+                "confidence": "high",
+                "support_count": 1,
+                "derived_from": ["sessions/2026/06/21/redacted/summary.md"],
+                "evidence_refs": [
+                    {
+                        "path": "sessions/2026/06/21/redacted/evidence.md",
+                        "quote_id": "redacted_ev_001",
+                    }
+                ],
+                "raw_refs": [
+                    {
+                        "path": "records/private.jsonl",
+                        "anchor": "SECRET_RAW_ANCHOR",
+                    }
+                ],
+                "supersedes": ["mem_shadow_old"],
+                "superseded_by": None,
+            },
+            {
+                "memory_id": "mem_shadow_noise",
+                "layer": "global",
+                "scope": "global",
+                "topic": "shadow-eval",
+                "text": "Shadow recall marker has a plausible but non-target neighbor.",
+                "source": "automatic",
+                "confidence": "high",
+                "support_count": 1,
+                "derived_from": ["sessions/2026/06/21/redacted/summary.md"],
+                "evidence_refs": [],
+                "raw_refs": [],
+            },
+            {
+                "memory_id": "mem_shadow_old",
+                "layer": "global",
+                "scope": "global",
+                "topic": "shadow-eval",
+                "text": "Shadow recall marker should not return the retired memory.",
+                "source": "automatic",
+                "confidence": "low",
+                "support_count": 1,
+                "derived_from": ["sessions/2026/06/21/redacted/summary.md"],
+                "evidence_refs": [],
+                "raw_refs": [],
+                "supersedes": [],
+                "superseded_by": "mem_shadow_current",
+            },
+            {
+                "memory_id": "mem_shadow_deprecated",
+                "layer": "global",
+                "scope": "global",
+                "topic": "shadow-eval",
+                "text": "Deprecated shadow marker should be inactive.",
+                "source": "automatic",
+                "confidence": "low",
+                "support_count": 1,
+                "derived_from": ["sessions/2026/06/21/redacted/summary.md"],
+                "evidence_refs": [],
+                "raw_refs": [],
+                "deprecates": [],
+                "deprecated_by": "mem_shadow_delete_marker",
+            },
+            {
+                "memory_id": "mem_shadow_delete_marker",
+                "layer": "global",
+                "scope": "global",
+                "topic": "shadow-eval",
+                "text": "Deprecated fact: Deprecated shadow marker should be inactive.",
+                "source": "automatic",
+                "confidence": "high",
+                "support_count": 1,
+                "derived_from": ["sessions/2026/06/21/redacted/summary.md"],
+                "evidence_refs": [
+                    {
+                        "path": "sessions/2026/06/21/redacted/evidence.md",
+                        "quote_id": "redacted_ev_001",
+                    }
+                ],
+                "raw_refs": [],
+                "deprecates": ["mem_shadow_deprecated"],
+                "deprecated_by": None,
+            },
+    ]
+    for record in records:
+        record.setdefault("rationale", "Synthetic redacted fixture for shadow evaluation.")
+        record.setdefault("persistence", "normal")
+        record.setdefault("first_seen", "2026-06-21")
+        record.setdefault("last_seen", "2026-06-21")
+        record.setdefault("supersedes", [])
+        record.setdefault("superseded_by", None)
+        if not record.get("evidence_refs"):
+            record["evidence_refs"] = [
+                {
+                    "path": "sessions/2026/06/21/redacted/evidence.md",
+                    "quote_id": "redacted_ev_001",
+                }
+            ]
+        record.setdefault("raw_refs", [])
+        record.setdefault("tags", ["shadow-eval", "redacted-fixture"])
+    write_jsonl(repo / "index/memories.jsonl", records)
+
+
+class ShadowEvalMemoryArchiveTests(unittest.TestCase):
+    def test_shadow_eval_runs_on_packaged_synthetic_archive(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                    "--include-superseded-distractors",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(SYNTHETIC_CASES),
+                    "--audit-script",
+                    str(AUDIT_SCRIPT),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["report_version"], 1)
+        self.assertEqual(payload["probe_cases"]["cases"], 44)
+        self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
+        self.assertIn("memory_precision_at_5", payload["metrics"])
+        self.assertIn("top_k_noise_at_5", payload["metrics"])
+        self.assertIn("provenance_coverage", payload["metrics"])
+        self.assertIn("lifecycle_integrity", payload["metrics"])
+        self.assertEqual(payload["audit"]["status"], "passed")
+        self.assertFalse(payload["privacy"]["source_content_rendered"])
+
+    def test_shadow_eval_report_is_aggregate_and_privacy_safe_for_redacted_fixture(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:shadow_current",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                        "expected_not_memory_id": [
+                            "mem_shadow_old",
+                            "mem_shadow_deprecated",
+                            "mem_shadow_delete_marker",
+                        ],
+                        "forbidden_output_patterns": [
+                            "SECRET_SOURCE_SNIPPET",
+                            "SECRET_RAW_ANCHOR",
+                        ],
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--audit-script",
+                    str(AUDIT_SCRIPT),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotIn("SECRET_SOURCE_SNIPPET", combined)
+        self.assertNotIn("SECRET_RAW_ANCHOR", combined)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["probe_cases"]["cases"], 1)
+        self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
+        self.assertLess(payload["metrics"]["memory_precision_at_5"], 1.0)
+        self.assertGreater(payload["metrics"]["top_k_noise_at_5"], 0.0)
+        self.assertEqual(payload["metrics"]["active_memory_suppression"], 1.0)
+        self.assertEqual(payload["metrics"]["lifecycle_integrity"]["score"], 1.0)
+        self.assertGreater(payload["metrics"]["provenance_coverage"]["score"], 0.0)
+        self.assertEqual(payload["audit"]["status"], "passed")
+        self.assertFalse(payload["privacy"]["source_content_rendered"])

@@ -107,10 +107,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
 
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["cases"], 34)
+            self.assertEqual(payload["cases"], 44)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
-            self.assertGreaterEqual(payload["memory_precision_at_5"], 0.25)
+            self.assertGreaterEqual(payload["memory_precision_at_5"], 0.23)
             self.assertGreater(payload["memory_result_count_at_5"], payload["memory_relevant_count_at_5"])
             self.assertEqual(payload["memory_relevant_count_at_5"], payload["positive_cases"])
             self.assertEqual(
@@ -121,11 +121,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_ndcg_at_5"], 1.0)
             self.assertEqual(payload["memory_explainability_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_explainability"], 1.0)
-            self.assertEqual(payload["layer_calibration_cases"], 5)
+            self.assertEqual(payload["layer_calibration_cases"], 15)
             self.assertEqual(payload["layer_calibration"], 1.0)
-            self.assertEqual(payload["scope_filter_cases"], 5)
+            self.assertEqual(payload["scope_filter_cases"], 15)
             self.assertEqual(payload["scope_filter_recall"], 1.0)
-            self.assertEqual(payload["wrong_scope_suppression_cases"], 5)
+            self.assertEqual(payload["wrong_scope_suppression_cases"], 15)
             self.assertEqual(payload["wrong_scope_suppression"], 1.0)
             self.assertEqual(payload["memory_ranked_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_rank_missing_cases"], 0)
@@ -135,8 +135,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_rank_histogram"]["missing"], 0)
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
-            self.assertGreaterEqual(payload["source_precision_at_5"], 0.28)
-            self.assertGreaterEqual(payload["source_micro_precision_at_5"], 0.24)
+            self.assertGreaterEqual(payload["source_precision_at_5"], 0.24)
+            self.assertGreaterEqual(payload["source_micro_precision_at_5"], 0.22)
             self.assertGreater(payload["source_result_count_at_5"], payload["source_relevant_count_at_5"])
             self.assertEqual(payload["source_relevant_count_at_5"], payload["source_cases"])
             self.assertEqual(
@@ -146,7 +146,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["evidence_reachability"], 1.0)
             self.assertEqual(payload["memory_evidence_ref_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_evidence_ref_reachability"], 1.0)
-            self.assertEqual(payload["evidence_text_cases"], 3)
+            self.assertEqual(payload["evidence_text_cases"], 13)
             self.assertEqual(payload["evidence_text_reachability"], 1.0)
             self.assertEqual(payload["answer_cases"], 11)
             self.assertEqual(payload["answer_reachability"], 1.0)
@@ -156,6 +156,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["negative_memory_suppression"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
+            self.assertEqual(payload["semantic_lifecycle_cases"], 0)
+            self.assertEqual(payload["deprecated_lifecycle_cases"], 0)
+            self.assertEqual(payload["semantic_false_merge_cases"], 0)
+            self.assertEqual(payload["semantic_evidence_retention_cases"], 0)
             self.assertEqual(payload["privacy_boundary_pass_rate"], 1.0)
             self.assertEqual(payload["failed_case_count"], 0)
             self.assertEqual(payload["case_pass_rate"], 1.0)
@@ -216,31 +220,41 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             lower_gates = json.loads(SYNTHETIC_QUALITY_GATES.read_text(encoding="utf-8"))
             upper_gates = json.loads(SYNTHETIC_MAX_QUALITY_GATES.read_text(encoding="utf-8"))
             self.assertEqual(lower_gates["case_pass_rate"], 1.0)
-            self.assertEqual(lower_gates["memory_precision_at_5"], 0.25)
-            self.assertEqual(lower_gates["memory_micro_precision_at_5"], 0.24)
+            self.assertEqual(lower_gates["memory_precision_at_5"], 0.23)
+            self.assertEqual(lower_gates["memory_micro_precision_at_5"], 0.21)
             self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
             self.assertEqual(lower_gates["memory_explainability"], 1.0)
-            self.assertEqual(lower_gates["memory_explainability_cases"], 29)
-            self.assertEqual(lower_gates["memory_evidence_ref_cases"], 29)
+            self.assertEqual(lower_gates["memory_explainability_cases"], 39)
+            self.assertEqual(lower_gates["memory_evidence_ref_cases"], 39)
             self.assertEqual(lower_gates["memory_evidence_ref_reachability"], 1.0)
             self.assertEqual(lower_gates["lifecycle_supersession_cases"], 9)
             self.assertEqual(lower_gates["lifecycle_supersession_reciprocity"], 1.0)
+            self.assertEqual(lower_gates["semantic_lifecycle_cases"], 10)
+            self.assertEqual(lower_gates["semantic_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(lower_gates["semantic_lifecycle_suppression"], 1.0)
+            self.assertEqual(lower_gates["deprecated_lifecycle_cases"], 2)
+            self.assertEqual(lower_gates["deprecated_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(lower_gates["deprecated_lifecycle_suppression"], 1.0)
+            self.assertEqual(lower_gates["semantic_false_merge_cases"], 3)
+            self.assertEqual(lower_gates["semantic_false_merge_guard"], 1.0)
+            self.assertEqual(lower_gates["semantic_evidence_retention_cases"], 10)
+            self.assertEqual(lower_gates["semantic_evidence_retention"], 1.0)
             self.assertEqual(lower_gates["layer_calibration"], 1.0)
-            self.assertEqual(lower_gates["layer_calibration_cases"], 5)
+            self.assertEqual(lower_gates["layer_calibration_cases"], 15)
             self.assertEqual(lower_gates["scope_filter_recall"], 1.0)
-            self.assertEqual(lower_gates["scope_filter_cases"], 5)
+            self.assertEqual(lower_gates["scope_filter_cases"], 15)
             self.assertEqual(lower_gates["wrong_scope_suppression"], 1.0)
-            self.assertEqual(lower_gates["wrong_scope_suppression_cases"], 5)
-            self.assertEqual(lower_gates["evidence_text_cases"], 3)
+            self.assertEqual(lower_gates["wrong_scope_suppression_cases"], 15)
+            self.assertEqual(lower_gates["evidence_text_cases"], 13)
             self.assertEqual(lower_gates["evidence_text_reachability"], 1.0)
-            self.assertEqual(lower_gates["source_precision_at_5"], 0.28)
-            self.assertEqual(lower_gates["source_micro_precision_at_5"], 0.24)
-            self.assertEqual(lower_gates["source_relevant_count_at_5"], 29)
-            self.assertEqual(lower_gates["memory_ranked_cases"], 29)
+            self.assertEqual(lower_gates["source_precision_at_5"], 0.25)
+            self.assertEqual(lower_gates["source_micro_precision_at_5"], 0.23)
+            self.assertEqual(lower_gates["source_relevant_count_at_5"], 39)
+            self.assertEqual(lower_gates["memory_ranked_cases"], 39)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
             self.assertEqual(upper_gates["memory_rank_median"], 1.0)
-            self.assertEqual(upper_gates["source_result_count_at_5"], 117)
+            self.assertEqual(upper_gates["source_result_count_at_5"], 170)
             self.assertEqual(upper_gates["unsafe_source_anchor_count_at_5"], 0)
             self.assertEqual(upper_gates["unsafe_source_anchor_rate_at_5"], 0.0)
             self.assertEqual(lower_gates["categories.abstention.case_pass_rate"], 1.0)
@@ -268,6 +282,12 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 lower_gates["categories.temporal_reasoning.lifecycle_supersession_reciprocity"],
                 1.0,
             )
+            self.assertEqual(lower_gates["categories.semantic_lifecycle.semantic_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(lower_gates["categories.semantic_lifecycle.semantic_lifecycle_suppression"], 1.0)
+            self.assertEqual(lower_gates["categories.semantic_lifecycle.deprecated_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(lower_gates["categories.semantic_lifecycle.deprecated_lifecycle_suppression"], 1.0)
+            self.assertEqual(lower_gates["categories.semantic_lifecycle.semantic_false_merge_guard"], 1.0)
+            self.assertEqual(lower_gates["categories.semantic_lifecycle.semantic_evidence_retention"], 1.0)
             subprocess.run(
                 [
                     sys.executable,
@@ -304,7 +324,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 for line in details.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            self.assertEqual(payload["cases"], 34)
+            self.assertEqual(payload["cases"], 44)
             self.assertEqual(payload["answer_cases"], 11)
             self.assertGreaterEqual(payload["memory_precision_at_5"], lower_gates["memory_precision_at_5"])
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
@@ -322,6 +342,43 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(
                 payload["lifecycle_supersession_reciprocity"],
                 lower_gates["lifecycle_supersession_reciprocity"],
+            )
+            self.assertGreaterEqual(payload["semantic_lifecycle_cases"], lower_gates["semantic_lifecycle_cases"])
+            self.assertGreaterEqual(
+                payload["semantic_lifecycle_reciprocity"],
+                lower_gates["semantic_lifecycle_reciprocity"],
+            )
+            self.assertGreaterEqual(
+                payload["semantic_lifecycle_suppression"],
+                lower_gates["semantic_lifecycle_suppression"],
+            )
+            self.assertGreaterEqual(
+                payload["deprecated_lifecycle_cases"],
+                lower_gates["deprecated_lifecycle_cases"],
+            )
+            self.assertGreaterEqual(
+                payload["deprecated_lifecycle_reciprocity"],
+                lower_gates["deprecated_lifecycle_reciprocity"],
+            )
+            self.assertGreaterEqual(
+                payload["deprecated_lifecycle_suppression"],
+                lower_gates["deprecated_lifecycle_suppression"],
+            )
+            self.assertGreaterEqual(
+                payload["semantic_false_merge_cases"],
+                lower_gates["semantic_false_merge_cases"],
+            )
+            self.assertGreaterEqual(
+                payload["semantic_false_merge_guard"],
+                lower_gates["semantic_false_merge_guard"],
+            )
+            self.assertGreaterEqual(
+                payload["semantic_evidence_retention_cases"],
+                lower_gates["semantic_evidence_retention_cases"],
+            )
+            self.assertGreaterEqual(
+                payload["semantic_evidence_retention"],
+                lower_gates["semantic_evidence_retention"],
             )
             self.assertGreaterEqual(payload["layer_calibration"], lower_gates["layer_calibration"])
             self.assertGreaterEqual(payload["layer_calibration_cases"], lower_gates["layer_calibration_cases"])
@@ -356,6 +413,16 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["lifecycle_supersession_cases"], 9)
             self.assertEqual(payload["lifecycle_supersession_reciprocity"], 1.0)
+            self.assertEqual(payload["semantic_lifecycle_cases"], 10)
+            self.assertEqual(payload["semantic_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(payload["semantic_lifecycle_suppression"], 1.0)
+            self.assertEqual(payload["deprecated_lifecycle_cases"], 2)
+            self.assertEqual(payload["deprecated_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(payload["deprecated_lifecycle_suppression"], 1.0)
+            self.assertEqual(payload["semantic_false_merge_cases"], 3)
+            self.assertEqual(payload["semantic_false_merge_guard"], 1.0)
+            self.assertEqual(payload["semantic_evidence_retention_cases"], 10)
+            self.assertEqual(payload["semantic_evidence_retention"], 1.0)
             lifecycle_rows = [
                 row
                 for row in detail_rows
@@ -363,9 +430,26 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             ]
             self.assertEqual(len(lifecycle_rows), 9)
             self.assertTrue(all(row["lifecycle_supersession_reciprocity_hit"] for row in lifecycle_rows))
+            semantic_rows = [
+                row
+                for row in detail_rows
+                if row["semantic_lifecycle_expected"]
+            ]
+            self.assertEqual(len(semantic_rows), 10)
+            self.assertTrue(all(row["semantic_lifecycle_reciprocity_hit"] for row in semantic_rows))
+            self.assertTrue(all(row["semantic_lifecycle_suppression_hit"] for row in semantic_rows))
+            self.assertEqual(
+                len([row for row in semantic_rows if row["deprecated_memory_ids"]]),
+                2,
+            )
+            self.assertEqual(
+                len([row for row in semantic_rows if row["semantic_false_merge_memory_ids"]]),
+                3,
+            )
+            self.assertTrue(all(row["semantic_evidence_retention_hit"] for row in semantic_rows))
             self.assertEqual(payload["failed_case_count"], 0)
             self.assertEqual(payload["case_pass_rate"], 1.0)
-            self.assertEqual(len(detail_rows), 34)
+            self.assertEqual(len(detail_rows), 44)
             self.assertEqual(detail_rows[0]["case_id"], "synthetic:info_permission_prompt")
             self.assertEqual(detail_rows[-1]["case_id"], "synthetic:scope_domain_benchmark")
 
@@ -408,16 +492,64 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(all(record.get("derived_from") for record in stale_records))
             self.assertTrue(all(record.get("evidence_refs") for record in stale_records))
             self.assertTrue(any("superseded distractor" in record.get("text", "") for record in stale_records))
+            contradicted_ids = {
+                row["contradicted_memory_id"]
+                for row in (
+                    json.loads(line)
+                    for line in SYNTHETIC_CASES.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+                if row.get("contradicted_memory_id")
+            }
+            contradicted_records = [record for record in records if record.get("memory_id") in contradicted_ids]
+            self.assertEqual(len(contradicted_records), 5)
+            self.assertTrue(all(record.get("contradicted_by") for record in contradicted_records))
+            self.assertTrue(any("contradicted distractor" in record.get("text", "") for record in contradicted_records))
+            deprecated_ids = {
+                row["deprecated_memory_id"]
+                for row in (
+                    json.loads(line)
+                    for line in SYNTHETIC_CASES.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+                if row.get("deprecated_memory_id")
+            }
+            deprecated_records = [record for record in records if record.get("memory_id") in deprecated_ids]
+            deprecation_markers = [record for record in records if record.get("deprecates")]
+            self.assertEqual(len(deprecated_records), 2)
+            self.assertEqual(len(deprecation_markers), 2)
+            self.assertTrue(all(record.get("deprecated_by") for record in deprecated_records))
+            self.assertTrue(all(record.get("deprecates") for record in deprecation_markers))
+            false_merge_ids = {
+                row["semantic_false_merge_memory_id"]
+                for row in (
+                    json.loads(line)
+                    for line in SYNTHETIC_CASES.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                )
+                if row.get("semantic_false_merge_memory_id")
+            }
+            false_merge_records = [record for record in records if record.get("memory_id") in false_merge_ids]
+            self.assertEqual(len(false_merge_records), 3)
+            self.assertTrue(all(not record.get("superseded_by") for record in false_merge_records))
+            self.assertTrue(all(not record.get("deprecated_by") for record in false_merge_records))
 
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
 
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["cases"], 34)
+            self.assertEqual(payload["cases"], 44)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
             self.assertEqual(payload["lifecycle_supersession_cases"], 9)
             self.assertEqual(payload["lifecycle_supersession_reciprocity"], 1.0)
+            self.assertEqual(payload["semantic_lifecycle_cases"], 10)
+            self.assertEqual(payload["semantic_lifecycle_reciprocity"], 1.0)
+            self.assertEqual(payload["semantic_lifecycle_suppression"], 1.0)
+            self.assertEqual(payload["deprecated_lifecycle_cases"], 2)
+            self.assertEqual(payload["deprecated_lifecycle_suppression"], 1.0)
+            self.assertEqual(payload["semantic_false_merge_cases"], 3)
+            self.assertEqual(payload["semantic_false_merge_guard"], 1.0)
 
     def test_synthetic_builder_omits_supersedes_when_stale_records_are_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -465,6 +597,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["lifecycle_supersession_cases"], 0)
             self.assertEqual(payload["lifecycle_supersession_reciprocity"], 0.0)
+            self.assertEqual(payload["semantic_lifecycle_cases"], 0)
+            self.assertEqual(payload["semantic_lifecycle_reciprocity"], 0.0)
+            self.assertEqual(payload["semantic_lifecycle_suppression"], 0.0)
 
     def test_synthetic_builder_uses_expected_layers_for_scope_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -153,12 +153,21 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
         "reference_answer",
         "reference_evidence",
         "stale_memory_id",
+        "contradicted_memory_id",
+        "deprecated_memory_id",
+        "semantic_false_merge_memory_id",
         "temporal_scope",
     ):
         optional_case_text_or_texts(case, key, path, line_no)
     expected_memory_id = optional_case_text(case, "expected_memory_id")
     if expected_memory_id:
-        for key in ("expected_not_memory_id", "stale_memory_id"):
+        for key in (
+            "expected_not_memory_id",
+            "stale_memory_id",
+            "contradicted_memory_id",
+            "deprecated_memory_id",
+            "semantic_false_merge_memory_id",
+        ):
             if expected_memory_id in case_texts(case, key):
                 raise SystemExit(
                     f"{case_location(path, line_no)}: expected_memory_id must not also appear in {key}"
@@ -309,6 +318,16 @@ def new_totals() -> Totals:
         "memory_evidence_ref_hits": 0,
         "lifecycle_supersession_cases": 0,
         "lifecycle_supersession_hits": 0,
+        "semantic_lifecycle_cases": 0,
+        "semantic_lifecycle_reciprocity_hits": 0,
+        "semantic_lifecycle_suppression_hits": 0,
+        "semantic_false_merge_cases": 0,
+        "semantic_false_merge_hits": 0,
+        "deprecated_lifecycle_cases": 0,
+        "deprecated_lifecycle_reciprocity_hits": 0,
+        "deprecated_lifecycle_suppression_hits": 0,
+        "semantic_evidence_retention_cases": 0,
+        "semantic_evidence_retention_hits": 0,
         "evidence_cases": 0,
         "evidence_hits": 0,
         "evidence_text_cases": 0,
@@ -437,6 +456,34 @@ def finalize_totals(totals: Totals) -> dict:
             totals["lifecycle_supersession_hits"],
             totals["lifecycle_supersession_cases"],
         ),
+        "semantic_lifecycle_cases": int(totals["semantic_lifecycle_cases"]),
+        "semantic_lifecycle_reciprocity": ratio(
+            totals["semantic_lifecycle_reciprocity_hits"],
+            totals["semantic_lifecycle_cases"],
+        ),
+        "semantic_lifecycle_suppression": ratio(
+            totals["semantic_lifecycle_suppression_hits"],
+            totals["semantic_lifecycle_cases"],
+        ),
+        "semantic_false_merge_cases": int(totals["semantic_false_merge_cases"]),
+        "semantic_false_merge_guard": ratio(
+            totals["semantic_false_merge_hits"],
+            totals["semantic_false_merge_cases"],
+        ),
+        "deprecated_lifecycle_cases": int(totals["deprecated_lifecycle_cases"]),
+        "deprecated_lifecycle_reciprocity": ratio(
+            totals["deprecated_lifecycle_reciprocity_hits"],
+            totals["deprecated_lifecycle_cases"],
+        ),
+        "deprecated_lifecycle_suppression": ratio(
+            totals["deprecated_lifecycle_suppression_hits"],
+            totals["deprecated_lifecycle_cases"],
+        ),
+        "semantic_evidence_retention_cases": int(totals["semantic_evidence_retention_cases"]),
+        "semantic_evidence_retention": ratio(
+            totals["semantic_evidence_retention_hits"],
+            totals["semantic_evidence_retention_cases"],
+        ),
         "evidence_reachability": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "evidence_text_cases": int(totals["evidence_text_cases"]),
         "evidence_text_reachability": ratio(totals["evidence_text_hits"], totals["evidence_text_cases"]),
@@ -520,6 +567,20 @@ def add_result(totals: Totals, result: dict) -> None:
     if result["lifecycle_supersession_expected"]:
         totals["lifecycle_supersession_cases"] += 1
         totals["lifecycle_supersession_hits"] += int(result["lifecycle_supersession_reciprocity_hit"])
+    if result["semantic_lifecycle_expected"]:
+        totals["semantic_lifecycle_cases"] += 1
+        totals["semantic_lifecycle_reciprocity_hits"] += int(result["semantic_lifecycle_reciprocity_hit"])
+        totals["semantic_lifecycle_suppression_hits"] += int(result["semantic_lifecycle_suppression_hit"])
+    if result["semantic_false_merge_expected"]:
+        totals["semantic_false_merge_cases"] += 1
+        totals["semantic_false_merge_hits"] += int(result["semantic_false_merge_guard_hit"])
+    if result["deprecated_lifecycle_expected"]:
+        totals["deprecated_lifecycle_cases"] += 1
+        totals["deprecated_lifecycle_reciprocity_hits"] += int(result["deprecated_lifecycle_reciprocity_hit"])
+        totals["deprecated_lifecycle_suppression_hits"] += int(result["deprecated_lifecycle_suppression_hit"])
+    if result["semantic_evidence_retention_expected"]:
+        totals["semantic_evidence_retention_cases"] += 1
+        totals["semantic_evidence_retention_hits"] += int(result["semantic_evidence_retention_hit"])
 
 
 def compact_whitespace(text: str) -> str:
@@ -687,6 +748,156 @@ def lifecycle_supersession_reciprocity_hit(
         if stale_record.get("superseded_by") != expected_memory_id:
             return False
     return True
+
+
+def semantic_lifecycle_expected(
+    expected_memory_id: str,
+    contradicted_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not expected_memory_id or not contradicted_memory_ids:
+        return False
+    current = memory_records.get(expected_memory_id)
+    if not isinstance(current, dict):
+        return False
+    current_contradicts = set(record_texts(current, "contradicts"))
+    return any(
+        contradicted_id in current_contradicts or contradicted_id in memory_records
+        for contradicted_id in contradicted_memory_ids
+    )
+
+
+def semantic_lifecycle_reciprocity_hit(
+    expected_memory_id: str,
+    contradicted_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not semantic_lifecycle_expected(expected_memory_id, contradicted_memory_ids, memory_records):
+        return False
+    current = memory_records.get(expected_memory_id)
+    current_contradicts = set(record_texts(current, "contradicts"))
+    if not all(contradicted_id in current_contradicts for contradicted_id in contradicted_memory_ids):
+        return False
+    for contradicted_id in contradicted_memory_ids:
+        contradicted_record = memory_records.get(contradicted_id)
+        if not isinstance(contradicted_record, dict):
+            return False
+        if expected_memory_id not in record_texts(contradicted_record, "contradicted_by"):
+            return False
+    return True
+
+
+def deprecation_marker_ids(deprecated_memory_ids: list[str], memory_records: dict[str, dict]) -> list[str]:
+    marker_ids: list[str] = []
+    for memory_id, record in memory_records.items():
+        if not isinstance(record, dict):
+            continue
+        deprecates = set(record_texts(record, "deprecates"))
+        if deprecates.intersection(deprecated_memory_ids):
+            marker_ids.append(memory_id)
+    return sorted(marker_ids)
+
+
+def deprecated_lifecycle_expected(
+    deprecated_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not deprecated_memory_ids:
+        return False
+    return all(deprecated_id in memory_records for deprecated_id in deprecated_memory_ids)
+
+
+def deprecated_lifecycle_reciprocity_hit(
+    deprecated_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not deprecated_lifecycle_expected(deprecated_memory_ids, memory_records):
+        return False
+    for deprecated_id in deprecated_memory_ids:
+        deprecated_record = memory_records.get(deprecated_id)
+        if not isinstance(deprecated_record, dict):
+            return False
+        marker_id = deprecated_record.get("deprecated_by")
+        if not isinstance(marker_id, str):
+            return False
+        marker_record = memory_records.get(marker_id)
+        if not isinstance(marker_record, dict):
+            return False
+        if deprecated_id not in record_texts(marker_record, "deprecates"):
+            return False
+    return True
+
+
+def semantic_false_merge_expected(
+    expected_memory_id: str,
+    false_merge_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    return bool(
+        expected_memory_id
+        and false_merge_memory_ids
+        and expected_memory_id in memory_records
+        and all(memory_id in memory_records for memory_id in false_merge_memory_ids)
+    )
+
+
+def linked_memory_ids(record: dict) -> set[str]:
+    linked = set(record_texts(record, "supersedes"))
+    linked.update(record_texts(record, "contradicts"))
+    linked.update(record_texts(record, "contradicted_by"))
+    linked.update(record_texts(record, "deprecates"))
+    for field in ("superseded_by", "deprecated_by"):
+        value = record.get(field)
+        if isinstance(value, str) and value:
+            linked.add(value)
+    return linked
+
+
+def semantic_false_merge_guard_hit(
+    expected_memory_id: str,
+    false_merge_memory_ids: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if not semantic_false_merge_expected(expected_memory_id, false_merge_memory_ids, memory_records):
+        return False
+    expected_record = memory_records.get(expected_memory_id)
+    if not isinstance(expected_record, dict):
+        return False
+    expected_links = linked_memory_ids(expected_record)
+    if expected_links.intersection(false_merge_memory_ids):
+        return False
+    for false_merge_id in false_merge_memory_ids:
+        false_record = memory_records.get(false_merge_id)
+        if not isinstance(false_record, dict):
+            return False
+        if expected_memory_id in linked_memory_ids(false_record):
+            return False
+    return True
+
+
+def record_has_evidence_paths(record: dict, required_paths: list[str]) -> bool:
+    evidence_paths = {
+        str(ref.get("path") or "")
+        for ref in record.get("evidence_refs", [])
+        if isinstance(ref, dict)
+    }
+    return all(path in evidence_paths for path in required_paths)
+
+
+def semantic_evidence_retention_hit(
+    expected_memory_id: str,
+    lifecycle_marker_ids: list[str],
+    required_paths: list[str],
+    memory_records: dict[str, dict],
+) -> bool:
+    if len(required_paths) < 2:
+        return False
+    candidate_ids = [expected_memory_id, *lifecycle_marker_ids]
+    return any(
+        isinstance((record := memory_records.get(candidate_id)), dict)
+        and record_has_evidence_paths(record, required_paths)
+        for candidate_id in candidate_ids
+    )
 
 
 def required_case_text(case: dict, key: str, path: Path, line_no: int) -> str:
@@ -1211,6 +1422,20 @@ def failed_checks(result: dict) -> list[str]:
         checks.append("update_consistency")
     if result["lifecycle_supersession_expected"] and not result["lifecycle_supersession_reciprocity_hit"]:
         checks.append("lifecycle_supersession_reciprocity")
+    if result["semantic_lifecycle_expected"]:
+        if not result["semantic_lifecycle_reciprocity_hit"]:
+            checks.append("semantic_lifecycle_reciprocity")
+        if not result["semantic_lifecycle_suppression_hit"]:
+            checks.append("semantic_lifecycle_suppression")
+    if result["semantic_false_merge_expected"] and not result["semantic_false_merge_guard_hit"]:
+        checks.append("semantic_false_merge_guard")
+    if result["deprecated_lifecycle_expected"]:
+        if not result["deprecated_lifecycle_reciprocity_hit"]:
+            checks.append("deprecated_lifecycle_reciprocity")
+        if not result["deprecated_lifecycle_suppression_hit"]:
+            checks.append("deprecated_lifecycle_suppression")
+    if result["semantic_evidence_retention_expected"] and not result["semantic_evidence_retention_hit"]:
+        checks.append("semantic_evidence_retention")
     if not result["privacy_boundary_pass"]:
         checks.append("privacy_boundary_pass_rate")
     return checks
@@ -1233,6 +1458,9 @@ def case_detail(case: Case, result: dict) -> dict:
         "expected_memory_id": safe_result_identifier(optional_case_text(data, "expected_memory_id")),
         "expected_not_memory_ids": safe_result_identifiers(case_texts(data, "expected_not_memory_id")),
         "stale_memory_ids": safe_result_identifiers(case_texts(data, "stale_memory_id")),
+        "contradicted_memory_ids": safe_result_identifiers(case_texts(data, "contradicted_memory_id")),
+        "deprecated_memory_ids": safe_result_identifiers(case_texts(data, "deprecated_memory_id")),
+        "semantic_false_merge_memory_ids": safe_result_identifiers(case_texts(data, "semantic_false_merge_memory_id")),
         "expected_summary_path": safe_result_identifier(optional_case_text(data, "expected_summary_path")),
         "expected_source_anchor": safe_result_identifier(optional_case_text(data, "expected_source_anchor")),
         "required_evidence_paths": safe_result_identifiers(case_texts(data, "required_evidence_paths")),
@@ -1266,6 +1494,16 @@ def case_detail(case: Case, result: dict) -> dict:
         "update_consistency_hit": result["update_consistency_hit"],
         "lifecycle_supersession_expected": result["lifecycle_supersession_expected"],
         "lifecycle_supersession_reciprocity_hit": result["lifecycle_supersession_reciprocity_hit"],
+        "semantic_lifecycle_expected": result["semantic_lifecycle_expected"],
+        "semantic_lifecycle_reciprocity_hit": result["semantic_lifecycle_reciprocity_hit"],
+        "semantic_lifecycle_suppression_hit": result["semantic_lifecycle_suppression_hit"],
+        "semantic_false_merge_expected": result["semantic_false_merge_expected"],
+        "semantic_false_merge_guard_hit": result["semantic_false_merge_guard_hit"],
+        "deprecated_lifecycle_expected": result["deprecated_lifecycle_expected"],
+        "deprecated_lifecycle_reciprocity_hit": result["deprecated_lifecycle_reciprocity_hit"],
+        "deprecated_lifecycle_suppression_hit": result["deprecated_lifecycle_suppression_hit"],
+        "semantic_evidence_retention_expected": result["semantic_evidence_retention_expected"],
+        "semantic_evidence_retention_hit": result["semantic_evidence_retention_hit"],
         "privacy_boundary_pass": result["privacy_boundary_pass"],
         "memory_result_ids": result["memory_result_ids"],
         "memory_results_at_5": result["memory_results_at_5"],
@@ -1352,6 +1590,9 @@ def score_case(
     reference_answers = case_texts(data, "reference_answer")
     negative_memory_ids = case_texts(data, "expected_not_memory_id")
     stale_memory_ids = case_texts(data, "stale_memory_id")
+    contradicted_memory_ids = case_texts(data, "contradicted_memory_id")
+    deprecated_memory_ids = case_texts(data, "deprecated_memory_id")
+    false_merge_memory_ids = case_texts(data, "semantic_false_merge_memory_id")
     forbidden_patterns = case_texts(data, "forbidden_output_patterns")
 
     expected_record = memory_records.get(expected_memory_id)
@@ -1463,6 +1704,56 @@ def score_case(
         lifecycle_expected
         and lifecycle_supersession_reciprocity_hit(expected_memory_id, stale_memory_ids, memory_records)
     )
+    semantic_expected = bool(
+        is_positive
+        and semantic_lifecycle_expected(expected_memory_id, contradicted_memory_ids, memory_records)
+    )
+    semantic_reciprocity_hit = bool(
+        semantic_expected
+        and semantic_lifecycle_reciprocity_hit(expected_memory_id, contradicted_memory_ids, memory_records)
+    )
+    deprecated_expected = bool(
+        is_positive
+        and deprecated_lifecycle_expected(deprecated_memory_ids, memory_records)
+    )
+    deprecated_reciprocity_hit = bool(
+        deprecated_expected
+        and deprecated_lifecycle_reciprocity_hit(deprecated_memory_ids, memory_records)
+    )
+    deprecated_marker_ids = deprecation_marker_ids(deprecated_memory_ids, memory_records)
+    false_merge_expected = bool(
+        is_positive
+        and semantic_false_merge_expected(expected_memory_id, false_merge_memory_ids, memory_records)
+    )
+    false_merge_hit = bool(
+        false_merge_expected
+        and semantic_false_merge_guard_hit(expected_memory_id, false_merge_memory_ids, memory_records)
+    )
+    semantic_evidence_expected = bool(
+        is_positive
+        and (semantic_expected or deprecated_expected or false_merge_expected)
+        and len(required_evidence_paths) >= 2
+    )
+    semantic_evidence_hit = bool(
+        semantic_evidence_expected
+        and semantic_evidence_retention_hit(
+            expected_memory_id,
+            deprecated_marker_ids,
+            required_evidence_paths,
+            memory_records,
+        )
+    )
+    semantic_lifecycle_any_expected = bool(semantic_expected or deprecated_expected or false_merge_expected)
+    semantic_reciprocity_combined_hit = bool(
+        (not semantic_expected or semantic_reciprocity_hit)
+        and (not deprecated_expected or deprecated_reciprocity_hit)
+        and (not false_merge_expected or false_merge_hit)
+    )
+    semantic_suppressed = not blocks_contain_memory_ids(
+        suppression_blocks,
+        [*contradicted_memory_ids, *deprecated_memory_ids, *deprecated_marker_ids],
+        memory_records,
+    )
 
     return {
         "positive_case": is_positive,
@@ -1505,6 +1796,20 @@ def score_case(
         "update_consistency_hit": bool(update_expected and rank is not None and stale_suppressed),
         "lifecycle_supersession_expected": lifecycle_expected,
         "lifecycle_supersession_reciprocity_hit": lifecycle_hit,
+        "semantic_lifecycle_expected": semantic_lifecycle_any_expected,
+        "semantic_lifecycle_reciprocity_hit": semantic_reciprocity_combined_hit,
+        "semantic_lifecycle_suppression_hit": semantic_suppressed,
+        "semantic_false_merge_expected": false_merge_expected,
+        "semantic_false_merge_guard_hit": false_merge_hit,
+        "deprecated_lifecycle_expected": deprecated_expected,
+        "deprecated_lifecycle_reciprocity_hit": deprecated_reciprocity_hit,
+        "deprecated_lifecycle_suppression_hit": not blocks_contain_memory_ids(
+            suppression_blocks,
+            [*deprecated_memory_ids, *deprecated_marker_ids],
+            memory_records,
+        ),
+        "semantic_evidence_retention_expected": semantic_evidence_expected,
+        "semantic_evidence_retention_hit": semantic_evidence_hit,
         "privacy_boundary_pass": privacy_boundary_pass(
             all_search_outputs,
             forbidden_patterns,

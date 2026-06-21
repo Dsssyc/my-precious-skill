@@ -106,6 +106,20 @@ unreachable evidence `quote_id` references:
 python tools/audit_memory_archive.py --memory-repo .
 ```
 
+Run an aggregate, privacy-safe shadow evaluation against this archive:
+
+```bash
+python tools/shadow_eval_memory_archive.py \
+  --repo . \
+  --cases /path/to/redacted_probe_cases.jsonl \
+  --audit-script tools/audit_memory_archive.py
+```
+
+The shadow report is JSON and intentionally omits memory text, evidence text,
+source paths, and raw anchors. Use it to inspect recall, active-memory
+suppression, lifecycle integrity, top-k noise, and provenance coverage without
+copying private transcripts or source records elsewhere.
+
 ## Render Scheduler Config
 
 Generate reviewable scheduler configuration without installing it:
@@ -156,6 +170,8 @@ Expected archive paths are limited to
 Expected generated data:
 
 - `index/memories.jsonl`
+- `index/memory_review_candidates.jsonl`
+- `index/memory_consolidation_trace.jsonl`
 - `memories/global.jsonl`
 - `memories/domains.jsonl`
 - `memories/projects.jsonl`
@@ -175,5 +191,6 @@ Expected generated data:
 - Redaction runs before summarization and evidence rendering.
 - Git sync refuses tool/script changes and unredacted key-like values.
 - Archive audit refuses wrapper-field noise, first-person process updates, broken memory drilldown paths, and unreachable evidence quote IDs in generated files.
+- Shadow evaluation emits aggregate metrics only and should not render raw source content.
 - Credentials must never be committed.
 - Keep this repository private.

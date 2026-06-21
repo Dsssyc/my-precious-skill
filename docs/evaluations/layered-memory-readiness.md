@@ -414,20 +414,29 @@ Current gaps:
 - Project path still remains central to update configuration and scheduled
   ingestion. Project is not yet merely one scope among many.
 - Automatic induction is implemented only as a conservative minimum slice. It
-  can promote synthetic reusable facts into high-level memories, but it is not
-  yet a semantic consolidation engine and has not been validated on real
+  can promote synthetic reusable facts into high-level memories and run a
+  dependency-light semantic lifecycle pass, but it is not yet a broad
+  natural-language consolidation engine and has not been validated on real
   private histories.
 - Direct explicit-memory writes exist in the reusable updater, but runtime-level
   adapters and governing-prompt integration still need policy design.
 - The system has `global`, `domain`, and `project` memory files, and now has a
-  minimum exact-match lifecycle loop for support merge and refresh/supersession.
-  Contradiction handling, partial supersession, decay, and confidence revision
-  are still incomplete.
+  minimum semantic lifecycle loop for support merge, paraphrase consolidation,
+  false partial-supersession guards, refresh/supersession, contradiction links,
+  deprecation links, partial supersession, and retired-node confidence revision
+  on synthetic records. Decay, large-history conflict policy, and richer
+  confidence revision are still incomplete.
 - Raw/source reachability is represented by anchors, not by a fully gated
   drilldown workflow that can safely walk all the way to original chat records.
-- The benchmark has three `evidence_text` cases; this is a better guard than
-  the previous single case, but still too small to prove source-depth
-  robustness.
+- The benchmark has thirteen `evidence_text` cases, including ten semantic
+  lifecycle robustness cases for conflict, deprecation, false-merge guards, and
+  evidence retention. This is still synthetic and too small to prove
+  source-depth robustness on real private histories.
+- The reusable template now includes a privacy-safe shadow evaluation runner
+  that can report aggregate recall, active-memory suppression, lifecycle
+  integrity, top-k noise, and provenance coverage for a target archive without
+  rendering source content. This is still an evaluation harness, not proof that
+  any particular private archive has been validated.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
   public datasets.
@@ -464,24 +473,27 @@ architecture.
 
 The system now has a bounded proof that high-level memories can be induced from
 synthetic session events and that direct explicit memories can be written only
-with evidence. It also has a synthetic proof for exact support merge and
-refresh/supersession links. It still does not satisfy the full target design.
-The next valuable work is no longer broad benchmark exploration; it is making
-the write path durable under realistic memory evolution: semantic promotion,
-non-exact merge, contradiction handling, partial supersession, confidence
-revision, and gated source drilldown.
+with evidence. It also has synthetic gates for semantic support merge,
+refresh/supersession, contradiction, deprecation, false-merge prevention, and
+evidence retention. It now also has an ambiguity review queue and explainable
+consolidation traces for semantic lifecycle cases that should not be
+auto-retired. It still does not satisfy the full target design. The next
+valuable work is running the shadow evaluation against larger realistic,
+redacted archives and improving durability under broader semantic promotion,
+decay, noisy multi-month histories, and gated source drilldown.
 
 ## Next Roadmap After The Minimum Slice
 
 1. Strengthen automatic induction.
    Move from literal `Reusable fact:` extraction toward a reviewable
    consolidation stage that can merge repeated facts, preserve contradictory
-   evidence, and avoid process-noise promotion.
+   evidence, route ambiguous scope changes to review, and avoid process-noise
+   promotion.
 
 2. Deepen lifecycle operations.
-   Extend the exact-match merge/refresh path to handle contradiction,
-   confidence revision, decay, partial supersession, and non-literal
-   support-count updates.
+   Extend the semantic merge/refresh/deprecation path beyond the current review
+   queue and trace v1 to handle richer confidence revision, decay, deletion
+   policy, and noisy multi-month evidence histories.
 
 3. Reduce project-boundary centrality.
    Treat project as one retrieval scope rather than the primary storage and

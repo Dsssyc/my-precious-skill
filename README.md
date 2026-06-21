@@ -254,6 +254,20 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
 The audit checks generated text quality, unsafe key-like values, memory-node
 drilldown paths, and evidence `quote_id` reachability.
 
+Run a privacy-safe shadow evaluation without copying private source records
+into this development repository:
+
+```bash
+python ~/repos/agent-memory/tools/shadow_eval_memory_archive.py \
+  --repo ~/repos/agent-memory \
+  --cases /path/to/redacted_probe_cases.jsonl \
+  --audit-script ~/repos/agent-memory/tools/audit_memory_archive.py
+```
+
+The shadow report is aggregate JSON only. It includes recall, active-memory
+suppression, lifecycle integrity, top-k noise, and provenance coverage metrics,
+but does not render memory text, evidence text, source paths, or raw anchors.
+
 Search without invoking an agent:
 
 ```bash
@@ -265,8 +279,9 @@ Use depth controls to drill into supporting sessions, evidence, or protected
 source anchors. Reserve `--depth source` for explicit source-reachability
 requests. Source anchors are treated as untrusted display data and unsafe
 anchor text is replaced with `[unsafe-source-ref]`; unsafe metadata fields are
-rendered as `[unsafe-field]`. Memory nodes with a non-empty `superseded_by`
-field are treated as inactive and skipped by search.
+rendered as `[unsafe-field]`. Memory nodes with confirmed `superseded_by`,
+`contradicted_by`, or `deprecated_by` lifecycle links are treated as inactive
+and skipped by search; deprecation marker nodes are also skipped by default.
 
 ```bash
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
@@ -564,6 +579,10 @@ A compatible deployment repository should expose:
 - `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
   and `memories/explicit.jsonl`: layered memory nodes.
 - `index/memories.jsonl`: combined layered-memory search index.
+- `index/memory_review_candidates.jsonl`: ambiguous lifecycle pairs requiring
+  manual review before automatic retirement.
+- `index/memory_consolidation_trace.jsonl`: explainable merge, supersede,
+  contradict, deprecate, and skip decisions from the updater.
 - `index/sessions.jsonl`: one row per session.
 - `index/decisions.jsonl`: one row per reusable decision.
 - `index/unresolved.jsonl`: one row per follow-up task.
@@ -585,6 +604,14 @@ skills/using-my-precious/references/archive-format.md
 - Generic archive format reference.
 - Layered global, domain, and project memory nodes with drilldown to sessions,
   evidence, and source anchors.
+- Dependency-light semantic consolidation for automatic memory nodes, including
+  paraphrase support merge, false partial-supersession guards, contradiction
+  links, deprecation links, partial supersession, confidence revision for
+  retired nodes, and robustness benchmark gates.
+- Ambiguity review queue and consolidation decision trace indexes for semantic
+  lifecycle cases that should not be auto-retired.
+- Privacy-safe real-archive shadow evaluation runner with aggregate recall,
+  suppression, lifecycle, noise, and provenance metrics.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, and explainable result reasons.
 - Incremental update script keyed by project path and source/session timestamp.
@@ -652,11 +679,13 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
+  skills/update-my-precious/scripts/memory_consolidation.py \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
+  templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/render_scheduler.py \
   templates/agent-memory-repo/tools/sync_memory_archive.py
