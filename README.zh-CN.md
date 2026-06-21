@@ -519,10 +519,12 @@ skills/using-my-precious/references/archive-format.md
 - 面向语义 lifecycle 模糊关系的 review queue，以及解释 merge、supersede、
   contradict、deprecate 和 skip 决策的 consolidation trace index。
 - privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、
-  suppression、lifecycle、top-k noise 和 provenance 指标，不渲染 memory text、
-  evidence text、source paths 或 raw anchors。
+  suppression、lifecycle、top-k noise、noise-source 和 provenance 指标；legacy
+  archive 也可生成结构报告，但在没有 `index/memories.jsonl` 前 memory top-k
+  指标会保持为 `null`。报告不渲染 memory text、evidence text、source paths 或
+  raw anchors。
 - 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
-  boost 和可解释结果原因。
+  boost、低信号 memory-node 过滤和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。
 - searchable summary、短 evidence snippet、source-map、daily summary 和 JSONL index 生成。
 - 默认拒绝疑似 secret source records 的安全检查。

@@ -144,7 +144,56 @@ def write_minimal_archive(repo: Path) -> None:
     write_jsonl(repo / "index/memories.jsonl", records)
 
 
+def write_legacy_archive(repo: Path) -> None:
+    (repo / "index").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/legacy").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/legacy/summary.md").write_text(
+        "# Session: Legacy shadow fixture\n\n"
+        "Legacy archive summary stays private in aggregate shadow reports.\n",
+        encoding="utf-8",
+    )
+    write_jsonl(
+        repo / "index/sessions.jsonl",
+        [
+            {
+                "date": "2026-06-21",
+                "project": "legacy-project",
+                "title": "Legacy shadow fixture",
+                "summary": "Legacy archive summary stays private.",
+                "summary_path": "sessions/2026/06/21/legacy/summary.md",
+            }
+        ],
+    )
+
+
 class ShadowEvalMemoryArchiveTests(unittest.TestCase):
+    def test_shadow_eval_reports_legacy_archive_without_memory_index(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "legacy-agent-memory"
+            write_legacy_archive(repo)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["archive"]["format"], "legacy")
+        self.assertEqual(payload["archive"]["memory_records"], 0)
+        self.assertEqual(payload["archive"]["legacy_session_records"], 1)
+        self.assertEqual(payload["probe_cases"]["cases"], 0)
+        self.assertIsNone(payload["metrics"]["memory_precision_at_5"])
+        self.assertFalse(payload["privacy"]["source_content_rendered"])
+        self.assertNotIn("Legacy archive summary", result.stdout)
+
     def test_shadow_eval_runs_on_packaged_synthetic_archive(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "agent-memory"
@@ -187,6 +236,7 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
         self.assertIn("memory_precision_at_5", payload["metrics"])
         self.assertIn("top_k_noise_at_5", payload["metrics"])
+        self.assertIn("noise_sources_at_5", payload["metrics"])
         self.assertIn("provenance_coverage", payload["metrics"])
         self.assertIn("lifecycle_integrity", payload["metrics"])
         self.assertEqual(payload["audit"]["status"], "passed")
@@ -242,6 +292,10 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
         self.assertLess(payload["metrics"]["memory_precision_at_5"], 1.0)
         self.assertGreater(payload["metrics"]["top_k_noise_at_5"], 0.0)
+        self.assertGreater(payload["metrics"]["noise_sources_at_5"]["broad_lexical_match"], 0)
+        self.assertIn("scope_mixed", payload["metrics"]["noise_sources_at_5"])
+        self.assertIn("inactive_lifecycle", payload["metrics"]["noise_sources_at_5"])
+        self.assertIn("low_signal_memory_node", payload["metrics"]["noise_sources_at_5"])
         self.assertEqual(payload["metrics"]["active_memory_suppression"], 1.0)
         self.assertEqual(payload["metrics"]["lifecycle_integrity"]["score"], 1.0)
         self.assertGreater(payload["metrics"]["provenance_coverage"]["score"], 0.0)

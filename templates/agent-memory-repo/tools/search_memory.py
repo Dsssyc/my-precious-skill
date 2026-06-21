@@ -1024,6 +1024,8 @@ def collect_memory_hits(
         score, matched, reasons = score_index_record(query_tokens, record, context_terms)
         if not score:
             continue
+        if "low-signal-only" in reasons and "project-context" not in reasons:
+            continue
         raw_text = compact_whitespace(str(record.get("text") or ""))
         text = safe_display_text(raw_text)
         title = text or display_title(record, query_tokens)

@@ -73,6 +73,76 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("memory_review_candidates.jsonl", result.stdout)
         self.assertNotIn("memory_consolidation_trace.jsonl", result.stdout)
 
+    def test_search_memory_filters_tag_only_low_signal_memory_noise(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            (repo / "sessions/2026/05/14/example").mkdir(parents=True)
+            (repo / "sessions/2026/05/14/example/summary.md").write_text(
+                "# Session: Search Signal\n\n"
+                "Durable ranking marker appears in high-signal memory text.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "memory_id": "mem_signal_target",
+                    "layer": "global",
+                    "scope": "global",
+                    "topic": "search-signal",
+                    "text": "Durable ranking marker belongs to the target memory.",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 1,
+                    "derived_from": ["sessions/2026/05/14/example/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "supersedes": [],
+                    "superseded_by": None,
+                    "tags": ["search-signal"],
+                },
+                {
+                    "memory_id": "mem_tag_only_noise",
+                    "layer": "global",
+                    "scope": "global",
+                    "topic": "unrelated",
+                    "text": "Unrelated note without the query phrase.",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 1,
+                    "derived_from": ["sessions/2026/05/14/example/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "supersedes": [],
+                    "superseded_by": None,
+                    "tags": ["durable", "ranking", "marker"],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "durable ranking marker",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("mem_signal_target", result.stdout)
+        self.assertNotIn("mem_tag_only_noise", result.stdout)
+
     def test_search_memory_sanitizes_archive_path_display(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

@@ -117,8 +117,11 @@ python tools/shadow_eval_memory_archive.py \
 
 The shadow report is JSON and intentionally omits memory text, evidence text,
 source paths, and raw anchors. Use it to inspect recall, active-memory
-suppression, lifecycle integrity, top-k noise, and provenance coverage without
-copying private transcripts or source records elsewhere.
+suppression, lifecycle integrity, top-k noise, noise-source buckets, and
+provenance coverage without copying private transcripts or source records
+elsewhere. Legacy archives without `index/memories.jsonl` still produce a
+structural report, but memory top-k metrics remain `null` until layered memory
+nodes exist.
 
 ## Render Scheduler Config
 

@@ -266,7 +266,11 @@ python ~/repos/agent-memory/tools/shadow_eval_memory_archive.py \
 
 The shadow report is aggregate JSON only. It includes recall, active-memory
 suppression, lifecycle integrity, top-k noise, and provenance coverage metrics,
-but does not render memory text, evidence text, source paths, or raw anchors.
+plus `noise_sources_at_5` buckets for broad lexical, scope-mixed, inactive
+lifecycle, and low-signal memory-node results. It can also report legacy
+archives that do not yet have `index/memories.jsonl`, but memory top-k metrics
+remain `null` until layered memory nodes exist. It does not render memory text,
+evidence text, source paths, or raw anchors.
 
 Search without invoking an agent:
 
@@ -611,9 +615,10 @@ skills/using-my-precious/references/archive-format.md
 - Ambiguity review queue and consolidation decision trace indexes for semantic
   lifecycle cases that should not be auto-retired.
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,
-  suppression, lifecycle, noise, and provenance metrics.
+  suppression, lifecycle, noise-source, and provenance metrics.
 - Dependency-free hybrid lexical search script with field weighting, phrase
-  coverage, optional project-context boost, and explainable result reasons.
+  coverage, optional project-context boost, low-signal memory-node filtering,
+  and explainable result reasons.
 - Incremental update script keyed by project path and source/session timestamp.
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.

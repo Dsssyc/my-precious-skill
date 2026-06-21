@@ -434,12 +434,18 @@ Current gaps:
   source-depth robustness on real private histories.
 - The reusable template now includes a privacy-safe shadow evaluation runner
   that can report aggregate recall, active-memory suppression, lifecycle
-  integrity, top-k noise, and provenance coverage for a target archive without
-  rendering source content. This is still an evaluation harness, not proof that
-  any particular private archive has been validated.
+  integrity, top-k noise, noise-source buckets, and provenance coverage for a
+  target archive without rendering source content. It can also emit a structural
+  report for legacy deployment archives that do not yet have layered memory
+  nodes. A read-only local run against the private deployment archive showed a
+  legacy shape with no memory index, so memory top-k metrics were not yet
+  measurable there.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
   public datasets.
+- Low-signal memory-node matches are filtered when the query only hits low
+  signal fields such as tags and there is no project-context match. This removes
+  a narrow top-k noise class without changing the synthetic recall gate.
 - No current test proves long-term behavior over hundreds of sessions,
   multi-month updates, high-cardinality users, or multi-principal governance.
 - The benchmark does not grade generated answers and therefore cannot claim

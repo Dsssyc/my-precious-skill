@@ -58,8 +58,15 @@ def safe_memory_id(value: object) -> str:
 def load_memory_records(repo: Path) -> list[dict]:
     path = repo / "index" / "memories.jsonl"
     if not path.is_file():
-        raise SystemExit("memory archive is missing index/memories.jsonl")
+        return []
     return list(iter_jsonl(path))
+
+
+def count_legacy_session_records(repo: Path) -> int:
+    path = repo / "index" / "sessions.jsonl"
+    if not path.is_file():
+        return 0
+    return sum(1 for _ in iter_jsonl(path))
 
 
 def load_cases(path: Path | None) -> list[dict]:
@@ -70,23 +77,60 @@ def load_cases(path: Path | None) -> list[dict]:
     return list(iter_jsonl(path))
 
 
-def top_memory_ids(repo: Path, query: str, limit: int) -> list[str]:
+def top_memory_hits(repo: Path, query: str, limit: int) -> list[search_memory.Hit]:
     query_tokens = search_memory.unique_query_tokens(query)
     if not query_tokens:
         return []
-    hits = search_memory.merge_hits(
+    return search_memory.merge_hits(
         repo,
         search_memory.collect_memory_hits(repo, query_tokens, [], "all"),
-    )
+    )[:limit]
+
+
+def top_memory_ids(repo: Path, query: str, limit: int) -> list[str]:
     out: list[str] = []
-    for hit in hits[:limit]:
+    for hit in top_memory_hits(repo, query, limit):
         memory_id = safe_memory_id(hit.memory_id)
         if memory_id:
             out.append(memory_id)
     return out
 
 
-def evaluate_cases(repo: Path, cases: list[dict], limit: int) -> dict[str, Any]:
+def inactive_memory_ids(records: list[dict]) -> set[str]:
+    supersedes_by_memory_id = search_memory.collect_supersedes_by_memory_id(records)
+    contradicts_by_memory_id = search_memory.collect_contradicts_by_memory_id(records)
+    deprecates_by_memory_id = search_memory.collect_deprecates_by_memory_id(records)
+    inactive = set(search_memory.collect_forward_superseded_ids(supersedes_by_memory_id))
+    inactive.update(search_memory.collect_forward_contradicted_ids(contradicts_by_memory_id))
+    inactive.update(search_memory.collect_forward_deprecated_ids(deprecates_by_memory_id))
+    for record in records:
+        memory_id = safe_memory_id(record.get("memory_id"))
+        if not memory_id:
+            continue
+        if search_memory.has_confirmed_superseded_by(record, supersedes_by_memory_id):
+            inactive.add(memory_id)
+        if search_memory.has_confirmed_contradicted_by(record, contradicts_by_memory_id):
+            inactive.add(memory_id)
+        if search_memory.has_confirmed_deprecated_by(record, deprecates_by_memory_id):
+            inactive.add(memory_id)
+        if search_memory.has_deprecation_marker(record):
+            inactive.add(memory_id)
+    return inactive
+
+
+def classify_noise_source(hit: search_memory.Hit, case: dict, inactive_ids: set[str]) -> str:
+    memory_id = safe_memory_id(hit.memory_id)
+    if memory_id in inactive_ids:
+        return "inactive_lifecycle"
+    if "low-signal-only" in hit.why or "broad-field-only" in hit.why:
+        return "low_signal_memory_node"
+    expected_layer = str(case.get("expected_layer") or "").strip()
+    if expected_layer and hit.layer and hit.layer != expected_layer:
+        return "scope_mixed"
+    return "broad_lexical_match"
+
+
+def evaluate_cases(repo: Path, cases: list[dict], records: list[dict], limit: int) -> dict[str, Any]:
     totals: dict[str, int] = {
         "cases": 0,
         "positive_cases": 0,
@@ -97,12 +141,20 @@ def evaluate_cases(repo: Path, cases: list[dict], limit: int) -> dict[str, Any]:
         "suppression_cases": 0,
         "suppression_hits": 0,
     }
+    noise_sources = {
+        "broad_lexical_match": 0,
+        "scope_mixed": 0,
+        "inactive_lifecycle": 0,
+        "low_signal_memory_node": 0,
+    }
+    inactive_ids = inactive_memory_ids(records)
     for case in cases:
         query = str(case.get("query") or "").strip()
         if not query:
             continue
         totals["cases"] += 1
-        result_ids = top_memory_ids(repo, query, limit)
+        hits = top_memory_hits(repo, query, limit)
+        result_ids = [memory_id for hit in hits if (memory_id := safe_memory_id(hit.memory_id))]
         expected_memory_id = safe_memory_id(case.get("expected_memory_id"))
         expected_not_memory_ids = [
             memory_id for memory_id in text_list(case.get("expected_not_memory_id")) if safe_memory_id(memory_id)
@@ -115,6 +167,10 @@ def evaluate_cases(repo: Path, cases: list[dict], limit: int) -> dict[str, Any]:
             if expected_memory_id in result_ids:
                 totals["recall_hits"] += 1
                 totals["relevant_results"] += 1
+            for hit in hits:
+                hit_id = safe_memory_id(hit.memory_id)
+                if hit_id and hit_id != expected_memory_id:
+                    noise_sources[classify_noise_source(hit, case, inactive_ids)] += 1
         if expected_not_memory_ids:
             totals["suppression_cases"] += 1
             if all(memory_id not in result_ids for memory_id in expected_not_memory_ids):
@@ -125,6 +181,7 @@ def evaluate_cases(repo: Path, cases: list[dict], limit: int) -> dict[str, Any]:
         "memory_recall_at_5": ratio(totals["recall_hits"], totals["positive_cases"]),
         "memory_precision_at_5": precision,
         "top_k_noise_at_5": None if precision is None else 1.0 - precision,
+        "noise_sources_at_5": noise_sources,
         "active_memory_suppression": ratio(totals["suppression_hits"], totals["suppression_cases"]),
     }
 
@@ -259,7 +316,8 @@ def run_audit(repo: Path, audit_script: Path | None) -> dict[str, Any]:
 
 def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit: int) -> dict[str, Any]:
     records = load_memory_records(repo)
-    case_metrics = evaluate_cases(repo, cases, limit)
+    case_metrics = evaluate_cases(repo, cases, records, limit)
+    memory_index_present = (repo / "index" / "memories.jsonl").is_file()
     return {
         "report_version": 1,
         "report_kind": "real_archive_shadow_evaluation",
@@ -270,7 +328,10 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "source_paths_rendered": False,
         },
         "archive": {
+            "format": "layered" if memory_index_present else "legacy",
+            "memory_index_present": memory_index_present,
             "memory_records": len(records),
+            "legacy_session_records": count_legacy_session_records(repo),
         },
         "probe_cases": {
             "cases": case_metrics["cases"],
@@ -281,6 +342,7 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "memory_recall_at_5": case_metrics["memory_recall_at_5"],
             "memory_precision_at_5": case_metrics["memory_precision_at_5"],
             "top_k_noise_at_5": case_metrics["top_k_noise_at_5"],
+            "noise_sources_at_5": case_metrics["noise_sources_at_5"],
             "active_memory_suppression": case_metrics["active_memory_suppression"],
             "provenance_coverage": provenance_coverage(records),
             "lifecycle_integrity": lifecycle_integrity(records),
