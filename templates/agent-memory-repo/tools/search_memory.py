@@ -97,6 +97,13 @@ GENERIC_SEARCH_TOKENS = {
     "update",
     "workflow",
 }
+PROCESS_MEMORY_PATTERN = re.compile(
+    r"\b(?:"
+    r"continue current goal|current goal|you are implementing|implementation progress|"
+    r"progress note|progress tracking|status update|task status|implementing task|"
+    r"working on task|task\s+\d+"
+    r")\b"
+)
 QUERY_STOP_TOKENS = {
     "a",
     "an",
@@ -409,6 +416,120 @@ def search_quality_noise_reason(record: dict) -> str:
         if re.search(r"\b(?:search|hit|title|rank|query|result)\b", combined):
             return "quality-penalty:search-verification"
     return ""
+
+
+def scalar_field_lower(record: dict, key: str) -> str:
+    value = record.get(key)
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (str, int, float)):
+        return str(value).strip().lower()
+    return ""
+
+
+def support_count_value(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str) and re.fullmatch(r"\d{1,6}", value.strip()):
+        return int(value.strip())
+    return 0
+
+
+def combined_record_text(record: dict, keys: tuple[str, ...]) -> str:
+    parts: list[str] = []
+    for key in keys:
+        parts.extend(iter_record_field_texts(record, key))
+    return compact_whitespace(" ".join(parts)).lower()
+
+
+def has_process_memory_signal(record: dict) -> bool:
+    combined = combined_record_text(record, ("title", "summary", "user_intent", "decision", "task", "text"))
+    return bool(combined and PROCESS_MEMORY_PATTERN.search(combined))
+
+
+def has_repeated_query_signal(record: dict, query_tokens: list[str]) -> bool:
+    combined = combined_record_text(record, ("title", "summary", "user_intent", "decision", "task", "text"))
+    if not combined:
+        return False
+    candidates = meaningful_query_tokens(query_tokens) or query_tokens
+    repeated = [token for token in candidates if token_occurrence_count(combined, token) >= 3]
+    required = 1 if len(candidates) <= 2 else 2
+    return len(repeated) >= required
+
+
+def strict_coverage_tokens(query_tokens: list[str]) -> list[str]:
+    important_tokens = important_query_tokens(query_tokens)
+    if len(important_tokens) >= 3:
+        return important_tokens
+    specific_tokens = specific_query_tokens(query_tokens)
+    if len(specific_tokens) >= 2:
+        return specific_tokens
+    return []
+
+
+def has_strict_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
+    required_tokens = strict_coverage_tokens(query_tokens)
+    return bool(required_tokens) and all(token in matched_tokens for token in required_tokens)
+
+
+def memory_rank_adjustment(record: dict, query_tokens: list[str]) -> tuple[int, list[str]]:
+    adjustment = 0
+    reasons: list[str] = []
+    source = scalar_field_lower(record, "source")
+    confidence = scalar_field_lower(record, "confidence")
+    layer = scalar_field_lower(record, "layer")
+    support_count = support_count_value(record.get("support_count"))
+
+    if source == "explicit":
+        adjustment += 350
+        add_reason(reasons, "explicit-memory-prior")
+    elif source == "automatic":
+        add_reason(reasons, "automatic-memory-prior")
+
+    if confidence == "high":
+        adjustment += 110
+        add_reason(reasons, "high-confidence-prior")
+    elif confidence == "medium":
+        adjustment += 40
+        add_reason(reasons, "medium-confidence-prior")
+    elif confidence == "low":
+        adjustment -= 100
+        add_reason(reasons, "low-confidence-demoted")
+
+    if support_count == 0 and source == "automatic":
+        adjustment -= 40
+        add_reason(reasons, "missing-support-demoted")
+
+    if layer == "global":
+        adjustment += 120
+        add_reason(reasons, "layer-priority:global")
+    elif layer == "domain":
+        adjustment += 80
+        add_reason(reasons, "layer-priority:domain")
+    elif layer == "project":
+        adjustment += 40
+        add_reason(reasons, "layer-priority:project")
+
+    if source == "automatic" and support_count <= 1:
+        if has_process_memory_signal(record):
+            adjustment -= 900
+            add_reason(reasons, "process-memory-demoted")
+        if confidence in ("", "low", "medium") and has_repeated_query_signal(record, query_tokens):
+            adjustment -= 350
+            add_reason(reasons, "lexical-repetition-demoted")
+
+    return adjustment, reasons
+
+
+def prune_loose_memory_hits(query_tokens: list[str], hits: list[Hit]) -> list[Hit]:
+    if not strict_coverage_tokens(query_tokens):
+        return hits
+    strict_hits = [hit for hit in hits if "strict-token-coverage" in hit.why]
+    if not strict_hits:
+        return hits
+    return strict_hits
 
 
 def key_like_project_match(value: str, term_name: str) -> bool:
@@ -1026,6 +1147,11 @@ def collect_memory_hits(
             continue
         if "low-signal-only" in reasons and "project-context" not in reasons:
             continue
+        rank_adjustment, rank_reasons = memory_rank_adjustment(record, query_tokens)
+        score = max(1, score + rank_adjustment)
+        reasons.extend(reason for reason in rank_reasons if reason not in reasons)
+        if has_strict_token_coverage(query_tokens, matched):
+            add_reason(reasons, "strict-token-coverage")
         raw_text = compact_whitespace(str(record.get("text") or ""))
         text = safe_display_text(raw_text)
         title = text or display_title(record, query_tokens)
@@ -1060,7 +1186,7 @@ def collect_memory_hits(
                 raw_refs=sanitized_raw_refs(repo, record.get("raw_refs")),
             )
         )
-    return hits
+    return prune_loose_memory_hits(query_tokens, hits)
 
 
 def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:

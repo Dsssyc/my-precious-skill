@@ -520,6 +520,220 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/06/17/permission/summary.md", first_hit)
         self.assertNotIn("sessions/2026/06/17/permission/evidence.md", first_hit)
 
+    def test_search_memory_ranks_durable_memory_above_repeated_process_noise(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/21/layered"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Layered recall\n\n"
+                "Layered memory recall should use durable high-level memory first.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "memory_id": "mem_layered_recall_policy",
+                    "layer": "global",
+                    "scope": "global",
+                    "topic": "layered-memory-recall",
+                    "text": "Layered memory recall should return durable high-level memory nodes before process notes.",
+                    "rationale": "Durable design preference extracted from user direction.",
+                    "source": "explicit",
+                    "confidence": "high",
+                    "support_count": 3,
+                    "derived_from": ["sessions/2026/06/21/layered/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "tags": ["durable-policy"],
+                },
+                {
+                    "memory_id": "mem_layered_process_noise",
+                    "layer": "project",
+                    "scope": "project:agent-memory",
+                    "topic": "implementation-progress",
+                    "text": (
+                        "Continue current goal. layered memory recall layered memory recall "
+                        "layered memory recall layered memory recall while implementing Task 3."
+                    ),
+                    "task": (
+                        "You are implementing the layered memory recall plan. "
+                        "The task status repeats layered memory recall for progress tracking."
+                    ),
+                    "source": "automatic",
+                    "confidence": "low",
+                    "support_count": 1,
+                    "derived_from": ["sessions/2026/06/21/layered/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "tags": ["progress"],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "layered memory recall",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("memory_id: mem_layered_recall_policy", first_hit)
+        self.assertNotIn("memory_id: mem_layered_process_noise", first_hit)
+
+    def test_search_memory_demotes_scope_mixed_broad_lexical_noise(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/21/scope"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Scope ranking\n\n"
+                "Global permission prompts policy should not be hidden by project task noise.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "memory_id": "mem_global_permission_policy",
+                    "layer": "global",
+                    "scope": "global",
+                    "topic": "permission-prompts",
+                    "text": "Permission prompts policy: after access is granted, avoid repeated approval requests.",
+                    "rationale": "Global user preference.",
+                    "source": "explicit",
+                    "confidence": "high",
+                    "support_count": 2,
+                    "derived_from": ["sessions/2026/06/21/scope/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                },
+                {
+                    "memory_id": "mem_project_permission_progress",
+                    "layer": "project",
+                    "scope": "project:unrelated",
+                    "topic": "implementation-progress",
+                    "text": (
+                        "permission prompts policy permission prompts policy "
+                        "permission prompts policy appeared in a project-local progress note."
+                    ),
+                    "task": "Continue the permission prompts policy implementation task.",
+                    "source": "automatic",
+                    "confidence": "low",
+                    "support_count": 1,
+                    "derived_from": ["sessions/2026/06/21/scope/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "permission prompts policy",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "1",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_global_permission_policy", result.stdout)
+        self.assertNotIn("memory_id: mem_project_permission_progress", result.stdout)
+
+    def test_search_memory_prunes_loose_specific_token_matches_when_strict_hits_exist(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/21/specific"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Specific token coverage\n\n"
+                "A complete c2-runtime memory should beat broad agent-workflow neighbors.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "memory_id": "mem_c2_runtime_target",
+                    "layer": "domain",
+                    "scope": "domain:agent-workflow",
+                    "topic": "agent-workflow",
+                    "text": "agent-workflow c-two c2-runtime has the durable runtime routing rule.",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 2,
+                    "derived_from": ["sessions/2026/06/21/specific/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "tags": ["agent-workflow", "c-two", "c2-runtime"],
+                },
+                {
+                    "memory_id": "mem_agent_workflow_neighbor",
+                    "layer": "domain",
+                    "scope": "domain:agent-workflow",
+                    "topic": "agent-workflow",
+                    "text": "agent-workflow and c-two nearby implementation detail.",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 2,
+                    "derived_from": ["sessions/2026/06/21/specific/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "tags": ["agent-workflow", "c-two"],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "agent-workflow c-two c2-runtime",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_c2_runtime_target", result.stdout)
+        self.assertIn("strict-token-coverage", result.stdout)
+        self.assertNotIn("memory_id: mem_agent_workflow_neighbor", result.stdout)
+
     def test_search_memory_skips_superseded_memory_nodes(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
