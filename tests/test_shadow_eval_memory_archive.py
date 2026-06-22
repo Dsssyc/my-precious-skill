@@ -581,6 +581,73 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(detail["relevant_result_count"], 1)
         self.assertEqual(detail["forbidden_output_violation_count"], 2)
 
+    def test_shadow_eval_scores_abstain_cases_and_gates_false_positive_results(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:abstain_clean",
+                        "query": "zzqabstain918273",
+                        "expected_abstain": True,
+                    },
+                    {
+                        "case_id": "redacted:abstain_false_positive",
+                        "query": "shadow recall marker",
+                        "expected_abstain": True,
+                    },
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            gate_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--fail-under",
+                    "abstain_pass_rate=1.0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["probe_cases"]["abstain_cases"], 2)
+        self.assertEqual(payload["metrics"]["abstain_pass_rate"], 0.5)
+        self.assertGreater(payload["metrics"]["abstain_false_positive_results"], 0)
+        clean_detail, noisy_detail = payload["case_details"]
+        self.assertTrue(clean_detail["abstention_hit"])
+        self.assertFalse(noisy_detail["abstention_hit"])
+
+        combined = gate_result.stdout + gate_result.stderr
+        self.assertNotEqual(gate_result.returncode, 0)
+        self.assertEqual(gate_result.stdout, "")
+        self.assertIn("abstain_pass_rate=0.5 below threshold 1.0", gate_result.stderr)
+        self.assertNotIn("shadow recall marker", combined)
+        self.assertNotIn("mem_shadow_current", combined)
+
     def test_shadow_eval_uses_expected_layer_as_soft_scope_preference_for_multi_relevant_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "multi-agent-memory"

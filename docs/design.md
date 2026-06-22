@@ -338,12 +338,15 @@ runner. Its probe case contract is intentionally narrower than the synthetic
 benchmark schema: `expected_memory_id` names one acceptable memory node,
 `expected_memory_ids` names several acceptable memory nodes for duplicate or
 overlapping real-history answers, `expected_layer` acts as a soft preferred
-layer, `expected_not_memory_id` checks active-memory suppression, and
+layer, `expected_not_memory_id` checks active-memory suppression,
+`expected_abstain: true` checks no-hit behavior, and
 `forbidden_output_patterns` names private or secret-like regular expressions
-that must not appear in audit or search subprocess output. Probe cases may live
-in a private deployment repository or another local private path, but private
-probe files, raw transcripts, memory text, source paths, and source records
-must not be committed to this reusable skill repository. The shadow runner can
+that must not appear in audit or search subprocess output. Abstain cases pass
+only when no memory hits are returned; false-positive hit counts are reported
+as aggregate metrics. Probe cases may live in a private deployment repository
+or another local private path, but private probe files, raw transcripts, memory
+text, source paths, and source records must not be committed to this reusable
+skill repository. The shadow runner can
 enforce aggregate numeric gates with `--fail-under`, `--fail-over`,
 `--fail-under-file`, and `--fail-over-file`; metric keys may be top-level
 metric names such as `memory_recall_at_5` or dotted paths such as

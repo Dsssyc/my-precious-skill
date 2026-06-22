@@ -198,6 +198,8 @@ def evaluate_cases(
         "cases": 0,
         "positive_cases": 0,
         "abstain_cases": 0,
+        "abstain_hits": 0,
+        "abstain_false_positive_results": 0,
         "recall_hits": 0,
         "relevant_results": 0,
         "total_results": 0,
@@ -232,8 +234,14 @@ def evaluate_cases(
                 totals["forbidden_output_violations"] += 1
         case_noise_sources = new_noise_sources()
         relevant_count = 0
+        abstention_hit = None
         if case.get("expected_abstain") is True:
             totals["abstain_cases"] += 1
+            abstention_hit = len(result_ids) == 0
+            if abstention_hit:
+                totals["abstain_hits"] += 1
+            else:
+                totals["abstain_false_positive_results"] += len(result_ids)
         elif expected_ids:
             totals["positive_cases"] += 1
             totals["total_results"] += len(result_ids)
@@ -261,6 +269,10 @@ def evaluate_cases(
                 "relevant_result_count": relevant_count,
                 "noise_result_count": max(0, len(result_ids) - relevant_count) if expected_ids else 0,
                 "recall_hit": bool(relevant_count),
+                "abstention_hit": abstention_hit,
+                "abstain_false_positive_result_count": (
+                    len(result_ids) if case.get("expected_abstain") is True and result_ids else 0
+                ),
                 "suppression_hit": (
                     None
                     if not expected_not_memory_ids
@@ -279,6 +291,8 @@ def evaluate_cases(
         "memory_precision_at_5": precision,
         "top_k_noise_at_5": None if precision is None else 1.0 - precision,
         "noise_sources_at_5": noise_sources,
+        "abstain_pass_rate": ratio(totals["abstain_hits"], totals["abstain_cases"]),
+        "abstain_false_positive_results": totals["abstain_false_positive_results"],
         "active_memory_suppression": ratio(totals["suppression_hits"], totals["suppression_cases"]),
         "privacy_boundary_pass_rate": ratio(totals["privacy_hits"], totals["privacy_cases"]),
         "case_details": details,
@@ -558,6 +572,8 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "memory_precision_at_5": case_metrics["memory_precision_at_5"],
             "top_k_noise_at_5": case_metrics["top_k_noise_at_5"],
             "noise_sources_at_5": case_metrics["noise_sources_at_5"],
+            "abstain_pass_rate": case_metrics["abstain_pass_rate"],
+            "abstain_false_positive_results": case_metrics["abstain_false_positive_results"],
             "active_memory_suppression": case_metrics["active_memory_suppression"],
             "privacy_boundary_pass_rate": case_metrics["privacy_boundary_pass_rate"],
             "forbidden_output_violations": case_metrics["forbidden_output_violations"],

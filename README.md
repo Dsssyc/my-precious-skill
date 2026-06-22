@@ -287,11 +287,13 @@ preferred layer; `expected_not_memory_id` checks active-memory suppression; and
 that must not appear in audit/search outputs. Top-k precision and noise are
 computed against the full relevant-ID set, so another listed relevant memory is
 not counted as noise. The report includes recall, active-memory suppression,
-lifecycle integrity, top-k noise, provenance coverage, and aggregate
-`case_details` count/status fields, plus `noise_sources_at_5` buckets for broad
-lexical, scope-mixed, inactive lifecycle, and low-signal memory-node results. It
-can also report legacy archives that do not yet have `index/memories.jsonl`, but
-memory top-k metrics remain `null` until layered memory nodes exist.
+abstain pass rate, abstain false-positive result count, lifecycle integrity,
+top-k noise, provenance coverage, and aggregate `case_details` count/status
+fields, plus `noise_sources_at_5` buckets for broad lexical, scope-mixed,
+inactive lifecycle, and low-signal memory-node results. `expected_abstain:
+true` cases pass only when no memory hits are returned. The runner can also
+report legacy archives that do not yet have `index/memories.jsonl`, but memory
+top-k metrics remain `null` until layered memory nodes exist.
 `--fail-under`, `--fail-over`, `--fail-under-file`, and `--fail-over-file`
 enforce numeric aggregate metrics or dotted metric paths such as
 `metrics.provenance_coverage.score`. Threshold failures print only metric names,

@@ -444,8 +444,9 @@ Current gaps:
   integrity, top-k noise, noise-source buckets, and provenance coverage for a
   target archive without rendering source content. It can also emit a structural
   report for legacy deployment archives that do not yet have layered memory
-  nodes. The 2026-06-22 private-probe gate below measured a layered deployment
-  archive with fixed redacted real-history probe cases kept outside this
+  nodes. The 2026-06-23 v2 private-probe gate below expanded the fixed
+  redacted real-history probe set with natural-language labels, hard negatives,
+  abstention checks, and a lifecycle relation-gap baseline kept outside this
   reusable repository.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
@@ -561,6 +562,76 @@ fail-under/fail-over threshold files, and an aggregate-only baseline JSON in its
 private evaluation area. The reusable skill repository must keep only aggregate
 figures like the table above.
 
+## Real Archive Shadow Eval Gate V2 Hard-Negative Snapshot
+
+Date: 2026-06-23
+
+This run expanded the private deployment archive's redacted real-history probe
+set. The probe cases use redacted natural-language labels and non-sensitive
+phrases rather than topic-only keywords. The private probe JSONL, fail-under
+gate, fail-over gate, and aggregate baseline JSON remain in the private
+deployment archive. This reusable skill repository records only aggregate
+metrics and coverage categories.
+
+Gate thresholds were set conservatively from the current v2 baseline:
+
+| gate | threshold |
+| --- | ---: |
+| metrics.memory_recall_at_5 | >= 1.0 |
+| metrics.memory_precision_at_5 | >= 0.3925233644859813 |
+| metrics.abstain_pass_rate | >= 0.3333333333333333 |
+| metrics.active_memory_suppression | >= 1.0 |
+| metrics.privacy_boundary_pass_rate | >= 1.0 |
+| metrics.provenance_coverage.score | >= 1.0 |
+| metrics.lifecycle_integrity.score | >= 1.0 |
+| metrics.top_k_noise_at_5 | <= 0.6074766355140186 |
+| metrics.abstain_false_positive_results | <= 7 |
+| metrics.forbidden_output_violations | <= 0 |
+| metrics.noise_sources_at_5.broad_lexical_match | <= 61 |
+| metrics.noise_sources_at_5.scope_mixed | <= 4 |
+| metrics.noise_sources_at_5.inactive_lifecycle | <= 0 |
+| metrics.noise_sources_at_5.low_signal_memory_node | <= 0 |
+
+Private probe result:
+
+| metric | value |
+| --- | --- |
+| archive_format | layered |
+| memory_records | 1376 |
+| legacy_session_records | 266 |
+| probe_cases | 27 |
+| positive_cases | 24 |
+| abstain_cases | 3 |
+| layers_covered | global, domain, project |
+| category_groups | abstain, agent workflow, audit, consolidation, cross-project, domain recall, frontend QA, git workflow, global recall, induction, layer preference, project recall, public benchmark, review queue, scope conflict, source depth |
+| schema_fields_covered | expected_abstain, expected_memory_id, expected_memory_ids, expected_layer, expected_not_memory_id, forbidden_output_patterns |
+| hard_negative_cases | 24 |
+| privacy_cases | 9 |
+| memory_recall_at_5 | 1.0 |
+| memory_precision_at_5 | 0.3925233644859813 |
+| top_k_noise_at_5 | 0.6074766355140186 |
+| noise_sources_at_5.broad_lexical_match | 61 |
+| noise_sources_at_5.scope_mixed | 4 |
+| noise_sources_at_5.inactive_lifecycle | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 |
+| abstain_pass_rate | 0.3333333333333333 |
+| abstain_false_positive_results | 7 |
+| active_memory_suppression | 1.0 |
+| privacy_boundary_pass_rate | 1.0 |
+| forbidden_output_violations | 0 |
+| provenance_coverage.score | 1.0 |
+| provenance_coverage.evidence_ref_coverage | 1.0 |
+| lifecycle_integrity.score | 1.0 |
+| lifecycle_relation_gap | true |
+| audit_status | passed |
+
+The lower v2 precision and abstain score are intentional hard-negative
+calibration signals. They show that broader natural-language labels and generic
+no-hit prompts still produce broad lexical and scope-mixed false positives. The
+deployment archive still has no real supersedes, deprecates, or contradicts
+relations, so stale/lifecycle suppression is recorded as a relation-gap
+baseline rather than a completed real-history lifecycle benchmark.
+
 ## Real Archive Induction And Review Queue Snapshot
 
 Date: 2026-06-22
@@ -653,11 +724,13 @@ not be auto-retired. It also has an initial gated source-depth workflow with
 synthetic quality gates and a real deployment aggregate baseline that passes
 the stricter source-map anchor audit. Shadow evaluation now has a private
 redacted real-history probe set with numeric recall, precision, noise,
-suppression, privacy, provenance, lifecycle, and audit gates. It still does
-not satisfy the full target design. The next valuable work is expanding that
-private probe set across more retrieval intents and noisy multi-month
-histories, then improving durability under broader semantic promotion, decay,
-and stronger source-drilldown authorization.
+abstention, suppression, privacy, provenance, lifecycle, and audit gates. The
+v2 hard-negative run exposes broad lexical noise, scope-mixed noise, and no-hit
+false positives under redacted natural-language labels. It also records that
+the real deployment archive has no lifecycle relation edges yet. The next
+valuable work is improving hard-negative/no-hit filtering and creating real
+lifecycle relation evidence before broadening consolidation, decay, and
+source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -686,12 +759,11 @@ and stronger source-drilldown authorization.
    repository. Record dataset version, conversion fingerprints, archive build
    rules, and score JSON.
 
-6. Expand the private redacted real-history probe set.
+6. Improve the v2 hard-negative and no-hit baseline.
    Keep probe cases in the deployment repository or another private local path,
-   never in the reusable skill repository. Add more redacted cases for
-   cross-project reuse, near-duplicate memories, stale-memory suppression,
-   source-depth decisions, and noisy long-history retrieval while preserving
-   aggregate-only reporting in this repository.
+   never in the reusable skill repository. Reduce broad lexical false positives,
+   preserve recall, and add real lifecycle relation cases once the archive
+   produces supersession, deprecation, or contradiction edges.
 
 7. Add governance tests later.
    Do not make multi-principal access control part of the next immediate slice,

@@ -267,7 +267,9 @@ shadow report 只输出聚合 JSON。probe case 可以使用旧的
 有多个可接受的 memory-node answer。`expected_layer` 是 soft preferred
 layer；`expected_not_memory_id` 用于检查 active-memory suppression；
 `forbidden_output_patterns` 是不得出现在 audit/search 输出中的私有或
-secret-like 正则。`--fail-under`、`--fail-over`、`--fail-under-file` 和
+secret-like 正则。`expected_abstain: true` case 只有在没有返回 memory hit
+时才算通过；report 会输出 abstain pass rate 和 abstain false-positive
+result count。`--fail-under`、`--fail-over`、`--fail-under-file` 和
 `--fail-over-file` 可以约束数值聚合指标或 dotted metric path，例如
 `metrics.provenance_coverage.score`。threshold failure 只输出 metric 名称、
 实际值和阈值，不输出 JSON report。shadow eval 不渲染 memory text、evidence
