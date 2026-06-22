@@ -444,8 +444,9 @@ Current gaps:
   integrity, top-k noise, noise-source buckets, and provenance coverage for a
   target archive without rendering source content. It can also emit a structural
   report for legacy deployment archives that do not yet have layered memory
-  nodes. The 2026-06-22 aggregate-only run below measured a layered deployment
-  archive with memory top-k metrics.
+  nodes. The 2026-06-22 private-probe gate below measured a layered deployment
+  archive with fixed redacted real-history probe cases kept outside this
+  reusable repository.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
   public datasets.
@@ -504,45 +505,61 @@ broad-lexical noise counts. The scope-aware preferred-layer run uses
 wrong-layer hits do not fill the top-k list; when no preferred-layer hit exists,
 cross-layer memories remain reachable.
 
-## Real Archive Shadow Eval Gate V1 Structural Snapshot
+## Real Archive Shadow Eval Gate V1 Private Probe Snapshot
 
 Date: 2026-06-22
 
 This run used the reusable `shadow_eval_memory_archive.py` quality-gate options
-against the deployment archive. No fixed redacted probe case file was found in
-the deployment repository, so this is a structural baseline rather than a recall
-probe score. The command used aggregate gates for provenance, lifecycle, and
-forbidden-output counts, and did not render private source records, memory text,
-source paths, queries, raw anchors, or probe content.
+against the deployment archive. The fixed redacted real-history probe cases and
+gate files live in the private deployment archive, not in this reusable skill
+repository. This document records only aggregate metrics, schema coverage, and
+the location strategy. The run did not render private source records, memory
+text, source paths, queries, raw anchors, memory ids, or probe content.
 
 Gate thresholds:
 
 | gate | threshold |
 | --- | ---: |
+| metrics.memory_recall_at_5 | >= 1.0 |
+| metrics.memory_precision_at_5 | >= 1.0 |
+| metrics.active_memory_suppression | >= 1.0 |
+| metrics.privacy_boundary_pass_rate | >= 1.0 |
 | metrics.provenance_coverage.score | >= 1.0 |
 | metrics.lifecycle_integrity.score | >= 1.0 |
 | metrics.forbidden_output_violations | <= 0 |
+| metrics.top_k_noise_at_5 | <= 0.0 |
+| metrics.noise_sources_at_5.* | <= 0 |
 
-Structural result:
+Private probe result:
 
 | metric | value |
-| --- | ---: |
+| --- | --- |
 | archive_format | layered |
 | memory_records | 1376 |
 | legacy_session_records | 266 |
-| probe_cases | 0 |
-| memory_recall_at_5 | null |
-| memory_precision_at_5 | null |
-| top_k_noise_at_5 | null |
+| probe_cases | 6 |
+| positive_cases | 6 |
+| layers_covered | global, domain, project |
+| schema_fields_covered | expected_memory_id, expected_memory_ids, expected_layer, expected_not_memory_id, forbidden_output_patterns |
+| memory_recall_at_5 | 1.0 |
+| memory_precision_at_5 | 1.0 |
+| top_k_noise_at_5 | 0.0 |
+| active_memory_suppression | 1.0 |
+| privacy_boundary_pass_rate | 1.0 |
 | forbidden_output_violations | 0 |
+| noise_sources_at_5.broad_lexical_match | 0 |
+| noise_sources_at_5.scope_mixed | 0 |
+| noise_sources_at_5.inactive_lifecycle | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 |
 | provenance_coverage.score | 1.0 |
 | provenance_coverage.evidence_ref_coverage | 1.0 |
 | lifecycle_integrity.score | 1.0 |
 | audit_status | passed |
 
-Noise-source counts are all zero because no probe cases were supplied:
-`broad_lexical_match=0`, `scope_mixed=0`, `inactive_lifecycle=0`, and
-`low_signal_memory_node=0`.
+The private deployment archive stores the redacted probe JSONL, separate
+fail-under/fail-over threshold files, and an aggregate-only baseline JSON in its
+private evaluation area. The reusable skill repository must keep only aggregate
+figures like the table above.
 
 ## Real Archive Induction And Review Queue Snapshot
 
@@ -634,13 +651,13 @@ consolidation traces, aggregate review-queue calibration metrics, and a narrow
 same-scope low-risk compression rule for semantic lifecycle cases that should
 not be auto-retired. It also has an initial gated source-depth workflow with
 synthetic quality gates and a real deployment aggregate baseline that passes
-the stricter source-map anchor audit. Shadow evaluation now has numeric
-aggregate gates, but the current deployment repository does not yet contain a
-fixed redacted probe case file, so real-history recall quality is not a stable
-gate. It still does not satisfy the full target design. The next valuable work
-is creating a private redacted real-history probe set outside the reusable skill
-repo, then improving durability under broader semantic promotion, decay, noisy
-multi-month histories, and stronger source-drilldown authorization.
+the stricter source-map anchor audit. Shadow evaluation now has a private
+redacted real-history probe set with numeric recall, precision, noise,
+suppression, privacy, provenance, lifecycle, and audit gates. It still does
+not satisfy the full target design. The next valuable work is expanding that
+private probe set across more retrieval intents and noisy multi-month
+histories, then improving durability under broader semantic promotion, decay,
+and stronger source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -669,10 +686,12 @@ multi-month histories, and stronger source-drilldown authorization.
    repository. Record dataset version, conversion fingerprints, archive build
    rules, and score JSON.
 
-6. Add a private redacted real-history probe set.
+6. Expand the private redacted real-history probe set.
    Keep probe cases in the deployment repository or another private local path,
-   never in the reusable skill repository. Use the shadow-eval quality gates to
-   track real-history recall, precision, top-k noise, suppression, and privacy.
+   never in the reusable skill repository. Add more redacted cases for
+   cross-project reuse, near-duplicate memories, stale-memory suppression,
+   source-depth decisions, and noisy long-history retrieval while preserving
+   aggregate-only reporting in this repository.
 
 7. Add governance tests later.
    Do not make multi-principal access control part of the next immediate slice,
