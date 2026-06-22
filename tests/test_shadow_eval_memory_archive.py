@@ -166,6 +166,70 @@ def write_legacy_archive(repo: Path) -> None:
     )
 
 
+def memory_record(memory_id: str, layer: str, text: str, *, topic: str = "multi-relevant") -> dict:
+    return {
+        "memory_id": memory_id,
+        "layer": layer,
+        "scope": layer if layer != "project" else "project:synthetic",
+        "topic": topic,
+        "text": text,
+        "source": "automatic",
+        "confidence": "high",
+        "support_count": 1,
+        "derived_from": ["sessions/2026/06/21/redacted/summary.md"],
+        "evidence_refs": [
+            {
+                "path": "sessions/2026/06/21/redacted/evidence.md",
+                "quote_id": "redacted_ev_001",
+            }
+        ],
+        "raw_refs": [],
+        "first_seen": "2026-06-21",
+        "last_seen": "2026-06-21",
+        "supersedes": [],
+        "superseded_by": None,
+    }
+
+
+def write_multi_relevant_archive(repo: Path) -> None:
+    (repo / "index").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted/summary.md").write_text(
+        "# Session: Multi relevant fixture\n\n"
+        "Synthetic public summary for multi relevant shadow evaluation.\n",
+        encoding="utf-8",
+    )
+    (repo / "sessions/2026/06/21/redacted/evidence.md").write_text(
+        "# Evidence\n\nredacted_ev_001:\nSynthetic public evidence.\n",
+        encoding="utf-8",
+    )
+    write_jsonl(
+        repo / "index/memories.jsonl",
+        [
+            memory_record(
+                "mem_multi_primary",
+                "domain",
+                "multi relevant marker primary durable fact",
+            ),
+            memory_record(
+                "mem_multi_secondary",
+                "domain",
+                "multi relevant marker secondary durable fact",
+            ),
+            memory_record(
+                "mem_multi_broad_noise",
+                "domain",
+                "multi relevant marker broad lexical neighbor",
+            ),
+            memory_record(
+                "mem_multi_scope_noise",
+                "project",
+                "multi relevant marker wrong project scope neighbor",
+            ),
+        ],
+    )
+
+
 class ShadowEvalMemoryArchiveTests(unittest.TestCase):
     def test_shadow_eval_reports_legacy_archive_without_memory_index(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -301,3 +365,151 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertGreater(payload["metrics"]["provenance_coverage"]["score"], 0.0)
         self.assertEqual(payload["audit"]["status"], "passed")
         self.assertFalse(payload["privacy"]["source_content_rendered"])
+
+    def test_shadow_eval_keeps_legacy_single_expected_memory_id_compatible_with_case_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            audit_script = Path(tmpdir) / "audit_with_forbidden_output.py"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:single_current",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                        "forbidden_output_patterns": ["SECRET_AUDIT_STDOUT", "SECRET_AUDIT_STDERR"],
+                    }
+                ],
+            )
+            audit_script.write_text(
+                "import sys\n"
+                "print('SECRET_AUDIT_STDOUT')\n"
+                "print('SECRET_AUDIT_STDERR', file=sys.stderr)\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--audit-script",
+                    str(audit_script),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotIn("SECRET_AUDIT_STDOUT", combined)
+        self.assertNotIn("SECRET_AUDIT_STDERR", combined)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
+        self.assertEqual(payload["metrics"]["forbidden_output_violations"], 1)
+        self.assertEqual(payload["metrics"]["privacy_boundary_pass_rate"], 0.0)
+        detail = payload["case_details"][0]
+        self.assertEqual(detail["case_id"], "redacted:single_current")
+        self.assertEqual(detail["expected_memory_count"], 1)
+        self.assertEqual(detail["relevant_result_count"], 1)
+        self.assertEqual(detail["forbidden_output_violation_count"], 2)
+
+    def test_shadow_eval_counts_multiple_expected_memory_ids_as_relevant_without_rendering_ids(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "multi-agent-memory"
+            cases = Path(tmpdir) / "multi_cases.jsonl"
+            write_multi_relevant_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:multi_relevant",
+                        "query": "multi relevant marker",
+                        "expected_memory_ids": [
+                            "mem_multi_primary",
+                            "mem_multi_secondary",
+                        ],
+                        "expected_layer": "domain",
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["probe_cases"]["positive_cases"], 1)
+        self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
+        self.assertEqual(payload["metrics"]["memory_precision_at_5"], 0.5)
+        self.assertEqual(payload["metrics"]["top_k_noise_at_5"], 0.5)
+        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["broad_lexical_match"], 1)
+        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["scope_mixed"], 1)
+        detail = payload["case_details"][0]
+        self.assertEqual(detail["case_id"], "redacted:multi_relevant")
+        self.assertEqual(detail["expected_memory_count"], 2)
+        self.assertEqual(detail["result_count"], 4)
+        self.assertEqual(detail["relevant_result_count"], 2)
+        self.assertEqual(detail["noise_result_count"], 2)
+        self.assertTrue(detail["recall_hit"])
+        self.assertEqual(detail["noise_sources_at_5"]["broad_lexical_match"], 1)
+        self.assertEqual(detail["noise_sources_at_5"]["scope_mixed"], 1)
+        serialized = json.dumps(payload)
+        self.assertNotIn("mem_multi_primary", serialized)
+        self.assertNotIn("mem_multi_secondary", serialized)
+        self.assertNotIn("sessions/2026/06/21/redacted", serialized)
+
+    def test_shadow_eval_rejects_invalid_forbidden_output_pattern(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:invalid_pattern",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                        "forbidden_output_patterns": ["["],
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid forbidden_output_patterns[0]", result.stderr)
+        self.assertNotIn("mem_shadow_current", result.stderr)

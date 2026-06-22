@@ -116,12 +116,18 @@ python tools/shadow_eval_memory_archive.py \
 ```
 
 The shadow report is JSON and intentionally omits memory text, evidence text,
-source paths, and raw anchors. Use it to inspect recall, active-memory
-suppression, lifecycle integrity, top-k noise, noise-source buckets, and
-provenance coverage without copying private transcripts or source records
+source paths, raw anchors, returned memory IDs, queries, and forbidden-pattern
+text. Probe cases can use the legacy `expected_memory_id` field or the plural
+`expected_memory_ids` field when a query has several acceptable memory-node
+answers. Top-k precision and noise are computed against the full relevant-ID
+set, so another listed relevant memory is not counted as noise. Use the report
+to inspect recall, active-memory suppression, lifecycle integrity, top-k noise,
+noise-source buckets, provenance coverage, and aggregate case-detail
+count/status fields without copying private transcripts or source records
 elsewhere. Legacy archives without `index/memories.jsonl` still produce a
 structural report, but memory top-k metrics remain `null` until layered memory
-nodes exist.
+nodes exist. Invalid `forbidden_output_patterns` regular expressions fail the
+run without rendering the pattern text.
 
 ## Render Scheduler Config
 
@@ -194,6 +200,6 @@ Expected generated data:
 - Redaction runs before summarization and evidence rendering.
 - Git sync refuses tool/script changes and unredacted key-like values.
 - Archive audit refuses wrapper-field noise, first-person process updates, broken memory drilldown paths, and unreachable evidence quote IDs in generated files.
-- Shadow evaluation emits aggregate metrics only and should not render raw source content.
+- Shadow evaluation emits aggregate metrics only and should not render raw source content, source paths, returned memory IDs, queries, or forbidden-pattern text.
 - Credentials must never be committed.
 - Keep this repository private.

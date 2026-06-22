@@ -437,9 +437,8 @@ Current gaps:
   integrity, top-k noise, noise-source buckets, and provenance coverage for a
   target archive without rendering source content. It can also emit a structural
   report for legacy deployment archives that do not yet have layered memory
-  nodes. A read-only local run against the private deployment archive showed a
-  legacy shape with no memory index, so memory top-k metrics were not yet
-  measurable there.
+  nodes. The 2026-06-22 aggregate-only run below measured a layered deployment
+  archive with memory top-k metrics.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
   public datasets.
@@ -471,6 +470,27 @@ paths:
 
 Lower-priority evaluation improvements remain, but they should not be mixed into
 this convergence audit as open-ended optimization.
+
+## Real Archive Shadow Eval V2 Snapshot
+
+Date: 2026-06-22
+
+This run used redacted probe case files outside this repository and did not copy
+private source records, memory text, source paths, queries, or raw anchors into
+the skill repository. The target deployment archive had 1,376 layered memory
+records. Archive audit passed, provenance coverage scored 1.0, and lifecycle
+integrity scored 1.0.
+
+| probe set | cases | recall@5 | precision@5 | top-k noise@5 | broad lexical noise | scope-mixed noise |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| v1 single expected ID | 12 | 1.00 | 0.30 | 0.70 | 20 | 8 |
+| v2 grouped expected IDs | 8 | 1.00 | 0.60 | 0.40 | 0 | 8 |
+
+The v2 protocol supports `expected_memory_ids` for cases where several memory
+nodes are legitimate answers to the same query. Precision and noise are computed
+against that full relevant-ID set. The v1 single-ID probe therefore overstated
+noise in duplicate-query families; the grouped v2 probe removes those false
+broad-lexical noise counts while preserving remaining scope-mixed noise.
 
 ## Recommendation
 

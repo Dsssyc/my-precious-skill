@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +54,42 @@ def safe_memory_id(value: object) -> str:
     if not search_memory.is_safe_memory_identifier(value):
         return ""
     return str(value)
+
+
+def safe_case_label(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return search_memory.safe_display_text(value.strip(), 120)
+
+
+def expected_memory_ids(case: dict) -> list[str]:
+    ids: list[str] = []
+    for memory_id in text_list(case.get("expected_memory_ids")):
+        safe_id = safe_memory_id(memory_id)
+        if safe_id and safe_id not in ids:
+            ids.append(safe_id)
+    singular_id = safe_memory_id(case.get("expected_memory_id"))
+    if singular_id and singular_id not in ids:
+        ids.append(singular_id)
+    return ids
+
+
+def forbidden_patterns(case: dict) -> list[str]:
+    patterns: list[str] = []
+    for idx, pattern in enumerate(text_list(case.get("forbidden_output_patterns"))):
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise SystemExit(f"invalid forbidden_output_patterns[{idx}]: {exc}") from exc
+        patterns.append(pattern)
+    return patterns
+
+
+def forbidden_output_violation_count(outputs: list[str], patterns: list[str]) -> int:
+    if not patterns:
+        return 0
+    combined = "\n".join(outputs)
+    return sum(1 for pattern in patterns if re.search(pattern, combined))
 
 
 def load_memory_records(repo: Path) -> list[dict]:
@@ -130,7 +167,22 @@ def classify_noise_source(hit: search_memory.Hit, case: dict, inactive_ids: set[
     return "broad_lexical_match"
 
 
-def evaluate_cases(repo: Path, cases: list[dict], records: list[dict], limit: int) -> dict[str, Any]:
+def new_noise_sources() -> dict[str, int]:
+    return {
+        "broad_lexical_match": 0,
+        "scope_mixed": 0,
+        "inactive_lifecycle": 0,
+        "low_signal_memory_node": 0,
+    }
+
+
+def evaluate_cases(
+    repo: Path,
+    cases: list[dict],
+    records: list[dict],
+    limit: int,
+    output_texts: list[str] | None = None,
+) -> dict[str, Any]:
     totals: dict[str, int] = {
         "cases": 0,
         "positive_cases": 0,
@@ -140,13 +192,12 @@ def evaluate_cases(repo: Path, cases: list[dict], records: list[dict], limit: in
         "total_results": 0,
         "suppression_cases": 0,
         "suppression_hits": 0,
+        "privacy_cases": 0,
+        "privacy_hits": 0,
+        "forbidden_output_violations": 0,
     }
-    noise_sources = {
-        "broad_lexical_match": 0,
-        "scope_mixed": 0,
-        "inactive_lifecycle": 0,
-        "low_signal_memory_node": 0,
-    }
+    noise_sources = new_noise_sources()
+    details: list[dict[str, Any]] = []
     inactive_ids = inactive_memory_ids(records)
     for case in cases:
         query = str(case.get("query") or "").strip()
@@ -155,26 +206,61 @@ def evaluate_cases(repo: Path, cases: list[dict], records: list[dict], limit: in
         totals["cases"] += 1
         hits = top_memory_hits(repo, query, limit)
         result_ids = [memory_id for hit in hits if (memory_id := safe_memory_id(hit.memory_id))]
-        expected_memory_id = safe_memory_id(case.get("expected_memory_id"))
+        expected_ids = expected_memory_ids(case)
+        expected_id_set = set(expected_ids)
         expected_not_memory_ids = [
             memory_id for memory_id in text_list(case.get("expected_not_memory_id")) if safe_memory_id(memory_id)
         ]
+        patterns = forbidden_patterns(case)
+        violation_count = forbidden_output_violation_count(output_texts or [], patterns)
+        if patterns:
+            totals["privacy_cases"] += 1
+            if violation_count == 0:
+                totals["privacy_hits"] += 1
+            else:
+                totals["forbidden_output_violations"] += 1
+        case_noise_sources = new_noise_sources()
+        relevant_count = 0
         if case.get("expected_abstain") is True:
             totals["abstain_cases"] += 1
-        elif expected_memory_id:
+        elif expected_ids:
             totals["positive_cases"] += 1
             totals["total_results"] += len(result_ids)
-            if expected_memory_id in result_ids:
+            relevant_count = sum(1 for memory_id in result_ids if memory_id in expected_id_set)
+            totals["relevant_results"] += relevant_count
+            if relevant_count:
                 totals["recall_hits"] += 1
-                totals["relevant_results"] += 1
             for hit in hits:
                 hit_id = safe_memory_id(hit.memory_id)
-                if hit_id and hit_id != expected_memory_id:
-                    noise_sources[classify_noise_source(hit, case, inactive_ids)] += 1
+                if hit_id and hit_id not in expected_id_set:
+                    source = classify_noise_source(hit, case, inactive_ids)
+                    noise_sources[source] += 1
+                    case_noise_sources[source] += 1
         if expected_not_memory_ids:
             totals["suppression_cases"] += 1
             if all(memory_id not in result_ids for memory_id in expected_not_memory_ids):
                 totals["suppression_hits"] += 1
+        details.append(
+            {
+                "case_index": totals["cases"],
+                "case_id": safe_case_label(case.get("case_id")),
+                "positive_case": bool(expected_ids),
+                "expected_memory_count": len(expected_ids),
+                "result_count": len(result_ids),
+                "relevant_result_count": relevant_count,
+                "noise_result_count": max(0, len(result_ids) - relevant_count) if expected_ids else 0,
+                "recall_hit": bool(relevant_count),
+                "suppression_hit": (
+                    None
+                    if not expected_not_memory_ids
+                    else all(memory_id not in result_ids for memory_id in expected_not_memory_ids)
+                ),
+                "noise_sources_at_5": case_noise_sources,
+                "forbidden_output_patterns_count": len(patterns),
+                "forbidden_output_violation_count": violation_count,
+                "privacy_boundary_pass": violation_count == 0,
+            }
+        )
     precision = ratio(totals["relevant_results"], totals["total_results"])
     return {
         **totals,
@@ -183,6 +269,8 @@ def evaluate_cases(repo: Path, cases: list[dict], records: list[dict], limit: in
         "top_k_noise_at_5": None if precision is None else 1.0 - precision,
         "noise_sources_at_5": noise_sources,
         "active_memory_suppression": ratio(totals["suppression_hits"], totals["suppression_cases"]),
+        "privacy_boundary_pass_rate": ratio(totals["privacy_hits"], totals["privacy_cases"]),
+        "case_details": details,
     }
 
 
@@ -292,9 +380,9 @@ def provenance_coverage(records: list[dict]) -> dict[str, Any]:
     }
 
 
-def run_audit(repo: Path, audit_script: Path | None) -> dict[str, Any]:
+def run_audit(repo: Path, audit_script: Path | None) -> tuple[dict[str, Any], list[str]]:
     if audit_script is None:
-        return {"status": "skipped"}
+        return {"status": "skipped"}, []
     result = subprocess.run(
         [
             sys.executable,
@@ -308,15 +396,19 @@ def run_audit(repo: Path, audit_script: Path | None) -> dict[str, Any]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    return {
-        "status": "passed" if result.returncode == 0 else "failed",
-        "returncode": result.returncode,
-    }
+    return (
+        {
+            "status": "passed" if result.returncode == 0 else "failed",
+            "returncode": result.returncode,
+        },
+        [result.stdout, result.stderr],
+    )
 
 
 def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit: int) -> dict[str, Any]:
     records = load_memory_records(repo)
-    case_metrics = evaluate_cases(repo, cases, records, limit)
+    audit, audit_outputs = run_audit(repo, audit_script)
+    case_metrics = evaluate_cases(repo, cases, records, limit, audit_outputs)
     memory_index_present = (repo / "index" / "memories.jsonl").is_file()
     return {
         "report_version": 1,
@@ -344,10 +436,13 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "top_k_noise_at_5": case_metrics["top_k_noise_at_5"],
             "noise_sources_at_5": case_metrics["noise_sources_at_5"],
             "active_memory_suppression": case_metrics["active_memory_suppression"],
+            "privacy_boundary_pass_rate": case_metrics["privacy_boundary_pass_rate"],
+            "forbidden_output_violations": case_metrics["forbidden_output_violations"],
             "provenance_coverage": provenance_coverage(records),
             "lifecycle_integrity": lifecycle_integrity(records),
         },
-        "audit": run_audit(repo, audit_script),
+        "case_details": case_metrics["case_details"],
+        "audit": audit,
     }
 
 

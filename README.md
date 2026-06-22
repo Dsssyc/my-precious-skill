@@ -264,13 +264,20 @@ python ~/repos/agent-memory/tools/shadow_eval_memory_archive.py \
   --audit-script ~/repos/agent-memory/tools/audit_memory_archive.py
 ```
 
-The shadow report is aggregate JSON only. It includes recall, active-memory
-suppression, lifecycle integrity, top-k noise, and provenance coverage metrics,
-plus `noise_sources_at_5` buckets for broad lexical, scope-mixed, inactive
-lifecycle, and low-signal memory-node results. It can also report legacy
-archives that do not yet have `index/memories.jsonl`, but memory top-k metrics
-remain `null` until layered memory nodes exist. It does not render memory text,
-evidence text, source paths, or raw anchors.
+The shadow report is aggregate JSON only. Probe cases can use the legacy
+`expected_memory_id` field or the plural `expected_memory_ids` field when a
+query has several acceptable memory-node answers. Top-k precision and noise are
+computed against the full relevant-ID set, so another listed relevant memory is
+not counted as noise. The report includes recall, active-memory suppression,
+lifecycle integrity, top-k noise, provenance coverage, and aggregate
+`case_details` count/status fields, plus `noise_sources_at_5` buckets for broad
+lexical, scope-mixed, inactive lifecycle, and low-signal memory-node results. It
+can also report legacy archives that do not yet have `index/memories.jsonl`, but
+memory top-k metrics remain `null` until layered memory nodes exist. It does not
+render memory text, evidence text, source paths, raw anchors, returned memory
+IDs, queries, or forbidden-pattern text.
+Invalid `forbidden_output_patterns` regular expressions fail the run without
+rendering the pattern text.
 
 Search without invoking an agent:
 
@@ -615,7 +622,8 @@ skills/using-my-precious/references/archive-format.md
 - Ambiguity review queue and consolidation decision trace indexes for semantic
   lifecycle cases that should not be auto-retired.
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,
-  suppression, lifecycle, noise-source, and provenance metrics.
+  suppression, lifecycle, noise-source, provenance, multi-relevant precision,
+  and case-detail count metrics.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
   and explainable result reasons.
