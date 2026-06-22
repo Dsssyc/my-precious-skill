@@ -251,6 +251,30 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
 audit 会检查生成文本质量、不安全 key-like value、memory node 下钻路径，以及
 evidence `quote_id` 是否可达。
 
+运行 privacy-safe shadow evaluation，不把私有 source records 复制进这个开发仓库：
+
+```bash
+python ~/repos/agent-memory/tools/shadow_eval_memory_archive.py \
+  --repo ~/repos/agent-memory \
+  --cases /path/to/redacted_probe_cases.jsonl \
+  --audit-script ~/repos/agent-memory/tools/audit_memory_archive.py \
+  --fail-under memory_recall_at_5=1.0 \
+  --fail-over top_k_noise_at_5=0.25
+```
+
+shadow report 只输出聚合 JSON。probe case 可以使用旧的
+`expected_memory_id`，也可以使用 `expected_memory_ids` 表示一个 query
+有多个可接受的 memory-node answer。`expected_layer` 是 soft preferred
+layer；`expected_not_memory_id` 用于检查 active-memory suppression；
+`forbidden_output_patterns` 是不得出现在 audit/search 输出中的私有或
+secret-like 正则。`--fail-under`、`--fail-over`、`--fail-under-file` 和
+`--fail-over-file` 可以约束数值聚合指标或 dotted metric path，例如
+`metrics.provenance_coverage.score`。threshold failure 只输出 metric 名称、
+实际值和阈值，不输出 JSON report。shadow eval 不渲染 memory text、evidence
+text、source paths、raw anchors、returned memory IDs、queries 或
+forbidden-pattern text；非法 `forbidden_output_patterns` 正则也不会回显原始
+pattern。
+
 不用 agent，也可以直接运行搜索脚本：
 
 ```bash
@@ -529,7 +553,8 @@ skills/using-my-precious/references/archive-format.md
 - 面向语义 lifecycle 模糊关系的 review queue，以及解释 merge、supersede、
   contradict、deprecate 和 skip 决策的 consolidation trace index。
 - privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、
-  suppression、lifecycle、top-k noise、noise-source 和 provenance 指标；legacy
+  suppression、lifecycle、top-k noise、noise-source、provenance 和 numeric
+  quality gate 指标；legacy
   archive 也可生成结构报告，但在没有 `index/memories.jsonl` 前 memory top-k
   指标会保持为 `null`。报告不渲染 memory text、evidence text、source paths 或
   raw anchors。

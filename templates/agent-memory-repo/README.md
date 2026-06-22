@@ -133,22 +133,30 @@ Run an aggregate, privacy-safe shadow evaluation against this archive:
 python tools/shadow_eval_memory_archive.py \
   --repo . \
   --cases /path/to/redacted_probe_cases.jsonl \
-  --audit-script tools/audit_memory_archive.py
+  --audit-script tools/audit_memory_archive.py \
+  --fail-under memory_recall_at_5=1.0 \
+  --fail-over top_k_noise_at_5=0.25
 ```
 
 The shadow report is JSON and intentionally omits memory text, evidence text,
 source paths, raw anchors, returned memory IDs, queries, and forbidden-pattern
 text. Probe cases can use the legacy `expected_memory_id` field or the plural
 `expected_memory_ids` field when a query has several acceptable memory-node
-answers. Top-k precision and noise are computed against the full relevant-ID
+answers. `expected_layer` is a soft preferred layer; `expected_not_memory_id`
+checks active-memory suppression; and `forbidden_output_patterns` contains
+private or secret-like regular expressions that must not appear in audit/search
+outputs. Top-k precision and noise are computed against the full relevant-ID
 set, so another listed relevant memory is not counted as noise. Use the report
 to inspect recall, active-memory suppression, lifecycle integrity, top-k noise,
 noise-source buckets, provenance coverage, and aggregate case-detail
 count/status fields without copying private transcripts or source records
-elsewhere. Legacy archives without `index/memories.jsonl` still produce a
-structural report, but memory top-k metrics remain `null` until layered memory
-nodes exist. Invalid `forbidden_output_patterns` regular expressions fail the
-run without rendering the pattern text.
+elsewhere. `--fail-under`, `--fail-over`, `--fail-under-file`, and
+`--fail-over-file` enforce numeric aggregate metrics or dotted metric paths.
+Threshold failures print only metric names, actual values, and thresholds; they
+do not print the JSON report. Legacy archives without `index/memories.jsonl`
+still produce a structural report, but memory top-k metrics remain `null` until
+layered memory nodes exist. Invalid `forbidden_output_patterns` regular
+expressions fail the run without rendering the pattern text.
 
 ## Render Scheduler Config
 

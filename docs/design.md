@@ -333,6 +333,24 @@ bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`, and rank
 mean/median caps. Additional answer-metric gates should be added to custom
 threshold files for case sets with broader `reference_answer` coverage.
 
+`shadow_eval_memory_archive.py` is the privacy-safe real-archive regression
+runner. Its probe case contract is intentionally narrower than the synthetic
+benchmark schema: `expected_memory_id` names one acceptable memory node,
+`expected_memory_ids` names several acceptable memory nodes for duplicate or
+overlapping real-history answers, `expected_layer` acts as a soft preferred
+layer, `expected_not_memory_id` checks active-memory suppression, and
+`forbidden_output_patterns` names private or secret-like regular expressions
+that must not appear in audit or search subprocess output. Probe cases may live
+in a private deployment repository or another local private path, but private
+probe files, raw transcripts, memory text, source paths, and source records
+must not be committed to this reusable skill repository. The shadow runner can
+enforce aggregate numeric gates with `--fail-under`, `--fail-over`,
+`--fail-under-file`, and `--fail-over-file`; metric keys may be top-level
+metric names such as `memory_recall_at_5` or dotted paths such as
+`metrics.provenance_coverage.score`. Unlike the synthetic benchmark, a shadow
+threshold failure does not print the aggregate JSON report; stderr only lists
+the failed metric name, actual value, comparison, and threshold.
+
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic
 external memory IDs, stable case IDs, and source anchors. Its stdout reports

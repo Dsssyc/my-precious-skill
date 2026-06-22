@@ -321,6 +321,152 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["audit"]["status"], "passed")
         self.assertFalse(payload["privacy"]["source_content_rendered"])
 
+    def test_shadow_eval_accepts_direct_and_file_quality_gates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            fail_under_file = Path(tmpdir) / "fail-under.json"
+            fail_over_file = Path(tmpdir) / "fail-over.json"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:gate_pass",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                    }
+                ],
+            )
+            fail_under_file.write_text(
+                json.dumps({"metrics.provenance_coverage.score": 1.0}, sort_keys=True),
+                encoding="utf-8",
+            )
+            fail_over_file.write_text(
+                json.dumps({"metrics.forbidden_output_violations": 0}, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--audit-script",
+                    str(AUDIT_SCRIPT),
+                    "--fail-under",
+                    "memory_recall_at_5=1.0",
+                    "--fail-under-file",
+                    str(fail_under_file),
+                    "--fail-over",
+                    "top_k_noise_at_5=1.0",
+                    "--fail-over-file",
+                    str(fail_over_file),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
+        self.assertEqual(payload["metrics"]["provenance_coverage"]["score"], 1.0)
+        self.assertEqual(result.stderr, "")
+
+    def test_shadow_eval_threshold_failure_outputs_only_safe_metric_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                        "forbidden_output_patterns": [
+                            "SECRET_SOURCE_SNIPPET",
+                            "SECRET_RAW_ANCHOR",
+                        ],
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--audit-script",
+                    str(AUDIT_SCRIPT),
+                    "--fail-under",
+                    "memory_recall_at_5=1.1",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("shadow eval threshold failed:", result.stderr)
+        self.assertIn("memory_recall_at_5=1.0 below threshold 1.1", result.stderr)
+        self.assertNotIn("SECRET_CASE_SHOULD_NOT_RENDER", combined)
+        self.assertNotIn("shadow recall marker", combined)
+        self.assertNotIn("mem_shadow_current", combined)
+        self.assertNotIn("SECRET_SOURCE_SNIPPET", combined)
+        self.assertNotIn("SECRET_RAW_ANCHOR", combined)
+
+    def test_shadow_eval_sanitizes_invalid_threshold_value(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:invalid_threshold",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--fail-under",
+                    "memory_recall_at_5=cookie=SHOULD_NOT_RENDER",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "--fail-under threshold must be numeric for memory_recall_at_5: [unsafe-field]",
+            result.stderr,
+        )
+        self.assertNotIn("cookie=", result.stderr)
+
     def test_shadow_eval_report_is_aggregate_and_privacy_safe_for_redacted_fixture(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "redacted-agent-memory"

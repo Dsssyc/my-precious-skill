@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import subprocess
 import sys
@@ -26,6 +27,10 @@ def ratio(numerator: int | float, denominator: int | float) -> float | None:
     if not denominator:
         return None
     return numerator / denominator
+
+
+def safe_diagnostic_text(value: object, limit: int = 240) -> str:
+    return search_memory.safe_display_text(str(value), limit)
 
 
 def iter_jsonl(path: Path) -> Iterable[dict]:
@@ -411,6 +416,118 @@ def run_audit(repo: Path, audit_script: Path | None) -> tuple[dict[str, Any], li
     )
 
 
+def nested_metric_value(payload: dict[str, Any], metric: str) -> object:
+    value: object = payload
+    for part in metric.split("."):
+        if not part or not isinstance(value, dict) or part not in value:
+            raise KeyError(metric)
+        value = value[part]
+    return value
+
+
+def threshold_metric_value(payload: dict[str, Any], metric: str, option: str) -> float:
+    metric = metric.strip()
+    display_metric = safe_diagnostic_text(metric)
+    candidate_metrics = [metric]
+    if not metric.startswith("metrics."):
+        candidate_metrics.append(f"metrics.{metric}")
+    value: object = None
+    found = False
+    for candidate in candidate_metrics:
+        try:
+            value = nested_metric_value(payload, candidate)
+        except KeyError:
+            continue
+        found = True
+        break
+    if not found or isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SystemExit(f"{option} metric is not numeric in shadow eval output: {display_metric}")
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise SystemExit(f"{option} metric is not finite in shadow eval output: {display_metric}")
+    return numeric_value
+
+
+def parse_thresholds(values: list[str], payload: dict[str, Any], option: str) -> list[tuple[str, float]]:
+    thresholds: list[tuple[str, float]] = []
+    for value in values:
+        if "=" not in value:
+            raise SystemExit(f"{option} must use metric=threshold, got: {safe_diagnostic_text(value)}")
+        metric, raw_threshold = value.split("=", 1)
+        metric = metric.strip()
+        raw_threshold = raw_threshold.strip()
+        threshold_metric_value(payload, metric, option)
+        display_metric = safe_diagnostic_text(metric)
+        display_threshold = safe_diagnostic_text(raw_threshold)
+        try:
+            threshold = float(raw_threshold)
+        except ValueError as exc:
+            raise SystemExit(f"{option} threshold must be numeric for {display_metric}: {display_threshold}") from exc
+        if not math.isfinite(threshold):
+            raise SystemExit(f"{option} threshold must be finite for {display_metric}: {display_threshold}")
+        thresholds.append((metric, threshold))
+    return thresholds
+
+
+def load_threshold_file(path: Path, payload: dict[str, Any], option: str) -> list[tuple[str, float]]:
+    display_path = safe_diagnostic_text(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SystemExit(f"unable to read {option} {display_path}: {safe_diagnostic_text(exc)}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid JSON at {display_path}: {safe_diagnostic_text(exc)}") from exc
+    if not isinstance(data, dict):
+        raise SystemExit(f"{option} must contain a JSON object: {display_path}")
+    thresholds: list[tuple[str, float]] = []
+    for metric, raw_threshold in data.items():
+        if not isinstance(metric, str) or not metric.strip():
+            raise SystemExit(f"{option} metric keys must be non-empty strings: {display_path}")
+        metric = metric.strip()
+        threshold_metric_value(payload, metric, option)
+        display_metric = safe_diagnostic_text(metric)
+        if isinstance(raw_threshold, bool) or not isinstance(raw_threshold, (int, float)):
+            raise SystemExit(f"{option} threshold must be numeric for {display_metric}")
+        threshold = float(raw_threshold)
+        if not math.isfinite(threshold):
+            raise SystemExit(f"{option} threshold must be finite for {display_metric}")
+        thresholds.append((metric, threshold))
+    return thresholds
+
+
+def merge_thresholds(*groups: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    merged: dict[str, float] = {}
+    for group in groups:
+        for metric, threshold in group:
+            merged[metric] = threshold
+    return list(merged.items())
+
+
+def threshold_failure_details(
+    payload: dict[str, Any],
+    thresholds: list[tuple[str, float]],
+    comparison: str,
+    option: str,
+) -> list[dict[str, float | str]]:
+    failures: list[dict[str, float | str]] = []
+    for metric, threshold in thresholds:
+        value = threshold_metric_value(payload, metric, option)
+        if (comparison == "below" and value < threshold) or (comparison == "above" and value > threshold):
+            failures.append({"comparison": comparison, "metric": metric, "value": value, "threshold": threshold})
+    return failures
+
+
+def format_threshold_failures(failures: list[dict[str, float | str]]) -> str:
+    parts: list[str] = []
+    for failure in failures:
+        metric = safe_diagnostic_text(failure["metric"])
+        value = failure["value"]
+        threshold = failure["threshold"]
+        direction = "below" if failure["comparison"] == "below" else "above"
+        parts.append(f"{metric}={value} {direction} threshold {threshold}")
+    return "shadow eval threshold failed: " + "; ".join(parts)
+
+
 def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit: int) -> dict[str, Any]:
     records = load_memory_records(repo)
     audit, audit_outputs = run_audit(repo, audit_script)
@@ -458,6 +575,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cases", help="Optional redacted probe cases JSONL")
     parser.add_argument("--audit-script", help="Optional audit_memory_archive.py path")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="Top-k memory hits to score")
+    parser.add_argument(
+        "--fail-under",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Exit non-zero when a numeric aggregate metric is below a threshold",
+    )
+    parser.add_argument(
+        "--fail-under-file",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="JSON object of lower-bound aggregate metric thresholds",
+    )
+    parser.add_argument(
+        "--fail-over",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Exit non-zero when a numeric aggregate metric is above a threshold",
+    )
+    parser.add_argument(
+        "--fail-over-file",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="JSON object of upper-bound aggregate metric thresholds",
+    )
     return parser.parse_args(argv)
 
 
@@ -469,6 +614,19 @@ def main(argv: list[str] | None = None) -> int:
     cases = load_cases(Path(args.cases) if args.cases else None)
     audit_script = Path(args.audit_script) if args.audit_script else None
     report = build_report(repo, cases, audit_script, args.limit)
+    file_under_thresholds: list[tuple[str, float]] = []
+    for threshold_file in args.fail_under_file:
+        file_under_thresholds.extend(load_threshold_file(Path(threshold_file), report, "--fail-under-file"))
+    file_over_thresholds: list[tuple[str, float]] = []
+    for threshold_file in args.fail_over_file:
+        file_over_thresholds.extend(load_threshold_file(Path(threshold_file), report, "--fail-over-file"))
+    under_thresholds = merge_thresholds(file_under_thresholds, parse_thresholds(args.fail_under, report, "--fail-under"))
+    over_thresholds = merge_thresholds(file_over_thresholds, parse_thresholds(args.fail_over, report, "--fail-over"))
+    failures = threshold_failure_details(report, under_thresholds, "below", "--fail-under")
+    failures.extend(threshold_failure_details(report, over_thresholds, "above", "--fail-over"))
+    if failures:
+        print(format_threshold_failures(failures), file=sys.stderr)
+        return 1
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0
 

@@ -504,6 +504,46 @@ broad-lexical noise counts. The scope-aware preferred-layer run uses
 wrong-layer hits do not fill the top-k list; when no preferred-layer hit exists,
 cross-layer memories remain reachable.
 
+## Real Archive Shadow Eval Gate V1 Structural Snapshot
+
+Date: 2026-06-22
+
+This run used the reusable `shadow_eval_memory_archive.py` quality-gate options
+against the deployment archive. No fixed redacted probe case file was found in
+the deployment repository, so this is a structural baseline rather than a recall
+probe score. The command used aggregate gates for provenance, lifecycle, and
+forbidden-output counts, and did not render private source records, memory text,
+source paths, queries, raw anchors, or probe content.
+
+Gate thresholds:
+
+| gate | threshold |
+| --- | ---: |
+| metrics.provenance_coverage.score | >= 1.0 |
+| metrics.lifecycle_integrity.score | >= 1.0 |
+| metrics.forbidden_output_violations | <= 0 |
+
+Structural result:
+
+| metric | value |
+| --- | ---: |
+| archive_format | layered |
+| memory_records | 1376 |
+| legacy_session_records | 266 |
+| probe_cases | 0 |
+| memory_recall_at_5 | null |
+| memory_precision_at_5 | null |
+| top_k_noise_at_5 | null |
+| forbidden_output_violations | 0 |
+| provenance_coverage.score | 1.0 |
+| provenance_coverage.evidence_ref_coverage | 1.0 |
+| lifecycle_integrity.score | 1.0 |
+| audit_status | passed |
+
+Noise-source counts are all zero because no probe cases were supplied:
+`broad_lexical_match=0`, `scope_mixed=0`, `inactive_lifecycle=0`, and
+`low_signal_memory_node=0`.
+
 ## Real Archive Induction And Review Queue Snapshot
 
 Date: 2026-06-22
@@ -594,10 +634,13 @@ consolidation traces, aggregate review-queue calibration metrics, and a narrow
 same-scope low-risk compression rule for semantic lifecycle cases that should
 not be auto-retired. It also has an initial gated source-depth workflow with
 synthetic quality gates and a real deployment aggregate baseline that passes
-the stricter source-map anchor audit. It still does not satisfy the full target
-design. The next valuable work is improving durability under broader semantic
-promotion, decay, noisy multi-month histories, and stronger source-drilldown
-authorization.
+the stricter source-map anchor audit. Shadow evaluation now has numeric
+aggregate gates, but the current deployment repository does not yet contain a
+fixed redacted probe case file, so real-history recall quality is not a stable
+gate. It still does not satisfy the full target design. The next valuable work
+is creating a private redacted real-history probe set outside the reusable skill
+repo, then improving durability under broader semantic promotion, decay, noisy
+multi-month histories, and stronger source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -626,7 +669,12 @@ authorization.
    repository. Record dataset version, conversion fingerprints, archive build
    rules, and score JSON.
 
-6. Add governance tests later.
+6. Add a private redacted real-history probe set.
+   Keep probe cases in the deployment repository or another private local path,
+   never in the reusable skill repository. Use the shadow-eval quality gates to
+   track real-history recall, precision, top-k noise, suppression, and privacy.
+
+7. Add governance tests later.
    Do not make multi-principal access control part of the next immediate slice,
    but keep GateMem-style utility/access/forgetting as a future evaluation
    direction.
