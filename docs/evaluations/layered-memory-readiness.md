@@ -717,6 +717,35 @@ The deployment archive passed the stricter source-map anchor audit after
 treating the legacy `explicit_memory` source-map anchor as a controlled alias
 for `source_record`.
 
+## Real Archive Lifecycle Review Decision Snapshot
+
+Date: 2026-06-23
+
+This run used the reusable `apply_memory_review_decisions.py` dry-run command
+against the private deployment archive. The command emitted aggregate JSON only
+and did not render private memory text, source paths, raw refs, review candidate
+content, queries, or memory ids.
+
+| metric | value |
+| --- | ---: |
+| review_candidate_count | 339 |
+| decision_count | 0 |
+| applied_decision_count | 0 |
+| ignored_decision_count | 0 |
+| relation_records_before.supersedes | 0 |
+| relation_records_before.contradicts | 0 |
+| relation_records_before.deprecates | 0 |
+| relation_records_after.supersedes | 0 |
+| relation_records_after.contradicts | 0 |
+| relation_records_after.deprecates | 0 |
+
+The reusable tool now supports a private
+`reviews/memory_lifecycle_decisions.jsonl` file for reviewed lifecycle
+decisions. The current deployment archive has review candidates but no reviewed
+decision file yet, so no real-history relation edge was applied in this pass.
+This keeps the lifecycle relation gap explicit instead of converting ambiguous
+candidates into relations without review.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -737,10 +766,12 @@ abstention, suppression, privacy, provenance, lifecycle, and audit gates. The
 post-hard-negative v2 run preserves recall while eliminating current no-hit
 false positives and reducing broad lexical noise under redacted
 natural-language labels. It still records scope-mixed and broad lexical top-k
-noise, and it also records that the real deployment archive has no lifecycle
-relation edges yet. The next valuable work is further reducing real-history
-top-k noise and creating real lifecycle relation evidence before broadening
-consolidation, decay, and source-drilldown authorization.
+noise. The real deployment archive now has an aggregate-only lifecycle review
+decision tool, but the current dry-run still records no reviewed decision file
+and no lifecycle relation edges. The next valuable work is reviewing a small
+batch of private lifecycle candidates into explicit decisions, then reducing
+real-history top-k noise before broadening consolidation, decay, and
+source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 

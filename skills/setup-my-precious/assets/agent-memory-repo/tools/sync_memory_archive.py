@@ -17,6 +17,7 @@ ALLOWED_ROOTS = (
     "config/projects.jsonl",
     "index",
     "memories",
+    "reviews",
     "daily",
     "sessions",
 )

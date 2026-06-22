@@ -251,6 +251,20 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
 audit 会检查生成文本质量、不安全 key-like value、memory node 下钻路径，以及
 evidence `quote_id` 是否可达。
 
+预览或应用 lifecycle review decisions，且不渲染私有 memory text：
+
+```bash
+python ~/repos/agent-memory/tools/apply_memory_review_decisions.py \
+  --memory-repo ~/repos/agent-memory \
+  --dry-run
+```
+
+review decisions 保存在私有部署仓库的
+`reviews/memory_lifecycle_decisions.jsonl`。dry-run report 只输出聚合 JSON，
+包括 decision count、applied/ignored action count，以及应用前后的 lifecycle
+relation count。只有在 review decision 文件已经过审查后才使用 `--write`；
+它会重建 archive indexes 并应用已确认的 lifecycle relations。
+
 运行 privacy-safe shadow evaluation，不把私有 source records 复制进这个开发仓库：
 
 ```bash
@@ -515,8 +529,9 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 ```
 
 sync helper 只 stage archive 路径（`INDEX.md`、`config/projects.jsonl`、
-`index/`、`memories/`、`daily/` 和 `sessions/`）。提交前它会拒绝 tool/script 改动、
-archive audit findings、未脱敏的 key-like value 和 whitespace 错误。
+`index/`、`memories/`、`reviews/`、`daily/` 和 `sessions/`）。提交前它会拒绝
+tool/script 改动、archive audit findings、未脱敏的 key-like value 和
+whitespace 错误。
 
 ## 归档格式约定
 
@@ -526,7 +541,14 @@ archive audit findings、未脱敏的 key-like value 和 whitespace 错误。
 - `config/projects.jsonl`：全域 runner 使用的可选项目注册表。
 - `memories/global.jsonl`、`memories/domains.jsonl`、
   `memories/projects.jsonl` 和 `memories/explicit.jsonl`：分层 memory nodes。
+- `reviews/memory_lifecycle_decisions.jsonl`：针对模糊 lifecycle candidates 的
+  私有 reviewer decisions。
 - `index/memories.jsonl`：合并后的分层 memory 搜索索引。
+- `index/memory_review_candidates.jsonl`：需要人工 review 的模糊 lifecycle pairs。
+- `index/memory_review_decision_results.jsonl`：applied/ignored review decision
+  状态，供聚合检查使用。
+- `index/memory_consolidation_trace.jsonl`：updater 生成的 merge、supersede、
+  contradict、deprecate 和 skip 决策说明。
 - `index/sessions.jsonl`：每个 session 一行。
 - `index/decisions.jsonl`：每个可复用决策一行。
 - `index/unresolved.jsonl`：每个未完成任务一行。
@@ -554,6 +576,8 @@ skills/using-my-precious/references/archive-format.md
   confidence revision 和 robustness benchmark gates。
 - 面向语义 lifecycle 模糊关系的 review queue，以及解释 merge、supersede、
   contradict、deprecate 和 skip 决策的 consolidation trace index。
+- 只输出聚合结果的 review-decision dry-run/apply 工具，可把已确认的
+  lifecycle review decisions 转成 reciprocal memory links。
 - privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、
   suppression、lifecycle、top-k noise、noise-source、provenance 和 numeric
   quality gate 指标；legacy

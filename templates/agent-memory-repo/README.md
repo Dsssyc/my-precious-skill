@@ -127,6 +127,18 @@ review compression, contradiction, supersession reciprocity, evidence
 reachability, and real-history privacy-pass metrics without rendering memory
 text, source paths, raw refs, or evidence snippets.
 
+Preview lifecycle review decisions without rendering memory text:
+
+```bash
+python tools/apply_memory_review_decisions.py --memory-repo . --dry-run
+```
+
+Reviewer decisions live in `reviews/memory_lifecycle_decisions.jsonl`. The
+dry-run output is aggregate JSON with decision counts, applied/ignored action
+counts, and before/after lifecycle relation counts. Use `--write` only after
+reviewing the decision file; it rebuilds archive indexes and applies approved
+supersession, contradiction, or deprecation links.
+
 Run an aggregate, privacy-safe shadow evaluation against this archive:
 
 ```bash

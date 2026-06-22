@@ -136,6 +136,30 @@ class SyncMemoryArchiveTests(unittest.TestCase):
             self.assertIn("- memories", result.stdout)
             self.assertNotIn("unexpected files", result.stderr)
 
+    def test_sync_memory_archive_dry_run_allows_review_decision_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = create_git_backed_archive(Path(tmpdir))
+            review_dir = memory_repo / "reviews"
+            review_dir.mkdir()
+            (review_dir / "memory_lifecycle_decisions.jsonl").write_text(
+                '{"decision_id":"synthetic","action":"noop","current_memory_id":"mem_current",'
+                '"older_memory_id":"mem_old","candidate_fingerprint":"sha256:synthetic"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/sync_memory_archive.py"), "--dry-run"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Would stage allowed archive roots", result.stdout)
+            self.assertIn("- reviews", result.stdout)
+            self.assertNotIn("unexpected files", result.stderr)
+
     def test_sync_memory_archive_refuses_key_like_values_without_leaking_them(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))

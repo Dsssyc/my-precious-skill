@@ -267,6 +267,22 @@ The induction report includes candidate, promotion, noise-rejection, review
 reason distribution, overlap buckets, low-risk review compression, contradiction,
 lifecycle reciprocity, evidence reachability, and privacy-pass metrics.
 
+Preview or apply lifecycle review decisions without rendering private memory
+text:
+
+```bash
+python ~/repos/agent-memory/tools/apply_memory_review_decisions.py \
+  --memory-repo ~/repos/agent-memory \
+  --dry-run
+```
+
+Review decisions live in the private deployment archive at
+`reviews/memory_lifecycle_decisions.jsonl`. The dry-run report is aggregate
+JSON only; it reports decision counts, applied/ignored action counts, and
+before/after lifecycle relation counts. Use `--write` only after reviewing the
+decision file; it rebuilds archive indexes and applies approved lifecycle
+relations.
+
 Run a privacy-safe shadow evaluation without copying private source records
 into this development repository:
 
@@ -623,9 +639,9 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 ```
 
 The sync helper only stages archive paths (`INDEX.md`,
-`config/projects.jsonl`, `index/`, `memories/`, `daily/`, and `sessions/`). It refuses
-tool/script edits, archive audit findings, unredacted key-like values, and
-whitespace errors before committing.
+`config/projects.jsonl`, `index/`, `memories/`, `reviews/`, `daily/`, and
+`sessions/`). It refuses tool/script edits, archive audit findings, unredacted
+key-like values, and whitespace errors before committing.
 
 ## Archive Contract
 
@@ -635,9 +651,13 @@ A compatible deployment repository should expose:
 - `config/projects.jsonl`: optional project registry used by the global runner.
 - `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
   and `memories/explicit.jsonl`: layered memory nodes.
+- `reviews/memory_lifecycle_decisions.jsonl`: private reviewer decisions for
+  ambiguous lifecycle candidates.
 - `index/memories.jsonl`: combined layered-memory search index.
 - `index/memory_review_candidates.jsonl`: ambiguous lifecycle pairs requiring
   manual review before automatic retirement.
+- `index/memory_review_decision_results.jsonl`: aggregate-safe applied/ignored
+  review decision statuses.
 - `index/memory_consolidation_trace.jsonl`: explainable merge, supersede,
   contradict, deprecate, and skip decisions from the updater.
 - `index/sessions.jsonl`: one row per session.
@@ -667,6 +687,8 @@ skills/using-my-precious/references/archive-format.md
   retired nodes, and robustness benchmark gates.
 - Ambiguity review queue and consolidation decision trace indexes for semantic
   lifecycle cases that should not be auto-retired.
+- Aggregate-only review-decision dry-run/apply tool for converting approved
+  lifecycle review decisions into reciprocal memory links.
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,
   suppression, lifecycle, noise-source, provenance, multi-relevant precision,
   case-detail count metrics, and numeric quality gates.

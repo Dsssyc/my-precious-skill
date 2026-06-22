@@ -26,6 +26,9 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from memory_consolidation import (
+    add_contradiction_link,
+    add_deprecation_link,
+    add_supersession_link,
     apply_memory_id_contradiction_links,
     apply_memory_id_deprecation_links,
     apply_memory_id_supersession_links,
@@ -60,6 +63,29 @@ CONFIG_CANDIDATES = (
     "AGENT_SESSION_MEMORY_CONFIG",
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
+MEMORY_REVIEW_DECISION_REL_PATH = Path("reviews/memory_lifecycle_decisions.jsonl")
+SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
+MEMORY_REVIEW_APPROVAL_ACTIONS = {
+    "approve_supersedes",
+    "approve_contradicts",
+    "approve_deprecates",
+}
+MEMORY_REVIEW_IGNORE_ACTIONS = {"reject", "noop"}
+MEMORY_REVIEW_ACTIONS = MEMORY_REVIEW_APPROVAL_ACTIONS | MEMORY_REVIEW_IGNORE_ACTIONS
+MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
+    "candidate_type",
+    "current_memory_id",
+    "older_memory_id",
+    "reason",
+    "recommended_action",
+    "current_last_seen",
+    "older_last_seen",
+    "overlap_token_count",
+    "overlap_ratio",
+    "compressed_candidate_count",
+    "compressed_older_memory_ids",
+    "compression_reason",
+)
 REDACTION_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
     "bearer_token": re.compile(r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+"),
@@ -2650,6 +2676,134 @@ def safe_node_memory_id(node: dict) -> str:
     return memory_id if isinstance(memory_id, str) and memory_id else ""
 
 
+def is_safe_memory_review_id(value: object) -> bool:
+    return isinstance(value, str) and SAFE_MEMORY_REVIEW_ID_PATTERN.fullmatch(value) is not None
+
+
+def safe_memory_review_scalar(value: object, limit: int = 120) -> str:
+    text = str(value or "")
+    if not SAFE_MEMORY_REVIEW_ID_PATTERN.fullmatch(text):
+        return ""
+    return text[:limit]
+
+
+def review_candidate_fingerprint(candidate: dict) -> str:
+    payload = {
+        field: candidate.get(field)
+        for field in MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS
+        if field in candidate
+    }
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
+
+
+def review_candidate_pairs(candidate: dict) -> list[tuple[str, str]]:
+    current_id = candidate.get("current_memory_id")
+    older_id = candidate.get("older_memory_id")
+    if not is_safe_memory_review_id(current_id) or not is_safe_memory_review_id(older_id):
+        return []
+    older_ids = [older_id]
+    compressed_older_ids = candidate.get("compressed_older_memory_ids", [])
+    if isinstance(compressed_older_ids, list):
+        for item in compressed_older_ids:
+            if is_safe_memory_review_id(item) and item not in older_ids:
+                older_ids.append(item)
+    return [(str(current_id), str(item)) for item in older_ids]
+
+
+def build_memory_review_candidate_index(candidates: list[dict]) -> dict[tuple[str, str], dict]:
+    index: dict[tuple[str, str], dict] = {}
+    for candidate in candidates:
+        for pair in review_candidate_pairs(candidate):
+            index.setdefault(pair, candidate)
+    return index
+
+
+def apply_memory_review_decisions(
+    nodes: list[dict],
+    review_candidates: list[dict],
+    review_decisions: list[dict],
+) -> list[dict]:
+    nodes_by_id = {
+        memory_id: node
+        for node in nodes
+        if (memory_id := safe_node_memory_id(node))
+    }
+    candidates_by_pair = build_memory_review_candidate_index(review_candidates)
+    results: list[dict] = []
+    for decision in review_decisions:
+        action = decision.get("action")
+        current_id = decision.get("current_memory_id")
+        older_id = decision.get("older_memory_id")
+        if (
+            not isinstance(action, str)
+            or action not in MEMORY_REVIEW_ACTIONS
+            or not is_safe_memory_review_id(current_id)
+            or not is_safe_memory_review_id(older_id)
+            or current_id == older_id
+        ):
+            raise SystemExit("unsafe memory review decision")
+        candidate = candidates_by_pair.get((current_id, older_id))
+        if candidate is None:
+            raise SystemExit("unknown memory review candidate")
+        candidate_fingerprint = decision.get("candidate_fingerprint")
+        if (
+            not isinstance(candidate_fingerprint, str)
+            or candidate_fingerprint != review_candidate_fingerprint(candidate)
+        ):
+            raise SystemExit("stale memory review decision")
+        current = nodes_by_id.get(current_id)
+        old = nodes_by_id.get(older_id)
+        if current is None or old is None:
+            raise SystemExit("unknown memory review target")
+        result = {
+            "decision_id": safe_memory_review_scalar(decision.get("decision_id") or "", 120),
+            "action": action,
+            "current_memory_id": current_id,
+            "older_memory_id": older_id,
+            "candidate_fingerprint": candidate_fingerprint,
+        }
+        if action in MEMORY_REVIEW_IGNORE_ACTIONS:
+            result["status"] = "ignored"
+            results.append(result)
+            continue
+        if action == "approve_supersedes":
+            add_supersession_link(current, old)
+        elif action == "approve_contradicts":
+            add_contradiction_link(current, old)
+        elif action == "approve_deprecates":
+            add_deprecation_link(current, old)
+        result["status"] = "applied"
+        results.append(result)
+    return results
+
+
+def load_memory_review_decisions(memory_repo: Path) -> list[dict]:
+    path = memory_repo / MEMORY_REVIEW_DECISION_REL_PATH
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit("Refusing to read unsafe memory review decision path")
+    return list(iter_jsonl(path))
+
+
+def filter_reviewed_memory_candidates(review_candidates: list[dict], decision_results: list[dict]) -> list[dict]:
+    if not decision_results:
+        return review_candidates
+    reviewed_pairs = {
+        (str(result.get("current_memory_id") or ""), str(result.get("older_memory_id") or ""))
+        for result in decision_results
+        if result.get("status") in {"applied", "ignored"}
+    }
+    if not reviewed_pairs:
+        return review_candidates
+    out: list[dict] = []
+    for candidate in review_candidates:
+        pairs = review_candidate_pairs(candidate)
+        if pairs and all(pair in reviewed_pairs for pair in pairs):
+            continue
+        out.append(candidate)
+    return out
+
+
 def string_items(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -2859,8 +3013,16 @@ def rebuild_indexes(memory_repo: Path) -> None:
     rows = collect_meta(memory_repo)
     repair_legacy_source_map_paths(memory_repo, rows)
     memory_nodes = build_memory_nodes(rows, memory_repo)
+    review_decisions = load_memory_review_decisions(memory_repo)
+    initial_review_candidates = build_memory_review_candidates(memory_nodes)
+    review_decision_results = apply_memory_review_decisions(
+        memory_nodes,
+        initial_review_candidates,
+        review_decisions,
+    )
     memory_nodes = write_memory_nodes(memory_repo, memory_nodes)
     review_candidates = build_memory_review_candidates(memory_nodes)
+    review_candidates = filter_reviewed_memory_candidates(review_candidates, review_decision_results)
     consolidation_traces = build_memory_consolidation_traces(memory_nodes, review_candidates)
 
     sessions_lines: list[str] = []
@@ -2969,6 +3131,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
         "index file",
     )
     write_jsonl_index(memory_repo, index_dir / "memory_review_candidates.jsonl", review_candidates, "memory review index")
+    write_jsonl_index(
+        memory_repo,
+        index_dir / "memory_review_decision_results.jsonl",
+        review_decision_results,
+        "memory review decision index",
+    )
     write_jsonl_index(memory_repo, index_dir / "memory_consolidation_trace.jsonl", consolidation_traces, "memory trace index")
 
     recent = rows[:10]

@@ -24,7 +24,69 @@ def load_update_module():
     return module
 
 
+APPLY_REVIEW_DECISIONS_SCRIPT = Path("templates/agent-memory-repo/tools/apply_memory_review_decisions.py").resolve()
+
+
 class UpdateMemoryArchiveTests(unittest.TestCase):
+    def synthetic_memory_node(
+        self,
+        memory_id: str,
+        text: str,
+        *,
+        last_seen: str = "2026-06-02T10:00:00Z",
+    ) -> dict:
+        return {
+            "memory_id": memory_id,
+            "layer": "project",
+            "scope": "project:/tmp/review",
+            "topic": "review",
+            "text": text,
+            "rationale": "Synthetic review decision fixture.",
+            "source": "automatic",
+            "confidence": "medium",
+            "persistence": "normal",
+            "support_count": 1,
+            "first_seen": last_seen,
+            "last_seen": last_seen,
+            "derived_from": ["sessions/synthetic/summary.md"],
+            "evidence_refs": [],
+            "raw_refs": [],
+            "supersedes": [],
+            "superseded_by": None,
+            "tags": ["review"],
+        }
+
+    def synthetic_review_candidate(
+        self,
+        current_id: str = "mem_current",
+        older_id: str = "mem_old",
+        *,
+        reason: str = "low_confidence_semantic_overlap_requires_review",
+    ) -> dict:
+        return {
+            "candidate_type": "ambiguous_semantic_lifecycle",
+            "current_memory_id": current_id,
+            "older_memory_id": older_id,
+            "reason": reason,
+            "recommended_action": "manual_review",
+            "current_last_seen": "2026-06-02T10:00:00Z",
+            "older_last_seen": "2026-06-01T10:00:00Z",
+            "overlap_token_count": 5,
+            "overlap_ratio": 0.625,
+        }
+
+    def synthetic_review_decision(self, module, candidate: dict, action: str) -> dict:
+        return {
+            "decision_id": f"decision_{action}",
+            "action": action,
+            "current_memory_id": candidate["current_memory_id"],
+            "older_memory_id": candidate["older_memory_id"],
+            "candidate_fingerprint": module.review_candidate_fingerprint(candidate),
+            "reviewed_at": "2026-06-23T00:00:00Z",
+            "reviewer": "synthetic",
+            "rationale": "Synthetic reviewer decision.",
+        }
+
     def test_extract_explicit_memory_texts_trims_task_tail(self):
         module = load_update_module()
 
@@ -710,6 +772,239 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertIn(("contradict", "confirmed_contradiction_link"), decisions)
         self.assertIn(("deprecate", "confirmed_deprecation_link"), decisions)
         self.assertIn(("skip", "ambiguous_scope_narrowing_requires_review"), decisions)
+
+    def test_apply_memory_review_decisions_approves_lifecycle_links(self):
+        module = load_update_module()
+        action_expectations = {
+            "approve_supersedes": ("supersedes", "superseded_by"),
+            "approve_contradicts": ("contradicts", "contradicted_by"),
+            "approve_deprecates": ("deprecates", "deprecated_by"),
+        }
+
+        for action, (current_field, older_field) in action_expectations.items():
+            with self.subTest(action=action):
+                current = self.synthetic_memory_node(
+                    "mem_current",
+                    "Layered review decisions should confirm memory lifecycle links.",
+                    last_seen="2026-06-02T10:00:00Z",
+                )
+                old = self.synthetic_memory_node(
+                    "mem_old",
+                    "Layered review candidates should confirm memory lifecycle links.",
+                    last_seen="2026-06-01T10:00:00Z",
+                )
+                candidate = self.synthetic_review_candidate()
+                decision = self.synthetic_review_decision(module, candidate, action)
+
+                results = module.apply_memory_review_decisions([current, old], [candidate], [decision])
+
+                self.assertEqual(results[0]["status"], "applied")
+                self.assertEqual(results[0]["action"], action)
+                if current_field == "contradicts":
+                    self.assertEqual(current[current_field], [old["memory_id"]])
+                    self.assertEqual(old[older_field], [current["memory_id"]])
+                else:
+                    self.assertEqual(current[current_field], [old["memory_id"]])
+                    self.assertEqual(old[older_field], current["memory_id"])
+                self.assertEqual(old["confidence"], "low")
+
+    def test_apply_memory_review_decisions_keeps_reject_and_noop_non_mutating(self):
+        module = load_update_module()
+        for action in ("reject", "noop"):
+            with self.subTest(action=action):
+                current = self.synthetic_memory_node("mem_current", "Current synthetic review memory.")
+                old = self.synthetic_memory_node("mem_old", "Older synthetic review memory.")
+                candidate = self.synthetic_review_candidate()
+                decision = self.synthetic_review_decision(module, candidate, action)
+
+                results = module.apply_memory_review_decisions([current, old], [candidate], [decision])
+
+                self.assertEqual(results[0]["status"], "ignored")
+                self.assertEqual(results[0]["action"], action)
+                self.assertEqual(current["supersedes"], [])
+                self.assertEqual(current.get("contradicts", []), [])
+                self.assertEqual(current.get("deprecates", []), [])
+                self.assertIsNone(old["superseded_by"])
+                self.assertNotIn("contradicted_by", old)
+                self.assertNotIn("deprecated_by", old)
+
+    def test_apply_memory_review_decisions_refuses_unknown_candidate(self):
+        module = load_update_module()
+        current = self.synthetic_memory_node("mem_current", "Current synthetic review memory.")
+        old = self.synthetic_memory_node("mem_old", "Older synthetic review memory.")
+        candidate = self.synthetic_review_candidate()
+        decision = self.synthetic_review_decision(module, candidate, "approve_supersedes")
+        decision["older_memory_id"] = "mem_missing"
+
+        with self.assertRaisesRegex(SystemExit, "unknown memory review candidate"):
+            module.apply_memory_review_decisions([current, old], [candidate], [decision])
+
+    def test_apply_memory_review_decisions_refuses_stale_candidate_fingerprint(self):
+        module = load_update_module()
+        current = self.synthetic_memory_node("mem_current", "Current synthetic review memory.")
+        old = self.synthetic_memory_node("mem_old", "Older synthetic review memory.")
+        candidate = self.synthetic_review_candidate()
+        decision = self.synthetic_review_decision(module, candidate, "approve_supersedes")
+        decision["candidate_fingerprint"] = "sha256:stale"
+
+        with self.assertRaisesRegex(SystemExit, "stale memory review decision"):
+            module.apply_memory_review_decisions([current, old], [candidate], [decision])
+
+    def test_apply_memory_review_decisions_refuses_unsafe_decision_ids(self):
+        module = load_update_module()
+        current = self.synthetic_memory_node("mem_current", "Current synthetic review memory.")
+        old = self.synthetic_memory_node("mem_old", "Older synthetic review memory.")
+        candidate = self.synthetic_review_candidate()
+        decision = self.synthetic_review_decision(module, candidate, "approve_supersedes")
+        decision["current_memory_id"] = "mem_current token=SHOULD_NOT_RENDER"
+
+        with self.assertRaisesRegex(SystemExit, "unsafe memory review decision"):
+            module.apply_memory_review_decisions([current, old], [candidate], [decision])
+
+    def test_rebuild_indexes_applies_memory_review_decision_file(self):
+        module = load_update_module()
+        current_fact = "Cache backend snapshot archive compact policy should stay reviewable."
+        old_fact = "Cache backend snapshot archive rebuild metadata should stay reviewable."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            rows = [
+                {
+                    "session_id": "old-session",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/old.jsonl",
+                    "source_updated_at": "2026-06-01T10:00:00Z",
+                    "summary_path": "sessions/2026/06/01/old/summary.md",
+                    "evidence_path": "sessions/2026/06/01/old/evidence.md",
+                    "reusable_facts": [old_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["cache", "archive"],
+                },
+                {
+                    "session_id": "current-session",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/current.jsonl",
+                    "source_updated_at": "2026-06-02T10:00:00Z",
+                    "summary_path": "sessions/2026/06/02/current/summary.md",
+                    "evidence_path": "sessions/2026/06/02/current/evidence.md",
+                    "reusable_facts": [current_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["cache", "archive"],
+                },
+            ]
+            for row in rows:
+                entry_dir = memory_repo / Path(row["summary_path"]).parent
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {row['session_id']}\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text("ev_001: Synthetic evidence\n", encoding="utf-8")
+                (entry_dir / "meta.json").write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+
+            module.rebuild_indexes(memory_repo)
+            candidate = json.loads((memory_repo / "index/memory_review_candidates.jsonl").read_text(encoding="utf-8"))
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            decision = {
+                "decision_id": "review_confirm_supersession",
+                "action": "approve_supersedes",
+                "current_memory_id": candidate["current_memory_id"],
+                "older_memory_id": candidate["older_memory_id"],
+                "candidate_fingerprint": module.review_candidate_fingerprint(candidate),
+                "reviewed_at": "2026-06-23T00:00:00Z",
+                "reviewer": "synthetic",
+                "rationale": "Synthetic reviewer confirmed the newer memory supersedes the older one.",
+            }
+            (decision_dir / "memory_lifecycle_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            module.rebuild_indexes(memory_repo)
+
+            nodes = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            by_id = {node["memory_id"]: node for node in nodes}
+            current_node = by_id[candidate["current_memory_id"]]
+            old_node = by_id[candidate["older_memory_id"]]
+            trace_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memory_consolidation_trace.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(current_node["supersedes"], [old_node["memory_id"]])
+        self.assertEqual(old_node["superseded_by"], current_node["memory_id"])
+        self.assertTrue(
+            any(
+                row.get("decision") == "supersede"
+                and row.get("reason") == "confirmed_supersession_link"
+                and row.get("current_memory_id") == current_node["memory_id"]
+                and row.get("target_memory_id") == old_node["memory_id"]
+                for row in trace_rows
+            )
+        )
+
+    def test_apply_memory_review_decisions_tool_dry_run_outputs_aggregate_only(self):
+        module = load_update_module()
+        current = self.synthetic_memory_node(
+            "mem_current",
+            "PRIVATE CURRENT MEMORY TEXT SHOULD NOT RENDER",
+            last_seen="2026-06-02T10:00:00Z",
+        )
+        old = self.synthetic_memory_node(
+            "mem_old",
+            "PRIVATE OLD MEMORY TEXT SHOULD NOT RENDER",
+            last_seen="2026-06-01T10:00:00Z",
+        )
+        candidate = self.synthetic_review_candidate()
+        decision = self.synthetic_review_decision(module, candidate, "approve_supersedes")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "reviews").mkdir()
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(current, sort_keys=True) + "\n" + json.dumps(old, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memory_review_candidates.jsonl").write_text(
+                json.dumps(candidate, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "reviews/memory_lifecycle_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(APPLY_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotIn("PRIVATE CURRENT MEMORY TEXT", result.stdout)
+        self.assertNotIn("PRIVATE OLD MEMORY TEXT", result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["decision_count"], 1)
+        self.assertEqual(payload["result_status_counts"], {"applied": 1})
+        self.assertEqual(payload["result_action_counts"], {"approve_supersedes": 1})
+        self.assertEqual(payload["relation_record_counts_before"]["supersedes"], 0)
+        self.assertEqual(payload["relation_record_counts_after"]["supersedes"], 1)
+        self.assertFalse(payload["write_enabled"])
 
     def test_build_memory_nodes_lowers_confidence_for_contradicted_memory(self):
         module = load_update_module()
