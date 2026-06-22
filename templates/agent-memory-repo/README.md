@@ -109,6 +109,17 @@ unreachable evidence `quote_id` references:
 python tools/audit_memory_archive.py --memory-repo .
 ```
 
+Run a privacy-safe induction/consolidation audit against generated metadata:
+
+```bash
+python tools/induction_consolidation_audit.py --repo .
+```
+
+The induction report is aggregate JSON only. It includes candidate, promotion,
+process-noise rejection, manual-review, contradiction, supersession reciprocity,
+evidence reachability, and real-history privacy-pass metrics without rendering
+memory text, source paths, raw refs, or evidence snippets.
+
 Run an aggregate, privacy-safe shadow evaluation against this archive:
 
 ```bash

@@ -79,6 +79,9 @@ and JSONL indexes.
 - `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
   bootstraps an empty project registry by scanning source records for project
   paths, then invokes the per-project updater for each enabled project.
+- `templates/agent-memory-repo/tools/induction_consolidation_audit.py`:
+  privacy-safe read-only audit for automatic induction, lifecycle consolidation,
+  evidence reachability, and aggregate real-history output safety.
 - `templates/agent-memory-repo/tools/sync_memory_archive.py`: safe Git sync
   helper that stages only generated archive paths and refuses unexpected files
   or unredacted key-like values.

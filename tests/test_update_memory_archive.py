@@ -185,6 +185,20 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     [],
                 )
 
+    def test_summarize_events_extracts_reusable_fact_without_literal_prefix(self):
+        module = load_update_module()
+        fact = "Layered retrieval should preserve evidence refs for induced memories."
+
+        summary = module.summarize_events(
+            [
+                module.MemoryEvent("user", "Please make the memory archive reliable."),
+                module.MemoryEvent("assistant", fact),
+            ],
+            "agent-memory",
+        )
+
+        self.assertIn(fact, summary["facts"])
+
     def test_build_memory_nodes_promotes_cross_project_reusable_fact_to_domain(self):
         module = load_update_module()
         rows = [
@@ -257,6 +271,31 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         nodes = module.build_memory_nodes(rows)
 
         self.assertEqual([node["text"] for node in nodes], ["Layered migration should preserve durable memory facts."])
+
+    def test_build_memory_nodes_rejects_process_update_candidates(self):
+        module = load_update_module()
+        rows = [
+            {
+                "session_id": "s1",
+                "project": "alpha",
+                "project_path": "/tmp/alpha",
+                "source_record": "source-records/alpha.jsonl",
+                "source_updated_at": "2026-06-01T10:00:00Z",
+                "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                "reusable_facts": [
+                    "I checked the failing tests and will now inspect the archive.",
+                    "现在我检查 Cargo workspace 边界。",
+                ],
+                "decisions": [],
+                "unresolved_tasks": [],
+                "tags": ["memory"],
+            },
+        ]
+
+        nodes = module.build_memory_nodes(rows)
+
+        self.assertEqual(nodes, [])
 
     def test_build_memory_nodes_semantically_merges_paraphrased_reusable_facts(self):
         module = load_update_module()

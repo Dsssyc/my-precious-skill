@@ -2172,7 +2172,13 @@ def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, s
             continue
         for item in value:
             text = normalize_memory_text(strip_reusable_fact_prefix(str(item)))
-            if text and not is_noisy_text(text) and not is_low_signal_memory_text(text):
+            if (
+                text
+                and not is_noisy_text(text)
+                and not is_raw_prompt_text(text)
+                and not is_process_update(text)
+                and not is_low_signal_memory_text(text)
+            ):
                 yield text, rationale
 
 

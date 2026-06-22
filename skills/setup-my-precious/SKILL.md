@@ -149,7 +149,7 @@ Ask only what is needed, one step at a time:
 A successful setup leaves the user with:
 
 - a local archive directory
-- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, and `tools/sync_memory_archive.py`
+- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/induction_consolidation_audit.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, and `tools/sync_memory_archive.py`
 - a Git repository when requested
 - an optional private remote when requested and supported
 - a local archive-location config at `~/.config/my-precious/config.json` unless skipped

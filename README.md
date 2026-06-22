@@ -75,6 +75,7 @@ my-precious-skill/
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
+      tools/induction_consolidation_audit.py
       tools/run_memory_updates.py
       tools/audit_memory_archive.py
       tools/backfill_memory_archive.py
@@ -253,6 +254,18 @@ python ~/repos/agent-memory/tools/audit_memory_archive.py \
 
 The audit checks generated text quality, unsafe key-like values, memory-node
 drilldown paths, and evidence `quote_id` reachability.
+
+Audit automatic induction and consolidation behavior without rendering private
+memory text or source paths:
+
+```bash
+python ~/repos/agent-memory/tools/induction_consolidation_audit.py \
+  --repo ~/repos/agent-memory
+```
+
+The induction report includes candidate, promotion, noise-rejection, manual
+review, contradiction, lifecycle reciprocity, evidence reachability, and
+privacy-pass metrics.
 
 Run a privacy-safe shadow evaluation without copying private source records
 into this development repository:
@@ -709,6 +722,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
+  templates/agent-memory-repo/tools/induction_consolidation_audit.py \
   templates/agent-memory-repo/tools/render_scheduler.py \
   templates/agent-memory-repo/tools/sync_memory_archive.py
 ```
