@@ -19,9 +19,15 @@ python tools/search_memory.py "<query>" --depth session
 python tools/search_memory.py "<query>" --depth evidence
 ```
 
-Use `--depth source` only when source anchors are needed and the user has
-explicitly asked for raw-source reachability. The command reports source
-anchors; it does not copy raw transcripts into the archive.
+Use `--depth source` only when source reachability is needed and the user has
+explicitly asked for it. The command reports safe source ref metadata
+(`source_ref_id`, `status`, and `reason`); it does not print raw source content
+or copy raw transcripts into the archive. A short redacted raw-source snippet
+requires an explicit preview request:
+
+```bash
+python tools/search_memory.py "<query>" --depth source --raw-source-preview all
+```
 Use `--preferred-scope global|domain|project` when the current task has an
 explicit memory layer but cross-layer fallback should remain possible.
 

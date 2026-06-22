@@ -19,6 +19,7 @@ SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resol
 AUDIT_SCRIPT = Path("templates/agent-memory-repo/tools/audit_memory_archive.py").resolve()
 SUMMARY_PATH = "sessions/2026/06/04/source/summary.md"
 SOURCE_ANCHOR = "records/private.jsonl#message:42"
+SOURCE_REF_ID = "src_" + hashlib.sha256(SOURCE_ANCHOR.encode("utf-8")).hexdigest()[:12]
 MEMORY_TEXT = "Avoid repeated permission prompts after permission is granted."
 
 
@@ -135,6 +136,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_rank_histogram"]["missing"], 0)
             self.assertEqual(payload["session_drilldown_at_5"], 1.0)
             self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertEqual(payload["source_ref_reachability"], 1.0)
+            self.assertEqual(payload["source_depth_policy_pass_rate"], 1.0)
+            self.assertEqual(payload["unsafe_source_ref_rejected_count"], 0)
+            self.assertEqual(payload["raw_preview_redaction_pass_rate"], 1.0)
+            self.assertEqual(payload["source_drilldown_privacy_pass_rate"], 1.0)
             self.assertGreaterEqual(payload["source_precision_at_5"], 0.24)
             self.assertGreaterEqual(payload["source_micro_precision_at_5"], 0.22)
             self.assertGreater(payload["source_result_count_at_5"], payload["source_relevant_count_at_5"])
@@ -869,6 +875,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     "memory|all|permission prompts",
                     "session|all|permission prompts",
                     "source|all|permission prompts",
+                    "source|all|permission prompts",
                 ],
             )
 
@@ -1439,6 +1446,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                     "memory_recall_at_5",
                     "session_drilldown_at_5",
                     "source_reachability",
+                    "source_ref_reachability",
+                    "source_depth_policy_pass_rate",
                     "evidence_reachability",
                     "memory_evidence_ref_reachability",
                     "answer_reachability",
@@ -1749,7 +1758,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             )
             self.assertEqual(detail["session_result_paths"], [SUMMARY_PATH])
             self.assertEqual(detail["source_result_ids"], ["mem_permission"])
-            self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
+            self.assertEqual(detail["source_result_refs"], [SOURCE_REF_ID])
+            self.assertEqual(detail["source_result_anchors"], [])
             self.assertNotIn(MEMORY_TEXT, json.dumps(detail))
 
     def test_layered_recall_benchmark_details_sanitize_sensitive_returned_identifiers(self):
@@ -1769,8 +1779,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             detail = self.read_rows(details)[0]
             self.assertEqual(
-                detail["source_result_anchors"],
-                [SOURCE_ANCHOR, "[unsafe-result-identifier]"],
+                detail["source_result_refs"],
+                [SOURCE_REF_ID, "src_unsafe"],
             )
             self.assertNotIn("SHOULD_NOT_RENDER", json.dumps(detail))
             self.assertNotIn("cookie=", json.dumps(detail))
@@ -1793,7 +1803,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             detail = self.read_rows(details)[0]
             self.assertEqual(detail["source_result_ids"], [])
-            self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
+            self.assertEqual(detail["source_result_refs"], [SOURCE_REF_ID])
 
     def test_layered_recall_benchmark_reports_source_anchor_precision(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1851,7 +1861,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["failed_case_count"], 1)
             self.assertFalse(detail["source_reachability_hit"])
             self.assertEqual(detail["source_result_ids"], ["mem_other"])
-            self.assertEqual(detail["source_result_anchors"], [SOURCE_ANCHOR])
+            self.assertEqual(detail["source_result_refs"], [SOURCE_REF_ID])
             self.assertIn("source_reachability", detail["failed_checks"])
 
     def test_source_anchor_precision_requires_expected_memory_identity(self):
@@ -2112,6 +2122,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                             "memory_recall_at_5",
                             "session_drilldown_at_5",
                             "source_reachability",
+                            "source_ref_reachability",
+                            "source_depth_policy_pass_rate",
                         ],
                         "memory_ndcg_at_5": 0.0,
                         "memory_precision_at_5": 0.0,
@@ -3572,6 +3584,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
         search_script.write_text(
             textwrap.dedent(
                 f"""\
+                import hashlib
                 import sys
                 import time
                 from pathlib import Path
@@ -3581,6 +3594,24 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 SOURCE_ANCHOR = {SOURCE_ANCHOR!r}
                 MEMORY_TEXT = {MEMORY_TEXT!r}
                 MODE = {mode!r}
+
+                def source_ref_id(anchor):
+                    if "#" in anchor:
+                        path, raw_anchor = anchor.split("#", 1)
+                    else:
+                        path, raw_anchor = anchor, ""
+                    return "src_" + hashlib.sha256(f"{{path}}#{{raw_anchor}}".encode("utf-8")).hexdigest()[:12]
+
+                def print_source_refs(include_unsafe=False):
+                    print("   source refs:")
+                    print("     - source_ref_id: " + source_ref_id(SOURCE_ANCHOR))
+                    print("       status: available")
+                    print("       reason: archive_source_anchor_reachable")
+                    if include_unsafe:
+                        print("     - source_ref_id: src_unsafe")
+                        print("       status: blocked")
+                        print("       reason: unsafe_source_ref")
+                        print("       ref: [unsafe-source-ref]")
 
                 def arg_value(name, default=""):
                     if name not in sys.argv:
@@ -3816,8 +3847,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   source: memory")
                         print("   why: field:text; matched:different")
                         print("   memory_id: mem_other")
-                        print("   source anchors:")
-                        print("     - " + SOURCE_ANCHOR)
+                        print_source_refs()
                     elif MODE == "source_wrong_memory":
                         print(f"Top memory hits for: {{query}}")
                         print()
@@ -3827,8 +3857,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_other")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
-                        print("   source anchors:")
-                        print("     - " + SOURCE_ANCHOR)
+                        print_source_refs()
                     elif MODE == "source_non_memory_anchor":
                         print(f"Top memory hits for: {{query}}")
                         print()
@@ -3837,8 +3866,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
-                        print("   source anchors:")
-                        print("     - " + SOURCE_ANCHOR)
+                        print_source_refs()
                     elif MODE == "evidence_wrong_memory":
                         print(f"Top memory hits for: {{query}}")
                         print()
@@ -3848,8 +3876,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
-                        print("   source anchors:")
-                        print("     - " + SOURCE_ANCHOR)
+                        print_source_refs()
                         print()
                         print("2. [global] Different memory")
                         print("   source: memory")
@@ -3866,8 +3893,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("   memory_id: mem_permission")
                         print("   drill:")
                         print("     - " + SUMMARY_PATH)
-                        print("   source anchors:")
-                        print("     - " + SOURCE_ANCHOR)
+                        print_source_refs()
                         print()
                         print("2. [global] Zebra isotope lantern.")
                         print("   source: memory")
@@ -3886,13 +3912,13 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                         print("     - " + SUMMARY_PATH)
                         if MODE == "evidence_path_prefix_collision":
                             print("     - " + SUMMARY_PATH.replace("/summary.md", "/evidence.md") + ".bak")
-                        print("   source anchors:")
-                        print("     - " + SOURCE_ANCHOR)
-                        if MODE == "leaky_anchor":
-                            print("     - records/private.jsonl#message:44 cookie=SHOULD_NOT_RENDER")
                         if MODE == "leaky_path":
+                            print("   source anchors:")
+                            print("     - " + SOURCE_ANCHOR)
                             print("     - /Users/private/source.jsonl#message:44")
                             print("     - ../outside/source.jsonl#message:45")
+                        else:
+                            print_source_refs(include_unsafe=MODE == "leaky_anchor")
                         if MODE == "leaky":
                             print("   evidence:")
                             print("     - FAKE RAW PRIVATE CONTENT")

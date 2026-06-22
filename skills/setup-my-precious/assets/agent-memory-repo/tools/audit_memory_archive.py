@@ -247,6 +247,9 @@ SECRET_PATTERNS = {
     "openai_key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 }
+SOURCE_MAP_ANCHOR_ALIASES = {
+    "explicit_memory": "source_record",
+}
 LOW_SIGNAL_PATTERN = re.compile(
     r"(?:"
     r"^\s*(?:[-*]\s*)?(?:验证结果|验证已跑|但阻塞点很明确|阻塞点很明确|阻塞原因|"
@@ -722,6 +725,17 @@ def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
     return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
 
 
+def source_map_anchor_exists(path: Path, anchor: str) -> bool:
+    if not anchor.strip():
+        return False
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    anchor_key = SOURCE_MAP_ANCHOR_ALIASES.get(anchor, anchor)
+    return isinstance(value, dict) and anchor_key in value
+
+
 def is_positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
@@ -1098,8 +1112,15 @@ def audit_memory_references(repo: Path) -> list[Finding]:
                     findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
                     continue
                 path_text = str(ref.get("path", ""))
-                if is_archive_internal_ref_path(path_text) and safe_archive_ref_path(repo, path_text) is None:
-                    findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+                if is_archive_internal_ref_path(path_text):
+                    raw_path = safe_archive_ref_path(repo, path_text)
+                    if raw_path is None:
+                        findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+                    elif raw_path.name == "source-map.json" and not source_map_anchor_exists(
+                        raw_path,
+                        str(ref.get("anchor", "")),
+                    ):
+                        findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
     return findings
 
 

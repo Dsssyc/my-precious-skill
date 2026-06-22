@@ -385,8 +385,11 @@ stress tests:
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`
-- `session_drilldown_at_5`, `source_reachability`, `evidence_reachability`,
-  and `evidence_text_reachability` with `evidence_text_cases`
+- `session_drilldown_at_5`, `source_reachability`,
+  `source_ref_reachability`, `source_depth_policy_pass_rate`,
+  `raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
+  `evidence_reachability`, and `evidence_text_reachability` with
+  `evidence_text_cases`
 - `answer_reachability`, `answer_normalized_reachability`, and
   `answer_token_f1` for reference-answer snippets that should be present in
   recalled memory/session/source output
@@ -408,7 +411,7 @@ Positive JSONL cases must include `query`, `expected_memory_id`,
 `stale_memory_id`, `temporal_scope`, `expected_layer`, and
 `forbidden_output_patterns`.
 `forbidden_output_patterns` entries are Python regular expressions matched
-against combined memory, session, and source output.
+against combined memory, session, source, and explicit raw-preview output.
 When present, `case_id` must be unique within the case file.
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text
@@ -418,6 +421,12 @@ checks, not generated-answer semantic grading. `evidence_text_reachability`
 checks that required evidence files contain exact `reference_evidence` snippets,
 so source-depth claims are backed by reachable evidence text rather than only
 path references.
+At source depth, search output reports source refs as stable
+`source_ref_id`, `status`, and `reason` fields. It does not print raw source
+content by default. A short redacted raw-source snippet is only requested
+explicitly with `--raw-source-preview <source_ref_id|all>`, and the benchmark
+checks that preview output stays redacted and source-drilldown output remains
+inside the privacy boundary.
 
 Locally downloaded public benchmark files can be converted into this case
 schema without committing the source data:
@@ -492,14 +501,15 @@ python benchmarks/layered_recall_benchmark.py \
 
 `--details-jsonl` writes one row per case with rank, drill-down, source,
 evidence, abstention, stale-suppression, lifecycle-supersession, privacy
-outcomes, safe case metadata, and a `failed_checks` list naming the failed
-applicable metrics for that case.
+outcomes, safe case metadata, source-depth policy outcomes, and a
+`failed_checks` list naming the failed applicable metrics for that case.
 The detail rows include benchmark source, temporal scope, expected stale or
 negative memory IDs, stable case IDs when provided, required evidence paths,
 and forbidden-pattern counts, but they do not render raw `reference_answer` or
 `forbidden_output_patterns` text.
 They also include safe returned identifiers such as memory result IDs, session
-paths, and source anchors, without returned hit titles or snippets.
+paths, and source ref IDs, without returned hit titles, raw source paths, or
+snippets.
 Sensitive-looking or control-character-bearing returned identifiers are written
 as `[unsafe-result-identifier]`.
 `--failures-json`
@@ -523,7 +533,9 @@ example:
   "categories.knowledge_update.update_consistency": 1.0,
   "lifecycle_supersession_reciprocity": 1.0,
   "memory_recall_at_5": 0.95,
-  "privacy_boundary_pass_rate": 1.0
+  "privacy_boundary_pass_rate": 1.0,
+  "source_depth_policy_pass_rate": 1.0,
+  "source_ref_reachability": 1.0
 }
 ```
 
@@ -531,7 +543,8 @@ Direct `--fail-under` arguments override duplicate metric keys loaded from
 threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
 gate covers the synthetic suite's recall, rank coverage, source/evidence,
 evidence-text reachability, answer reachability, abstention, stale/update,
-lifecycle reciprocity, privacy, and denominator-count checks. The paired
+lifecycle reciprocity, source-depth governance, privacy, and denominator-count
+checks. The paired
 `benchmarks/quality-gates/layered_recall_synthetic_max.json`
 uses `--fail-over-file` for upper-bound checks such as `failed_case_count`,
 `memory_rank_missing_cases`, `memory_rank_mean`, and `memory_rank_median`. Add

@@ -8,6 +8,7 @@ deployment repository or from a skill bundle.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -51,6 +52,22 @@ SENSITIVE_REASON_TOKEN_PATTERN = re.compile(
     r"(?i)^(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
     r"private[_-]?key|secret|session[_-]?id|token)$"
 )
+SOURCE_PREVIEW_LIMIT = 240
+SOURCE_PREVIEW_REDACTION_PATTERNS = (
+    ("COOKIE", re.compile(r"(?i)\bcookie\s*=\s*\S+")),
+    ("AUTHORIZATION", re.compile(r"(?i)\bauthorization\s*[:=]\s*\S+")),
+    ("BEARER_TOKEN", re.compile(r"(?i)\bbearer\s+\S+")),
+    ("OPENAI_KEY", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("GITHUB_TOKEN", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b")),
+    ("AWS_ACCESS_KEY", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("API_KEY", re.compile(r"(?i)\bapi[_-]?key\s*[:=]\s*\S+")),
+    ("PASSWORD", re.compile(r"(?i)\bpassword\s*[:=]\s*\S+")),
+    ("SECRET", re.compile(r"(?i)\bsecret\s*[:=]\s*\S+")),
+    ("TOKEN", re.compile(r"(?i)\btoken\s*[:=]\s*\S+")),
+)
+SOURCE_MAP_ANCHOR_ALIASES = {
+    "explicit_memory": "source_record",
+}
 
 
 @dataclass
@@ -67,6 +84,15 @@ class Hit:
     drill_paths: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     raw_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SourceRefStatus:
+    source_ref_id: str
+    status: str
+    reason: str
+    unsafe_ref: bool = False
+    preview: str = ""
 
 
 HIGH_SIGNAL_FIELDS = {
@@ -927,10 +953,118 @@ def safe_display_path(value: object, limit: int = 200) -> str:
     return safe_display_text(str(value), limit)
 
 
+def split_source_ref_text(value: str) -> tuple[str, str]:
+    if "#" not in value:
+        return value.strip(), ""
+    path_text, anchor_text = value.split("#", 1)
+    return path_text.strip(), anchor_text.strip()
+
+
+def stable_source_ref_id(path_text: str, anchor_text: str) -> str:
+    digest = hashlib.sha256(f"{path_text}#{anchor_text}".encode("utf-8")).hexdigest()
+    return f"src_{digest[:12]}"
+
+
+def parse_sanitized_source_ref(value: str) -> tuple[str, str] | None:
+    if value == UNSAFE_SOURCE_REF:
+        return None
+    path_text, anchor_text = split_source_ref_text(value)
+    if not path_text:
+        return None
+    return path_text, anchor_text
+
+
+def redact_source_preview_text(text: str) -> str:
+    redacted = compact_whitespace(text)
+    for name, pattern in SOURCE_PREVIEW_REDACTION_PATTERNS:
+        redacted = pattern.sub(f"[REDACTED_{name}]", redacted)
+    if has_control_chars(redacted):
+        redacted = "".join(" " if ord(char) < 32 or ord(char) == 127 else char for char in redacted)
+    return clip(compact_whitespace(redacted), SOURCE_PREVIEW_LIMIT)
+
+
+def anchor_line(text: str, anchor_text: str) -> str:
+    if not anchor_text:
+        return ""
+    for line in text.splitlines():
+        if anchor_text in line:
+            return line
+    return ""
+
+
+def read_text_if_safe(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def source_map_is_reachable(repo: Path, path_text: str, anchor_text: str) -> bool:
+    source_map_path = repo / path_text
+    try:
+        source_map = json.loads(source_map_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(source_map, dict):
+        return False
+    anchor_key = SOURCE_MAP_ANCHOR_ALIASES.get(anchor_text, anchor_text)
+    if anchor_key and anchor_key not in source_map:
+        return False
+    expected_self = source_map.get("source_map_path")
+    if not isinstance(expected_self, str) or safe_repo_relative_path(repo, expected_self) != path_text:
+        return False
+    for field in ("summary_path", "evidence_path", "source_map_path"):
+        value = source_map.get(field)
+        if not isinstance(value, str):
+            return False
+        safe_path = safe_repo_relative_path(repo, value)
+        if not safe_path or not (repo / safe_path).is_file():
+            return False
+    return True
+
+
+def should_preview_source_ref(source_ref_id: str, preview_targets: tuple[str, ...]) -> bool:
+    return "all" in preview_targets or source_ref_id in preview_targets
+
+
+def source_ref_status(repo: Path, raw_ref: str, preview_targets: tuple[str, ...]) -> SourceRefStatus:
+    parsed = parse_sanitized_source_ref(raw_ref)
+    if parsed is None:
+        return SourceRefStatus("src_unsafe", "blocked", "unsafe_source_ref", unsafe_ref=True)
+    path_text, anchor_text = parsed
+    source_ref_id = stable_source_ref_id(path_text, anchor_text)
+    safe_path = safe_repo_relative_path(repo, path_text)
+    if not safe_path or safe_path != path_text:
+        return SourceRefStatus(source_ref_id, "blocked", "unsafe_source_ref", unsafe_ref=True)
+    path = repo / safe_path
+    if not path.is_file():
+        return SourceRefStatus(source_ref_id, "unavailable", "source_ref_not_in_archive")
+    if path.name == "source-map.json":
+        if not source_map_is_reachable(repo, safe_path, anchor_text):
+            return SourceRefStatus(source_ref_id, "unavailable", "source_map_unreachable")
+        preview = ""
+        if should_preview_source_ref(source_ref_id, preview_targets):
+            preview = "blocked: source_map_contains_no_raw_content"
+        return SourceRefStatus(source_ref_id, "available", "source_map_reachable", preview=preview)
+    text = read_text_if_safe(path)
+    line = anchor_line(text, anchor_text)
+    if not line:
+        return SourceRefStatus(source_ref_id, "unavailable", "source_anchor_missing")
+    preview = ""
+    if should_preview_source_ref(source_ref_id, preview_targets):
+        preview = redact_source_preview_text(line)
+        if not preview:
+            preview = "blocked: empty_source_preview"
+    return SourceRefStatus(source_ref_id, "available", "archive_source_anchor_reachable", preview=preview)
+
+
+def source_ref_statuses(repo: Path, raw_refs: tuple[str, ...], preview_targets: tuple[str, ...]) -> tuple[SourceRefStatus, ...]:
+    return tuple(source_ref_status(repo, raw_ref, preview_targets) for raw_ref in raw_refs)
+
+
 def sanitize_raw_ref(repo: Path, value: object) -> str:
     if isinstance(value, str):
-        path_text = value.strip()
-        anchor_text = ""
+        path_text, anchor_text = split_source_ref_text(value)
     elif isinstance(value, dict):
         path = value.get("path")
         if not isinstance(path, str):
@@ -1343,7 +1477,7 @@ def drill_path_limited_hits(repo: Path, hits: list[Hit], memory_hits: list[Hit],
     return [hit for hit in hits if safe_repo_relative_path(repo, str(hit.path)) in allowed]
 
 
-def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
+def format_memory_hit(repo: Path, hit: Hit, idx: int, depth: str, raw_source_preview: tuple[str, ...] = ()) -> str:
     layer = hit.layer or "memory"
     title = safe_display_text(hit.text or hit.title or "Untitled memory", 160)
     why = "; ".join(hit.why)
@@ -1365,15 +1499,28 @@ def format_memory_hit(hit: Hit, idx: int, depth: str) -> str:
         lines.append("   evidence:")
         lines.extend(f"     - {safe_display_path(ref)}" for ref in hit.evidence_refs)
     if depth == "source" and hit.raw_refs:
-        lines.append("   source anchors:")
-        lines.extend(f"     - {raw_ref}" for raw_ref in hit.raw_refs)
+        lines.append("   source refs:")
+        for source_status in source_ref_statuses(repo, hit.raw_refs, raw_source_preview):
+            lines.append(f"     - source_ref_id: {source_status.source_ref_id}")
+            lines.append(f"       status: {source_status.status}")
+            lines.append(f"       reason: {source_status.reason}")
+            if source_status.unsafe_ref:
+                lines.append(f"       ref: {UNSAFE_SOURCE_REF}")
+            if source_status.preview:
+                lines.append(f"       raw_preview: {source_status.preview}")
     lines.append("   next: use drill paths for supporting sessions and evidence")
     return "\n".join(lines)
 
 
-def format_hit(repo: Path, hit: Hit, idx: int, depth: str = "memory") -> str:
+def format_hit(
+    repo: Path,
+    hit: Hit,
+    idx: int,
+    depth: str = "memory",
+    raw_source_preview: tuple[str, ...] = (),
+) -> str:
     if hit.source == "memory":
-        return format_memory_hit(hit, idx, depth)
+        return format_memory_hit(repo, hit, idx, depth, raw_source_preview)
     try:
         rel = hit.path.relative_to(repo)
     except ValueError:
@@ -1411,6 +1558,13 @@ def main(argv: list[str] | None = None) -> int:
         choices=("memory", "session", "evidence", "source"),
         default="memory",
         help="Recall depth: memory nodes, sessions, evidence snippets, or source anchors",
+    )
+    parser.add_argument(
+        "--raw-source-preview",
+        action="append",
+        default=[],
+        metavar="SOURCE_REF_ID|all",
+        help="Explicitly preview short redacted raw-source snippets for matching source refs at source depth",
     )
     parser.add_argument(
         "--scope",
@@ -1475,7 +1629,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Archive: {safe_display_text(repo.name or 'archive', 80)}")
     print()
     for idx, hit in enumerate(hits[: args.limit], 1):
-        print(format_hit(repo, hit, idx, args.depth))
+        print(format_hit(repo, hit, idx, args.depth, tuple(args.raw_source_preview)))
         print()
     return 0
 

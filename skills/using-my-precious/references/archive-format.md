@@ -124,7 +124,13 @@ event narrative.
 
 `raw_refs` may point to protected source anchors or source-map entries rather
 than committed raw files. Compatible archives should not commit raw transcripts
-by default.
+by default. When a `raw_refs` path points at an archive-local `source-map.json`,
+the `anchor` must name a key present in that source map. The legacy
+`explicit_memory` source-map anchor is treated as a controlled alias for
+`source_record`. Search source depth renders stable `source_ref_id`, `status`,
+and `reason` fields by default; it does not print raw source content unless an
+agent explicitly requests a short redacted preview with
+`--raw-source-preview <source_ref_id|all>`.
 
 ## Summary Requirements
 

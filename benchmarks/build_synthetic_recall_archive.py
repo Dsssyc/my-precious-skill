@@ -399,6 +399,12 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def append_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
 def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
     reference_answers = text_list(case.get("reference_answer"))
     reference_evidence = text_list(case.get("reference_evidence"))
@@ -425,7 +431,7 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
         )
     for raw_ref in record["raw_refs"]:
         raw_path = repo / raw_ref["path"]
-        write_text(
+        append_text(
             raw_path,
             json.dumps(
                 {

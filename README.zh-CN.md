@@ -259,8 +259,9 @@ python ~/repos/agent-memory/tools/search_memory.py "private session archive"
 
 当 `index/memories.jsonl` 存在时，搜索会先从分层 memory nodes 开始。
 使用 depth 控制继续下钻到支持它的 sessions、evidence 或受保护的 source
-anchors。source anchors 会被当作不可信显示数据处理，不安全的 anchor 文本会被
-替换为 `[unsafe-source-ref]`；不安全的 metadata 字段会显示为 `[unsafe-field]`。
+refs。source depth 默认只输出 `source_ref_id`、`status` 和 `reason`，不会打印
+raw source content；不安全的 source ref 会显示为 `[unsafe-source-ref]`，不安全的
+metadata 字段会显示为 `[unsafe-field]`。
 带有已确认 `superseded_by`、`contradicted_by` 或 `deprecated_by` lifecycle
 links 的 memory node 会被视为非活跃记忆，并被搜索跳过；deprecation marker
 nodes 默认也会被跳过。
@@ -270,6 +271,12 @@ nodes 默认也会被跳过。
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth evidence
 python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth source
+```
+
+只有用户明确要求 raw-source 检查时，才请求短的脱敏预览：
+
+```bash
+python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth source --raw-source-preview all
 ```
 
 指定仓库路径：
@@ -329,8 +336,10 @@ python benchmarks/layered_recall_benchmark.py \
   search 不会从其它层返回这个 expected memory
 - rank 分布字段：`memory_ranked_cases`、`memory_rank_missing_cases`、
   `memory_rank_mean`、`memory_rank_median` 和 `memory_rank_histogram`
-- `session_drilldown_at_5`、`source_reachability`、`evidence_reachability`
-  以及带 `evidence_text_cases` 的 `evidence_text_reachability`
+- `session_drilldown_at_5`、`source_reachability`、`source_ref_reachability`、
+  `source_depth_policy_pass_rate`、`raw_preview_redaction_pass_rate`、
+  `source_drilldown_privacy_pass_rate`、`evidence_reachability`，以及带
+  `evidence_text_cases` 的 `evidence_text_reachability`
 - `answer_reachability`、`answer_normalized_reachability` 和
   `answer_token_f1`，用于检查召回的 memory/session/source 输出里是否出现
   `reference_answer` 片段
@@ -347,7 +356,7 @@ python benchmarks/layered_recall_benchmark.py \
 `stale_memory_id`、`temporal_scope`、`expected_layer` 和
 `forbidden_output_patterns`。
 `forbidden_output_patterns` 的每一项都是 Python 正则表达式，会匹配合并后的
-memory、session 和 source 输出。
+memory、session、source 和显式 raw preview 输出。
 拒答 case 设置 `expected_abstain` 为 `true`，不需要正向 expected 字段。
 `answer_reachability` 检查精确 reference answer 文本可达性；
 `answer_normalized_reachability` 忽略大小写和标点；`answer_token_f1`
@@ -408,20 +417,21 @@ python benchmarks/layered_recall_benchmark.py \
 ```
 
 `--details-jsonl` 会为每条 case 写一行 JSON，包含 rank、drill-down、source、
-evidence、拒答、stale suppression、lifecycle supersession 和 privacy 结果。
+evidence、拒答、stale suppression、lifecycle supersession、source-depth policy
+和 privacy 结果。
 疑似敏感或包含控制字符的 returned identifier 会写成 `[unsafe-result-identifier]`。
 `--failures-json`
 会写结构化质量门禁失败信息，包括 metric、value、threshold，以及安全的失败
 case 摘要：case ID、行号、category、source benchmark、失败检查名、memory rank、
 recall 标志、session drilldown 状态和 source reachability 状态；它仍然不会写原始
-query、expected memory ID、reference answer 或返回片段。`--fail-under` 会保留
+query、expected memory ID、raw source path、reference answer 或返回片段。`--fail-under` 会保留
 stdout 的 aggregate JSON，并在数值指标低于阈值时用非零状态退出，方便在 CI
 里作为质量门禁；`--fail-over-file` 可用于 `failed_case_count`、
 `memory_rank_missing_cases`、rank mean/median 等上界门禁。阈值必须是有限数值；
 NaN 和 Infinity 会在比较前被拒绝。
 packaged `benchmarks/quality-gates/layered_recall_synthetic.json` 同时覆盖
-source/evidence path、evidence-text、answer reachability、拒答、stale/update、
-lifecycle reciprocity、privacy、rank 和分母计数。
+source/evidence path、source-depth governance、evidence-text、answer
+reachability、拒答、stale/update、lifecycle reciprocity、privacy、rank 和分母计数。
 memory/session/source 每一层搜索 subprocess 默认有 30 秒超时；`--search-timeout-s`
 必须是有限正数，可以在 CI smoke test 中调低，或在大型本地 archive 上调高。
 

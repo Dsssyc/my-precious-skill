@@ -1478,7 +1478,7 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("latest active policy", result.stdout)
         self.assertNotIn("obsolete invalid lifecycle", result.stdout)
 
-    def test_search_memory_depth_source_shows_source_anchors_without_raw_content(self):
+    def test_search_memory_depth_source_reports_source_status_without_raw_content(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1489,7 +1489,10 @@ class SearchMemoryTests(unittest.TestCase):
             (session_dir / "summary.md").write_text("# Session: Source Anchors\n", encoding="utf-8")
             raw_path = repo / "records/private.jsonl"
             raw_path.parent.mkdir(parents=True)
-            raw_path.write_text("FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n", encoding="utf-8")
+            raw_path.write_text(
+                "message:42: FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n",
+                encoding="utf-8",
+            )
             (repo / "index/memories.jsonl").write_text(
                 json.dumps(
                     {
@@ -1528,9 +1531,157 @@ class SearchMemoryTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-        self.assertIn("source anchors:", result.stdout)
-        self.assertIn("records/private.jsonl#message:42", result.stdout)
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("source_ref_id: src_", result.stdout)
+        self.assertIn("status: available", result.stdout)
+        self.assertIn("reason: archive_source_anchor_reachable", result.stdout)
+        self.assertNotIn("records/private.jsonl#message:42", result.stdout)
         self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
+
+    def test_search_memory_raw_source_preview_requires_explicit_opt_in_and_redacts(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/source-preview"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Source Preview\n", encoding="utf-8")
+            raw_path = repo / "records/private.jsonl"
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text(
+                "message:42: Safe preview phrase for gated source drilldown cookie=SHOULD_NOT_RENDER\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_source_preview",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-preview",
+                        "text": "Raw source preview should require explicit opt in and redaction.",
+                        "source": "explicit",
+                        "derived_from": ["sessions/2026/06/17/source-preview/summary.md"],
+                        "raw_refs": [{"path": str(raw_path), "anchor": "message:42"}],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            default_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source preview redaction",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            preview_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source preview redaction",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                    "--raw-source-preview",
+                    "all",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotIn("raw_preview:", default_result.stdout)
+        self.assertIn("raw_preview:", preview_result.stdout)
+        self.assertIn("Safe preview phrase for gated source drilldown", preview_result.stdout)
+        self.assertIn("[REDACTED_COOKIE]", preview_result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", preview_result.stdout)
+        self.assertNotIn("cookie=", preview_result.stdout)
+
+    def test_search_memory_depth_source_reports_reachable_source_map_without_path_leak(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/source-map"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Source Map\n", encoding="utf-8")
+            (session_dir / "evidence.md").write_text("ev_001: Evidence for source map.\n", encoding="utf-8")
+            source_map_path = session_dir / "source-map.json"
+            source_map_path.write_text(
+                json.dumps(
+                    {
+                        "source_record": "/private/raw-transcript.jsonl",
+                        "summary_path": "sessions/2026/06/17/source-map/summary.md",
+                        "evidence_path": "sessions/2026/06/17/source-map/evidence.md",
+                        "source_map_path": "sessions/2026/06/17/source-map/source-map.json",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_source_map",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-map",
+                        "text": "Source maps can prove source reachability without exposing raw paths.",
+                        "source": "automatic",
+                        "derived_from": ["sessions/2026/06/17/source-map/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/06/17/source-map/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [
+                            {
+                                "path": "sessions/2026/06/17/source-map/source-map.json",
+                                "anchor": "explicit_memory",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source map reachability",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("status: available", result.stdout)
+        self.assertIn("reason: source_map_reachable", result.stdout)
+        self.assertNotIn("source-map.json#explicit_memory", result.stdout)
+        self.assertNotIn("/private/raw-transcript.jsonl", result.stdout)
 
     def test_search_memory_depth_source_parses_string_source_refs_with_anchors(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
@@ -1543,7 +1694,10 @@ class SearchMemoryTests(unittest.TestCase):
             (session_dir / "summary.md").write_text("# Session: String Source Anchors\n", encoding="utf-8")
             raw_path = repo / "records/private.jsonl"
             raw_path.parent.mkdir(parents=True)
-            raw_path.write_text("FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n", encoding="utf-8")
+            raw_path.write_text(
+                "message:42: FAKE RAW PRIVATE CONTENT THAT MUST NOT BE PRINTED\n",
+                encoding="utf-8",
+            )
             (repo / "index/memories.jsonl").write_text(
                 json.dumps(
                     {
@@ -1578,8 +1732,10 @@ class SearchMemoryTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-        self.assertIn("source anchors:", result.stdout)
-        self.assertIn("records/private.jsonl#message:42", result.stdout)
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("source_ref_id: src_", result.stdout)
+        self.assertIn("status: available", result.stdout)
+        self.assertNotIn("records/private.jsonl#message:42", result.stdout)
         self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
 
     def test_search_memory_depth_source_sanitizes_unsafe_source_refs(self):
@@ -1632,7 +1788,9 @@ class SearchMemoryTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("status: blocked", result.stdout)
+        self.assertIn("reason: unsafe_source_ref", result.stdout)
         self.assertIn("[unsafe-source-ref]", result.stdout)
         self.assertNotIn("../outside", result.stdout)
         self.assertNotIn("/Users/private", result.stdout)
@@ -1690,7 +1848,9 @@ class SearchMemoryTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("status: blocked", result.stdout)
+        self.assertIn("reason: unsafe_source_ref", result.stdout)
         self.assertIn("[unsafe-source-ref]", result.stdout)
         self.assertNotIn("source-map.json", result.stdout)
 
@@ -1743,7 +1903,9 @@ class SearchMemoryTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("status: blocked", result.stdout)
+        self.assertIn("reason: unsafe_source_ref", result.stdout)
         self.assertIn("[unsafe-source-ref]", result.stdout)
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
@@ -1794,10 +1956,70 @@ class SearchMemoryTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-        self.assertIn("source anchors:", result.stdout)
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("status: blocked", result.stdout)
+        self.assertIn("reason: unsafe_source_ref", result.stdout)
         self.assertIn("[unsafe-source-ref]", result.stdout)
         self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
         self.assertNotIn("cookie=", result.stdout)
+
+    def test_search_memory_depth_source_blocks_symlinked_raw_source_refs(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "repo"
+            repo.mkdir()
+            outside = root / "outside-private.jsonl"
+            outside.write_text("message:46: OUTSIDE RAW CONTENT MUST NOT RENDER\n", encoding="utf-8")
+            (repo / "index").mkdir()
+            (repo / "records").mkdir()
+            symlink_path = repo / "records/outside-link.jsonl"
+            symlink_path.symlink_to(outside)
+            session_dir = repo / "sessions/2026/06/17/symlink-source"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text("# Session: Symlink Source\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_global_symlink_source",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "source-depth",
+                        "text": "Symlinked source-depth refs should be refused before raw preview.",
+                        "source": "explicit",
+                        "derived_from": ["sessions/2026/06/17/symlink-source/summary.md"],
+                        "raw_refs": [{"path": "records/outside-link.jsonl", "anchor": "message:46"}],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "symlinked source-depth refs",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                    "--raw-source-preview",
+                    "all",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("source refs:", result.stdout)
+        self.assertIn("status: blocked", result.stdout)
+        self.assertIn("reason: unsafe_source_ref", result.stdout)
+        self.assertNotIn("OUTSIDE RAW CONTENT", result.stdout)
+        self.assertNotIn("outside-link.jsonl", result.stdout)
 
     def test_search_memory_sanitizes_multiline_memory_metadata(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()

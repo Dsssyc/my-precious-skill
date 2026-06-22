@@ -178,8 +178,9 @@ Positive cases check whether the correct high-level memory appears at rank 1 or
 within the top 5, whether the memory can drill down to the supporting session,
 what fraction of returned top-5 memory hits match the expected memory, whether
 required evidence paths are reachable from the expected memory, and whether
-source anchors are available on the expected memory's `source: memory` block at
-source depth. Cases with `reference_answer` also check whether the exact answer
+source refs are available on the expected memory's `source: memory` block at
+source depth without rendering raw source paths or content by default. Cases
+with `reference_answer` also check whether the exact answer
 snippet is reachable in expected-memory memory/source output or the expected
 summary session output. These metrics are reported as `memory_recall_at_1`,
 `memory_recall_at_5`,
@@ -193,6 +194,8 @@ summary session output. These metrics are reported as `memory_recall_at_1`,
 `wrong_scope_suppression`,
 `session_drilldown_at_5`, `evidence_reachability`,
 `evidence_text_cases`, `evidence_text_reachability`, `source_reachability`,
+`source_ref_reachability`, `source_depth_policy_pass_rate`,
+`raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
@@ -207,9 +210,15 @@ returned-memory and relevant-memory hits. `memory_explainability` measures
 whether ranked expected-memory hits carry high-signal `why:` reasons such as
 structured field matches, phrase matches, important token coverage, or project
 context, while rejecting low-signal-only or broad-field-only explanations.
-`source_precision_at_5` counts all top-5 returned source anchors in the
-denominator, but only anchors on the expected memory's `source: memory` block
-are relevant.
+`source_precision_at_5` counts all top-5 returned source refs in the
+denominator, but only available refs on the expected memory's `source: memory`
+block are relevant. `source_ref_reachability` checks the stable source ref ID
+derived from `expected_source_anchor`; `source_depth_policy_pass_rate` checks
+that source-depth output uses `source_ref_id`, `status`, and `reason` fields
+instead of legacy raw anchor rendering; `raw_preview_redaction_pass_rate` checks
+explicit `--raw-source-preview all` output; and
+`source_drilldown_privacy_pass_rate` checks source-depth plus preview output
+against forbidden private or secret-like patterns.
 `layer_calibration` measures whether cases that declare `expected_layer` return
 the expected memory from the requested `global`, `domain`, or `project` layer.
 `scope_filter_recall` reruns those `expected_layer` cases with
@@ -231,10 +240,11 @@ so zero-denominator metrics can be distinguished from measured failures.
 Aggregate payloads include `cases_path`, `cases_sha256`, `search_script_path`,
 and `search_script_sha256` so score reports identify the exact case file and
 search implementation used for a run.
-Search treats source anchors as untrusted display data: unsafe paths or
-sensitive-looking anchor text are rendered as `[unsafe-source-ref]` instead of
-being printed verbatim. Unsafe memory metadata fields are rendered as
-`[unsafe-field]` so archive records cannot inject extra output lines.
+Search treats source anchors as untrusted display data. Source depth reports
+safe status metadata by default; unsafe paths or sensitive-looking anchor text
+are rendered as `[unsafe-source-ref]` instead of being printed verbatim. Unsafe
+memory metadata fields are rendered as `[unsafe-field]` so archive records
+cannot inject extra output lines.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:
@@ -272,7 +282,7 @@ Optional fields include `category`, `source_benchmark`,
 `expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
 `forbidden_output_patterns`.
 `forbidden_output_patterns` values are Python regular expressions matched
-against combined memory, session, and source output.
+against combined memory, session, source, and explicit raw-preview output.
 When present, `case_id` must be unique within the case file.
 Abstention cases use `expected_abstain: true` and do not require positive
 expected fields.
@@ -282,15 +292,15 @@ The benchmark can also write per-case details as JSONL, including a
 case, source benchmark, temporal scope, stale or negative memory IDs, stable
 case IDs when provided, required evidence paths, and forbidden-pattern counts.
 Returned memory ID diagnostics are taken only from `source: memory` hit blocks;
-source anchor diagnostics still report returned source-depth anchors after
-sanitization.
+source diagnostics report returned source ref IDs after sanitization.
 When present, `reference_evidence` is checked against required evidence files
 with exact-text reachability and is counted by `evidence_text_cases`.
 Details also include safe returned identifiers such as memory result IDs,
-session paths, and source anchors, but avoid returned hit titles, snippets, raw
-`reference_answer`, raw `reference_evidence`, and `forbidden_output_patterns`
-text. Sensitive-looking or control-character-bearing returned identifiers are
-rendered as `[unsafe-result-identifier]`. The benchmark can also write structured
+session paths, and source ref IDs, but avoid returned hit titles, snippets, raw
+source paths, raw `reference_answer`, raw `reference_evidence`, and
+`forbidden_output_patterns` text. Sensitive-looking or
+control-character-bearing returned identifiers are rendered as
+`[unsafe-result-identifier]`. The benchmark can also write structured
 threshold failures with `--failures-json`; that failure file includes the same
 case-set and search-script fingerprints as stdout, the aggregate
 `failed_case_count` and `case_pass_rate`, plus safe per-case failure summaries

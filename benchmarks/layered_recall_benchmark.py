@@ -310,10 +310,17 @@ def new_totals() -> Totals:
         "session_hits": 0,
         "source_cases": 0,
         "source_hits": 0,
+        "source_ref_hits": 0,
         "source_precision_at_5": 0.0,
         "source_result_count_at_5": 0,
         "source_relevant_count_at_5": 0,
         "unsafe_source_anchor_count_at_5": 0,
+        "source_depth_policy_cases": 0,
+        "source_depth_policy_hits": 0,
+        "raw_preview_redaction_cases": 0,
+        "raw_preview_redaction_hits": 0,
+        "source_drilldown_privacy_cases": 0,
+        "source_drilldown_privacy_hits": 0,
         "memory_evidence_ref_cases": 0,
         "memory_evidence_ref_hits": 0,
         "lifecycle_supersession_cases": 0,
@@ -434,6 +441,7 @@ def finalize_totals(totals: Totals) -> dict:
         "memory_rank_histogram": memory_rank_histogram(rank_counts, missing_rank_cases),
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
+        "source_ref_reachability": ratio(totals["source_ref_hits"], totals["source_cases"]),
         "source_precision_at_5": ratio(totals["source_precision_at_5"], totals["source_cases"]),
         "source_micro_precision_at_5": ratio(
             totals["source_relevant_count_at_5"],
@@ -445,6 +453,19 @@ def finalize_totals(totals: Totals) -> dict:
         "unsafe_source_anchor_rate_at_5": ratio(
             totals["unsafe_source_anchor_count_at_5"],
             totals["source_result_count_at_5"],
+        ),
+        "unsafe_source_ref_rejected_count": int(totals["unsafe_source_anchor_count_at_5"]),
+        "source_depth_policy_pass_rate": ratio(
+            totals["source_depth_policy_hits"],
+            totals["source_depth_policy_cases"],
+        ),
+        "raw_preview_redaction_pass_rate": ratio(
+            totals["raw_preview_redaction_hits"],
+            totals["raw_preview_redaction_cases"],
+        ),
+        "source_drilldown_privacy_pass_rate": ratio(
+            totals["source_drilldown_privacy_hits"],
+            totals["source_drilldown_privacy_cases"],
         ),
         "memory_evidence_ref_cases": int(totals["memory_evidence_ref_cases"]),
         "memory_evidence_ref_reachability": ratio(
@@ -537,11 +558,18 @@ def add_result(totals: Totals, result: dict) -> None:
         totals["session_hits"] += int(result["session_drilldown_hit"])
         totals["source_cases"] += int(result["source_expected"])
         totals["source_hits"] += int(result["source_reachability_hit"])
+        totals["source_ref_hits"] += int(result["source_ref_reachability_hit"])
         if result["source_expected"]:
             totals["source_precision_at_5"] += result["source_precision_at_5"]
             totals["source_result_count_at_5"] += result["source_result_count_at_5"]
             totals["source_relevant_count_at_5"] += result["source_relevant_count_at_5"]
             totals["unsafe_source_anchor_count_at_5"] += result["unsafe_source_anchor_count_at_5"]
+            totals["source_depth_policy_cases"] += 1
+            totals["source_depth_policy_hits"] += int(result["source_depth_policy_pass"])
+            totals["raw_preview_redaction_cases"] += 1
+            totals["raw_preview_redaction_hits"] += int(result["raw_preview_redaction_pass"])
+            totals["source_drilldown_privacy_cases"] += 1
+            totals["source_drilldown_privacy_hits"] += int(result["source_drilldown_privacy_pass"])
         totals["evidence_cases"] += int(result["evidence_expected"])
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
         totals["memory_evidence_ref_cases"] += int(result["evidence_expected"])
@@ -661,7 +689,15 @@ def safe_reason_identifiers(values: list[str]) -> list[str]:
     return unique_texts(identifier for value in values if (identifier := safe_reason_identifier(value)))
 
 
-def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_s: float, scope: str = "all") -> SearchOutput:
+def run_search(
+    search_script: Path,
+    repo: Path,
+    query: str,
+    depth: str,
+    timeout_s: float,
+    scope: str = "all",
+    raw_source_preview: str = "",
+) -> SearchOutput:
     display_query = safe_result_identifier(query)
     display_script = safe_diagnostic_path(search_script)
     command = [
@@ -677,6 +713,8 @@ def run_search(search_script: Path, repo: Path, query: str, depth: str, timeout_
     ]
     if scope != "all":
         command.extend(["--scope", scope])
+    if raw_source_preview:
+        command.extend(["--raw-source-preview", raw_source_preview])
     try:
         result = subprocess.run(
             command,
@@ -1079,6 +1117,96 @@ def session_drilldown_hit(blocks: list[str], expected_summary_path: str) -> bool
     return expected_summary_path in block_result_paths(blocks)
 
 
+def split_source_anchor(value: str) -> tuple[str, str]:
+    if "#" not in value:
+        return value.strip(), ""
+    path_text, anchor_text = value.split("#", 1)
+    return path_text.strip(), anchor_text.strip()
+
+
+def source_ref_id_for_anchor(value: str) -> str:
+    path_text, anchor_text = split_source_anchor(value)
+    digest = hashlib.sha256(f"{path_text}#{anchor_text}".encode("utf-8")).hexdigest()
+    return f"src_{digest[:12]}"
+
+
+def source_ref_items(block: str) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    in_section = False
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped == "source refs:":
+            in_section = True
+            continue
+        if not in_section:
+            continue
+        if stripped.startswith("- source_ref_id:"):
+            if current is not None:
+                items.append(current)
+            current = {"source_ref_id": stripped.split(":", 1)[1].strip()}
+            continue
+        if stripped.startswith("- "):
+            if current is not None:
+                items.append(current)
+            anchor = stripped[2:].strip()
+            current = {
+                "source_ref_id": source_ref_id_for_anchor(anchor),
+                "status": "blocked" if anchor in UNSAFE_SOURCE_ANCHOR_MARKERS else "available",
+                "reason": "unsafe_source_ref" if anchor in UNSAFE_SOURCE_ANCHOR_MARKERS else "legacy_source_anchor",
+                "legacy_anchor": anchor,
+            }
+            continue
+        if current is not None and stripped.startswith(("status:", "reason:", "raw_preview:")):
+            key, value = stripped.split(":", 1)
+            current[key.strip()] = value.strip()
+            continue
+        if stripped and not line.startswith(("     ", "       ")):
+            break
+    if current is not None:
+        items.append(current)
+    for anchor in section_items(block, "source anchors"):
+        items.append(
+            {
+                "source_ref_id": source_ref_id_for_anchor(anchor),
+                "status": "blocked" if anchor in UNSAFE_SOURCE_ANCHOR_MARKERS else "available",
+                "reason": "unsafe_source_ref" if anchor in UNSAFE_SOURCE_ANCHOR_MARKERS else "legacy_source_anchor",
+                "legacy_anchor": anchor,
+            }
+        )
+    return items
+
+
+def source_ref_id_is_valid(value: str) -> bool:
+    return bool(re.fullmatch(r"src_[0-9a-f]{12}", value))
+
+
+def source_depth_policy_pass(blocks: list[str]) -> bool:
+    memory_blocks = [block for block in blocks if is_memory_block(block)]
+    if not memory_blocks:
+        return False
+    for block in memory_blocks:
+        if "source anchors:" in block:
+            return False
+        refs = source_ref_items(block)
+        if not refs:
+            return False
+        for ref in refs:
+            if not source_ref_id_is_valid(ref.get("source_ref_id", "")):
+                return False
+            if ref.get("status") not in {"available", "unavailable", "blocked"}:
+                return False
+            if not ref.get("reason"):
+                return False
+    return True
+
+
+def sensitive_output_free(output: str, forbidden_patterns: list[str]) -> bool:
+    if SENSITIVE_RESULT_IDENTIFIER_PATTERN.search(output):
+        return False
+    return not any(re.search(pattern, output) for pattern in forbidden_patterns)
+
+
 def source_reachability_hit(
     blocks: list[str],
     expected_memory_id: str,
@@ -1086,6 +1214,7 @@ def source_reachability_hit(
     expected_source_anchor: str,
     record: dict | None,
 ) -> bool:
+    expected_source_ref_id = source_ref_id_for_anchor(expected_source_anchor)
     for block in blocks:
         if not is_memory_block(block):
             continue
@@ -1093,6 +1222,11 @@ def source_reachability_hit(
             continue
         if not block_has_drill_path(block, expected_summary_path):
             continue
+        if any(
+            item.get("source_ref_id") == expected_source_ref_id and item.get("status") == "available"
+            for item in source_ref_items(block)
+        ):
+            return True
         if expected_source_anchor in section_items(block, "source anchors"):
             return True
     return False
@@ -1105,30 +1239,38 @@ def source_anchor_precision_at_5(
     record: dict | None,
 ) -> MemoryPrecisionAt5:
     top_blocks = blocks[:5]
-    anchors = block_section_values(top_blocks, "source anchors")
-    if not anchors:
+    expected_source_ref_id = source_ref_id_for_anchor(expected_source_anchor)
+    ref_items = [
+        (block, item)
+        for block in top_blocks
+        for item in source_ref_items(block)
+    ]
+    if not ref_items:
         return MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     relevant = sum(
         int(
             is_memory_block(block)
             and block_contains_memory(block, expected_memory_id, record)
-            and anchor == expected_source_anchor
+            and item.get("source_ref_id") == expected_source_ref_id
+            and item.get("status") == "available"
         )
-        for block in top_blocks
-        for anchor in section_items(block, "source anchors")
+        for block, item in ref_items
     )
     return MemoryPrecisionAt5(
-        score=relevant / len(anchors),
-        result_count=len(anchors),
+        score=relevant / len(ref_items),
+        result_count=len(ref_items),
         relevant_count=relevant,
     )
 
 
 def unsafe_source_anchor_count_at_5(blocks: list[str]) -> int:
-    anchors = block_section_values(blocks[:5], "source anchors")
     return sum(
-        int(anchor in UNSAFE_SOURCE_ANCHOR_MARKERS or safe_result_identifier(anchor) == UNSAFE_RESULT_IDENTIFIER)
-        for anchor in anchors
+        int(
+            item.get("status") == "blocked"
+            and item.get("reason") == "unsafe_source_ref"
+        )
+        for block in blocks[:5]
+        for item in source_ref_items(block)
     )
 
 
@@ -1399,6 +1541,14 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("session_drilldown_at_5")
         if result["source_expected"] and not result["source_reachability_hit"]:
             checks.append("source_reachability")
+        if result["source_expected"] and not result["source_ref_reachability_hit"]:
+            checks.append("source_ref_reachability")
+        if result["source_expected"] and not result["source_depth_policy_pass"]:
+            checks.append("source_depth_policy_pass_rate")
+        if result["source_expected"] and not result["raw_preview_redaction_pass"]:
+            checks.append("raw_preview_redaction_pass_rate")
+        if result["source_expected"] and not result["source_drilldown_privacy_pass"]:
+            checks.append("source_drilldown_privacy_pass_rate")
         if result["evidence_expected"] and not result["evidence_reachability_hit"]:
             checks.append("evidence_reachability")
         if result["evidence_expected"] and not result["memory_evidence_ref_reachability_hit"]:
@@ -1481,6 +1631,10 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
         "source_reachability_hit": result["source_reachability_hit"],
+        "source_ref_reachability_hit": result["source_ref_reachability_hit"],
+        "source_depth_policy_pass": result["source_depth_policy_pass"],
+        "raw_preview_redaction_pass": result["raw_preview_redaction_pass"],
+        "source_drilldown_privacy_pass": result["source_drilldown_privacy_pass"],
         "memory_evidence_ref_reachability_hit": result["memory_evidence_ref_reachability_hit"],
         "evidence_reachability_hit": result["evidence_reachability_hit"],
         "evidence_text_reachability_hit": result["evidence_text_reachability_hit"],
@@ -1510,6 +1664,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "session_result_paths": result["session_result_paths"],
         "source_result_ids": result["source_result_ids"],
         "source_result_anchors": result["source_result_anchors"],
+        "source_result_refs": result["source_result_refs"],
         "source_precision_at_5": round(result["source_precision_at_5"], 6),
         "source_result_count_at_5": result["source_result_count_at_5"],
         "source_relevant_count_at_5": result["source_relevant_count_at_5"],
@@ -1531,6 +1686,8 @@ def score_case(
     data = case.data
     query = required_case_text(data, "query", case.path, case.line_no)
     expected_layer = optional_case_text(data, "expected_layer")
+    expected_source_anchor = optional_case_text(data, "expected_source_anchor")
+    forbidden_patterns = case_texts(data, "forbidden_output_patterns")
     expected_abstain = data.get("expected_abstain") is True
     is_positive = positive_case(data)
 
@@ -1538,6 +1695,16 @@ def score_case(
     memory_search = run_search(search_script, repo, query, "memory", search_timeout_s)
     session_search = run_search(search_script, repo, query, "session", search_timeout_s)
     source_search = run_search(search_script, repo, query, "source", search_timeout_s)
+    source_preview_search = SearchOutput("", "")
+    if is_positive and expected_source_anchor:
+        source_preview_search = run_search(
+            search_script,
+            repo,
+            query,
+            "source",
+            search_timeout_s,
+            raw_source_preview="all",
+        )
     scope_search = SearchOutput("", "")
     wrong_scope_searches: list[SearchOutput] = []
     abstain_scope_searches: list[SearchOutput] = []
@@ -1556,6 +1723,7 @@ def score_case(
     memory_output = memory_search.stdout
     session_output = session_search.stdout
     source_output = source_search.stdout
+    source_preview_output = source_preview_search.stdout
     scope_output = scope_search.stdout
     wrong_scope_outputs = [search.stdout for search in wrong_scope_searches]
     abstain_scope_outputs = [search.stdout for search in abstain_scope_searches]
@@ -1577,6 +1745,7 @@ def score_case(
         memory_search.combined(),
         session_search.combined(),
         source_search.combined(),
+        source_preview_search.combined(),
         scope_search.combined(),
         *(search.combined() for search in wrong_scope_searches),
         *(search.combined() for search in abstain_scope_searches),
@@ -1584,7 +1753,6 @@ def score_case(
     combined_output = "\n".join([memory_output, session_output, source_output])
     expected_memory_id = optional_case_text(data, "expected_memory_id")
     expected_summary_path = optional_case_text(data, "expected_summary_path")
-    expected_source_anchor = optional_case_text(data, "expected_source_anchor")
     required_evidence_paths = case_texts(data, "required_evidence_paths")
     reference_evidence = case_texts(data, "reference_evidence")
     reference_answers = case_texts(data, "reference_answer")
@@ -1593,7 +1761,6 @@ def score_case(
     contradicted_memory_ids = case_texts(data, "contradicted_memory_id")
     deprecated_memory_ids = case_texts(data, "deprecated_memory_id")
     false_merge_memory_ids = case_texts(data, "semantic_false_merge_memory_id")
-    forbidden_patterns = case_texts(data, "forbidden_output_patterns")
 
     expected_record = memory_records.get(expected_memory_id)
     rank = None
@@ -1613,6 +1780,12 @@ def score_case(
     memory_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     source_precision = MemoryPrecisionAt5(score=0.0, result_count=0, relevant_count=0)
     unsafe_source_anchor_count = unsafe_source_anchor_count_at_5(source_blocks)
+    source_policy_pass = source_depth_policy_pass(source_blocks) if expected_source_anchor else False
+    raw_preview_pass = sensitive_output_free(source_preview_search.combined(), forbidden_patterns) if expected_source_anchor else False
+    source_drilldown_privacy = sensitive_output_free(
+        "\n".join([source_search.combined(), source_preview_search.combined()]),
+        forbidden_patterns,
+    ) if expected_source_anchor else False
     if is_positive:
         rank = memory_hit_rank(memory_blocks, expected_memory_id, expected_summary_path, expected_record)
         memory_ndcg = memory_ndcg_at_5(rank)
@@ -1773,6 +1946,10 @@ def score_case(
         "session_drilldown_hit": session_hit,
         "source_expected": bool(is_positive and expected_source_anchor),
         "source_reachability_hit": source_hit,
+        "source_ref_reachability_hit": source_hit,
+        "source_depth_policy_pass": source_policy_pass,
+        "raw_preview_redaction_pass": raw_preview_pass,
+        "source_drilldown_privacy_pass": source_drilldown_privacy,
         "source_precision_at_5": source_precision.score,
         "source_result_count_at_5": source_precision.result_count,
         "source_relevant_count_at_5": source_precision.relevant_count,
@@ -1819,6 +1996,9 @@ def score_case(
         "session_result_paths": safe_result_identifiers(block_result_paths(session_blocks)),
         "source_result_ids": safe_result_identifiers(memory_block_field_values(source_blocks, "memory_id")),
         "source_result_anchors": safe_result_identifiers(block_section_values(source_blocks, "source anchors")),
+        "source_result_refs": safe_result_identifiers(
+            [item.get("source_ref_id", "") for block in source_blocks for item in source_ref_items(block)]
+        ),
         "latency_ms": latency_ms,
     }
 

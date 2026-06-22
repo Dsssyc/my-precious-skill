@@ -428,11 +428,16 @@ Current gaps:
   deprecation links, partial supersession, and retired-node confidence revision
   on synthetic records. Decay, large-history conflict policy, and richer
   confidence revision are still incomplete.
-- Raw/source reachability is represented by anchors, not by a fully gated
-  drilldown workflow that can safely walk all the way to original chat records.
+- Raw/source reachability now has an initial gated drilldown workflow. Source
+  depth reports stable `source_ref_id`, `status`, and `reason` fields by
+  default, and short raw-source previews require explicit
+  `--raw-source-preview` opt-in with redaction. This is still not a full
+  multi-principal authorization system.
 - The benchmark has thirteen `evidence_text` cases, including ten semantic
   lifecycle robustness cases for conflict, deprecation, false-merge guards, and
-  evidence retention. This is still synthetic and too small to prove
+  evidence retention. It now also gates source-depth policy, source ref
+  reachability, raw-preview redaction, and source-drilldown privacy on the
+  packaged synthetic suite. This is still synthetic and too small to prove
   source-depth robustness on real private histories.
 - The reusable template now includes a privacy-safe shadow evaluation runner
   that can report aggregate recall, active-memory suppression, lifecycle
@@ -544,6 +549,37 @@ same-scope `low_confidence_semantic_overlap_requires_review` rows that share the
 same current memory node. Ambiguous scope narrowing and cross-scope/cross-layer
 reviews stay explicit in the manual review queue.
 
+## Real Archive Source Drilldown Governance Snapshot
+
+Date: 2026-06-22
+
+This run traversed deployment archive memory `raw_refs` with the reusable search
+policy code and emitted aggregate JSON only. It did not render private source
+records, memory text, source paths, raw refs, queries, or evidence snippets.
+
+| metric | value |
+| --- | ---: |
+| memory_count | 1376 |
+| represented_memory_count | 1376 |
+| raw_ref_count | 2140 |
+| source_ref_reachability | 1.0 |
+| source_depth_policy_pass_rate | 1.0 |
+| unsafe_source_ref_rejected_count | 0 |
+| raw_preview_redaction_pass_rate | 1.0 |
+| source_drilldown_privacy_pass_rate | 1.0 |
+| available_source_ref_count | 2140 |
+| unavailable_source_ref_count | 0 |
+
+Reason distribution:
+
+| reason | count |
+| --- | ---: |
+| source_map_reachable | 2140 |
+
+The deployment archive passed the stricter source-map anchor audit after
+treating the legacy `explicit_memory` source-map anchor as a controlled alias
+for `source_record`.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -556,9 +592,12 @@ refresh/supersession, contradiction, deprecation, false-merge prevention, and
 evidence retention. It now also has an ambiguity review queue, explainable
 consolidation traces, aggregate review-queue calibration metrics, and a narrow
 same-scope low-risk compression rule for semantic lifecycle cases that should
-not be auto-retired. It still does not satisfy the full target design. The next
-valuable work is improving durability under broader semantic promotion, decay,
-noisy multi-month histories, and gated source drilldown.
+not be auto-retired. It also has an initial gated source-depth workflow with
+synthetic quality gates and a real deployment aggregate baseline that passes
+the stricter source-map anchor audit. It still does not satisfy the full target
+design. The next valuable work is improving durability under broader semantic
+promotion, decay, noisy multi-month histories, and stronger source-drilldown
+authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -577,10 +616,10 @@ noisy multi-month histories, and gated source drilldown.
    Treat project as one retrieval scope rather than the primary storage and
    scheduling boundary.
 
-4. Expand source-depth governance.
+4. Deepen source-depth governance.
    Keep raw source anchors private by default, add authorization checks for
-   deeper drilldown, and test broken source anchors separately from evidence
-   quote refs.
+   deeper drilldown, and extend real history source-depth robustness beyond
+   aggregate dry-runs.
 
 5. Run adapted public benchmarks locally.
    Use the existing converter against downloaded public records outside the
