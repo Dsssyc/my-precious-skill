@@ -19,6 +19,7 @@ import search_memory  # noqa: E402
 
 
 DEFAULT_LIMIT = 5
+MEMORY_LAYERS = {"global", "domain", "project"}
 
 
 def ratio(numerator: int | float, denominator: int | float) -> float | None:
@@ -74,6 +75,11 @@ def expected_memory_ids(case: dict) -> list[str]:
     return ids
 
 
+def expected_layer(case: dict) -> str:
+    layer = str(case.get("expected_layer") or "").strip()
+    return layer if layer in MEMORY_LAYERS else ""
+
+
 def forbidden_patterns(case: dict) -> list[str]:
     patterns: list[str] = []
     for idx, pattern in enumerate(text_list(case.get("forbidden_output_patterns"))):
@@ -114,13 +120,13 @@ def load_cases(path: Path | None) -> list[dict]:
     return list(iter_jsonl(path))
 
 
-def top_memory_hits(repo: Path, query: str, limit: int) -> list[search_memory.Hit]:
+def top_memory_hits(repo: Path, query: str, limit: int, preferred_scope: str = "") -> list[search_memory.Hit]:
     query_tokens = search_memory.unique_query_tokens(query)
     if not query_tokens:
         return []
     return search_memory.merge_hits(
         repo,
-        search_memory.collect_memory_hits(repo, query_tokens, [], "all"),
+        search_memory.collect_memory_hits(repo, query_tokens, [], "all", preferred_scope),
     )[:limit]
 
 
@@ -204,7 +210,7 @@ def evaluate_cases(
         if not query:
             continue
         totals["cases"] += 1
-        hits = top_memory_hits(repo, query, limit)
+        hits = top_memory_hits(repo, query, limit, expected_layer(case))
         result_ids = [memory_id for hit in hits if (memory_id := safe_memory_id(hit.memory_id))]
         expected_ids = expected_memory_ids(case)
         expected_id_set = set(expected_ids)

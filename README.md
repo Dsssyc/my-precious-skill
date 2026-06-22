@@ -324,12 +324,21 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --project-path /path/to/current/project
 ```
 
+Soft-rank an explicit memory layer without filtering away other layers when no
+preferred-layer hit exists:
+
+```bash
+python ~/repos/agent-memory/tools/search_memory.py \
+  "agent workflow proxy" \
+  --preferred-scope domain
+```
+
 Search uses dependency-free hybrid lexical ranking over JSONL indexes, summary
 files, and optional evidence files. The ranker weights high-signal fields such
 as decisions, reusable facts, unresolved tasks, summaries, and user intent;
 rewards exact query phrases and important literal tokens; and prints a `why:`
 line so agents can tell whether a hit came from a structured field, phrase
-match, important token coverage, or project context.
+match, important token coverage, project context, or scope preference.
 
 ### Layered Recall Benchmark
 
@@ -626,7 +635,7 @@ skills/using-my-precious/references/archive-format.md
   and case-detail count metrics.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
-  and explainable result reasons.
+  optional preferred-scope ranking, and explainable result reasons.
 - Incremental update script keyed by project path and source/session timestamp.
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.

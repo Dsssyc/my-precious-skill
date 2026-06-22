@@ -14,6 +14,7 @@ sessions and evidence when `index/memories.jsonl` exists:
 ```bash
 python tools/search_memory.py "<query>"
 python tools/search_memory.py "<query>" --project-path /path/to/current/project
+python tools/search_memory.py "<query>" --preferred-scope domain
 python tools/search_memory.py "<query>" --depth session
 python tools/search_memory.py "<query>" --depth evidence
 ```
@@ -21,6 +22,8 @@ python tools/search_memory.py "<query>" --depth evidence
 Use `--depth source` only when source anchors are needed and the user has
 explicitly asked for raw-source reachability. The command reports source
 anchors; it does not copy raw transcripts into the archive.
+Use `--preferred-scope global|domain|project` when the current task has an
+explicit memory layer but cross-layer fallback should remain possible.
 
 Read `why:` and `drill:` lines in search output. Prefer high-level memories
 with provenance, then open the supporting summaries or evidence. If no relevant

@@ -483,14 +483,19 @@ integrity scored 1.0.
 
 | probe set | cases | recall@5 | precision@5 | top-k noise@5 | broad lexical noise | scope-mixed noise |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| v1 single expected ID | 12 | 1.00 | 0.30 | 0.70 | 20 | 8 |
-| v2 grouped expected IDs | 8 | 1.00 | 0.60 | 0.40 | 0 | 8 |
+| v1 single expected ID baseline | 12 | 1.00 | 0.30 | 0.70 | 20 | 8 |
+| v2 grouped expected IDs baseline | 8 | 1.00 | 0.60 | 0.40 | 0 | 8 |
+| v1 single + scope-aware preferred layer | 12 | 1.00 | 0.375 | 0.625 | 20 | 0 |
+| v2 grouped + scope-aware preferred layer | 8 | 1.00 | 1.00 | 0.00 | 0 | 0 |
 
 The v2 protocol supports `expected_memory_ids` for cases where several memory
 nodes are legitimate answers to the same query. Precision and noise are computed
 against that full relevant-ID set. The v1 single-ID probe therefore overstated
 noise in duplicate-query families; the grouped v2 probe removes those false
-broad-lexical noise counts while preserving remaining scope-mixed noise.
+broad-lexical noise counts. The scope-aware preferred-layer run uses
+`expected_layer` as a soft retrieval preference: when preferred-layer hits exist,
+wrong-layer hits do not fill the top-k list; when no preferred-layer hit exists,
+cross-layer memories remain reachable.
 
 ## Recommendation
 

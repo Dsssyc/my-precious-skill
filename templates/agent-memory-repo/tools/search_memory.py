@@ -97,6 +97,7 @@ GENERIC_SEARCH_TOKENS = {
     "update",
     "workflow",
 }
+MEMORY_LAYERS = ("global", "domain", "project")
 PROCESS_MEMORY_PATTERN = re.compile(
     r"\b(?:"
     r"continue current goal|current goal|you are implementing|implementation progress|"
@@ -474,7 +475,7 @@ def has_strict_token_coverage(query_tokens: list[str], matched_tokens: list[str]
     return bool(required_tokens) and all(token in matched_tokens for token in required_tokens)
 
 
-def memory_rank_adjustment(record: dict, query_tokens: list[str]) -> tuple[int, list[str]]:
+def memory_rank_adjustment(record: dict, query_tokens: list[str], preferred_scope: str = "") -> tuple[int, list[str]]:
     adjustment = 0
     reasons: list[str] = []
     source = scalar_field_lower(record, "source")
@@ -512,6 +513,14 @@ def memory_rank_adjustment(record: dict, query_tokens: list[str]) -> tuple[int, 
         adjustment += 40
         add_reason(reasons, "layer-priority:project")
 
+    if preferred_scope in MEMORY_LAYERS and layer in MEMORY_LAYERS:
+        if layer == preferred_scope:
+            adjustment += 240
+            add_reason(reasons, f"scope-preference:{preferred_scope}")
+        else:
+            adjustment -= 900
+            add_reason(reasons, f"scope-preference-demoted:{preferred_scope}")
+
     if source == "automatic" and support_count <= 1:
         if has_process_memory_signal(record):
             adjustment -= 900
@@ -530,6 +539,13 @@ def prune_loose_memory_hits(query_tokens: list[str], hits: list[Hit]) -> list[Hi
     if not strict_hits:
         return hits
     return strict_hits
+
+
+def prune_nonpreferred_scope_hits(preferred_scope: str, hits: list[Hit]) -> list[Hit]:
+    if preferred_scope not in MEMORY_LAYERS:
+        return hits
+    preferred_hits = [hit for hit in hits if hit.layer == preferred_scope]
+    return preferred_hits or hits
 
 
 def key_like_project_match(value: str, term_name: str) -> bool:
@@ -1113,6 +1129,7 @@ def collect_memory_hits(
     query_tokens: list[str],
     context_terms: list[str] | None = None,
     scope: str = "all",
+    preferred_scope: str = "",
 ) -> list[Hit]:
     hits: list[Hit] = []
     index_path = repo / "index" / "memories.jsonl"
@@ -1147,7 +1164,7 @@ def collect_memory_hits(
             continue
         if "low-signal-only" in reasons and "project-context" not in reasons:
             continue
-        rank_adjustment, rank_reasons = memory_rank_adjustment(record, query_tokens)
+        rank_adjustment, rank_reasons = memory_rank_adjustment(record, query_tokens, preferred_scope)
         score = max(1, score + rank_adjustment)
         reasons.extend(reason for reason in rank_reasons if reason not in reasons)
         if has_strict_token_coverage(query_tokens, matched):
@@ -1186,6 +1203,7 @@ def collect_memory_hits(
                 raw_refs=sanitized_raw_refs(repo, record.get("raw_refs")),
             )
         )
+    hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
     return prune_loose_memory_hits(query_tokens, hits)
 
 
@@ -1401,6 +1419,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Memory node layer to search; not applied to legacy session fallback",
     )
     parser.add_argument(
+        "--preferred-scope",
+        choices=("global", "domain", "project"),
+        default="",
+        help="Soft-rank a memory node layer higher without filtering other layers",
+    )
+    parser.add_argument(
         "--legacy-sessions",
         action="store_true",
         help="Bypass memory nodes and use the legacy session/index/markdown search path",
@@ -1428,7 +1452,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.legacy_sessions:
         selected_hits = session_hits
     else:
-        memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope)
+        preferred_scope = "" if args.scope != "all" else args.preferred_scope
+        memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope, preferred_scope)
         if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
             if args.depth in ("session", "evidence", "source"):
                 session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, args.depth)

@@ -666,6 +666,129 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("memory_id: mem_global_permission_policy", result.stdout)
         self.assertNotIn("memory_id: mem_project_permission_progress", result.stdout)
 
+    def test_search_memory_preferred_scope_ranks_requested_layer_first(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/21/preferred-scope"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Preferred scope\n\n"
+                "Scope preference marker should rank the requested layer before wrong-layer neighbors.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "memory_id": "mem_domain_scope_target",
+                    "layer": "domain",
+                    "scope": "domain:agent-workflow",
+                    "topic": "scope-preference",
+                    "text": "scope preference marker durable domain answer",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 2,
+                    "derived_from": ["sessions/2026/06/21/preferred-scope/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                },
+                {
+                    "memory_id": "mem_project_scope_neighbor",
+                    "layer": "project",
+                    "scope": "project:unrelated",
+                    "topic": "scope-preference",
+                    "text": (
+                        "scope preference marker scope preference marker "
+                        "scope preference marker wrong-layer project neighbor"
+                    ),
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 2,
+                    "derived_from": ["sessions/2026/06/21/preferred-scope/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "scope preference marker",
+                    "--repo",
+                    str(repo),
+                    "--preferred-scope",
+                    "domain",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("memory_id: mem_domain_scope_target", first_hit)
+        self.assertIn("scope-preference:domain", first_hit)
+
+    def test_search_memory_preferred_scope_keeps_cross_layer_shared_memory_reachable(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/21/shared-scope"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Shared scope\n\n"
+                "Shared layer marker remains reachable even when another layer is preferred.\n",
+                encoding="utf-8",
+            )
+            row = {
+                "memory_id": "mem_global_shared_scope",
+                "layer": "global",
+                "scope": "global",
+                "topic": "scope-preference",
+                "text": "shared layer marker durable global memory",
+                "source": "explicit",
+                "confidence": "high",
+                "support_count": 2,
+                "derived_from": ["sessions/2026/06/21/shared-scope/summary.md"],
+                "evidence_refs": [],
+                "raw_refs": [],
+            }
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(row, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "shared layer marker",
+                    "--repo",
+                    str(repo),
+                    "--preferred-scope",
+                    "domain",
+                    "--limit",
+                    "1",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_global_shared_scope", result.stdout)
+        self.assertIn("scope-preference-demoted:domain", result.stdout)
+
     def test_search_memory_prunes_loose_specific_token_matches_when_strict_hits_exist(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

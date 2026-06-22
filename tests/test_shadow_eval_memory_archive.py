@@ -217,14 +217,29 @@ def write_multi_relevant_archive(repo: Path) -> None:
                 "multi relevant marker secondary durable fact",
             ),
             memory_record(
-                "mem_multi_broad_noise",
+                "mem_multi_broad_noise_a",
                 "domain",
-                "multi relevant marker broad lexical neighbor",
+                "multi relevant marker broad lexical domain neighbor alpha",
             ),
             memory_record(
-                "mem_multi_scope_noise",
+                "mem_multi_broad_noise_b",
+                "domain",
+                "multi relevant marker broad lexical domain neighbor beta",
+            ),
+            memory_record(
+                "mem_multi_broad_noise_c",
+                "domain",
+                "multi relevant marker broad lexical domain neighbor gamma",
+            ),
+            memory_record(
+                "mem_multi_scope_noise_a",
                 "project",
-                "multi relevant marker wrong project scope neighbor",
+                "multi relevant marker multi relevant marker wrong project scope neighbor alpha",
+            ),
+            memory_record(
+                "mem_multi_scope_noise_b",
+                "project",
+                "multi relevant marker multi relevant marker wrong project scope neighbor beta",
             ),
         ],
     )
@@ -420,7 +435,7 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(detail["relevant_result_count"], 1)
         self.assertEqual(detail["forbidden_output_violation_count"], 2)
 
-    def test_shadow_eval_counts_multiple_expected_memory_ids_as_relevant_without_rendering_ids(self):
+    def test_shadow_eval_uses_expected_layer_as_soft_scope_preference_for_multi_relevant_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "multi-agent-memory"
             cases = Path(tmpdir) / "multi_cases.jsonl"
@@ -460,19 +475,19 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["probe_cases"]["positive_cases"], 1)
         self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
-        self.assertEqual(payload["metrics"]["memory_precision_at_5"], 0.5)
-        self.assertEqual(payload["metrics"]["top_k_noise_at_5"], 0.5)
-        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["broad_lexical_match"], 1)
-        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["scope_mixed"], 1)
+        self.assertEqual(payload["metrics"]["memory_precision_at_5"], 0.4)
+        self.assertEqual(payload["metrics"]["top_k_noise_at_5"], 0.6)
+        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["broad_lexical_match"], 3)
+        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["scope_mixed"], 0)
         detail = payload["case_details"][0]
         self.assertEqual(detail["case_id"], "redacted:multi_relevant")
         self.assertEqual(detail["expected_memory_count"], 2)
-        self.assertEqual(detail["result_count"], 4)
+        self.assertEqual(detail["result_count"], 5)
         self.assertEqual(detail["relevant_result_count"], 2)
-        self.assertEqual(detail["noise_result_count"], 2)
+        self.assertEqual(detail["noise_result_count"], 3)
         self.assertTrue(detail["recall_hit"])
-        self.assertEqual(detail["noise_sources_at_5"]["broad_lexical_match"], 1)
-        self.assertEqual(detail["noise_sources_at_5"]["scope_mixed"], 1)
+        self.assertEqual(detail["noise_sources_at_5"]["broad_lexical_match"], 3)
+        self.assertEqual(detail["noise_sources_at_5"]["scope_mixed"], 0)
         serialized = json.dumps(payload)
         self.assertNotIn("mem_multi_primary", serialized)
         self.assertNotIn("mem_multi_secondary", serialized)
