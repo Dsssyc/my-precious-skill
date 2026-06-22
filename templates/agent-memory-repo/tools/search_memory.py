@@ -335,6 +335,21 @@ def meaningful_query_tokens(query_tokens: list[str]) -> list[str]:
     return [token for token in query_tokens if token not in GENERIC_SEARCH_TOKENS]
 
 
+def coverage_query_tokens(query_tokens: list[str]) -> list[str]:
+    out: list[str] = []
+    skip_next_sensitive_value = False
+    for token in query_tokens:
+        if has_sensitive_reason_token(token) or has_sensitive_display_text(token):
+            skip_next_sensitive_value = True
+            continue
+        if skip_next_sensitive_value and token_importance(token) >= 3:
+            skip_next_sensitive_value = False
+            continue
+        skip_next_sensitive_value = False
+        out.append(token)
+    return out
+
+
 def query_phrases(query_tokens: list[str]) -> list[str]:
     phrases: list[str] = []
     for length in range(4, 1, -1):
@@ -381,11 +396,19 @@ def non_context_query_tokens(query_tokens: list[str], context_terms: list[str] |
 
 def should_keep_match(query_tokens: list[str], matched_tokens: list[str], context_terms: list[str] | None = None) -> bool:
     content_tokens = non_context_query_tokens(query_tokens, context_terms)
+    if not content_tokens and context_terms:
+        return True
+    coverage_tokens = coverage_query_tokens(meaningful_query_tokens(content_tokens))
+    if not coverage_tokens:
+        return False
+    specific_tokens = specific_query_tokens(coverage_tokens)
+    if specific_tokens and not any(token in matched_tokens for token in specific_tokens):
+        return False
     important_tokens = important_query_tokens(content_tokens)
     if not important_tokens:
         meaningful_tokens = meaningful_query_tokens(content_tokens)
         if not meaningful_tokens:
-            return True
+            return False
         return any(token in matched_tokens for token in meaningful_tokens)
     return any(token in matched_tokens for token in important_tokens)
 
@@ -487,10 +510,11 @@ def has_repeated_query_signal(record: dict, query_tokens: list[str]) -> bool:
 
 
 def strict_coverage_tokens(query_tokens: list[str]) -> list[str]:
-    important_tokens = important_query_tokens(query_tokens)
+    meaningful_tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
+    important_tokens = important_query_tokens(meaningful_tokens)
     if len(important_tokens) >= 3:
         return important_tokens
-    specific_tokens = specific_query_tokens(query_tokens)
+    specific_tokens = specific_query_tokens(meaningful_tokens)
     if len(specific_tokens) >= 2:
         return specific_tokens
     return []
@@ -498,6 +522,18 @@ def strict_coverage_tokens(query_tokens: list[str]) -> list[str]:
 
 def has_strict_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
     required_tokens = strict_coverage_tokens(query_tokens)
+    return bool(required_tokens) and all(token in matched_tokens for token in required_tokens)
+
+
+def meaningful_coverage_tokens(query_tokens: list[str]) -> list[str]:
+    tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
+    if len(tokens) > 5:
+        return []
+    return tokens
+
+
+def has_meaningful_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
+    required_tokens = meaningful_coverage_tokens(query_tokens)
     return bool(required_tokens) and all(token in matched_tokens for token in required_tokens)
 
 
@@ -559,12 +595,15 @@ def memory_rank_adjustment(record: dict, query_tokens: list[str], preferred_scop
 
 
 def prune_loose_memory_hits(query_tokens: list[str], hits: list[Hit]) -> list[Hit]:
-    if not strict_coverage_tokens(query_tokens):
+    return hits
+
+
+def prune_low_relative_memory_hits(hits: list[Hit]) -> list[Hit]:
+    if len(hits) <= 1:
         return hits
-    strict_hits = [hit for hit in hits if "strict-token-coverage" in hit.why]
-    if not strict_hits:
-        return hits
-    return strict_hits
+    top_score = max(hit.score for hit in hits)
+    threshold = int(top_score * 0.85)
+    return [hit for hit in hits if hit.score >= threshold]
 
 
 def prune_nonpreferred_scope_hits(preferred_scope: str, hits: list[Hit]) -> list[Hit]:
@@ -1303,6 +1342,8 @@ def collect_memory_hits(
         reasons.extend(reason for reason in rank_reasons if reason not in reasons)
         if has_strict_token_coverage(query_tokens, matched):
             add_reason(reasons, "strict-token-coverage")
+        if has_meaningful_token_coverage(query_tokens, matched):
+            add_reason(reasons, "meaningful-token-coverage")
         raw_text = compact_whitespace(str(record.get("text") or ""))
         text = safe_display_text(raw_text)
         title = text or display_title(record, query_tokens)
@@ -1338,7 +1379,8 @@ def collect_memory_hits(
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
-    return prune_loose_memory_hits(query_tokens, hits)
+    hits = prune_loose_memory_hits(query_tokens, hits)
+    return prune_low_relative_memory_hits(hits)
 
 
 def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:

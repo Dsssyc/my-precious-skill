@@ -6,6 +6,47 @@ import unittest
 from pathlib import Path
 
 
+SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+
+def synthetic_memory_row(
+    memory_id: str,
+    text: str,
+    *,
+    layer: str = "project",
+    scope: str = "project:synthetic",
+    topic: str = "synthetic-search-quality",
+) -> dict:
+    return {
+        "memory_id": memory_id,
+        "layer": layer,
+        "scope": scope,
+        "topic": topic,
+        "text": text,
+        "source": "synthetic",
+        "confidence": "high",
+        "support_count": 1,
+        "derived_from": ["sessions/2026/06/20/search-quality/summary.md"],
+        "evidence_refs": [],
+        "raw_refs": [],
+        "supersedes": [],
+        "superseded_by": None,
+    }
+
+
+def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
+    (repo / "index").mkdir(parents=True)
+    (repo / "sessions/2026/06/20/search-quality").mkdir(parents=True)
+    (repo / "sessions/2026/06/20/search-quality/summary.md").write_text(
+        "# Session: synthetic search quality\n",
+        encoding="utf-8",
+    )
+    (repo / "index/memories.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
 class SearchMemoryTests(unittest.TestCase):
     def test_search_memory_finds_index_and_summary_hits(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
@@ -4251,6 +4292,149 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("No memory hits for: Which memory should cache?", result.stdout)
         self.assertNotIn("mem_memory_should_noise", result.stdout)
+
+    def test_search_memory_rejects_generic_only_memory_overlap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_generic_only_noise",
+                        "memory review source workflow project archive",
+                    )
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "Which memory review source workflow?",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("No memory hits for: Which memory review source workflow?", result.stdout)
+        self.assertNotIn("mem_generic_only_noise", result.stdout)
+
+    def test_search_memory_requires_distinctive_token_when_broad_overlap_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_distinctive_target",
+                        "source depth authorization zirconium",
+                    ),
+                    synthetic_memory_row(
+                        "mem_missing_distinctive_noise",
+                        "source depth authorization preview policy",
+                    ),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "source depth authorization zirconium",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("mem_distinctive_target", result.stdout)
+        self.assertNotIn("mem_missing_distinctive_noise", result.stdout)
+
+    def test_search_memory_filters_scope_conflict_noise_without_distinctive_scope_token(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_scope_target",
+                        "scopex domain project rule",
+                    ),
+                    synthetic_memory_row(
+                        "mem_scope_broad_noise",
+                        "domain project rule broad overlap",
+                    ),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "scopex domain project rule",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("mem_scope_target", result.stdout)
+        self.assertNotIn("mem_scope_broad_noise", result.stdout)
+
+    def test_search_memory_filters_source_depth_noise_without_distinctive_anchor_token(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_source_depth_target",
+                        "source depth anchorproof redaction policy",
+                    ),
+                    synthetic_memory_row(
+                        "mem_source_depth_broad_noise",
+                        "source depth redaction policy broad overlap",
+                    ),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "source depth anchorproof redaction policy",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("mem_source_depth_target", result.stdout)
+        self.assertNotIn("mem_source_depth_broad_noise", result.stdout)
 
 
 if __name__ == "__main__":

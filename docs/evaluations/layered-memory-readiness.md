@@ -454,6 +454,10 @@ Current gaps:
 - Low-signal memory-node matches are filtered when the query only hits low
   signal fields such as tags and there is no project-context match. This removes
   a narrow top-k noise class without changing the synthetic recall gate.
+- Hard-negative memory search now keeps lexical explainability while requiring
+  distinctive specific query tokens to appear in retained memory hits. Queries
+  with only generic-token coverage abstain instead of returning broad lexical
+  memory noise.
 - No current test proves long-term behavior over hundreds of sessions,
   multi-month updates, high-cardinality users, or multi-principal governance.
 - The benchmark does not grade generated answers and therefore cannot claim
@@ -573,21 +577,21 @@ gate, fail-over gate, and aggregate baseline JSON remain in the private
 deployment archive. This reusable skill repository records only aggregate
 metrics and coverage categories.
 
-Gate thresholds were set conservatively from the current v2 baseline:
+Gate thresholds were tightened from the post-hard-negative v2 baseline:
 
 | gate | threshold |
 | --- | ---: |
 | metrics.memory_recall_at_5 | >= 1.0 |
-| metrics.memory_precision_at_5 | >= 0.3925233644859813 |
-| metrics.abstain_pass_rate | >= 0.3333333333333333 |
+| metrics.memory_precision_at_5 | >= 0.3978494623655914 |
+| metrics.abstain_pass_rate | >= 1.0 |
 | metrics.active_memory_suppression | >= 1.0 |
 | metrics.privacy_boundary_pass_rate | >= 1.0 |
 | metrics.provenance_coverage.score | >= 1.0 |
 | metrics.lifecycle_integrity.score | >= 1.0 |
-| metrics.top_k_noise_at_5 | <= 0.6074766355140186 |
-| metrics.abstain_false_positive_results | <= 7 |
+| metrics.top_k_noise_at_5 | <= 0.6021505376344086 |
+| metrics.abstain_false_positive_results | <= 0 |
 | metrics.forbidden_output_violations | <= 0 |
-| metrics.noise_sources_at_5.broad_lexical_match | <= 61 |
+| metrics.noise_sources_at_5.broad_lexical_match | <= 52 |
 | metrics.noise_sources_at_5.scope_mixed | <= 4 |
 | metrics.noise_sources_at_5.inactive_lifecycle | <= 0 |
 | metrics.noise_sources_at_5.low_signal_memory_node | <= 0 |
@@ -608,14 +612,14 @@ Private probe result:
 | hard_negative_cases | 24 |
 | privacy_cases | 9 |
 | memory_recall_at_5 | 1.0 |
-| memory_precision_at_5 | 0.3925233644859813 |
-| top_k_noise_at_5 | 0.6074766355140186 |
-| noise_sources_at_5.broad_lexical_match | 61 |
+| memory_precision_at_5 | 0.3978494623655914 |
+| top_k_noise_at_5 | 0.6021505376344086 |
+| noise_sources_at_5.broad_lexical_match | 52 |
 | noise_sources_at_5.scope_mixed | 4 |
 | noise_sources_at_5.inactive_lifecycle | 0 |
 | noise_sources_at_5.low_signal_memory_node | 0 |
-| abstain_pass_rate | 0.3333333333333333 |
-| abstain_false_positive_results | 7 |
+| abstain_pass_rate | 1.0 |
+| abstain_false_positive_results | 0 |
 | active_memory_suppression | 1.0 |
 | privacy_boundary_pass_rate | 1.0 |
 | forbidden_output_violations | 0 |
@@ -625,12 +629,17 @@ Private probe result:
 | lifecycle_relation_gap | true |
 | audit_status | passed |
 
-The lower v2 precision and abstain score are intentional hard-negative
-calibration signals. They show that broader natural-language labels and generic
-no-hit prompts still produce broad lexical and scope-mixed false positives. The
-deployment archive still has no real supersedes, deprecates, or contradicts
-relations, so stale/lifecycle suppression is recorded as a relation-gap
-baseline rather than a completed real-history lifecycle benchmark.
+Compared with the first v2 hard-negative baseline, recall stayed at 1.0,
+precision moved from 0.3925233644859813 to 0.3978494623655914, top-k noise
+moved from 0.6074766355140186 to 0.6021505376344086, broad lexical noise moved
+from 61 to 52, abstain pass rate moved from 0.3333333333333333 to 1.0, and
+abstain false-positive results moved from 7 to 0. The reusable search change is
+strategy-level rather than probe-specific: it preserves lexical recall, rejects
+pure generic-token coverage, and requires distinctive specific query tokens to
+appear in retained memory hits. The deployment archive still has no real
+supersedes, deprecates, or contradicts relations, so stale/lifecycle suppression
+is recorded as a relation-gap baseline rather than a completed real-history
+lifecycle benchmark.
 
 ## Real Archive Induction And Review Queue Snapshot
 
@@ -725,12 +734,13 @@ synthetic quality gates and a real deployment aggregate baseline that passes
 the stricter source-map anchor audit. Shadow evaluation now has a private
 redacted real-history probe set with numeric recall, precision, noise,
 abstention, suppression, privacy, provenance, lifecycle, and audit gates. The
-v2 hard-negative run exposes broad lexical noise, scope-mixed noise, and no-hit
-false positives under redacted natural-language labels. It also records that
-the real deployment archive has no lifecycle relation edges yet. The next
-valuable work is improving hard-negative/no-hit filtering and creating real
-lifecycle relation evidence before broadening consolidation, decay, and
-source-drilldown authorization.
+post-hard-negative v2 run preserves recall while eliminating current no-hit
+false positives and reducing broad lexical noise under redacted
+natural-language labels. It still records scope-mixed and broad lexical top-k
+noise, and it also records that the real deployment archive has no lifecycle
+relation edges yet. The next valuable work is further reducing real-history
+top-k noise and creating real lifecycle relation evidence before broadening
+consolidation, decay, and source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -759,11 +769,12 @@ source-drilldown authorization.
    repository. Record dataset version, conversion fingerprints, archive build
    rules, and score JSON.
 
-6. Improve the v2 hard-negative and no-hit baseline.
+6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,
-   never in the reusable skill repository. Reduce broad lexical false positives,
-   preserve recall, and add real lifecycle relation cases once the archive
-   produces supersession, deprecation, or contradiction edges.
+   never in the reusable skill repository. Preserve the current recall and
+   abstention gates, reduce remaining broad lexical and scope-mixed top-k noise,
+   and add real lifecycle relation cases once the archive produces supersession,
+   deprecation, or contradiction edges.
 
 7. Add governance tests later.
    Do not make multi-principal access control part of the next immediate slice,

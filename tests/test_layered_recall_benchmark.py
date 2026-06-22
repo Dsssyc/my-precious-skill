@@ -112,7 +112,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
             self.assertGreaterEqual(payload["memory_precision_at_5"], 0.23)
-            self.assertGreater(payload["memory_result_count_at_5"], payload["memory_relevant_count_at_5"])
+            self.assertGreaterEqual(payload["memory_result_count_at_5"], payload["memory_relevant_count_at_5"])
             self.assertEqual(payload["memory_relevant_count_at_5"], payload["positive_cases"])
             self.assertEqual(
                 payload["memory_micro_precision_at_5"],
@@ -143,7 +143,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["source_drilldown_privacy_pass_rate"], 1.0)
             self.assertGreaterEqual(payload["source_precision_at_5"], 0.24)
             self.assertGreaterEqual(payload["source_micro_precision_at_5"], 0.22)
-            self.assertGreater(payload["source_result_count_at_5"], payload["source_relevant_count_at_5"])
+            self.assertGreaterEqual(payload["source_result_count_at_5"], payload["source_relevant_count_at_5"])
             self.assertEqual(payload["source_relevant_count_at_5"], payload["source_cases"])
             self.assertEqual(
                 payload["source_micro_precision_at_5"],
