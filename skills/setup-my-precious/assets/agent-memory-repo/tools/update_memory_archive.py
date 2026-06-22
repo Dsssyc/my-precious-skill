@@ -2671,9 +2671,69 @@ def has_lifecycle_link(current: dict, old: dict) -> bool:
     )
 
 
+def is_same_scope_low_risk_review_candidate(candidate: dict, nodes_by_id: dict[str, dict]) -> bool:
+    if candidate.get("reason") != "low_confidence_semantic_overlap_requires_review":
+        return False
+    current = nodes_by_id.get(str(candidate.get("current_memory_id") or ""))
+    old = nodes_by_id.get(str(candidate.get("older_memory_id") or ""))
+    if current is None or old is None:
+        return False
+    current_layer = str(current.get("layer") or "")
+    old_layer = str(old.get("layer") or "")
+    current_scope = str(current.get("scope") or "")
+    old_scope = str(old.get("scope") or "")
+    return bool(current_layer and current_scope and current_layer == old_layer and current_scope == old_scope)
+
+
+def compress_low_risk_review_candidates(candidates: list[dict], nodes_by_id: dict[str, dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    passthrough: list[dict] = []
+    for candidate in candidates:
+        if not is_same_scope_low_risk_review_candidate(candidate, nodes_by_id):
+            passthrough.append(candidate)
+            continue
+        key = (
+            str(candidate.get("current_memory_id") or ""),
+            str(candidate.get("reason") or ""),
+        )
+        grouped.setdefault(key, []).append(candidate)
+
+    compressed: list[dict] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            compressed.extend(group)
+            continue
+        ordered = sorted(
+            group,
+            key=lambda item: (
+                str(item.get("older_memory_id") or ""),
+                str(item.get("current_memory_id") or ""),
+            ),
+        )
+        representative = dict(ordered[0])
+        older_ids = [
+            older_id
+            for candidate in ordered
+            if isinstance((older_id := candidate.get("older_memory_id")), str) and older_id
+        ]
+        representative["candidate_type"] = "compressed_low_risk_semantic_lifecycle"
+        representative["compressed_candidate_count"] = len(ordered)
+        representative["compressed_older_memory_ids"] = older_ids
+        representative["compression_reason"] = "same_scope_low_confidence_semantic_overlap"
+        representative["overlap_token_count"] = max(int(item.get("overlap_token_count") or 0) for item in ordered)
+        representative["overlap_ratio"] = round(max(float(item.get("overlap_ratio") or 0.0) for item in ordered), 6)
+        compressed.append(representative)
+    return [*passthrough, *compressed]
+
+
 def build_memory_review_candidates(nodes: list[dict]) -> list[dict]:
     candidates: list[dict] = []
     automatic_nodes = [node for node in nodes if node.get("source") == "automatic"]
+    nodes_by_id = {
+        memory_id: node
+        for node in automatic_nodes
+        if (memory_id := safe_node_memory_id(node))
+    }
     seen: set[tuple[str, str, str]] = set()
     for current in sorted(automatic_nodes, key=node_last_seen_key):
         current_id = safe_node_memory_id(current)
@@ -2708,6 +2768,7 @@ def build_memory_review_candidates(nodes: list[dict]) -> list[dict]:
                     "overlap_ratio": round(float(detail.get("overlap_ratio") or 0.0), 6),
                 }
             )
+    candidates = compress_low_risk_review_candidates(candidates, nodes_by_id)
     return sorted(
         candidates,
         key=lambda item: (
@@ -2762,15 +2823,17 @@ def build_memory_consolidation_traces(nodes: list[dict], review_candidates: list
                 }
             )
     for candidate in review_candidates:
-        traces.append(
-            {
-                "decision": "skip",
-                "reason": candidate.get("reason", ""),
-                "current_memory_id": candidate.get("current_memory_id", ""),
-                "target_memory_id": candidate.get("older_memory_id", ""),
-                "review_candidate": True,
-            }
-        )
+        trace = {
+            "decision": "skip",
+            "reason": candidate.get("reason", ""),
+            "current_memory_id": candidate.get("current_memory_id", ""),
+            "target_memory_id": candidate.get("older_memory_id", ""),
+            "review_candidate": True,
+        }
+        for key in ("compressed_candidate_count", "compressed_older_memory_ids", "compression_reason"):
+            if key in candidate:
+                trace[key] = candidate[key]
+        traces.append(trace)
     return sorted(
         traces,
         key=lambda item: (

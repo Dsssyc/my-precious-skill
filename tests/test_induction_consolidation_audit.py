@@ -67,6 +67,34 @@ class InductionConsolidationAuditTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--repo must point to a memory archive", result.stderr)
 
+    def test_induction_consolidation_audit_handles_missing_indexes_and_empty_review_queue(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            (repo / "sessions").mkdir(parents=True)
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--repo", str(repo)],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        report = json.loads(result.stdout)
+        metrics = report["metrics"]
+        self.assertFalse(report["archive"]["memory_review_index_present"])
+        self.assertFalse(report["archive"]["memory_consolidation_trace_index_present"])
+        self.assertEqual(metrics["review_candidate_count"], 0)
+        self.assertEqual(metrics["review_reason_distribution"], {})
+        self.assertEqual(metrics["represented_review_candidate_count"], 0)
+        self.assertEqual(metrics["compressed_review_candidate_count"], 0)
+        self.assertEqual(metrics["overlap_ratio_buckets"], {})
+        self.assertEqual(metrics["overlap_token_buckets"], {})
+        self.assertEqual(metrics["layer_pair_distribution"], {})
+        self.assertEqual(metrics["scope_pair_distribution_safe"], {})
+        self.assertEqual(metrics["auto_merge_count"], 0)
+        self.assertEqual(metrics["skipped_lifecycle_count"], 0)
+
     def test_induction_consolidation_audit_reports_quantitative_write_path_metrics(self):
         old_superseded = "Memory archive should use literal-only search."
         new_superseding = "Memory archive should use hybrid lexical scoring."
@@ -74,6 +102,8 @@ class InductionConsolidationAuditTests(unittest.TestCase):
         new_contradicting = "Scheduler updates must not keep raw transcript uploads disabled by default."
         scoped_fact = "Layer routing should preserve project-specific defaults for nested workspaces."
         broad_fact = "Layer routing should preserve defaults for nested workspaces."
+        low_overlap_old = "Cache backend should retain compact snapshot metadata after rebuild."
+        low_overlap_current = "Cache backend should retain compact snapshot summaries after refresh."
         process_noise = "I checked the failing tests and will now inspect the archive."
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -135,6 +165,24 @@ class InductionConsolidationAuditTests(unittest.TestCase):
             )
             write_meta_row(
                 repo,
+                "low-overlap-old",
+                project="theta",
+                project_path="/tmp/theta",
+                source_updated_at="2026-06-22T15:20:00Z",
+                reusable_facts=[low_overlap_old],
+                tags=["cache", "snapshot"],
+            )
+            write_meta_row(
+                repo,
+                "low-overlap-current",
+                project="iota",
+                project_path="/tmp/iota",
+                source_updated_at="2026-06-22T15:40:00Z",
+                reusable_facts=[low_overlap_current],
+                tags=["cache", "snapshot"],
+            )
+            write_meta_row(
+                repo,
                 "process-noise",
                 project="eta",
                 project_path="/tmp/eta",
@@ -153,11 +201,28 @@ class InductionConsolidationAuditTests(unittest.TestCase):
 
         report = json.loads(result.stdout)
         metrics = report["metrics"]
-        self.assertEqual(metrics["induction_candidate_count"], 7)
-        self.assertEqual(metrics["accepted_induction_candidate_count"], 6)
+        self.assertEqual(metrics["induction_candidate_count"], 9)
+        self.assertEqual(metrics["accepted_induction_candidate_count"], 8)
         self.assertEqual(metrics["process_noise_rejected_count"], 1)
-        self.assertEqual(metrics["promoted_memory_count"], 6)
+        self.assertEqual(metrics["promoted_memory_count"], 8)
+        self.assertEqual(metrics["review_candidate_count"], 2)
+        self.assertEqual(metrics["represented_review_candidate_count"], 2)
+        self.assertEqual(metrics["compressed_review_candidate_count"], 0)
         self.assertEqual(metrics["ambiguous_scope_review_count"], 1)
+        self.assertEqual(metrics["low_confidence_semantic_overlap_review_count"], 1)
+        self.assertEqual(
+            metrics["review_reason_distribution"],
+            {
+                "ambiguous_scope_narrowing_requires_review": 1,
+                "low_confidence_semantic_overlap_requires_review": 1,
+            },
+        )
+        self.assertEqual(metrics["overlap_ratio_buckets"], {"0.60-0.74": 1, "0.75-1.00": 1})
+        self.assertEqual(metrics["overlap_token_buckets"], {"6-8": 2})
+        self.assertEqual(metrics["layer_pair_distribution"], {"project->project": 2})
+        self.assertEqual(metrics["scope_pair_distribution_safe"], {"same_layer_different_scope": 2})
+        self.assertEqual(metrics["auto_merge_count"], 2)
+        self.assertEqual(metrics["skipped_lifecycle_count"], 2)
         self.assertEqual(metrics["contradiction_preserved_count"], 1)
         self.assertEqual(metrics["supersession_reciprocity"], 1.0)
         self.assertEqual(metrics["evidence_ref_reachability"], 1.0)
@@ -176,4 +241,7 @@ class InductionConsolidationAuditTests(unittest.TestCase):
         combined = result.stdout + result.stderr
         self.assertNotIn("SECRET_AUDIT_FIXTURE_TEXT", combined)
         self.assertNotIn("/private/source", combined)
+        self.assertNotIn("source_record", combined)
         self.assertNotIn(process_noise, combined)
+        self.assertNotIn(low_overlap_old, combined)
+        self.assertNotIn(low_overlap_current, combined)

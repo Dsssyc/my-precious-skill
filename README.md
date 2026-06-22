@@ -263,9 +263,9 @@ python ~/repos/agent-memory/tools/induction_consolidation_audit.py \
   --repo ~/repos/agent-memory
 ```
 
-The induction report includes candidate, promotion, noise-rejection, manual
-review, contradiction, lifecycle reciprocity, evidence reachability, and
-privacy-pass metrics.
+The induction report includes candidate, promotion, noise-rejection, review
+reason distribution, overlap buckets, low-risk review compression, contradiction,
+lifecycle reciprocity, evidence reachability, and privacy-pass metrics.
 
 Run a privacy-safe shadow evaluation without copying private source records
 into this development repository:

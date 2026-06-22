@@ -566,6 +566,54 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 )
             )
 
+    def test_review_candidates_compress_same_scope_low_confidence_overlap(self):
+        module = load_update_module()
+        nodes = [
+            {
+                "memory_id": "mem_current",
+                "source": "automatic",
+                "layer": "project",
+                "scope": "project:/tmp/alpha",
+                "text": "Cache backend snapshot archive compact policy should stay reviewable.",
+                "last_seen": "2026-06-03T10:00:00Z",
+                "supersedes": [],
+                "superseded_by": None,
+            },
+            {
+                "memory_id": "mem_old_a",
+                "source": "automatic",
+                "layer": "project",
+                "scope": "project:/tmp/alpha",
+                "text": "Cache backend snapshot archive rebuild metadata should stay reviewable.",
+                "last_seen": "2026-06-01T10:00:00Z",
+                "supersedes": [],
+                "superseded_by": None,
+            },
+            {
+                "memory_id": "mem_old_b",
+                "source": "automatic",
+                "layer": "project",
+                "scope": "project:/tmp/alpha",
+                "text": "Snapshot archive compact policy refresh summaries should stay reviewable.",
+                "last_seen": "2026-06-02T10:00:00Z",
+                "supersedes": [],
+                "superseded_by": None,
+            },
+        ]
+
+        candidates = module.build_memory_review_candidates(nodes)
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["candidate_type"], "compressed_low_risk_semantic_lifecycle")
+        self.assertEqual(candidates[0]["current_memory_id"], "mem_current")
+        self.assertEqual(candidates[0]["older_memory_id"], "mem_old_a")
+        self.assertEqual(candidates[0]["compressed_candidate_count"], 2)
+        self.assertEqual(candidates[0]["compressed_older_memory_ids"], ["mem_old_a", "mem_old_b"])
+        self.assertEqual(
+            candidates[0]["compression_reason"],
+            "same_scope_low_confidence_semantic_overlap",
+        )
+
     def test_rebuild_indexes_handles_legacy_meta_without_quote_refs(self):
         module = load_update_module()
 

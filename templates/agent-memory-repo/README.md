@@ -116,9 +116,10 @@ python tools/induction_consolidation_audit.py --repo .
 ```
 
 The induction report is aggregate JSON only. It includes candidate, promotion,
-process-noise rejection, manual-review, contradiction, supersession reciprocity,
-evidence reachability, and real-history privacy-pass metrics without rendering
-memory text, source paths, raw refs, or evidence snippets.
+process-noise rejection, review reason distribution, overlap buckets, low-risk
+review compression, contradiction, supersession reciprocity, evidence
+reachability, and real-history privacy-pass metrics without rendering memory
+text, source paths, raw refs, or evidence snippets.
 
 Run an aggregate, privacy-safe shadow evaluation against this archive:
 

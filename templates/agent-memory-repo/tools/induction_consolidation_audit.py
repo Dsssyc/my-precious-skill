@@ -19,6 +19,14 @@ import update_memory_archive  # noqa: E402
 
 CANDIDATE_FIELDS = ("reusable_facts", "decisions", "unresolved_tasks")
 SAFE_DETAIL_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
+SAFE_LAYERS = {"global", "domain", "project"}
+RATIO_BUCKETS = (
+    ("0.00-0.24", 0.0, 0.25),
+    ("0.25-0.44", 0.25, 0.45),
+    ("0.45-0.59", 0.45, 0.60),
+    ("0.60-0.74", 0.60, 0.75),
+    ("0.75-1.00", 0.75, 1.01),
+)
 
 
 def ratio(numerator: int | float, denominator: int | float) -> float | None:
@@ -132,6 +140,123 @@ def count_contradiction_links(nodes: list[dict]) -> int:
     return count
 
 
+def count_by_reason(rows: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        reason = str(row.get("reason") or "")
+        if not safe_detail_value(reason):
+            reason = "unsafe_reason"
+        counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def ratio_bucket(value: object) -> str:
+    try:
+        ratio_value = float(value)
+    except (TypeError, ValueError):
+        ratio_value = 0.0
+    if ratio_value < 0:
+        ratio_value = 0.0
+    for label, lower, upper in RATIO_BUCKETS:
+        if lower <= ratio_value < upper:
+            return label
+    return "0.75-1.00"
+
+
+def token_bucket(value: object) -> str:
+    try:
+        token_count = int(value)
+    except (TypeError, ValueError):
+        token_count = 0
+    if token_count <= 3:
+        return "0-3"
+    if token_count <= 5:
+        return "4-5"
+    if token_count <= 8:
+        return "6-8"
+    return "9+"
+
+
+def bucket_counts(rows: list[dict], field: str, bucket_fn) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        bucket = bucket_fn(row.get(field))
+        counts[bucket] = counts.get(bucket, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def safe_layer(value: object) -> str:
+    layer = str(value or "")
+    return layer if layer in SAFE_LAYERS else "unknown"
+
+
+def review_pair_distributions(review_candidates: list[dict], nodes: list[dict]) -> tuple[dict[str, int], dict[str, int]]:
+    by_id = node_id_map(nodes)
+    layer_counts: dict[str, int] = {}
+    scope_counts: dict[str, int] = {}
+    for candidate in review_candidates:
+        current = by_id.get(safe_memory_id(candidate.get("current_memory_id")))
+        old = by_id.get(safe_memory_id(candidate.get("older_memory_id")))
+        if current is None or old is None:
+            layer_pair = "unknown->unknown"
+            scope_pair = "unknown"
+        else:
+            current_layer = safe_layer(current.get("layer"))
+            old_layer = safe_layer(old.get("layer"))
+            layer_pair = f"{current_layer}->{old_layer}"
+            current_scope = str(current.get("scope") or "")
+            old_scope = str(old.get("scope") or "")
+            if not current_scope or not old_scope:
+                scope_pair = "unknown"
+            elif current_layer != old_layer:
+                scope_pair = "different_layer"
+            elif current_scope == old_scope:
+                scope_pair = "same_scope"
+            else:
+                scope_pair = "same_layer_different_scope"
+        layer_counts[layer_pair] = layer_counts.get(layer_pair, 0) + 1
+        scope_counts[scope_pair] = scope_counts.get(scope_pair, 0) + 1
+    return dict(sorted(layer_counts.items())), dict(sorted(scope_counts.items()))
+
+
+def review_queue_metrics(review_candidates: list[dict], nodes: list[dict]) -> dict[str, Any]:
+    reason_distribution = count_by_reason(review_candidates)
+    layer_pair_distribution, scope_pair_distribution = review_pair_distributions(review_candidates, nodes)
+    represented_review_count = sum(
+        int(candidate.get("compressed_candidate_count") or 1)
+        for candidate in review_candidates
+    )
+    return {
+        "review_candidate_count": len(review_candidates),
+        "represented_review_candidate_count": represented_review_count,
+        "compressed_review_candidate_count": max(0, represented_review_count - len(review_candidates)),
+        "ambiguous_scope_review_count": reason_distribution.get(
+            "ambiguous_scope_narrowing_requires_review",
+            0,
+        ),
+        "low_confidence_semantic_overlap_review_count": reason_distribution.get(
+            "low_confidence_semantic_overlap_requires_review",
+            0,
+        ),
+        "review_reason_distribution": reason_distribution,
+        "overlap_ratio_buckets": bucket_counts(review_candidates, "overlap_ratio", ratio_bucket),
+        "overlap_token_buckets": bucket_counts(review_candidates, "overlap_token_count", token_bucket),
+        "layer_pair_distribution": layer_pair_distribution,
+        "scope_pair_distribution_safe": scope_pair_distribution,
+    }
+
+
+def trace_metrics(traces: list[dict]) -> dict[str, int]:
+    return {
+        "auto_merge_count": sum(1 for trace in traces if trace.get("decision") == "merge"),
+        "skipped_lifecycle_count": sum(
+            int(trace.get("compressed_candidate_count") or 1)
+            for trace in traces
+            if trace.get("decision") == "skip"
+        ),
+    }
+
+
 def evidence_ref_reachability(repo: Path, nodes: list[dict]) -> float | None:
     checked = 0
     reachable = 0
@@ -193,6 +318,8 @@ def build_case_details(metrics: dict[str, Any]) -> list[dict[str, str]]:
         details.append(case_detail("process-noise-rejection", "induction", "reject"))
     if metrics["ambiguous_scope_review_count"]:
         details.append(case_detail("ambiguous-scope-review", "consolidation", "review"))
+    if metrics["low_confidence_semantic_overlap_review_count"]:
+        details.append(case_detail("semantic-overlap-review", "consolidation", "review"))
     if metrics["contradiction_preserved_count"]:
         details.append(case_detail("contradiction-preserved", "consolidation", "preserve"))
     details.append(
@@ -220,15 +347,12 @@ def build_report(repo: Path) -> dict[str, Any]:
     nodes = update_memory_archive.build_memory_nodes(rows, repo)
     automatic_nodes = [node for node in nodes if node.get("source") == "automatic"]
     review_candidates = update_memory_archive.build_memory_review_candidates(nodes)
-    ambiguous_scope_review_count = sum(
-        1
-        for candidate in review_candidates
-        if candidate.get("reason") == "ambiguous_scope_narrowing_requires_review"
-    )
+    consolidation_traces = update_memory_archive.build_memory_consolidation_traces(nodes, review_candidates)
     metrics: dict[str, Any] = {
         **candidate_counts,
         "promoted_memory_count": len(automatic_nodes),
-        "ambiguous_scope_review_count": ambiguous_scope_review_count,
+        **review_queue_metrics(review_candidates, nodes),
+        **trace_metrics(consolidation_traces),
         "contradiction_preserved_count": count_contradiction_links(automatic_nodes),
         "supersession_reciprocity": supersession_reciprocity(automatic_nodes),
         "evidence_ref_reachability": evidence_ref_reachability(repo, automatic_nodes),
@@ -248,6 +372,8 @@ def build_report(repo: Path) -> dict[str, Any]:
         },
         "archive": {
             "session_meta_records": len(rows),
+            "memory_review_index_present": (repo / "index" / "memory_review_candidates.jsonl").is_file(),
+            "memory_consolidation_trace_index_present": (repo / "index" / "memory_consolidation_trace.jsonl").is_file(),
             "dry_run_only": True,
         },
         "metrics": metrics,

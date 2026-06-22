@@ -413,11 +413,13 @@ Current gaps:
 
 - Project path still remains central to update configuration and scheduled
   ingestion. Project is not yet merely one scope among many.
-- Automatic induction is implemented only as a conservative minimum slice. It
-  can promote synthetic reusable facts into high-level memories and run a
-  dependency-light semantic lifecycle pass, but it is not yet a broad
-  natural-language consolidation engine and has not been validated on real
-  private histories.
+- Automatic induction is implemented as a conservative minimum slice. It can
+  promote synthetic reusable facts into high-level memories and run a
+  dependency-light semantic lifecycle pass. A 2026-06-22 aggregate-only dry run
+  has now measured induction and review-queue behavior on a real deployment
+  archive without rendering private memory text or source paths, but this is
+  still not a broad natural-language consolidation engine or an end-to-end
+  generated-answer evaluation.
 - Direct explicit-memory writes exist in the reusable updater, but runtime-level
   adapters and governing-prompt integration still need policy design.
 - The system has `global`, `domain`, and `project` memory files, and now has a
@@ -497,6 +499,51 @@ broad-lexical noise counts. The scope-aware preferred-layer run uses
 wrong-layer hits do not fill the top-k list; when no preferred-layer hit exists,
 cross-layer memories remain reachable.
 
+## Real Archive Induction And Review Queue Snapshot
+
+Date: 2026-06-22
+
+This run used `induction_consolidation_audit.py` against the deployment archive
+and emitted aggregate JSON only. It did not copy private source records, memory
+text, source paths, raw refs, queries, or evidence snippets into this repository.
+
+| metric | value |
+| --- | ---: |
+| session_meta_records | 266 |
+| induction_candidate_count | 2253 |
+| accepted_induction_candidate_count | 2253 |
+| promoted_memory_count | 1374 |
+| auto_merge_count | 293 |
+| represented_review_candidate_count | 339 |
+| review_candidate_count_after_compression | 203 |
+| compressed_review_candidate_count | 136 |
+| ambiguous_scope_review_count | 51 |
+| low_confidence_semantic_overlap_review_count | 152 |
+| skipped_lifecycle_count | 339 |
+| supersession_reciprocity | 1.0 |
+| evidence_ref_reachability | 1.0 |
+| real_history_privacy_pass_rate | 1.0 |
+
+Review reason distribution after low-risk same-scope compression:
+
+| reason | count |
+| --- | ---: |
+| ambiguous_scope_narrowing_requires_review | 51 |
+| low_confidence_semantic_overlap_requires_review | 152 |
+
+Safe scope-pair distribution after compression:
+
+| scope pair bucket | count |
+| --- | ---: |
+| different_layer | 26 |
+| same_layer_different_scope | 33 |
+| same_scope | 144 |
+
+The compression rule is intentionally narrow: it only compresses same-layer,
+same-scope `low_confidence_semantic_overlap_requires_review` rows that share the
+same current memory node. Ambiguous scope narrowing and cross-scope/cross-layer
+reviews stay explicit in the manual review queue.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -506,12 +553,12 @@ The system now has a bounded proof that high-level memories can be induced from
 synthetic session events and that direct explicit memories can be written only
 with evidence. It also has synthetic gates for semantic support merge,
 refresh/supersession, contradiction, deprecation, false-merge prevention, and
-evidence retention. It now also has an ambiguity review queue and explainable
-consolidation traces for semantic lifecycle cases that should not be
-auto-retired. It still does not satisfy the full target design. The next
-valuable work is running the shadow evaluation against larger realistic,
-redacted archives and improving durability under broader semantic promotion,
-decay, noisy multi-month histories, and gated source drilldown.
+evidence retention. It now also has an ambiguity review queue, explainable
+consolidation traces, aggregate review-queue calibration metrics, and a narrow
+same-scope low-risk compression rule for semantic lifecycle cases that should
+not be auto-retired. It still does not satisfy the full target design. The next
+valuable work is improving durability under broader semantic promotion, decay,
+noisy multi-month histories, and gated source drilldown.
 
 ## Next Roadmap After The Minimum Slice
 
