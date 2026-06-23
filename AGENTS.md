@@ -85,6 +85,7 @@ Compile bundled scripts when implementation code changes:
 
 ```bash
 python3 -m py_compile \
+  benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \

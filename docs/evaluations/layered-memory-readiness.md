@@ -11,8 +11,9 @@ The conclusion is intentionally narrow: the current benchmark set provides
 repeatable local quality gates for retrieval, layer-path drilldown,
 source-reference reachability, broad lexical noise resistance, stale
 suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
-and updater-driven automatic induction on synthetic archives. It is not a
-direct leaderboard score against public long-memory systems such as MemPalace,
+updater-driven automatic induction on synthetic archives, and end-to-end
+induction-to-recall behavior on synthetic source records. It is not a direct
+leaderboard score against public long-memory systems such as MemPalace,
 LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
 ## Current Baseline
@@ -179,6 +180,76 @@ The runner creates temporary synthetic source records and invokes the deployed
 template updater. It does not prebuild `memories/*.jsonl`; the memories,
 evidence refs, source-map refs, explicit memory nodes, lifecycle links, and
 redaction/refusal outcomes must be produced by `update_memory_archive.py`.
+The JSON report is aggregate-only: it does not render source content, memory
+text, source paths, raw refs, or per-case details.
+
+## End-To-End Induction-To-Recall Baseline
+
+Baseline date: 2026-06-23
+
+Code point used for the benchmark harness: this document revision
+
+Case file:
+`benchmarks/cases/e2e_induction_recall_synthetic.jsonl`
+
+Case fingerprint:
+`717974356b9de5d2e60bfce70216e2c5e64532d5c5b8bee0707c17a4bd63b860`
+
+Runner fingerprint:
+`a34916522e7837cbe7a73e232fe247361d94bed2bb776fa82775cef97e870233`
+
+Setup script fingerprint:
+`d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
+
+Updater script fingerprint:
+`db761e35c307ed01680d7d96d37228eb97ca27d7ad80dc8207c6354b5f01a756`
+
+Search script fingerprint:
+`de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`
+
+Baseline command:
+
+```bash
+python3 benchmarks/e2e_induction_recall_benchmark.py \
+  --cases benchmarks/cases/e2e_induction_recall_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/e2e_induction_recall_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/e2e_induction_recall_synthetic_max.json
+```
+
+Baseline result:
+
+| Metric | Value |
+| --- | ---: |
+| cases | 6 |
+| source_records | 12 |
+| recall_cases | 6 |
+| e2e_memory_recall_at_1 | 1.0 |
+| e2e_memory_recall_at_5 | 1.0 |
+| e2e_layer_assignment_accuracy | 1.0 |
+| e2e_session_drilldown_rate | 1.0 |
+| e2e_evidence_reachability_rate | 1.0 |
+| e2e_source_policy_pass_rate | 1.0 |
+| e2e_lifecycle_active_suppression_rate | 1.0 |
+| e2e_forced_memory_recall_rate | 1.0 |
+| privacy_leak_count | 0 |
+| failed_case_count | 0 |
+| case_pass_rate | 1.0 |
+
+The e2e suite contains synthetic scenarios across these categories:
+
+| Category | Cases |
+| --- | ---: |
+| automatic_induction | 2 |
+| forced_memory | 1 |
+| lifecycle | 1 |
+| privacy | 2 |
+
+The runner creates temporary synthetic source records, invokes the deployed
+template updater, derives recall cases from generated memory nodes, and scores
+them through the real copied `search_memory.py`. Active recall expectations
+cover six generated memories; deprecate lifecycle behavior is measured through
+suppression probes against retired target memory IDs rather than by treating a
+deprecation marker as an active recall target.
 The JSON report is aggregate-only: it does not render source content, memory
 text, source paths, raw refs, or per-case details.
 
@@ -529,8 +600,8 @@ Current gaps:
   dependency-light semantic lifecycle pass. A 2026-06-22 aggregate-only dry run
   has now measured induction and review-queue behavior on a real deployment
   archive without rendering private memory text or source paths, but this is
-  still not a broad natural-language consolidation engine or an end-to-end
-  generated-answer evaluation.
+  still not a broad natural-language consolidation engine, a real-history
+  organic distribution proof, or an end-to-end generated-answer evaluation.
 - Direct explicit-memory writes exist in the reusable updater, but runtime-level
   adapters and governing-prompt integration still need policy design.
 - The system has `global`, `domain`, and `project` memory files, and now has a

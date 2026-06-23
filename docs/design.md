@@ -76,6 +76,10 @@ and JSONL indexes.
 - `benchmarks/updater_induction_benchmark.py`: synthetic write-path benchmark
   that drives the real setup and updater scripts from temporary source records
   and reports aggregate induction, lifecycle, provenance, and privacy metrics.
+- `benchmarks/e2e_induction_recall_benchmark.py`: synthetic end-to-end
+  benchmark that drives setup, updater, generated memory indexes, layered
+  recall scoring, and the copied search script without rendering private case
+  details.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -391,6 +395,54 @@ content, memory text, source paths, or raw refs. Core metrics are
 gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
 `benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
 pass-rate metrics to remain at 1.0 and `privacy_leak_count` to remain 0.
+
+## End-To-End Induction-To-Recall Benchmark
+
+`benchmarks/e2e_induction_recall_benchmark.py` evaluates the minimum complete
+memory path:
+
+1. write synthetic source records to a temporary source directory;
+2. run `setup_memory_archive.py`;
+3. run the deployed template's `tools/update_memory_archive.py`;
+4. resolve generated memory IDs, summary paths, evidence refs, and source refs
+   from `index/memories.jsonl`;
+5. derive temporary layered recall cases; and
+6. score them with `benchmarks/layered_recall_benchmark.py` and the generated
+   archive's copied `tools/search_memory.py`.
+
+The packaged case file is
+`benchmarks/cases/e2e_induction_recall_synthetic.jsonl`. It uses the same
+source-record shape as the updater-driven benchmark, but each active
+`expected_memories` entry must also include:
+
+- `recall_query`: the query used for the read-path check;
+- `layer`: the expected generated memory layer;
+- `expect_evidence_drilldown: true`; and
+- `expect_source_policy: true`.
+
+Lifecycle target memories that should be inactive are represented through
+`expected_lifecycle_links`, not as active recall expectations. The e2e runner
+turns those links into suppression probes against the real memory search path,
+so supersede, contradict, and deprecate behavior are measured without treating
+retired nodes as successful active recall targets.
+
+The aggregate JSON report maps the underlying recall benchmark fields into
+goal-level metrics:
+
+- `e2e_memory_recall_at_1` and `e2e_memory_recall_at_5`
+- `e2e_layer_assignment_accuracy`
+- `e2e_session_drilldown_rate`
+- `e2e_evidence_reachability_rate`
+- `e2e_source_policy_pass_rate`
+- `e2e_lifecycle_active_suppression_rate`
+- `e2e_forced_memory_recall_rate`
+- `privacy_leak_count`
+
+The quality gates in
+`benchmarks/quality-gates/e2e_induction_recall_synthetic.json` and
+`benchmarks/quality-gates/e2e_induction_recall_synthetic_max.json` keep every
+pass-rate metric at 1.0, `failed_case_count` at 0, and `privacy_leak_count` at
+0.
 
 `shadow_eval_memory_archive.py` is the privacy-safe real-archive regression
 runner. Its probe case contract is intentionally narrower than the synthetic

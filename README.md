@@ -45,6 +45,7 @@ my-precious-skill/
   docs/
     design.md
   benchmarks/
+    e2e_induction_recall_benchmark.py
     updater_induction_benchmark.py
     layered_recall_benchmark.py
     cases/
@@ -640,6 +641,30 @@ supersede/contradict/deprecate lifecycle links, redacted source records, and
 default refusal of likely-secret source records. It does not render source
 content, memory text, source paths, raw refs, or per-case details.
 
+The end-to-end synthetic benchmark connects the write and read paths. It
+creates temporary synthetic source records, runs the real setup and updater,
+derives recall cases from the generated `index/memories.jsonl`, then scores
+those cases with the real layered recall benchmark and copied
+`tools/search_memory.py`:
+
+```bash
+python benchmarks/e2e_induction_recall_benchmark.py \
+  --cases benchmarks/cases/e2e_induction_recall_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/e2e_induction_recall_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/e2e_induction_recall_synthetic_max.json
+```
+
+It reports aggregate-only e2e metrics:
+`e2e_memory_recall_at_1`, `e2e_memory_recall_at_5`,
+`e2e_layer_assignment_accuracy`, `e2e_session_drilldown_rate`,
+`e2e_evidence_reachability_rate`, `e2e_source_policy_pass_rate`,
+`e2e_lifecycle_active_suppression_rate`, `e2e_forced_memory_recall_rate`,
+and `privacy_leak_count`. The packaged suite covers cross-project automatic
+induction, project-scoped induction, source-record forced memory,
+supersede/contradict/deprecate lifecycle suppression, redacted source records,
+and default refusal of likely-secret source records without rendering private
+case details.
+
 Render a default global scheduler:
 
 ```bash
@@ -732,6 +757,9 @@ skills/using-my-precious/references/archive-format.md
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,
   suppression, lifecycle, noise-source, provenance, multi-relevant precision,
   case-detail count metrics, and numeric quality gates.
+- End-to-end synthetic induction-to-recall benchmark that runs setup, updater,
+  generated layered recall cases, and the copied search script with
+  aggregate-only quality gates.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
   optional preferred-scope ranking, and explainable result reasons.
@@ -798,6 +826,7 @@ Validate the skill with your runtime's skill validator, then run the repository 
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \

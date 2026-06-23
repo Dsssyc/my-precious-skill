@@ -45,6 +45,7 @@ my-precious-skill/
   docs/
     design.md
   benchmarks/
+    e2e_induction_recall_benchmark.py
     updater_induction_benchmark.py
     layered_recall_benchmark.py
     cases/
@@ -528,6 +529,28 @@ source-record forced memory、supersede/contradict/deprecate lifecycle link、
 redacted source record，以及默认拒绝 likely-secret source record。它不会渲染
 source content、memory text、source path、raw ref 或 per-case detail。
 
+end-to-end synthetic benchmark 会把写入路径和读取路径串起来：它创建临时合成
+source records，运行真实 `setup_memory_archive.py` 和 updater，从生成的
+`index/memories.jsonl` 派生 recall cases，然后用真实 layered recall benchmark
+和复制出的 `tools/search_memory.py` 评分：
+
+```bash
+python benchmarks/e2e_induction_recall_benchmark.py \
+  --cases benchmarks/cases/e2e_induction_recall_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/e2e_induction_recall_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/e2e_induction_recall_synthetic_max.json
+```
+
+它只输出 aggregate e2e 指标：
+`e2e_memory_recall_at_1`、`e2e_memory_recall_at_5`、
+`e2e_layer_assignment_accuracy`、`e2e_session_drilldown_rate`、
+`e2e_evidence_reachability_rate`、`e2e_source_policy_pass_rate`、
+`e2e_lifecycle_active_suppression_rate`、`e2e_forced_memory_recall_rate`
+和 `privacy_leak_count`。packaged suite 覆盖跨项目自动归纳、项目作用域归纳、
+source-record forced memory、supersede/contradict/deprecate lifecycle
+suppression、redacted source record，以及默认拒绝 likely-secret source
+record，并且不渲染私有 case detail。
+
 渲染默认全域 scheduler：
 
 ```bash
@@ -621,6 +644,9 @@ skills/using-my-precious/references/archive-format.md
   archive 也可生成结构报告，但在没有 `index/memories.jsonl` 前 memory top-k
   指标会保持为 `null`。报告不渲染 memory text、evidence text、source paths 或
   raw anchors。
+- end-to-end synthetic induction-to-recall benchmark，可运行 setup、updater、
+  生成后的 layered recall cases，以及复制出的 search script，并只输出
+  aggregate quality gate 指标。
 - 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
   boost、低信号 memory-node 过滤和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。
@@ -687,6 +713,7 @@ skills/using-my-precious/references/archive-format.md
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \
