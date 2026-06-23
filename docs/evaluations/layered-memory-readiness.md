@@ -627,9 +627,9 @@ Private probe result:
 | provenance_coverage.evidence_ref_coverage | 1.0 |
 | lifecycle_integrity.score | 1.0 |
 | lifecycle_relation_gap | false |
-| lifecycle_relation_records.supersedes | 1 |
-| lifecycle_relation_records.superseded_by | 1 |
-| records_with_any_lifecycle_relation | 2 |
+| lifecycle_relation_records.supersedes | 2 |
+| lifecycle_relation_records.superseded_by | 2 |
+| records_with_any_lifecycle_relation | 4 |
 | audit_status | passed |
 
 Compared with the first v2 hard-negative baseline, recall stayed at 1.0,
@@ -640,9 +640,9 @@ abstain false-positive results moved from 7 to 0. The reusable search change is
 strategy-level rather than probe-specific: it preserves lexical recall, rejects
 pure generic-token coverage, and requires distinctive specific query tokens to
 appear in retained memory hits. The initial v2 baseline had no real supersedes,
-deprecates, or contradicts relations. The 2026-06-23 lifecycle decision proof
-below adds one aggregate-only real supersession pair while preserving the v2
-gate thresholds.
+deprecates, or contradicts relations. The 2026-06-23 lifecycle review
+calibration below adds two aggregate-only real supersession pairs while
+preserving the v2 gate thresholds.
 
 ## Real Archive Induction And Review Queue Snapshot
 
@@ -731,19 +731,23 @@ candidate content, queries, or memory ids.
 
 | metric | value |
 | --- | ---: |
-| review_candidate_count_before_apply | 203 |
-| review_candidate_count_after_apply | 202 |
-| decision_count | 1 |
-| applied_decision_count | 1 |
-| ignored_decision_count | 0 |
-| pre_apply_dry_run.relation_records_before.supersedes | 0 |
-| pre_apply_dry_run.relation_records_before.superseded_by | 0 |
-| pre_apply_dry_run.relation_records_after.supersedes | 1 |
-| pre_apply_dry_run.relation_records_after.superseded_by | 1 |
-| post_apply_dry_run.relation_records.supersedes | 1 |
-| post_apply_dry_run.relation_records.superseded_by | 1 |
-| records_with_any_lifecycle_relation | 2 |
+| review_candidate_count_before_apply | 202 |
+| review_candidate_count_after_apply | 197 |
+| decision_count | 6 |
+| applied_decision_count | 2 |
+| ignored_decision_count | 4 |
+| action_counts.approve_supersedes | 2 |
+| action_counts.noop | 2 |
+| action_counts.reject | 2 |
+| pre_apply_dry_run.relation_records_before.supersedes | 1 |
+| pre_apply_dry_run.relation_records_before.superseded_by | 1 |
+| pre_apply_dry_run.relation_records_after.supersedes | 2 |
+| pre_apply_dry_run.relation_records_after.superseded_by | 2 |
+| post_apply_dry_run.relation_records.supersedes | 2 |
+| post_apply_dry_run.relation_records.superseded_by | 2 |
+| records_with_any_lifecycle_relation | 4 |
 | reciprocal_supersession_ok | 1 |
+| ignored_non_mutating_ok | 1 |
 | stale_search_suppressed | 1 |
 | lifecycle_integrity.score | 1.0 |
 | lifecycle_integrity.broken_refs | 0 |
@@ -754,10 +758,11 @@ candidate content, queries, or memory ids.
 
 The reusable tool now supports a private
 `reviews/memory_lifecycle_decisions.jsonl` file for reviewed lifecycle
-decisions. The private deployment archive now has one reviewed supersession
-decision applied to real-history memory nodes. The proof keeps the private
-decision file and real identifiers in the deployment repository while recording
-only aggregate counts in this reusable skill repository.
+decisions. The private deployment archive now has a small calibrated batch:
+two reviewed supersession decisions applied to real-history memory nodes and
+four reviewed `noop`/`reject` decisions kept non-mutating. The proof keeps the
+private decision file and real identifiers in the deployment repository while
+recording only aggregate counts in this reusable skill repository.
 
 ## Recommendation
 
@@ -780,11 +785,11 @@ post-hard-negative v2 run preserves recall while eliminating current no-hit
 false positives and reducing broad lexical noise under redacted
 natural-language labels. It still records scope-mixed and broad lexical top-k
 noise. The real deployment archive now has an aggregate-only lifecycle review
-decision tool and one applied real-history supersession proof with reciprocal
-links, stale search suppression, audit pass, and v2 shadow gate pass. The next
-valuable work is expanding the reviewed private lifecycle batch carefully, then
-reducing real-history top-k noise before broadening consolidation, decay, and
-source-drilldown authorization.
+decision tool and a calibrated real-history batch with reciprocal supersession
+links, ignored non-mutating decisions, stale search suppression, audit pass, and
+v2 shadow gate pass. The next valuable work is improving lifecycle candidate
+quality and reducing real-history top-k noise before broadening consolidation,
+decay, and source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 

@@ -127,6 +127,31 @@ def persisted_results_report(
     }
 
 
+def split_reflected_results_and_pending_decisions(
+    repo: Path,
+    nodes: list[dict],
+    decisions: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    results = load_index_rows(repo, "index/memory_review_decision_results.jsonl")
+    if not decisions or not results:
+        return [], decisions
+    results_by_key = {decision_result_key(result): result for result in results}
+    nodes_by_id = {
+        memory_id: node
+        for node in nodes
+        if (memory_id := update_memory_archive.safe_node_memory_id(node))
+    }
+    reflected_results: list[dict] = []
+    pending_decisions: list[dict] = []
+    for decision in decisions:
+        result = results_by_key.get(decision_result_key(decision))
+        if result is not None and result_reflected_by_nodes(result, nodes_by_id):
+            reflected_results.append(result)
+        else:
+            pending_decisions.append(decision)
+    return reflected_results, pending_decisions
+
+
 def dry_run_report(repo: Path) -> dict[str, Any]:
     nodes = load_index_rows(repo, "index/memories.jsonl")
     candidates = load_index_rows(repo, "index/memory_review_candidates.jsonl")
@@ -135,7 +160,9 @@ def dry_run_report(repo: Path) -> dict[str, Any]:
     if persisted_report is not None:
         return persisted_report
     before = relation_record_counts(nodes)
-    results = update_memory_archive.apply_memory_review_decisions(nodes, candidates, decisions)
+    reflected_results, pending_decisions = split_reflected_results_and_pending_decisions(repo, nodes, decisions)
+    pending_results = update_memory_archive.apply_memory_review_decisions(nodes, candidates, pending_decisions)
+    results = [*reflected_results, *pending_results]
     after = relation_record_counts(nodes)
     return {
         "decision_count": len(decisions),

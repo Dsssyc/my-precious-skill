@@ -1090,6 +1090,96 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["relation_record_counts_after"]["superseded_by"], 1)
         self.assertFalse(payload["write_enabled"])
 
+    def test_apply_memory_review_decisions_tool_dry_run_handles_mixed_applied_and_pending_decisions(self):
+        module = load_update_module()
+        current = self.synthetic_memory_node(
+            "mem_current_applied",
+            "PRIVATE APPLIED CURRENT MEMORY TEXT SHOULD NOT RENDER",
+            last_seen="2026-06-04T10:00:00Z",
+        )
+        old = self.synthetic_memory_node(
+            "mem_old_applied",
+            "PRIVATE APPLIED OLD MEMORY TEXT SHOULD NOT RENDER",
+            last_seen="2026-06-03T10:00:00Z",
+        )
+        module.add_supersession_link(current, old)
+        applied_candidate = self.synthetic_review_candidate("mem_current_applied", "mem_old_applied")
+        applied_decision = self.synthetic_review_decision(module, applied_candidate, "approve_supersedes")
+        applied_result = {
+            "decision_id": applied_decision["decision_id"],
+            "action": applied_decision["action"],
+            "current_memory_id": applied_decision["current_memory_id"],
+            "older_memory_id": applied_decision["older_memory_id"],
+            "candidate_fingerprint": applied_decision["candidate_fingerprint"],
+            "status": "applied",
+        }
+
+        pending_current = self.synthetic_memory_node(
+            "mem_current_pending",
+            "PRIVATE PENDING CURRENT MEMORY TEXT SHOULD NOT RENDER",
+            last_seen="2026-06-02T10:00:00Z",
+        )
+        pending_old = self.synthetic_memory_node(
+            "mem_old_pending",
+            "PRIVATE PENDING OLD MEMORY TEXT SHOULD NOT RENDER",
+            last_seen="2026-06-01T10:00:00Z",
+        )
+        pending_candidate = self.synthetic_review_candidate("mem_current_pending", "mem_old_pending")
+        pending_decision = self.synthetic_review_decision(module, pending_candidate, "approve_supersedes")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "reviews").mkdir()
+            (memory_repo / "index/memories.jsonl").write_text(
+                "\n".join(
+                    json.dumps(node, sort_keys=True)
+                    for node in (current, old, pending_current, pending_old)
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memory_review_candidates.jsonl").write_text(
+                json.dumps(pending_candidate, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memory_review_decision_results.jsonl").write_text(
+                json.dumps(applied_result, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "reviews/memory_lifecycle_decisions.jsonl").write_text(
+                json.dumps(applied_decision, sort_keys=True)
+                + "\n"
+                + json.dumps(pending_decision, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(APPLY_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertNotIn("PRIVATE APPLIED CURRENT MEMORY TEXT", result.stdout)
+        self.assertNotIn("PRIVATE PENDING CURRENT MEMORY TEXT", result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["decision_count"], 2)
+        self.assertEqual(payload["result_status_counts"], {"applied": 2})
+        self.assertEqual(payload["result_action_counts"], {"approve_supersedes": 2})
+        self.assertEqual(payload["relation_record_counts_before"]["supersedes"], 1)
+        self.assertEqual(payload["relation_record_counts_after"]["supersedes"], 2)
+        self.assertEqual(payload["relation_record_counts_after"]["superseded_by"], 2)
+        self.assertFalse(payload["write_enabled"])
+
     def test_build_memory_nodes_lowers_confidence_for_contradicted_memory(self):
         module = load_update_module()
         old_fact = "Layered retrieval must preserve evidence refs for induced memories."
