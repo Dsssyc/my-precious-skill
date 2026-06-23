@@ -7,13 +7,13 @@ repository. It records what the current implementation can measure reliably,
 where the packaged benchmark can overstate readiness, and what remains before
 the project can claim a full non-project-boundary layered memory system.
 
-The conclusion is intentionally narrow: the current benchmark is a repeatable
-local quality gate for retrieval, layer-path drilldown, source-reference
-reachability, broad lexical noise resistance, stale suppression, lifecycle-link
-reciprocity, abstention, and privacy-boundary behavior on synthetic archives.
-It is not a direct leaderboard score against public long-memory systems such as
-MemPalace, LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval
-tests.
+The conclusion is intentionally narrow: the current benchmark set provides
+repeatable local quality gates for retrieval, layer-path drilldown,
+source-reference reachability, broad lexical noise resistance, stale
+suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
+and updater-driven automatic induction on synthetic archives. It is not a
+direct leaderboard score against public long-memory systems such as MemPalace,
+LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
 ## Current Baseline
 
@@ -112,6 +112,75 @@ Latency for local verification runs is about `22 s` total, or about `500 ms`
 mean per case. Treat these as local smoke-test timings, not a performance
 claim; they depend on the local Python runtime, filesystem cache, and machine
 load.
+
+## Updater-Driven Induction Baseline
+
+Baseline date: 2026-06-23
+
+Code point used for the benchmark harness: this document revision
+
+Case file:
+`benchmarks/cases/updater_induction_synthetic.jsonl`
+
+Case fingerprint:
+`5de3098286702d5267c95cd79bf38f2f4e56e93972bf1dab2de2ba8a3b2b2b50`
+
+Runner fingerprint:
+`033214460c99304e696e39f5e89a03c679e19266240a3bea2ba17eda5bdfc40b`
+
+Setup script fingerprint:
+`d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
+
+Updater script fingerprint:
+`db761e35c307ed01680d7d96d37228eb97ca27d7ad80dc8207c6354b5f01a756`
+
+Baseline command:
+
+```bash
+python3 benchmarks/updater_induction_benchmark.py \
+  --cases benchmarks/cases/updater_induction_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/updater_induction_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/updater_induction_synthetic_max.json
+```
+
+Baseline result:
+
+| Metric | Value |
+| --- | ---: |
+| cases | 6 |
+| source_records | 12 |
+| expected_automatic_memories | 9 |
+| expected_forced_memories | 1 |
+| expected_lifecycle_links | 3 |
+| expected_privacy_refusals | 1 |
+| expected_privacy_redactions | 1 |
+| induction_success_rate | 1.0 |
+| layer_assignment_accuracy | 1.0 |
+| evidence_retention_rate | 1.0 |
+| source_ref_policy_pass_rate | 1.0 |
+| lifecycle_link_accuracy | 1.0 |
+| forced_memory_capture_rate | 1.0 |
+| privacy_refusal_pass_rate | 1.0 |
+| privacy_redaction_pass_rate | 1.0 |
+| privacy_leak_count | 0 |
+| failed_case_count | 0 |
+| case_pass_rate | 1.0 |
+
+The updater-driven suite contains synthetic scenarios across these categories:
+
+| Category | Cases |
+| --- | ---: |
+| automatic_induction | 2 |
+| forced_memory | 1 |
+| lifecycle | 1 |
+| privacy | 2 |
+
+The runner creates temporary synthetic source records and invokes the deployed
+template updater. It does not prebuild `memories/*.jsonl`; the memories,
+evidence refs, source-map refs, explicit memory nodes, lifecycle links, and
+redaction/refusal outcomes must be produced by `update_memory_archive.py`.
+The JSON report is aggregate-only: it does not render source content, memory
+text, source paths, raw refs, or per-case details.
 
 ## Synthetic Case Coverage
 
@@ -233,13 +302,18 @@ Measured:
 - `wrong_scope_suppression`: whether the same expected memory is absent when
   searched through incorrect scopes.
 
-Not measured:
+Not measured by the layered recall benchmark:
 
 - Automatic promotion from sessions into layers.
 - Multi-layer conflict resolution.
 - Session-layer and raw/source-layer scope controls as first-class query
   targets.
 - Whether a project-independent memory ontology is complete.
+
+The updater-driven induction benchmark now covers automatic promotion into
+`global`, `domain`, and `project` memory layers on synthetic source records,
+but it still does not prove ontology completeness or organic multi-project
+distribution on real private history.
 
 ### Drilldown And Source Reachability
 

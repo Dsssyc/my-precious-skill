@@ -8,6 +8,7 @@ memory archives. It is not the private archive itself.
 Keep this repository limited to reusable building blocks:
 
 - `skills/`: installable skill folders.
+- `benchmarks/`: synthetic benchmark runners, cases, and aggregate quality gates.
 - `templates/agent-memory-repo/`: deployment repository template.
 - `tests/`: synthetic tests only.
 - `docs/`: design notes for the reusable implementation.
@@ -84,6 +85,10 @@ Compile bundled scripts when implementation code changes:
 
 ```bash
 python3 -m py_compile \
+  benchmarks/updater_induction_benchmark.py \
+  benchmarks/layered_recall_benchmark.py \
+  benchmarks/build_synthetic_recall_archive.py \
+  benchmarks/convert_public_memory_benchmark.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \
@@ -104,7 +109,8 @@ python3 -m py_compile \
 Remove generated caches before committing:
 
 ```bash
-rm -rf .uv-cache tests/__pycache__ templates/agent-memory-repo/tools/__pycache__ \
+rm -rf .uv-cache tests/__pycache__ benchmarks/__pycache__ \
+  templates/agent-memory-repo/tools/__pycache__ \
   skills/setup-my-precious/scripts/__pycache__ \
   skills/setup-my-precious/assets/agent-memory-repo/tools/__pycache__ \
   skills/update-my-precious/scripts/__pycache__ \

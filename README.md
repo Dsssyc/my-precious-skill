@@ -44,6 +44,11 @@ my-precious-skill/
   README.zh-CN.md
   docs/
     design.md
+  benchmarks/
+    updater_induction_benchmark.py
+    layered_recall_benchmark.py
+    cases/
+    quality-gates/
   skills/
     setup-my-precious/
       SKILL.md
@@ -611,6 +616,30 @@ schema when needed. This benchmark is designed for My Precious layered recall,
 not as a direct score comparison against systems that store verbatim transcript
 embeddings.
 
+The repository also includes an updater-driven synthetic induction benchmark.
+Unlike the layered recall benchmark, it does not prebuild `memories/*.jsonl`.
+It creates temporary synthetic source records, runs `setup_memory_archive.py`,
+then runs the deployed template's `tools/update_memory_archive.py` and scores
+the generated archive:
+
+```bash
+python benchmarks/updater_induction_benchmark.py \
+  --cases benchmarks/cases/updater_induction_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/updater_induction_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/updater_induction_synthetic_max.json
+```
+
+The induction benchmark reports aggregate-only JSON metrics:
+`induction_success_rate`, `layer_assignment_accuracy`,
+`evidence_retention_rate`, `source_ref_policy_pass_rate`,
+`lifecycle_link_accuracy`, `forced_memory_capture_rate`,
+`privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`, and
+`privacy_leak_count`. Its packaged synthetic suite covers cross-project
+automatic induction, project-scoped induction, source-record forced memory,
+supersede/contradict/deprecate lifecycle links, redacted source records, and
+default refusal of likely-secret source records. It does not render source
+content, memory text, source paths, raw refs, or per-case details.
+
 Render a default global scheduler:
 
 ```bash
@@ -769,6 +798,10 @@ Validate the skill with your runtime's skill validator, then run the repository 
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  benchmarks/updater_induction_benchmark.py \
+  benchmarks/layered_recall_benchmark.py \
+  benchmarks/build_synthetic_recall_archive.py \
+  benchmarks/convert_public_memory_benchmark.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \

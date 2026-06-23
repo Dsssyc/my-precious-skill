@@ -73,6 +73,9 @@ and JSONL indexes.
   incremental updater keyed by `project_path` and source-record timestamps,
   with deterministic summary rendering, source maps, daily summaries, JSONL
   indexes, and default refusal for source records that match secret patterns.
+- `benchmarks/updater_induction_benchmark.py`: synthetic write-path benchmark
+  that drives the real setup and updater scripts from temporary source records
+  and reports aggregate induction, lifecycle, provenance, and privacy metrics.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -346,6 +349,48 @@ bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`,
 `top_k_noise_at_5=0`, `privacy_leak_count=0`, and rank mean/median caps.
 Additional answer-metric gates should be added to custom threshold files for
 case sets with broader `reference_answer` coverage.
+
+## Updater-Driven Induction Benchmark
+
+`benchmarks/updater_induction_benchmark.py` evaluates the write path rather than
+the read path. The runner creates temporary synthetic source records, uses
+`skills/setup-my-precious/scripts/setup_memory_archive.py` to scaffold a
+temporary archive, then invokes the deployed template's
+`tools/update_memory_archive.py`. This exercises the same path a deployment
+archive uses:
+
+1. `extract_source_events()` reads JSONL source events.
+2. `summarize_events()` extracts durable facts, decisions, evidence snippets,
+   and explicit memory directives.
+3. `write_record()` writes `summary.md`, `evidence.md`, `meta.json`,
+   `redactions.md`, and `source-map.json`.
+4. `build_memory_nodes()` promotes automatic memories from `reusable_facts`,
+   writes explicit memories from source-record directives, assigns
+   `global`/`domain`/`project` layers, attaches evidence/source references, and
+   applies supersede, contradict, and deprecate lifecycle links.
+5. `write_memory_nodes()` and `rebuild_indexes()` write the searchable
+   `memories/*.jsonl` and `index/*.jsonl` surfaces.
+
+The synthetic case file is
+`benchmarks/cases/updater_induction_synthetic.jsonl`. Each JSONL row is one
+scenario with safe `case_id`, `category`, `records`, `expected_memories`, and
+optional `expected_lifecycle_links`, `expected_privacy_refusal`, or
+`expected_redaction` fields. `records` contain synthetic `role`/`content`
+events and a synthetic `project_key`; the runner maps those keys to temporary
+local paths at runtime. Secret-like fixtures are represented with placeholders
+such as `{{OPENAI_KEY}}` or `{{AUTHORIZATION_BEARER}}` and expanded only inside
+the temporary source records.
+
+The runner reports aggregate-only JSON. It does not render case details, source
+content, memory text, source paths, or raw refs. Core metrics are
+`induction_success_rate`, `layer_assignment_accuracy`,
+`evidence_retention_rate`, `source_ref_policy_pass_rate`,
+`lifecycle_link_accuracy`, `forced_memory_capture_rate`,
+`privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`,
+`privacy_leak_count`, `failed_case_count`, and `case_pass_rate`. The packaged
+gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
+`benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
+pass-rate metrics to remain at 1.0 and `privacy_leak_count` to remain 0.
 
 `shadow_eval_memory_archive.py` is the privacy-safe real-archive regression
 runner. Its probe case contract is intentionally narrower than the synthetic

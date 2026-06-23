@@ -1,0 +1,13 @@
+{
+  "case_pass_rate": 1.0,
+  "cases": 6,
+  "evidence_retention_rate": 1.0,
+  "forced_memory_capture_rate": 1.0,
+  "induction_success_rate": 1.0,
+  "layer_assignment_accuracy": 1.0,
+  "lifecycle_link_accuracy": 1.0,
+  "privacy_redaction_pass_rate": 1.0,
+  "privacy_refusal_pass_rate": 1.0,
+  "source_records": 12,
+  "source_ref_policy_pass_rate": 1.0
+}

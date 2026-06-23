@@ -44,6 +44,11 @@ my-precious-skill/
   README.zh-CN.md
   docs/
     design.md
+  benchmarks/
+    updater_induction_benchmark.py
+    layered_recall_benchmark.py
+    cases/
+    quality-gates/
   skills/
     setup-my-precious/
       SKILL.md
@@ -501,6 +506,28 @@ python benchmarks/build_synthetic_recall_archive.py \
 JSONL case schema。这个 benchmark 面向 My Precious 的分层召回，不应该直接
 等同于使用原文 transcript embedding 的系统分数。
 
+仓库也内置了一份 updater-driven synthetic induction benchmark。它和 layered
+recall benchmark 的区别是：它不会预构造 `memories/*.jsonl`，而是创建临时合成
+source records，运行 `setup_memory_archive.py`，再运行部署模板里的
+`tools/update_memory_archive.py`，最后评分生成出来的 archive：
+
+```bash
+python benchmarks/updater_induction_benchmark.py \
+  --cases benchmarks/cases/updater_induction_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/updater_induction_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/updater_induction_synthetic_max.json
+```
+
+induction benchmark 只输出 aggregate JSON 指标：
+`induction_success_rate`、`layer_assignment_accuracy`、
+`evidence_retention_rate`、`source_ref_policy_pass_rate`、
+`lifecycle_link_accuracy`、`forced_memory_capture_rate`、
+`privacy_refusal_pass_rate`、`privacy_redaction_pass_rate` 和
+`privacy_leak_count`。packaged synthetic suite 覆盖跨项目自动归纳、项目作用域归纳、
+source-record forced memory、supersede/contradict/deprecate lifecycle link、
+redacted source record，以及默认拒绝 likely-secret source record。它不会渲染
+source content、memory text、source path、raw ref 或 per-case detail。
+
 渲染默认全域 scheduler：
 
 ```bash
@@ -660,6 +687,10 @@ skills/using-my-precious/references/archive-format.md
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  benchmarks/updater_induction_benchmark.py \
+  benchmarks/layered_recall_benchmark.py \
+  benchmarks/build_synthetic_recall_archive.py \
+  benchmarks/convert_public_memory_benchmark.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \
