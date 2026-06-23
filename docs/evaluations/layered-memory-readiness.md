@@ -764,6 +764,46 @@ four reviewed `noop`/`reject` decisions kept non-mutating. The proof keeps the
 private decision file and real identifiers in the deployment repository while
 recording only aggregate counts in this reusable skill repository.
 
+## Real Archive Candidate Quality Calibration Snapshot
+
+Date: 2026-06-23
+
+This run tightened the review-candidate generator with an aggregate-derived
+minimum overlap rule for `ambiguous_scope_narrowing_requires_review`. The rule
+keeps ambiguous scope narrowing candidates only when `overlap_ratio >= 0.45`.
+It did not render private memory text, source paths, raw refs, review candidate
+content, queries, or memory ids.
+
+| metric | value |
+| --- | ---: |
+| review_candidate_count_before | 197 |
+| review_candidate_count_after | 176 |
+| removed_candidate_count | 21 |
+| removed_reason_counts.ambiguous_scope_narrowing_requires_review | 21 |
+| removed_overlap_ratio_bucket_counts.lt_0.45 | 21 |
+| after_candidate_type_counts.ambiguous_semantic_lifecycle | 132 |
+| after_candidate_type_counts.compressed_low_risk_semantic_lifecycle | 44 |
+| after_reason_counts.ambiguous_scope_narrowing_requires_review | 26 |
+| after_reason_counts.low_confidence_semantic_overlap_requires_review | 150 |
+| after_overlap_ratio_bucket_counts.0.45-0.59 | 88 |
+| after_overlap_ratio_bucket_counts.0.60-0.74 | 54 |
+| after_overlap_ratio_bucket_counts.0.75-1.00 | 34 |
+| after_overlap_token_bucket_counts.0-5 | 107 |
+| after_overlap_token_bucket_counts.6-8 | 42 |
+| after_overlap_token_bucket_counts.9-12 | 18 |
+| after_overlap_token_bucket_counts.13+ | 9 |
+| shadow_eval_v2_gate_status | passed |
+| shadow_eval_v2.memory_precision_at_5 | 0.3978494623655914 |
+| shadow_eval_v2.top_k_noise_at_5 | 0.6021505376344086 |
+| shadow_eval_v2.noise_sources_at_5.broad_lexical_match | 52 |
+| shadow_eval_v2.noise_sources_at_5.scope_mixed | 4 |
+| audit_status | passed |
+
+The candidate-quality change removed the entire `<0.45` overlap-ratio bucket
+from ambiguous scope narrowing review while preserving the existing v2 shadow
+eval thresholds. The top-k noise profile is unchanged by design; this slice
+improves manual review signal density, not search ranking.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -787,9 +827,10 @@ natural-language labels. It still records scope-mixed and broad lexical top-k
 noise. The real deployment archive now has an aggregate-only lifecycle review
 decision tool and a calibrated real-history batch with reciprocal supersession
 links, ignored non-mutating decisions, stale search suppression, audit pass, and
-v2 shadow gate pass. The next valuable work is improving lifecycle candidate
-quality and reducing real-history top-k noise before broadening consolidation,
-decay, and source-drilldown authorization.
+v2 shadow gate pass. It also has an aggregate-derived candidate-quality rule
+that removes low-overlap ambiguous scope review noise while preserving current
+shadow-eval gates. The next valuable work is reducing real-history top-k noise
+before broadening consolidation, decay, and source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -822,8 +863,7 @@ decay, and source-drilldown authorization.
    Keep probe cases in the deployment repository or another private local path,
    never in the reusable skill repository. Preserve the current recall and
    abstention gates, reduce remaining broad lexical and scope-mixed top-k noise,
-   and add real lifecycle relation cases once the archive produces supersession,
-   deprecation, or contradiction edges.
+   and keep candidate-quality changes tied to aggregate before/after buckets.
 
 7. Add governance tests later.
    Do not make multi-principal access control part of the next immediate slice,

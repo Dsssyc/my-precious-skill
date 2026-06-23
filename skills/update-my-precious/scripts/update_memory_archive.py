@@ -86,6 +86,7 @@ MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "compressed_older_memory_ids",
     "compression_reason",
 )
+MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
 REDACTION_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
     "bearer_token": re.compile(r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+"),
@@ -2825,6 +2826,16 @@ def has_lifecycle_link(current: dict, old: dict) -> bool:
     )
 
 
+def should_queue_memory_review_candidate(reason: str, detail: dict) -> bool:
+    if reason == "ambiguous_scope_narrowing_requires_review":
+        try:
+            overlap_ratio = float(detail.get("overlap_ratio") or 0.0)
+        except (TypeError, ValueError):
+            return False
+        return overlap_ratio >= MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO
+    return True
+
+
 def is_same_scope_low_risk_review_candidate(candidate: dict, nodes_by_id: dict[str, dict]) -> bool:
     if candidate.get("reason") != "low_confidence_semantic_overlap_requires_review":
         return False
@@ -2903,7 +2914,7 @@ def build_memory_review_candidates(nodes: list[dict]) -> list[dict]:
                 continue
             detail = semantic_relation_detail(str(current.get("text", "")), str(old.get("text", "")))
             reason = str(detail.get("review_reason") or "")
-            if not reason:
+            if not reason or not should_queue_memory_review_candidate(reason, detail):
                 continue
             key = (current_id, old_id, reason)
             if key in seen:

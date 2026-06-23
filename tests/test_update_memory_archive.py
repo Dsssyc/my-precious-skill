@@ -676,6 +676,44 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "same_scope_low_confidence_semantic_overlap",
         )
 
+    def test_review_candidates_suppress_low_overlap_scope_narrowing_noise(self):
+        module = load_update_module()
+        nodes = [
+            {
+                "memory_id": "mem_current",
+                "source": "automatic",
+                "layer": "project",
+                "scope": "project:/tmp/alpha",
+                "text": "Cache backend snapshot archive.",
+                "last_seen": "2026-06-03T10:00:00Z",
+                "supersedes": [],
+                "superseded_by": None,
+            },
+            {
+                "memory_id": "mem_old",
+                "source": "automatic",
+                "layer": "project",
+                "scope": "project:/tmp/beta",
+                "text": (
+                    "Cache backend snapshot archive sandbox relay validator metadata source "
+                    "reference policy should stay reviewable."
+                ),
+                "last_seen": "2026-06-01T10:00:00Z",
+                "supersedes": [],
+                "superseded_by": None,
+            },
+        ]
+
+        detail = module.semantic_relation_detail(nodes[0]["text"], nodes[1]["text"])
+        candidates = module.build_memory_review_candidates(nodes)
+
+        self.assertEqual(
+            detail["review_reason"],
+            "ambiguous_scope_narrowing_requires_review",
+        )
+        self.assertLess(detail["overlap_ratio"], 0.45)
+        self.assertEqual(candidates, [])
+
     def test_rebuild_indexes_handles_legacy_meta_without_quote_refs(self):
         module = load_update_module()
 
