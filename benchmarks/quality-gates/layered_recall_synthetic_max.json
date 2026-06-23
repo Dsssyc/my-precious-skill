@@ -1,9 +1,12 @@
 {
   "failed_case_count": 0,
+  "memory_noise_count_at_5": 0,
   "memory_rank_mean": 1.0,
   "memory_rank_median": 1.0,
   "memory_rank_missing_cases": 0,
-  "source_result_count_at_5": 170,
+  "privacy_leak_count": 0,
+  "source_result_count_at_5": 39,
+  "top_k_noise_at_5": 0.0,
   "unsafe_source_ref_rejected_count": 0,
   "unsafe_source_anchor_count_at_5": 0,
   "unsafe_source_anchor_rate_at_5": 0.0

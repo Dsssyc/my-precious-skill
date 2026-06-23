@@ -188,19 +188,21 @@ snippet is reachable in expected-memory memory/source output or the expected
 summary session output. These metrics are reported as `memory_recall_at_1`,
 `memory_recall_at_5`,
 `memory_precision_at_5`, `memory_micro_precision_at_5`,
-`memory_result_count_at_5`, `memory_relevant_count_at_5`, `memory_mrr`,
+`memory_result_count_at_5`, `memory_relevant_count_at_5`,
+`memory_noise_count_at_5`, `top_k_noise_at_5`, `memory_mrr`,
 `memory_ndcg_at_5`, `memory_ranked_cases`, `memory_rank_missing_cases`,
 `memory_rank_mean`, `memory_rank_median`, `memory_rank_histogram`,
 `memory_explainability_cases`, `memory_explainability`,
-`layer_calibration_cases`, `layer_calibration`, `scope_filter_cases`,
-`scope_filter_recall`, `wrong_scope_suppression_cases`,
+`layer_calibration_cases`, `layer_calibration`, `layer_path_success_rate`,
+`scope_filter_cases`, `scope_filter_recall`, `wrong_scope_suppression_cases`,
 `wrong_scope_suppression`,
-`session_drilldown_at_5`, `evidence_reachability`,
+`session_drilldown_at_5`, `drilldown_success_rate`, `evidence_reachability`,
 `evidence_text_cases`, `evidence_text_reachability`, `source_reachability`,
 `source_ref_reachability`, `source_depth_policy_pass_rate`,
 `raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`,
+`abstain_pass_rate`, `suppression_pass_rate`, `privacy_leak_count`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
 `case_pass_rate`. Exact answer
 reachability is strict text reachability. Normalized reachability ignores case
@@ -209,7 +211,8 @@ for each positive case, the benchmark divides matching expected-memory hits by
 the returned memory hits in the top-5 cutoff, then macro-averages those per-case
 scores. `memory_micro_precision_at_5` divides summed relevant-memory hits by
 summed returned-memory hits. The related count fields report those summed
-returned-memory and relevant-memory hits. `memory_explainability` measures
+returned-memory, relevant-memory, and noise hits; `top_k_noise_at_5` is the
+aggregate non-relevant top-5 memory-hit ratio. `memory_explainability` measures
 whether ranked expected-memory hits carry high-signal `why:` reasons such as
 structured field matches, phrase matches, important token coverage, or project
 context, while rejecting low-signal-only or broad-field-only explanations.
@@ -290,6 +293,8 @@ Optional fields include `category`, `source_benchmark`,
 `forbidden_output_patterns`.
 `forbidden_output_patterns` values are Python regular expressions matched
 against combined memory, session, source, and explicit raw-preview output.
+`privacy_leak_count` also treats generic secret-like output identifiers as
+leaks even when a case does not configure explicit forbidden patterns.
 When present, `case_id` must be unique within the case file.
 Abstention cases use `expected_abstain: true` and do not require positive
 expected fields.
@@ -333,12 +338,14 @@ lower it for CI smoke tests.
 The packaged synthetic gates intentionally split lower-bound and upper-bound
 checks: `benchmarks/quality-gates/layered_recall_synthetic.json` covers the
 synthetic suite dimensions, rank coverage, evidence-text reachability, answer
-reachability, lifecycle supersession reciprocity, pass-rate metrics, and
-denominator counts, while
+reachability, lifecycle supersession reciprocity, layer path and drilldown
+success, broad lexical noise resistance, pass-rate metrics, and denominator
+counts, while
 `benchmarks/quality-gates/layered_recall_synthetic_max.json` enforces upper
-bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`, and rank
-mean/median caps. Additional answer-metric gates should be added to custom
-threshold files for case sets with broader `reference_answer` coverage.
+bounds such as `failed_case_count=0`, `memory_rank_missing_cases=0`,
+`top_k_noise_at_5=0`, `privacy_leak_count=0`, and rank mean/median caps.
+Additional answer-metric gates should be added to custom threshold files for
+case sets with broader `reference_answer` coverage.
 
 `shadow_eval_memory_archive.py` is the privacy-safe real-archive regression
 runner. Its probe case contract is intentionally narrower than the synthetic

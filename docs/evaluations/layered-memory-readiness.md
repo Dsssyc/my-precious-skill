@@ -8,40 +8,41 @@ where the packaged benchmark can overstate readiness, and what remains before
 the project can claim a full non-project-boundary layered memory system.
 
 The conclusion is intentionally narrow: the current benchmark is a repeatable
-local quality gate for retrieval, drilldown, stale suppression, lifecycle-link
-reciprocity, abstention, and privacy-boundary behavior on synthetic archives. It
-is not a direct leaderboard score against public long-memory systems such as
+local quality gate for retrieval, layer-path drilldown, source-reference
+reachability, broad lexical noise resistance, stale suppression, lifecycle-link
+reciprocity, abstention, and privacy-boundary behavior on synthetic archives.
+It is not a direct leaderboard score against public long-memory systems such as
 MemPalace, LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval
 tests.
 
 ## Current Baseline
 
-Baseline date: 2026-06-20
+Baseline date: 2026-06-23
 
-Code point used for the benchmark harness: `98d54ba`
+Code point used for the benchmark harness: this document revision
 
 Case file:
 `benchmarks/cases/layered_recall_synthetic.jsonl`
 
 Case fingerprint:
-`84358ae2053eaa87145cd96be0b9aa463d35eef359157640359297e95646ac33`
+`690fd6c13c9072bd3d91cfb41c47c00d9f5a2432e47760d9e231313c3d464783`
 
 Search implementation fingerprint:
-`a92d90f51d779a4bd8c4089611a58386599246ce53a42accd0eaf3a16b8bc234`
+`de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`
 
 Baseline commands:
 
 ```bash
 python3 benchmarks/build_synthetic_recall_archive.py \
-  --repo /tmp/my-precious-layered-lifecycle-baseline-98d54ba \
+  --repo /tmp/my-precious-layered-synthetic-baseline \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --include-superseded-distractors
 
 python3 benchmarks/layered_recall_benchmark.py \
-  --repo /tmp/my-precious-layered-lifecycle-baseline-98d54ba \
+  --repo /tmp/my-precious-layered-synthetic-baseline \
   --cases benchmarks/cases/layered_recall_synthetic.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/my-precious-layered-lifecycle-details-98d54ba.jsonl \
+  --details-jsonl /tmp/my-precious-layered-synthetic-details.jsonl \
   --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
   --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json
 ```
@@ -50,55 +51,77 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 34 |
-| positive_cases | 29 |
+| cases | 44 |
+| positive_cases | 39 |
 | abstain_cases | 5 |
 | answer_cases | 11 |
-| evidence_text_cases | 3 |
+| evidence_text_cases | 13 |
 | memory_recall_at_1 | 1.0 |
 | memory_recall_at_5 | 1.0 |
 | memory_mrr | 1.0 |
 | memory_ndcg_at_5 | 1.0 |
-| memory_precision_at_5 | 0.2787356321839081 |
-| memory_micro_precision_at_5 | 0.24369747899159663 |
+| memory_precision_at_5 | 1.0 |
+| memory_micro_precision_at_5 | 1.0 |
+| memory_result_count_at_5 | 39 |
+| memory_relevant_count_at_5 | 39 |
+| memory_noise_count_at_5 | 0 |
+| top_k_noise_at_5 | 0.0 |
 | memory_explainability | 1.0 |
 | layer_calibration | 1.0 |
+| layer_path_success_rate | 1.0 |
 | scope_filter_recall | 1.0 |
 | wrong_scope_suppression | 1.0 |
 | session_drilldown_at_5 | 1.0 |
+| drilldown_success_rate | 1.0 |
 | source_reachability | 1.0 |
-| source_precision_at_5 | 0.28218390804597704 |
-| source_micro_precision_at_5 | 0.24786324786324787 |
-| memory_evidence_ref_cases | 29 |
+| source_ref_reachability | 1.0 |
+| source_precision_at_5 | 1.0 |
+| source_micro_precision_at_5 | 1.0 |
+| source_result_count_at_5 | 39 |
+| source_relevant_count_at_5 | 39 |
+| memory_evidence_ref_cases | 39 |
 | memory_evidence_ref_reachability | 1.0 |
 | lifecycle_supersession_cases | 9 |
 | lifecycle_supersession_reciprocity | 1.0 |
+| semantic_lifecycle_cases | 10 |
+| semantic_lifecycle_reciprocity | 1.0 |
+| semantic_lifecycle_suppression | 1.0 |
+| deprecated_lifecycle_cases | 2 |
+| deprecated_lifecycle_suppression | 1.0 |
+| semantic_false_merge_cases | 3 |
+| semantic_false_merge_guard | 1.0 |
+| semantic_evidence_retention_cases | 10 |
+| semantic_evidence_retention | 1.0 |
 | evidence_reachability | 1.0 |
 | evidence_text_reachability | 1.0 |
 | answer_reachability | 1.0 |
 | answer_normalized_reachability | 1.0 |
 | answer_token_f1 | 1.0 |
 | abstention_accuracy | 1.0 |
+| abstain_pass_rate | 1.0 |
 | negative_memory_suppression | 1.0 |
 | stale_memory_suppression | 1.0 |
-| update_consistency | 1.0 |
+| suppression_pass_rate | 1.0 |
 | privacy_boundary_pass_rate | 1.0 |
+| privacy_leak_count | 0 |
+| update_consistency | 1.0 |
 | failed_case_count | 0 |
 | case_pass_rate | 1.0 |
 
-Latency for this local run was `9999.748 ms` total, `294.110 ms` mean per case,
-and `451.506 ms` max per case. Treat these as local smoke-test timings, not a
-performance claim; they depend on the local Python runtime, filesystem cache,
-and machine load.
+Latency for local verification runs is about `22 s` total, or about `500 ms`
+mean per case. Treat these as local smoke-test timings, not a performance
+claim; they depend on the local Python runtime, filesystem cache, and machine
+load.
 
 ## Synthetic Case Coverage
 
-The packaged synthetic suite contains 34 cases across these categories:
+The packaged synthetic suite contains 44 cases across these categories:
 
 | Category | Cases |
 | --- | ---: |
-| abstention | 5 |
+| abstention | 3 |
 | automatic_induction | 1 |
+| broad_lexical_noise | 2 |
 | cross_project_recall | 3 |
 | explicit_memory | 1 |
 | information_extraction | 3 |
@@ -106,6 +129,7 @@ The packaged synthetic suite contains 34 cases across these categories:
 | multi_session_reasoning | 3 |
 | privacy_boundary | 3 |
 | scope_calibration | 3 |
+| semantic_lifecycle | 10 |
 | source_reachability | 3 |
 | stale_memory_suppression | 3 |
 | temporal_reasoning | 3 |
@@ -124,7 +148,7 @@ Source labels in the synthetic file are:
 | LOCoMo | 4 |
 | LongMemEval-V2 | 3 |
 | MemPalace-analysis | 3 |
-| MyPrecious-layered-synthetic | 2 |
+| MyPrecious-layered-synthetic | 12 |
 
 These labels indicate which public benchmark family or design concern inspired
 the case. They do not mean the public benchmark dataset was run.
@@ -159,15 +183,22 @@ Measured:
 - `memory_precision_at_5`: per-case macro purity of top-5 memory results.
 - `memory_micro_precision_at_5`: aggregate relevant-result ratio across top-5
   memory results.
+- `top_k_noise_at_5`: aggregate top-5 memory noise, computed as
+  non-relevant memory results divided by returned memory results.
 - `source_precision_at_5` and `source_micro_precision_at_5`: analogous purity
   for source anchors at source depth.
+- `privacy_leak_count`: count of benchmark cases whose configured forbidden
+  output patterns or generic secret-like identifiers appeared in memory,
+  session, source, or source-preview output.
 
 Interpretation:
 
-These precision metrics are intentionally below 1.0 in the current baseline.
-The search path returns extra related results in the top 5; the benchmark
-therefore rewards correct top-rank recall while still exposing returned-result
-noise.
+The current packaged synthetic baseline is intentionally strict:
+`memory_precision_at_5`, `memory_micro_precision_at_5`,
+`source_precision_at_5`, and `source_micro_precision_at_5` all score 1.0, with
+`top_k_noise_at_5=0.0` and `privacy_leak_count=0`. Future regressions should
+therefore show up as aggregate noise or leak counts before they are treated as
+acceptable related context.
 
 Not measured:
 
@@ -194,6 +225,9 @@ Measured:
 
 - `layer_calibration`: whether expected `global`, `domain`, and `project`
   memories are returned at the intended layer.
+- `layer_path_success_rate`: whether a positive case retrieves the expected
+  memory within top 5, includes the supporting summary path, and satisfies the
+  expected layer when one is configured.
 - `scope_filter_recall`: whether `--scope <expected_layer>` still recalls the
   expected memory.
 - `wrong_scope_suppression`: whether the same expected memory is absent when
@@ -213,6 +247,9 @@ Measured:
 
 - `session_drilldown_at_5`: whether the supporting session summary path appears
   in session-depth results.
+- `drilldown_success_rate`: whether a positive case can traverse the expected
+  summary, evidence, and source-ref path without violating source-depth privacy
+  policy.
 - `evidence_reachability`: whether required evidence paths are reachable from
   the expected memory's memory blocks.
 - `memory_evidence_ref_reachability`: whether the expected memory block itself

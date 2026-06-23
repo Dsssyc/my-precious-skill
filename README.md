@@ -397,13 +397,16 @@ stress tests:
 
 - `memory_recall_at_1`, `memory_recall_at_5`, `memory_mrr`,
   `memory_ndcg_at_5`, `memory_precision_at_5`, and
-  `memory_micro_precision_at_5`
+  `memory_micro_precision_at_5`, plus `memory_noise_count_at_5` and
+  `top_k_noise_at_5` for top-k result noise
 - `memory_explainability`, with `memory_explainability_cases`, to check that
   ranked expected-memory hits are backed by high-signal `why:` reasons instead
   of only broad or low-signal matches
 - `layer_calibration`, with `layer_calibration_cases`, for cases that require
   the expected memory to be recalled from a specific `global`, `domain`, or
   `project` layer
+- `layer_path_success_rate`, which requires top-5 memory recall, the supporting
+  summary path, and any configured expected layer to line up
 - `scope_filter_recall`, with `scope_filter_cases`, to verify those layer
   cases still recall the expected memory when search runs with
   `--scope <expected_layer>`
@@ -412,7 +415,7 @@ stress tests:
 - rank distribution fields `memory_ranked_cases`,
   `memory_rank_missing_cases`, `memory_rank_mean`,
   `memory_rank_median`, and `memory_rank_histogram`
-- `session_drilldown_at_5`, `source_reachability`,
+- `session_drilldown_at_5`, `drilldown_success_rate`, `source_reachability`,
   `source_ref_reachability`, `source_depth_policy_pass_rate`,
   `raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
   `evidence_reachability`, and `evidence_text_reachability` with
@@ -422,8 +425,10 @@ stress tests:
   recalled memory/session/source output
 - `abstention_accuracy`, `negative_memory_suppression`,
   `stale_memory_suppression`, `update_consistency`,
-  `lifecycle_supersession_cases`, and `lifecycle_supersession_reciprocity`
-- `privacy_boundary_pass_rate`, total `latency_ms`, `latency_mean_ms`,
+  `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`, and
+  aggregate `suppression_pass_rate`
+- `privacy_boundary_pass_rate`, `privacy_leak_count`, total `latency_ms`,
+  `latency_mean_ms`,
   `latency_max_ms`, and per-category summaries
 - denominator counts such as `positive_cases`, `answer_cases`, `stale_cases`,
   and `privacy_cases` so zero-denominator metrics are visible
@@ -437,8 +442,12 @@ Positive JSONL cases must include `query`, `expected_memory_id`,
 `reference_evidence`, `required_evidence_paths`, `expected_not_memory_id`,
 `stale_memory_id`, `temporal_scope`, `expected_layer`, and
 `forbidden_output_patterns`.
+The packaged synthetic suite includes explicit `broad_lexical_noise` abstain
+cases so broad lexical overlap is measured separately from ordinary abstention.
 `forbidden_output_patterns` entries are Python regular expressions matched
 against combined memory, session, source, and explicit raw-preview output.
+`privacy_leak_count` also treats generic secret-like output identifiers as
+leaks even when a case does not configure explicit forbidden patterns.
 When present, `case_id` must be unique within the case file.
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text
@@ -569,14 +578,16 @@ example:
 Direct `--fail-under` arguments override duplicate metric keys loaded from
 threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
 gate covers the synthetic suite's recall, rank coverage, source/evidence,
-evidence-text reachability, answer reachability, abstention, stale/update,
-lifecycle reciprocity, source-depth governance, privacy, and denominator-count
+evidence-text reachability, answer reachability, abstention, broad lexical
+noise resistance, stale/update, lifecycle reciprocity, source-depth governance,
+layer path and drilldown success, suppression, privacy, and denominator-count
 checks. The paired
 `benchmarks/quality-gates/layered_recall_synthetic_max.json`
 uses `--fail-over-file` for upper-bound checks such as `failed_case_count`,
-`memory_rank_missing_cases`, `memory_rank_mean`, and `memory_rank_median`. Add
-additional answer-metric gates to custom threshold files when an evaluated case
-set has broader `reference_answer` coverage. Each memory/session/source search
+`memory_rank_missing_cases`, `memory_rank_mean`, `memory_rank_median`,
+`top_k_noise_at_5`, and `privacy_leak_count`. Add additional answer-metric
+gates to custom threshold files when an evaluated case set has broader
+`reference_answer` coverage. Each memory/session/source search
 subprocess has a default 30 second timeout; set finite positive
 `--search-timeout-s` values lower for CI smoke tests or higher for large local
 archives.

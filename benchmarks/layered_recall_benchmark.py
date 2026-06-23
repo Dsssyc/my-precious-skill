@@ -300,6 +300,8 @@ def new_totals() -> Totals:
         "memory_explainability_hits": 0,
         "layer_cases": 0,
         "layer_hits": 0,
+        "layer_path_cases": 0,
+        "layer_path_hits": 0,
         "scope_filter_cases": 0,
         "scope_filter_hits": 0,
         "wrong_scope_cases": 0,
@@ -308,6 +310,8 @@ def new_totals() -> Totals:
         "memory_relevant_count_at_5": 0,
         "session_cases": 0,
         "session_hits": 0,
+        "drilldown_cases": 0,
+        "drilldown_hits": 0,
         "source_cases": 0,
         "source_hits": 0,
         "source_ref_hits": 0,
@@ -349,6 +353,8 @@ def new_totals() -> Totals:
         "negative_hits": 0,
         "stale_cases": 0,
         "stale_hits": 0,
+        "suppression_cases": 0,
+        "suppression_hits": 0,
         "update_cases": 0,
         "update_hits": 0,
         "privacy_cases": 0,
@@ -421,6 +427,13 @@ def finalize_totals(totals: Totals) -> dict:
         ),
         "memory_result_count_at_5": int(totals["memory_result_count_at_5"]),
         "memory_relevant_count_at_5": int(totals["memory_relevant_count_at_5"]),
+        "memory_noise_count_at_5": int(
+            totals["memory_result_count_at_5"] - totals["memory_relevant_count_at_5"]
+        ),
+        "top_k_noise_at_5": ratio(
+            totals["memory_result_count_at_5"] - totals["memory_relevant_count_at_5"],
+            totals["memory_result_count_at_5"],
+        ),
         "memory_mrr": ratio(totals["memory_rr"], totals["positive_cases"]),
         "memory_ndcg_at_5": ratio(totals["memory_ndcg_at_5"], totals["positive_cases"]),
         "memory_explainability_cases": int(totals["memory_explainability_cases"]),
@@ -430,6 +443,7 @@ def finalize_totals(totals: Totals) -> dict:
         ),
         "layer_calibration_cases": int(totals["layer_cases"]),
         "layer_calibration": ratio(totals["layer_hits"], totals["layer_cases"]),
+        "layer_path_success_rate": ratio(totals["layer_path_hits"], totals["layer_path_cases"]),
         "scope_filter_cases": int(totals["scope_filter_cases"]),
         "scope_filter_recall": ratio(totals["scope_filter_hits"], totals["scope_filter_cases"]),
         "wrong_scope_suppression_cases": int(totals["wrong_scope_cases"]),
@@ -440,6 +454,7 @@ def finalize_totals(totals: Totals) -> dict:
         "memory_rank_median": memory_rank_median(rank_counts),
         "memory_rank_histogram": memory_rank_histogram(rank_counts, missing_rank_cases),
         "session_drilldown_at_5": ratio(totals["session_hits"], totals["session_cases"]),
+        "drilldown_success_rate": ratio(totals["drilldown_hits"], totals["drilldown_cases"]),
         "source_reachability": ratio(totals["source_hits"], totals["source_cases"]),
         "source_ref_reachability": ratio(totals["source_ref_hits"], totals["source_cases"]),
         "source_precision_at_5": ratio(totals["source_precision_at_5"], totals["source_cases"]),
@@ -512,10 +527,13 @@ def finalize_totals(totals: Totals) -> dict:
         "answer_normalized_reachability": ratio(totals["answer_normalized_hits"], totals["answer_cases"]),
         "answer_token_f1": ratio(totals["answer_f1"], totals["answer_cases"]),
         "abstention_accuracy": ratio(totals["abstain_hits"], totals["abstain_cases"]),
+        "abstain_pass_rate": ratio(totals["abstain_hits"], totals["abstain_cases"]),
         "negative_memory_suppression": ratio(totals["negative_hits"], totals["negative_cases"]),
         "stale_memory_suppression": ratio(totals["stale_hits"], totals["stale_cases"]),
+        "suppression_pass_rate": ratio(totals["suppression_hits"], totals["suppression_cases"]),
         "update_consistency": ratio(totals["update_hits"], totals["update_cases"]),
         "privacy_boundary_pass_rate": ratio(totals["privacy_hits"], totals["privacy_cases"]),
+        "privacy_leak_count": int(totals["privacy_cases"] - totals["privacy_hits"]),
         "failed_case_count": int(totals["failed_cases"]),
         "case_pass_rate": ratio(totals["cases"] - totals["failed_cases"], totals["cases"]),
         "latency_ms": round(totals["latency_ms"], 3),
@@ -552,10 +570,14 @@ def add_result(totals: Totals, result: dict) -> None:
             totals["scope_filter_hits"] += int(result["scope_filter_hit"])
             totals["wrong_scope_cases"] += 1
             totals["wrong_scope_hits"] += int(result["wrong_scope_suppression_hit"])
+        totals["layer_path_cases"] += int(result["layer_path_expected"])
+        totals["layer_path_hits"] += int(result["layer_path_success_hit"])
         totals["memory_result_count_at_5"] += result["memory_result_count_at_5"]
         totals["memory_relevant_count_at_5"] += result["memory_relevant_count_at_5"]
         totals["session_cases"] += 1
         totals["session_hits"] += int(result["session_drilldown_hit"])
+        totals["drilldown_cases"] += int(result["drilldown_expected"])
+        totals["drilldown_hits"] += int(result["drilldown_success_hit"])
         totals["source_cases"] += int(result["source_expected"])
         totals["source_hits"] += int(result["source_reachability_hit"])
         totals["source_ref_hits"] += int(result["source_ref_reachability_hit"])
@@ -589,6 +611,9 @@ def add_result(totals: Totals, result: dict) -> None:
     if result["stale_expected"]:
         totals["stale_cases"] += 1
         totals["stale_hits"] += int(result["stale_memory_suppression_hit"])
+    if result["suppression_expected"]:
+        totals["suppression_cases"] += 1
+        totals["suppression_hits"] += int(result["suppression_hit"])
     if result["update_expected"]:
         totals["update_cases"] += 1
         totals["update_hits"] += int(result["update_consistency_hit"])
@@ -1515,10 +1540,8 @@ def answer_token_f1(output: str, reference_answers: list[str]) -> float:
 
 
 def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> bool:
-    if not forbidden_patterns:
-        return True
     combined = "\n".join(outputs)
-    return not any(re.search(pattern, combined) for pattern in forbidden_patterns)
+    return sensitive_output_free(combined, forbidden_patterns)
 
 
 def failed_checks(result: dict) -> list[str]:
@@ -1625,11 +1648,13 @@ def case_detail(case: Case, result: dict) -> dict:
         "memory_precision_at_5": round(result["memory_precision_at_5"], 6),
         "memory_explainability_hit": result["memory_explainability_hit"],
         "layer_calibration_hit": result["layer_calibration_hit"],
+        "layer_path_success_hit": result["layer_path_success_hit"],
         "scope_filter_hit": result["scope_filter_hit"],
         "wrong_scope_suppression_hit": result["wrong_scope_suppression_hit"],
         "memory_result_count_at_5": result["memory_result_count_at_5"],
         "memory_relevant_count_at_5": result["memory_relevant_count_at_5"],
         "session_drilldown_hit": result["session_drilldown_hit"],
+        "drilldown_success_hit": result["drilldown_success_hit"],
         "source_reachability_hit": result["source_reachability_hit"],
         "source_ref_reachability_hit": result["source_ref_reachability_hit"],
         "source_depth_policy_pass": result["source_depth_policy_pass"],
@@ -1645,6 +1670,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "abstention_hit": result["abstention_hit"],
         "negative_memory_suppression_hit": result["negative_memory_suppression_hit"],
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
+        "suppression_hit": result["suppression_hit"],
         "update_consistency_hit": result["update_consistency_hit"],
         "lifecycle_supersession_expected": result["lifecycle_supersession_expected"],
         "lifecycle_supersession_reciprocity_hit": result["lifecycle_supersession_reciprocity_hit"],
@@ -1927,6 +1953,34 @@ def score_case(
         [*contradicted_memory_ids, *deprecated_memory_ids, *deprecated_marker_ids],
         memory_records,
     )
+    layer_path_expected = is_positive
+    layer_path_hit = bool(
+        layer_path_expected
+        and rank is not None
+        and rank <= 5
+        and session_hit
+        and (not expected_layer or layer_hit)
+    )
+    drilldown_expected = bool(is_positive and (expected_source_anchor or required_evidence_paths))
+    drilldown_hit = bool(
+        drilldown_expected
+        and session_hit
+        and (not expected_source_anchor or (source_hit and source_policy_pass and source_drilldown_privacy))
+        and (not required_evidence_paths or (evidence_hit and memory_evidence_ref_hit))
+    )
+    suppression_expected = bool(
+        negative_memory_ids
+        or stale_memory_ids
+        or (is_positive and expected_layer)
+        or semantic_lifecycle_any_expected
+    )
+    suppression_hit = bool(
+        suppression_expected
+        and (not negative_memory_ids or negative_suppressed)
+        and (not stale_memory_ids or stale_suppressed)
+        and (not (is_positive and expected_layer) or wrong_scope_hit)
+        and (not semantic_lifecycle_any_expected or semantic_suppressed)
+    )
 
     return {
         "positive_case": is_positive,
@@ -1937,6 +1991,8 @@ def score_case(
         "memory_explainability_hit": explainability_hit,
         "layer_expected": bool(is_positive and expected_layer),
         "layer_calibration_hit": layer_hit,
+        "layer_path_expected": layer_path_expected,
+        "layer_path_success_hit": layer_path_hit,
         "scope_filter_expected": bool(is_positive and expected_layer),
         "scope_filter_hit": scope_hit,
         "wrong_scope_expected": bool(is_positive and expected_layer),
@@ -1944,6 +2000,8 @@ def score_case(
         "memory_result_count_at_5": memory_precision.result_count,
         "memory_relevant_count_at_5": memory_precision.relevant_count,
         "session_drilldown_hit": session_hit,
+        "drilldown_expected": drilldown_expected,
+        "drilldown_success_hit": drilldown_hit,
         "source_expected": bool(is_positive and expected_source_anchor),
         "source_reachability_hit": source_hit,
         "source_ref_reachability_hit": source_hit,
@@ -1969,6 +2027,8 @@ def score_case(
         "negative_memory_suppression_hit": negative_suppressed,
         "stale_expected": bool(stale_memory_ids),
         "stale_memory_suppression_hit": stale_suppressed,
+        "suppression_expected": suppression_expected,
+        "suppression_hit": suppression_hit,
         "update_expected": update_expected,
         "update_consistency_hit": bool(update_expected and rank is not None and stale_suppressed),
         "lifecycle_supersession_expected": lifecycle_expected,
