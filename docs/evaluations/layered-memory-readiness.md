@@ -582,17 +582,17 @@ Gate thresholds were tightened from the post-hard-negative v2 baseline:
 | gate | threshold |
 | --- | ---: |
 | metrics.memory_recall_at_5 | >= 1.0 |
-| metrics.memory_precision_at_5 | >= 0.3978494623655914 |
+| metrics.memory_precision_at_5 | >= 0.42424242424242425 |
 | metrics.abstain_pass_rate | >= 1.0 |
 | metrics.active_memory_suppression | >= 1.0 |
 | metrics.privacy_boundary_pass_rate | >= 1.0 |
 | metrics.provenance_coverage.score | >= 1.0 |
 | metrics.lifecycle_integrity.score | >= 1.0 |
-| metrics.top_k_noise_at_5 | <= 0.6021505376344086 |
+| metrics.top_k_noise_at_5 | <= 0.5757575757575757 |
 | metrics.abstain_false_positive_results | <= 0 |
 | metrics.forbidden_output_violations | <= 0 |
-| metrics.noise_sources_at_5.broad_lexical_match | <= 52 |
-| metrics.noise_sources_at_5.scope_mixed | <= 4 |
+| metrics.noise_sources_at_5.broad_lexical_match | <= 35 |
+| metrics.noise_sources_at_5.scope_mixed | <= 3 |
 | metrics.noise_sources_at_5.inactive_lifecycle | <= 0 |
 | metrics.noise_sources_at_5.low_signal_memory_node | <= 0 |
 
@@ -612,10 +612,10 @@ Private probe result:
 | hard_negative_cases | 24 |
 | privacy_cases | 9 |
 | memory_recall_at_5 | 1.0 |
-| memory_precision_at_5 | 0.3978494623655914 |
-| top_k_noise_at_5 | 0.6021505376344086 |
-| noise_sources_at_5.broad_lexical_match | 52 |
-| noise_sources_at_5.scope_mixed | 4 |
+| memory_precision_at_5 | 0.42424242424242425 |
+| top_k_noise_at_5 | 0.5757575757575757 |
+| noise_sources_at_5.broad_lexical_match | 35 |
+| noise_sources_at_5.scope_mixed | 3 |
 | noise_sources_at_5.inactive_lifecycle | 0 |
 | noise_sources_at_5.low_signal_memory_node | 0 |
 | abstain_pass_rate | 1.0 |
@@ -633,16 +633,18 @@ Private probe result:
 | audit_status | passed |
 
 Compared with the first v2 hard-negative baseline, recall stayed at 1.0,
-precision moved from 0.3925233644859813 to 0.3978494623655914, top-k noise
-moved from 0.6074766355140186 to 0.6021505376344086, broad lexical noise moved
-from 61 to 52, abstain pass rate moved from 0.3333333333333333 to 1.0, and
+precision moved from 0.3925233644859813 to 0.42424242424242425, top-k noise
+moved from 0.6074766355140186 to 0.5757575757575757, broad lexical noise moved
+from 61 to 35, scope-mixed noise moved from 4 to 3, abstain pass rate moved
+from 0.3333333333333333 to 1.0, and
 abstain false-positive results moved from 7 to 0. The reusable search change is
 strategy-level rather than probe-specific: it preserves lexical recall, rejects
-pure generic-token coverage, and requires distinctive specific query tokens to
-appear in retained memory hits. The initial v2 baseline had no real supersedes,
-deprecates, or contradicts relations. The 2026-06-23 lifecycle review
-calibration below adds two aggregate-only real supersession pairs while
-preserving the v2 gate thresholds.
+pure generic-token coverage, requires distinctive specific query tokens to
+appear in retained memory hits, and diversifies same topic/scope memory results
+so loose near-neighbor automatic memories do not fill top-k. The initial v2
+baseline had no real supersedes, deprecates, or contradicts relations. The
+2026-06-23 lifecycle review calibration below adds two aggregate-only real
+supersession pairs while preserving the tightened v2 gate thresholds.
 
 ## Real Archive Induction And Review Queue Snapshot
 
@@ -804,6 +806,41 @@ from ambiguous scope narrowing review while preserving the existing v2 shadow
 eval thresholds. The top-k noise profile is unchanged by design; this slice
 improves manual review signal density, not search ranking.
 
+## Real Archive Top-K Noise Reduction Snapshot
+
+Date: 2026-06-23
+
+This run tightened memory result ranking with same topic/scope diversification:
+after scoring memory hits, only the highest-scoring hit for each
+`(layer, scope, topic)` bucket is retained. The run used private redacted v2
+shadow cases and emitted aggregate JSON only. It did not render private memory
+text, source paths, raw refs, shadow case content, queries, or memory ids.
+
+| metric | before | after |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.3978494623655914 | 0.42424242424242425 |
+| top_k_noise_at_5 | 0.6021505376344086 | 0.5757575757575757 |
+| noise_sources_at_5.broad_lexical_match | 52 | 35 |
+| noise_sources_at_5.scope_mixed | 4 | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| case_noise_result_count_distribution.1 | 1 | 7 |
+| case_noise_result_count_distribution.2 | 2 | 4 |
+| case_noise_result_count_distribution.3 | 1 | 1 |
+| case_noise_result_count_distribution.4_plus | 12 | 5 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| audit_status | passed | passed |
+| shadow_eval_v2_gate_status | passed | passed |
+
+The change reduces broad lexical top-k fill without changing case-level recall,
+abstention, active-memory suppression, privacy, provenance, or lifecycle
+integrity gates. It intentionally favors a more diverse top-k set over listing
+multiple near-neighbor memories with the same layer, scope, and topic.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -829,8 +866,10 @@ decision tool and a calibrated real-history batch with reciprocal supersession
 links, ignored non-mutating decisions, stale search suppression, audit pass, and
 v2 shadow gate pass. It also has an aggregate-derived candidate-quality rule
 that removes low-overlap ambiguous scope review noise while preserving current
-shadow-eval gates. The next valuable work is reducing real-history top-k noise
-before broadening consolidation, decay, and source-drilldown authorization.
+shadow-eval gates. Same topic/scope result diversification now reduces
+real-history top-k noise while preserving recall and privacy gates. The next
+valuable work is broadening consolidation, decay, source-drilldown
+authorization, and public benchmark coverage.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -862,8 +901,8 @@ before broadening consolidation, decay, and source-drilldown authorization.
 6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,
    never in the reusable skill repository. Preserve the current recall and
-   abstention gates, reduce remaining broad lexical and scope-mixed top-k noise,
-   and keep candidate-quality changes tied to aggregate before/after buckets.
+   abstention gates, continue reducing remaining broad lexical and scope-mixed
+   top-k noise, and keep quality changes tied to aggregate before/after buckets.
 
 7. Add governance tests later.
    Do not make multi-principal access control part of the next immediate slice,

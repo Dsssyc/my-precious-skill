@@ -16,6 +16,7 @@ def synthetic_memory_row(
     layer: str = "project",
     scope: str = "project:synthetic",
     topic: str = "synthetic-search-quality",
+    derived_from: list[str] | None = None,
 ) -> dict:
     return {
         "memory_id": memory_id,
@@ -26,7 +27,7 @@ def synthetic_memory_row(
         "source": "synthetic",
         "confidence": "high",
         "support_count": 1,
-        "derived_from": ["sessions/2026/06/20/search-quality/summary.md"],
+        "derived_from": derived_from or ["sessions/2026/06/20/search-quality/summary.md"],
         "evidence_refs": [],
         "raw_refs": [],
         "supersedes": [],
@@ -39,6 +40,11 @@ def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
     (repo / "sessions/2026/06/20/search-quality").mkdir(parents=True)
     (repo / "sessions/2026/06/20/search-quality/summary.md").write_text(
         "# Session: synthetic search quality\n",
+        encoding="utf-8",
+    )
+    (repo / "sessions/2026/06/20/search-quality-alt").mkdir(parents=True)
+    (repo / "sessions/2026/06/20/search-quality-alt/summary.md").write_text(
+        "# Session: synthetic search quality alt\n",
         encoding="utf-8",
     )
     (repo / "index/memories.jsonl").write_text(
@@ -4435,6 +4441,48 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertIn("mem_source_depth_target", result.stdout)
         self.assertNotIn("mem_source_depth_broad_noise", result.stdout)
+
+    def test_search_memory_prunes_same_topic_scope_tail_for_result_diversity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_retrieval_policy_target",
+                        "retrieval policy archive recall exact durable rule",
+                        topic="retrieval-policy",
+                        scope="project:retrieval",
+                    ),
+                    synthetic_memory_row(
+                        "mem_retrieval_policy_tail_noise",
+                        "retrieval policy archive recall nearby implementation note",
+                        topic="retrieval-policy",
+                        scope="project:retrieval",
+                        derived_from=["sessions/2026/06/20/search-quality-alt/summary.md"],
+                    ),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "retrieval policy archive recall",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("mem_retrieval_policy_target", result.stdout)
+        self.assertNotIn("mem_retrieval_policy_tail_noise", result.stdout)
 
 
 if __name__ == "__main__":

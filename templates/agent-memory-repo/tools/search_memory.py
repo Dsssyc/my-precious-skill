@@ -80,6 +80,7 @@ class Hit:
     memory_id: str = ""
     layer: str = ""
     scope: str = ""
+    topic: str = ""
     text: str = ""
     drill_paths: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
@@ -594,8 +595,21 @@ def memory_rank_adjustment(record: dict, query_tokens: list[str], preferred_scop
     return adjustment, reasons
 
 
-def prune_loose_memory_hits(query_tokens: list[str], hits: list[Hit]) -> list[Hit]:
-    return hits
+def prune_redundant_topic_scope_memory_hits(hits: list[Hit]) -> list[Hit]:
+    if len(hits) <= 1:
+        return hits
+    ordered = sorted(hits, key=lambda hit: (hit.score, hit.path.as_posix()), reverse=True)
+    kept: list[Hit] = []
+    seen_topic_scope: set[tuple[str, str, str]] = set()
+    for hit in ordered:
+        key = (hit.layer, hit.scope, hit.topic)
+        has_topic_scope = all(key)
+        if has_topic_scope and key in seen_topic_scope:
+            continue
+        kept.append(hit)
+        if has_topic_scope:
+            seen_topic_scope.add(key)
+    return kept
 
 
 def prune_low_relative_memory_hits(hits: list[Hit]) -> list[Hit]:
@@ -1372,6 +1386,7 @@ def collect_memory_hits(
                 memory_id=memory_id,
                 layer=layer,
                 scope=safe_display_scalar(record.get("scope") or "", 120),
+                topic=safe_display_scalar(record.get("topic") or "", 120),
                 text=text,
                 drill_paths=memory_drill_paths(repo, record),
                 evidence_refs=memory_evidence_refs(repo, record),
@@ -1379,7 +1394,7 @@ def collect_memory_hits(
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
-    hits = prune_loose_memory_hits(query_tokens, hits)
+    hits = prune_redundant_topic_scope_memory_hits(hits)
     return prune_low_relative_memory_hits(hits)
 
 
