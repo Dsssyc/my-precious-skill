@@ -540,8 +540,8 @@ Private probe result:
 | metric | value |
 | --- | --- |
 | archive_format | layered |
-| memory_records | 1376 |
-| legacy_session_records | 266 |
+| memory_records | 1377 |
+| legacy_session_records | 267 |
 | probe_cases | 6 |
 | positive_cases | 6 |
 | layers_covered | global, domain, project |
@@ -601,8 +601,8 @@ Private probe result:
 | metric | value |
 | --- | --- |
 | archive_format | layered |
-| memory_records | 1376 |
-| legacy_session_records | 266 |
+| memory_records | 1377 |
+| legacy_session_records | 267 |
 | probe_cases | 27 |
 | positive_cases | 24 |
 | abstain_cases | 3 |
@@ -626,7 +626,10 @@ Private probe result:
 | provenance_coverage.score | 1.0 |
 | provenance_coverage.evidence_ref_coverage | 1.0 |
 | lifecycle_integrity.score | 1.0 |
-| lifecycle_relation_gap | true |
+| lifecycle_relation_gap | false |
+| lifecycle_relation_records.supersedes | 1 |
+| lifecycle_relation_records.superseded_by | 1 |
+| records_with_any_lifecycle_relation | 2 |
 | audit_status | passed |
 
 Compared with the first v2 hard-negative baseline, recall stayed at 1.0,
@@ -636,10 +639,10 @@ from 61 to 52, abstain pass rate moved from 0.3333333333333333 to 1.0, and
 abstain false-positive results moved from 7 to 0. The reusable search change is
 strategy-level rather than probe-specific: it preserves lexical recall, rejects
 pure generic-token coverage, and requires distinctive specific query tokens to
-appear in retained memory hits. The deployment archive still has no real
-supersedes, deprecates, or contradicts relations, so stale/lifecycle suppression
-is recorded as a relation-gap baseline rather than a completed real-history
-lifecycle benchmark.
+appear in retained memory hits. The initial v2 baseline had no real supersedes,
+deprecates, or contradicts relations. The 2026-06-23 lifecycle decision proof
+below adds one aggregate-only real supersession pair while preserving the v2
+gate thresholds.
 
 ## Real Archive Induction And Review Queue Snapshot
 
@@ -721,30 +724,40 @@ for `source_record`.
 
 Date: 2026-06-23
 
-This run used the reusable `apply_memory_review_decisions.py` dry-run command
-against the private deployment archive. The command emitted aggregate JSON only
-and did not render private memory text, source paths, raw refs, review candidate
-content, queries, or memory ids.
+This run used the reusable `apply_memory_review_decisions.py` dry-run and write
+commands against the private deployment archive. The commands emitted aggregate
+JSON only and did not render private memory text, source paths, raw refs, review
+candidate content, queries, or memory ids.
 
 | metric | value |
 | --- | ---: |
-| review_candidate_count | 339 |
-| decision_count | 0 |
-| applied_decision_count | 0 |
+| review_candidate_count_before_apply | 203 |
+| review_candidate_count_after_apply | 202 |
+| decision_count | 1 |
+| applied_decision_count | 1 |
 | ignored_decision_count | 0 |
-| relation_records_before.supersedes | 0 |
-| relation_records_before.contradicts | 0 |
-| relation_records_before.deprecates | 0 |
-| relation_records_after.supersedes | 0 |
-| relation_records_after.contradicts | 0 |
-| relation_records_after.deprecates | 0 |
+| pre_apply_dry_run.relation_records_before.supersedes | 0 |
+| pre_apply_dry_run.relation_records_before.superseded_by | 0 |
+| pre_apply_dry_run.relation_records_after.supersedes | 1 |
+| pre_apply_dry_run.relation_records_after.superseded_by | 1 |
+| post_apply_dry_run.relation_records.supersedes | 1 |
+| post_apply_dry_run.relation_records.superseded_by | 1 |
+| records_with_any_lifecycle_relation | 2 |
+| reciprocal_supersession_ok | 1 |
+| stale_search_suppressed | 1 |
+| lifecycle_integrity.score | 1.0 |
+| lifecycle_integrity.broken_refs | 0 |
+| lifecycle_integrity.illegal_state_records | 0 |
+| audit_status | passed |
+| shadow_eval_v2_gate_status | passed |
+| shadow_eval_v2.noise_sources_at_5.inactive_lifecycle | 0 |
 
 The reusable tool now supports a private
 `reviews/memory_lifecycle_decisions.jsonl` file for reviewed lifecycle
-decisions. The current deployment archive has review candidates but no reviewed
-decision file yet, so no real-history relation edge was applied in this pass.
-This keeps the lifecycle relation gap explicit instead of converting ambiguous
-candidates into relations without review.
+decisions. The private deployment archive now has one reviewed supersession
+decision applied to real-history memory nodes. The proof keeps the private
+decision file and real identifiers in the deployment repository while recording
+only aggregate counts in this reusable skill repository.
 
 ## Recommendation
 
@@ -767,10 +780,10 @@ post-hard-negative v2 run preserves recall while eliminating current no-hit
 false positives and reducing broad lexical noise under redacted
 natural-language labels. It still records scope-mixed and broad lexical top-k
 noise. The real deployment archive now has an aggregate-only lifecycle review
-decision tool, but the current dry-run still records no reviewed decision file
-and no lifecycle relation edges. The next valuable work is reviewing a small
-batch of private lifecycle candidates into explicit decisions, then reducing
-real-history top-k noise before broadening consolidation, decay, and
+decision tool and one applied real-history supersession proof with reciprocal
+links, stale search suppression, audit pass, and v2 shadow gate pass. The next
+valuable work is expanding the reviewed private lifecycle batch carefully, then
+reducing real-history top-k noise before broadening consolidation, decay, and
 source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice

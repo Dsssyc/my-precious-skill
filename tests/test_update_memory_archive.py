@@ -1006,6 +1006,90 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["relation_record_counts_after"]["supersedes"], 1)
         self.assertFalse(payload["write_enabled"])
 
+    def test_apply_memory_review_decisions_tool_dry_run_handles_already_applied_decisions(self):
+        module = load_update_module()
+        current_fact = "Cache backend snapshot archive compact policy should stay reviewable."
+        old_fact = "Cache backend snapshot archive rebuild metadata should stay reviewable."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            rows = [
+                {
+                    "session_id": "old-session",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/old.jsonl",
+                    "source_updated_at": "2026-06-01T10:00:00Z",
+                    "summary_path": "sessions/2026/06/01/old/summary.md",
+                    "evidence_path": "sessions/2026/06/01/old/evidence.md",
+                    "reusable_facts": [old_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["cache", "archive"],
+                },
+                {
+                    "session_id": "current-session",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/current.jsonl",
+                    "source_updated_at": "2026-06-02T10:00:00Z",
+                    "summary_path": "sessions/2026/06/02/current/summary.md",
+                    "evidence_path": "sessions/2026/06/02/current/evidence.md",
+                    "reusable_facts": [current_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["cache", "archive"],
+                },
+            ]
+            for row in rows:
+                entry_dir = memory_repo / Path(row["summary_path"]).parent
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {row['session_id']}\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text("ev_001: Synthetic evidence\n", encoding="utf-8")
+                (entry_dir / "meta.json").write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+
+            module.rebuild_indexes(memory_repo)
+            candidate = json.loads((memory_repo / "index/memory_review_candidates.jsonl").read_text(encoding="utf-8"))
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            decision = {
+                "decision_id": "review_confirm_supersession",
+                "action": "approve_supersedes",
+                "current_memory_id": candidate["current_memory_id"],
+                "older_memory_id": candidate["older_memory_id"],
+                "candidate_fingerprint": module.review_candidate_fingerprint(candidate),
+                "reviewed_at": "2026-06-23T00:00:00Z",
+                "reviewer": "synthetic",
+                "rationale": "Synthetic reviewer confirmed the newer memory supersedes the older one.",
+            }
+            (decision_dir / "memory_lifecycle_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            module.rebuild_indexes(memory_repo)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(APPLY_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["decision_count"], 1)
+        self.assertEqual(payload["result_status_counts"], {"applied": 1})
+        self.assertEqual(payload["result_action_counts"], {"approve_supersedes": 1})
+        self.assertEqual(payload["relation_record_counts_after"]["supersedes"], 1)
+        self.assertEqual(payload["relation_record_counts_after"]["superseded_by"], 1)
+        self.assertFalse(payload["write_enabled"])
+
     def test_build_memory_nodes_lowers_confidence_for_contradicted_memory(self):
         module = load_update_module()
         old_fact = "Layered retrieval must preserve evidence refs for induced memories."
