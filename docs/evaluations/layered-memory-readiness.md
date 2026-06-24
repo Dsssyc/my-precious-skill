@@ -18,7 +18,7 @@ LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
 ## Current Baseline
 
-Baseline date: 2026-06-23
+Baseline date: 2026-06-24
 
 Code point used for the benchmark harness: this document revision
 
@@ -124,16 +124,16 @@ Case file:
 `benchmarks/cases/updater_induction_synthetic.jsonl`
 
 Case fingerprint:
-`5de3098286702d5267c95cd79bf38f2f4e56e93972bf1dab2de2ba8a3b2b2b50`
+`783e2ca5bf245467f852c72eb90fadb2715b3e45387fc5b43969da79966ec1b3`
 
 Runner fingerprint:
-`033214460c99304e696e39f5e89a03c679e19266240a3bea2ba17eda5bdfc40b`
+`9955ed69ad55a24d56272751f62936b8771b695981b8e718a5fb57171b20929d`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`db761e35c307ed01680d7d96d37228eb97ca27d7ad80dc8207c6354b5f01a756`
+`270017842e43a8a9c30baa6bb821d912bbd3b00fc35d6ab9161ae5ad9ea2023c`
 
 Baseline command:
 
@@ -148,14 +148,19 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 6 |
-| source_records | 12 |
-| expected_automatic_memories | 9 |
+| cases | 12 |
+| source_records | 20 |
+| expected_automatic_memories | 13 |
 | expected_forced_memories | 1 |
 | expected_lifecycle_links | 3 |
 | expected_privacy_refusals | 1 |
 | expected_privacy_redactions | 1 |
 | induction_success_rate | 1.0 |
+| natural_induction_success_rate | 1.0 |
+| cross_project_generalization_rate | 1.0 |
+| project_scope_precision | 1.0 |
+| ambiguous_candidate_review_rate | 1.0 |
+| process_noise_rejection_rate | 1.0 |
 | layer_assignment_accuracy | 1.0 |
 | evidence_retention_rate | 1.0 |
 | source_ref_policy_pass_rate | 1.0 |
@@ -174,6 +179,7 @@ The updater-driven suite contains synthetic scenarios across these categories:
 | automatic_induction | 2 |
 | forced_memory | 1 |
 | lifecycle | 1 |
+| natural_induction | 6 |
 | privacy | 2 |
 
 The runner creates temporary synthetic source records and invokes the deployed
@@ -185,7 +191,7 @@ text, source paths, raw refs, or per-case details.
 
 ## End-To-End Induction-To-Recall Baseline
 
-Baseline date: 2026-06-23
+Baseline date: 2026-06-24
 
 Code point used for the benchmark harness: this document revision
 
@@ -193,16 +199,16 @@ Case file:
 `benchmarks/cases/e2e_induction_recall_synthetic.jsonl`
 
 Case fingerprint:
-`717974356b9de5d2e60bfce70216e2c5e64532d5c5b8bee0707c17a4bd63b860`
+`48a4d6e3597e39773574dd71649abd82e6e5c141e284a99c4e528d665cbbcda2`
 
 Runner fingerprint:
-`a34916522e7837cbe7a73e232fe247361d94bed2bb776fa82775cef97e870233`
+`a2a31257c71edd98c3a538e052cf2c26e1e8a7bf07747ce28b113af513a21ac2`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`db761e35c307ed01680d7d96d37228eb97ca27d7ad80dc8207c6354b5f01a756`
+`270017842e43a8a9c30baa6bb821d912bbd3b00fc35d6ab9161ae5ad9ea2023c`
 
 Search script fingerprint:
 `de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`
@@ -220,9 +226,14 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 6 |
-| source_records | 12 |
-| recall_cases | 6 |
+| cases | 12 |
+| source_records | 20 |
+| recall_cases | 10 |
+| natural_induction_success_rate | 1.0 |
+| cross_project_generalization_rate | 1.0 |
+| project_scope_precision | 1.0 |
+| ambiguous_candidate_review_rate | 1.0 |
+| process_noise_rejection_rate | 1.0 |
 | e2e_memory_recall_at_1 | 1.0 |
 | e2e_memory_recall_at_5 | 1.0 |
 | e2e_layer_assignment_accuracy | 1.0 |
@@ -242,6 +253,7 @@ The e2e suite contains synthetic scenarios across these categories:
 | automatic_induction | 2 |
 | forced_memory | 1 |
 | lifecycle | 1 |
+| natural_induction | 6 |
 | privacy | 2 |
 
 The runner creates temporary synthetic source records, invokes the deployed

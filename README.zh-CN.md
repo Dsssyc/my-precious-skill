@@ -520,11 +520,15 @@ python benchmarks/updater_induction_benchmark.py \
 ```
 
 induction benchmark 只输出 aggregate JSON 指标：
-`induction_success_rate`、`layer_assignment_accuracy`、
+`induction_success_rate`、`natural_induction_success_rate`、
+`cross_project_generalization_rate`、`project_scope_precision`、
+`ambiguous_candidate_review_rate`、`process_noise_rejection_rate`、
 `evidence_retention_rate`、`source_ref_policy_pass_rate`、
 `lifecycle_link_accuracy`、`forced_memory_capture_rate`、
 `privacy_refusal_pass_rate`、`privacy_redaction_pass_rate` 和
 `privacy_leak_count`。packaged synthetic suite 覆盖跨项目自动归纳、项目作用域归纳、
+自然语言 preference/workflow 归纳、project-scoped implementation constraint、
+ambiguous scope candidate 进入 review、process-noise rejection、
 source-record forced memory、supersede/contradict/deprecate lifecycle link、
 redacted source record，以及默认拒绝 likely-secret source record。它不会渲染
 source content、memory text、source path、raw ref 或 per-case detail。
@@ -542,11 +546,16 @@ python benchmarks/e2e_induction_recall_benchmark.py \
 ```
 
 它只输出 aggregate e2e 指标：
-`e2e_memory_recall_at_1`、`e2e_memory_recall_at_5`、
+`natural_induction_success_rate`、`cross_project_generalization_rate`、
+`project_scope_precision`、`ambiguous_candidate_review_rate`、
+`process_noise_rejection_rate`、`e2e_memory_recall_at_1`、
+`e2e_memory_recall_at_5`、
 `e2e_layer_assignment_accuracy`、`e2e_session_drilldown_rate`、
 `e2e_evidence_reachability_rate`、`e2e_source_policy_pass_rate`、
 `e2e_lifecycle_active_suppression_rate`、`e2e_forced_memory_recall_rate`
 和 `privacy_leak_count`。packaged suite 覆盖跨项目自动归纳、项目作用域归纳、
+自然语言 preference/workflow 归纳、project-scoped implementation constraint、
+ambiguous scope candidate 进入 review、process-noise rejection、
 source-record forced memory、supersede/contradict/deprecate lifecycle
 suppression、redacted source record，以及默认拒绝 likely-secret source
 record，并且不渲染私有 case detail。

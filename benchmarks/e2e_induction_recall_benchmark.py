@@ -38,6 +38,7 @@ class CaseRun:
     category: str
     source_records: int
     recall_cases: int
+    natural_quality: dict[str, int]
     lifecycle_suppression_cases: int
     lifecycle_suppression_hits: int
     recall_details: list[dict[str, Any]]
@@ -266,6 +267,7 @@ def score_e2e_case(
     memory_repo, command_outputs, failed, source_records = run_updates_for_case(case, case_root, setup_script)
     leaked = induction_benchmark.privacy_leaked(case, command_outputs, memory_repo)
     nodes = induction_benchmark.load_nodes(memory_repo)
+    natural_quality = induction_benchmark.score_natural_quality_expectations(case, memory_repo, nodes)
     targets_by_text = relation_targets(case, nodes)
     recall_cases: list[dict[str, Any]] = []
     lifecycle_cases, lifecycle_hits, lifecycle_leaked = score_lifecycle_suppression_probes(
@@ -314,10 +316,14 @@ def score_e2e_case(
         category=category,
         source_records=source_records,
         recall_cases=len(recall_cases),
+        natural_quality=dict(natural_quality),
         lifecycle_suppression_cases=lifecycle_cases,
         lifecycle_suppression_hits=lifecycle_hits,
         recall_details=details,
-        failed=failed or leaked or lifecycle_hits != lifecycle_cases,
+        failed=failed
+        or leaked
+        or lifecycle_hits != lifecycle_cases
+        or not induction_benchmark.natural_quality_expectations_pass(natural_quality),
         leaked=leaked,
     )
 
@@ -338,6 +344,9 @@ def build_report(cases: list[dict[str, Any]], runs: list[CaseRun], fingerprint: 
     layer_cases = sum(1 for detail in details if detail.get("expected_layer"))
     evidence_cases = sum(1 for detail in details if detail.get("required_evidence_paths"))
     source_policy_cases = sum(1 for detail in details if detail.get("expected_source_anchor"))
+    quality_totals = Counter()
+    for run in runs:
+        quality_totals.update(run.natural_quality)
 
     return {
         "report_version": 1,
@@ -355,6 +364,26 @@ def build_report(cases: list[dict[str, Any]], runs: list[CaseRun], fingerprint: 
         "source_records": sum(run.source_records for run in runs),
         "recall_cases": recall_cases,
         "category_counts": dict(sorted(Counter(run.category for run in runs).items())),
+        "natural_induction_success_rate": ratio(
+            quality_totals["natural_hits"],
+            quality_totals["natural_cases"],
+        ),
+        "cross_project_generalization_rate": ratio(
+            quality_totals["cross_project_generalization_hits"],
+            quality_totals["cross_project_generalization_cases"],
+        ),
+        "project_scope_precision": ratio(
+            quality_totals["project_scope_precision_hits"],
+            quality_totals["project_scope_precision_cases"],
+        ),
+        "ambiguous_candidate_review_rate": ratio(
+            quality_totals["review_hits"],
+            quality_totals["review_cases"],
+        ),
+        "process_noise_rejection_rate": ratio(
+            quality_totals["noise_hits"],
+            quality_totals["noise_cases"],
+        ),
         "e2e_memory_recall_at_1": ratio(sum(detail_hit(detail, "memory_recall_at_1") for detail in details), recall_cases),
         "e2e_memory_recall_at_5": ratio(sum(detail_hit(detail, "memory_recall_at_5") for detail in details), recall_cases),
         "e2e_layer_assignment_accuracy": ratio(

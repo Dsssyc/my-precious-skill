@@ -631,12 +631,16 @@ python benchmarks/updater_induction_benchmark.py \
 ```
 
 The induction benchmark reports aggregate-only JSON metrics:
-`induction_success_rate`, `layer_assignment_accuracy`,
+`induction_success_rate`, `natural_induction_success_rate`,
+`cross_project_generalization_rate`, `project_scope_precision`,
+`ambiguous_candidate_review_rate`, `process_noise_rejection_rate`,
 `evidence_retention_rate`, `source_ref_policy_pass_rate`,
 `lifecycle_link_accuracy`, `forced_memory_capture_rate`,
 `privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`, and
 `privacy_leak_count`. Its packaged synthetic suite covers cross-project
-automatic induction, project-scoped induction, source-record forced memory,
+automatic induction, natural-language preference and workflow induction,
+project-scoped implementation constraints, ambiguous scope candidates routed to
+review, process-noise rejection, source-record forced memory,
 supersede/contradict/deprecate lifecycle links, redacted source records, and
 default refusal of likely-secret source records. It does not render source
 content, memory text, source paths, raw refs, or per-case details.
@@ -655,12 +659,17 @@ python benchmarks/e2e_induction_recall_benchmark.py \
 ```
 
 It reports aggregate-only e2e metrics:
-`e2e_memory_recall_at_1`, `e2e_memory_recall_at_5`,
+`natural_induction_success_rate`, `cross_project_generalization_rate`,
+`project_scope_precision`, `ambiguous_candidate_review_rate`,
+`process_noise_rejection_rate`, `e2e_memory_recall_at_1`,
+`e2e_memory_recall_at_5`,
 `e2e_layer_assignment_accuracy`, `e2e_session_drilldown_rate`,
 `e2e_evidence_reachability_rate`, `e2e_source_policy_pass_rate`,
 `e2e_lifecycle_active_suppression_rate`, `e2e_forced_memory_recall_rate`,
 and `privacy_leak_count`. The packaged suite covers cross-project automatic
-induction, project-scoped induction, source-record forced memory,
+induction, natural-language preference and workflow induction,
+project-scoped implementation constraints, ambiguous scope candidates routed to
+review, process-noise rejection, source-record forced memory,
 supersede/contradict/deprecate lifecycle suppression, redacted source records,
 and default refusal of likely-secret source records without rendering private
 case details.

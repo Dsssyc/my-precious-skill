@@ -1,13 +1,18 @@
 {
   "case_pass_rate": 1.0,
-  "cases": 6,
+  "cases": 12,
+  "ambiguous_candidate_review_rate": 1.0,
+  "cross_project_generalization_rate": 1.0,
   "evidence_retention_rate": 1.0,
   "forced_memory_capture_rate": 1.0,
   "induction_success_rate": 1.0,
   "layer_assignment_accuracy": 1.0,
   "lifecycle_link_accuracy": 1.0,
+  "natural_induction_success_rate": 1.0,
+  "process_noise_rejection_rate": 1.0,
+  "project_scope_precision": 1.0,
   "privacy_redaction_pass_rate": 1.0,
   "privacy_refusal_pass_rate": 1.0,
-  "source_records": 12,
+  "source_records": 20,
   "source_ref_policy_pass_rate": 1.0
 }

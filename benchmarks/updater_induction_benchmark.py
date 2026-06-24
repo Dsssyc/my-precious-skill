@@ -53,6 +53,16 @@ class CaseScore:
     leaked: bool
     induction_cases: int = 0
     induction_hits: int = 0
+    natural_cases: int = 0
+    natural_hits: int = 0
+    cross_project_generalization_cases: int = 0
+    cross_project_generalization_hits: int = 0
+    project_scope_precision_cases: int = 0
+    project_scope_precision_hits: int = 0
+    review_cases: int = 0
+    review_hits: int = 0
+    noise_cases: int = 0
+    noise_hits: int = 0
     layer_cases: int = 0
     layer_hits: int = 0
     evidence_cases: int = 0
@@ -272,11 +282,45 @@ def load_meta_rows(memory_repo: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def load_review_candidates(memory_repo: Path) -> list[dict[str, Any]]:
+    return load_jsonl(memory_repo / "index/memory_review_candidates.jsonl")
+
+
 def node_by_text(nodes: list[dict[str, Any]], text: str, source: str) -> dict[str, Any] | None:
     for node in nodes:
         if node.get("text") == text and node.get("source") == source:
             return node
     return None
+
+
+def node_int(node: dict[str, Any], key: str) -> int:
+    try:
+        return int(node.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def node_list_len(node: dict[str, Any], key: str) -> int:
+    value = node.get(key)
+    return len(value) if isinstance(value, list) else 0
+
+
+def cross_project_generalization_hit(node: dict[str, Any] | None) -> bool:
+    return bool(
+        node is not None
+        and node.get("layer") == "domain"
+        and node_int(node, "support_count") >= 2
+        and node_list_len(node, "derived_from") >= 2
+    )
+
+
+def project_scope_precision_hit(node: dict[str, Any] | None) -> bool:
+    return bool(
+        node is not None
+        and node.get("layer") == "project"
+        and isinstance(node.get("scope"), str)
+        and str(node["scope"]).startswith("project:")
+    )
 
 
 def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
@@ -355,6 +399,93 @@ def lifecycle_link_hit(
     if relation == "deprecates":
         return target_id in list_texts(current.get("deprecates")) and target.get("deprecated_by") == current_id
     return False
+
+
+def review_candidate_hit(
+    nodes: list[dict[str, Any]],
+    review_candidates: list[dict[str, Any]],
+    expected: dict[str, Any],
+) -> bool:
+    current = node_by_text(nodes, str(expected.get("current_text") or ""), "automatic")
+    older = node_by_text(nodes, str(expected.get("older_text") or ""), "automatic")
+    if current is None or older is None:
+        return False
+    current_id = current.get("memory_id")
+    older_id = older.get("memory_id")
+    reason = str(expected.get("reason") or "")
+    if not isinstance(current_id, str) or not isinstance(older_id, str) or not reason:
+        return False
+    for candidate in review_candidates:
+        if (
+            candidate.get("current_memory_id") == current_id
+            and candidate.get("older_memory_id") == older_id
+            and candidate.get("reason") == reason
+            and candidate.get("recommended_action") == "manual_review"
+        ):
+            return True
+    return False
+
+
+def noise_rejection_hit(nodes: list[dict[str, Any]], expected: dict[str, Any]) -> bool:
+    text = str(expected.get("text") or "").strip()
+    pattern = str(expected.get("pattern") or "").strip()
+    for node in nodes:
+        node_text = str(node.get("text") or "")
+        if text and node_text == text:
+            return False
+        if pattern:
+            try:
+                if re.search(pattern, node_text, re.IGNORECASE):
+                    return False
+            except re.error as exc:
+                raise SystemExit("invalid expected noise rejection pattern") from exc
+    return True
+
+
+def score_natural_quality_expectations(
+    case: dict[str, Any],
+    memory_repo: Path,
+    nodes: list[dict[str, Any]],
+) -> Counter:
+    score = Counter()
+    for expected in case.get("expected_memories") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_memories entries must be objects")
+        node = node_by_text(nodes, str(expected.get("text") or ""), str(expected.get("source") or ""))
+        if expected.get("natural_induction") is True:
+            score["natural_cases"] += 1
+            score["natural_hits"] += int(node is not None)
+        if expected.get("cross_project_generalization") is True:
+            score["cross_project_generalization_cases"] += 1
+            score["cross_project_generalization_hits"] += int(cross_project_generalization_hit(node))
+        if expected.get("project_scope_precision") is True:
+            score["project_scope_precision_cases"] += 1
+            score["project_scope_precision_hits"] += int(project_scope_precision_hit(node))
+
+    review_candidates = load_review_candidates(memory_repo)
+    for expected in case.get("expected_review_candidates") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_review_candidates entries must be objects")
+        score["review_cases"] += 1
+        score["review_hits"] += int(review_candidate_hit(nodes, review_candidates, expected))
+
+    for expected in case.get("expected_noise_rejections") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_noise_rejections entries must be objects")
+        score["noise_cases"] += 1
+        score["noise_hits"] += int(noise_rejection_hit(nodes, expected))
+    return score
+
+
+def natural_quality_expectations_pass(score: Counter) -> bool:
+    pairs = (
+        ("natural_hits", "natural_cases"),
+        ("cross_project_generalization_hits", "cross_project_generalization_cases"),
+        ("project_scope_precision_hits", "project_scope_precision_cases"),
+        ("review_hits", "review_cases"),
+        ("noise_hits", "noise_cases"),
+    )
+    return all(score[hits] == score[cases] for hits, cases in pairs)
 
 
 def list_texts(value: object) -> list[str]:
@@ -461,6 +592,7 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
     nodes = load_nodes(memory_repo)
     meta_rows = load_meta_rows(memory_repo)
     leaked = privacy_leaked(case, command_outputs, memory_repo)
+    natural_quality = score_natural_quality_expectations(case, memory_repo, nodes)
 
     score = CaseScore(
         passed=not unexpected_update_failure and not leaked,
@@ -468,6 +600,16 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         refusal_cases=refusal_cases,
         refusal_hits=refusal_hits,
         source_records=source_records,
+        natural_cases=natural_quality["natural_cases"],
+        natural_hits=natural_quality["natural_hits"],
+        cross_project_generalization_cases=natural_quality["cross_project_generalization_cases"],
+        cross_project_generalization_hits=natural_quality["cross_project_generalization_hits"],
+        project_scope_precision_cases=natural_quality["project_scope_precision_cases"],
+        project_scope_precision_hits=natural_quality["project_scope_precision_hits"],
+        review_cases=natural_quality["review_cases"],
+        review_hits=natural_quality["review_hits"],
+        noise_cases=natural_quality["noise_cases"],
+        noise_hits=natural_quality["noise_hits"],
     )
     if case.get("expected_redaction") is True:
         score.redaction_cases += 1
@@ -524,6 +666,7 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
             score.forced_hits == score.forced_cases,
             score.refusal_hits == score.refusal_cases,
             score.redaction_hits == score.redaction_cases,
+            natural_quality_expectations_pass(natural_quality),
         )
     )
     return score
@@ -596,6 +739,16 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["source_records"] += score.source_records
         totals["induction_cases"] += score.induction_cases
         totals["induction_hits"] += score.induction_hits
+        totals["natural_cases"] += score.natural_cases
+        totals["natural_hits"] += score.natural_hits
+        totals["cross_project_generalization_cases"] += score.cross_project_generalization_cases
+        totals["cross_project_generalization_hits"] += score.cross_project_generalization_hits
+        totals["project_scope_precision_cases"] += score.project_scope_precision_cases
+        totals["project_scope_precision_hits"] += score.project_scope_precision_hits
+        totals["review_cases"] += score.review_cases
+        totals["review_hits"] += score.review_hits
+        totals["noise_cases"] += score.noise_cases
+        totals["noise_hits"] += score.noise_hits
         totals["layer_cases"] += score.layer_cases
         totals["layer_hits"] += score.layer_hits
         totals["evidence_cases"] += score.evidence_cases
@@ -633,6 +786,17 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "expected_privacy_refusals": int(totals["refusal_cases"]),
         "expected_privacy_redactions": int(totals["redaction_cases"]),
         "induction_success_rate": ratio(totals["induction_hits"], totals["induction_cases"]),
+        "natural_induction_success_rate": ratio(totals["natural_hits"], totals["natural_cases"]),
+        "cross_project_generalization_rate": ratio(
+            totals["cross_project_generalization_hits"],
+            totals["cross_project_generalization_cases"],
+        ),
+        "project_scope_precision": ratio(
+            totals["project_scope_precision_hits"],
+            totals["project_scope_precision_cases"],
+        ),
+        "ambiguous_candidate_review_rate": ratio(totals["review_hits"], totals["review_cases"]),
+        "process_noise_rejection_rate": ratio(totals["noise_hits"], totals["noise_cases"]),
         "layer_assignment_accuracy": ratio(totals["layer_hits"], totals["layer_cases"]),
         "evidence_retention_rate": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "source_ref_policy_pass_rate": ratio(totals["source_ref_hits"], totals["source_ref_cases"]),

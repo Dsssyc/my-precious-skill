@@ -379,16 +379,26 @@ The synthetic case file is
 `benchmarks/cases/updater_induction_synthetic.jsonl`. Each JSONL row is one
 scenario with safe `case_id`, `category`, `records`, `expected_memories`, and
 optional `expected_lifecycle_links`, `expected_privacy_refusal`, or
-`expected_redaction` fields. `records` contain synthetic `role`/`content`
-events and a synthetic `project_key`; the runner maps those keys to temporary
-local paths at runtime. Secret-like fixtures are represented with placeholders
-such as `{{OPENAI_KEY}}` or `{{AUTHORIZATION_BEARER}}` and expanded only inside
-the temporary source records.
+`expected_redaction` fields. Natural-induction v2 cases may also set
+`natural_induction: true` on expected automatic memories, set
+`cross_project_generalization: true` when repeated support across synthetic
+projects must become a `domain` memory, set `project_scope_precision: true`
+when a single-project rule must remain `project` scoped, provide
+`expected_review_candidates` for ambiguous semantic lifecycle candidates, and
+provide `expected_noise_rejections` for process chatter that must not become a
+memory node. `records` contain synthetic `role`/`content` events and a
+synthetic `project_key`; the runner maps those keys to temporary local paths at
+runtime. Secret-like fixtures are represented with placeholders such as
+`{{OPENAI_KEY}}` or `{{AUTHORIZATION_BEARER}}` and expanded only inside the
+temporary source records.
 
 The runner reports aggregate-only JSON. It does not render case details, source
 content, memory text, source paths, or raw refs. Core metrics are
-`induction_success_rate`, `layer_assignment_accuracy`,
-`evidence_retention_rate`, `source_ref_policy_pass_rate`,
+`induction_success_rate`, `natural_induction_success_rate`,
+`cross_project_generalization_rate`, `project_scope_precision`,
+`ambiguous_candidate_review_rate`, `process_noise_rejection_rate`,
+`layer_assignment_accuracy`, `evidence_retention_rate`,
+`source_ref_policy_pass_rate`,
 `lifecycle_link_accuracy`, `forced_memory_capture_rate`,
 `privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`,
 `privacy_leak_count`, `failed_case_count`, and `case_pass_rate`. The packaged
@@ -429,6 +439,11 @@ retired nodes as successful active recall targets.
 The aggregate JSON report maps the underlying recall benchmark fields into
 goal-level metrics:
 
+- `natural_induction_success_rate`
+- `cross_project_generalization_rate`
+- `project_scope_precision`
+- `ambiguous_candidate_review_rate`
+- `process_noise_rejection_rate`
 - `e2e_memory_recall_at_1` and `e2e_memory_recall_at_5`
 - `e2e_layer_assignment_accuracy`
 - `e2e_session_drilldown_rate`

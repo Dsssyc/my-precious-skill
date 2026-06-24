@@ -261,6 +261,43 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
         self.assertIn(fact, summary["facts"])
 
+    def test_summarize_events_induces_user_preference_without_marker(self):
+        module = load_update_module()
+
+        summary = module.summarize_events(
+            [
+                module.MemoryEvent(
+                    "user",
+                    "I prefer benchmark review summaries to lead with quantified risks before implementation notes.",
+                ),
+                module.MemoryEvent(
+                    "assistant",
+                    "Understood; future benchmark reviews will keep that preference visible.",
+                ),
+            ],
+            "synthetic-memory",
+        )
+
+        self.assertIn(
+            "The user prefers benchmark review summaries to lead with quantified risks before implementation notes.",
+            summary["facts"],
+        )
+
+    def test_summarize_events_rejects_process_noise_without_marker(self):
+        module = load_update_module()
+
+        summary = module.summarize_events(
+            [
+                module.MemoryEvent("assistant", "I checked the failing tests and will now inspect the archive."),
+                module.MemoryEvent("assistant", "Now I will rerun the benchmark gates and report status."),
+            ],
+            "synthetic-memory",
+        )
+
+        self.assertEqual(summary["facts"], [])
+        self.assertEqual(summary["decisions"], [])
+        self.assertEqual(summary["evidence"], [])
+
     def test_build_memory_nodes_promotes_cross_project_reusable_fact_to_domain(self):
         module = load_update_module()
         rows = [

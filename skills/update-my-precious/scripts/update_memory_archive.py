@@ -139,6 +139,11 @@ EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
     r"(?:现在|然后|接下来|顺便|再|请|帮我))"
 )
 REUSABLE_FACT_PREFIX = re.compile(r"(?i)^\s*reusable fact\s*[:\uFF1A]\s*(?P<text>.+)$")
+NATURAL_USER_MEMORY_PATTERNS = (
+    (re.compile(r"(?i)^\s*i\s+prefer\s+(?P<text>.+)$"), "The user prefers {text}"),
+    (re.compile(r"(?i)^\s*my\s+preference\s+is\s+(?:that\s+)?(?P<text>.+)$"), "The user prefers {text}"),
+    (re.compile(r"(?i)^\s*i\s+want\s+(?P<text>.+)$"), "The user wants {text}"),
+)
 SENSITIVE_EXPLICIT_MEMORY_MARKERS = (
     "[redacted_",
     "authorization:",
@@ -1525,6 +1530,41 @@ def retrieval_literal_priority(text: str) -> tuple[int, str]:
     return (4, lowered)
 
 
+def sentence_case_tail(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    if len(stripped) == 1:
+        return stripped.lower()
+    return stripped[:1].lower() + stripped[1:]
+
+
+def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5) -> list[str]:
+    facts: list[str] = []
+    for text in event_texts(events, {"user"}):
+        if is_process_update(text):
+            continue
+        compacted = compact_whitespace(strip_process_clauses(text))
+        if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
+            continue
+        for pattern, template in NATURAL_USER_MEMORY_PATTERNS:
+            match = pattern.match(compacted)
+            if not match:
+                continue
+            tail = clean_explicit_memory_text(normalize_memory_text(match.group("text")))
+            tail = re.sub(r"(?i)^\s*that\s+", "", tail).strip()
+            if not tail or is_sensitive_explicit_memory_text(tail):
+                continue
+            fact = template.format(text=sentence_case_tail(tail))
+            durable = durable_memory_text(fact)
+            if durable and durable not in facts:
+                facts.append(durable)
+            break
+        if len(facts) >= limit:
+            break
+    return facts
+
+
 def extract_tags(project_name: str, texts: list[str]) -> list[str]:
     tags: list[str] = []
     project_slug = slugify(project_name)
@@ -1731,6 +1771,7 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         if durable:
             durable_user_lines.append(durable)
     assistant_lines = event_texts(events, {"assistant", "record"})
+    natural_user_facts = extract_natural_user_memory_facts(events)
     decisions = select_event_texts(
         events,
         r"\b(decision|decide|decided|chosen|selected|root cause)\b|原因|根因|决定|选择",
@@ -1755,6 +1796,9 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         kinds={"assistant", "record"},
         limit=12,
     )
+    for line in reversed(natural_user_facts):
+        if line not in facts:
+            facts.insert(0, line)
     retrieval_literals = select_retrieval_literal_texts(events, kinds={"assistant", "record"}, limit=8)
     for line in retrieval_literals:
         if line not in facts:
