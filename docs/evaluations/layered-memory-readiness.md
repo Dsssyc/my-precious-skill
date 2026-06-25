@@ -116,7 +116,7 @@ load.
 
 ## Updater-Driven Induction Baseline
 
-Baseline date: 2026-06-23
+Baseline date: 2026-06-25
 
 Code point used for the benchmark harness: this document revision
 
@@ -124,16 +124,16 @@ Case file:
 `benchmarks/cases/updater_induction_synthetic.jsonl`
 
 Case fingerprint:
-`783e2ca5bf245467f852c72eb90fadb2715b3e45387fc5b43969da79966ec1b3`
+`8cab9c1fb17544479f061d896dfd85e737f4e254b454a21ff76137cc652d64ef`
 
 Runner fingerprint:
-`9955ed69ad55a24d56272751f62936b8771b695981b8e718a5fb57171b20929d`
+`813d2966b1ed5093c393b00a8ec00f8ead7a84bb282132b7398c220e2aeef455`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`270017842e43a8a9c30baa6bb821d912bbd3b00fc35d6ab9161ae5ad9ea2023c`
+`59810fbc7e8c1968e88bf67aef520667effab137a43dae5d43f715820de121e4`
 
 Baseline command:
 
@@ -148,8 +148,8 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 12 |
-| source_records | 20 |
+| cases | 20 |
+| source_records | 29 |
 | expected_automatic_memories | 13 |
 | expected_forced_memories | 1 |
 | expected_lifecycle_links | 3 |
@@ -157,10 +157,17 @@ Baseline result:
 | expected_privacy_redactions | 1 |
 | induction_success_rate | 1.0 |
 | natural_induction_success_rate | 1.0 |
+| natural_false_promotion_rate | 0.0 |
 | cross_project_generalization_rate | 1.0 |
 | project_scope_precision | 1.0 |
 | ambiguous_candidate_review_rate | 1.0 |
+| review_routing_rate | 1.0 |
 | process_noise_rejection_rate | 1.0 |
+| ephemeral_status_rejection_rate | 1.0 |
+| hypothetical_rejection_rate | 1.0 |
+| acknowledgement_only_rejection_rate | 1.0 |
+| temporary_local_decision_rejection_rate | 1.0 |
+| generic_rule_rejection_rate | 1.0 |
 | layer_assignment_accuracy | 1.0 |
 | evidence_retention_rate | 1.0 |
 | source_ref_policy_pass_rate | 1.0 |
@@ -180,6 +187,7 @@ The updater-driven suite contains synthetic scenarios across these categories:
 | forced_memory | 1 |
 | lifecycle | 1 |
 | natural_induction | 6 |
+| natural_precision | 8 |
 | privacy | 2 |
 
 The runner creates temporary synthetic source records and invokes the deployed
@@ -191,7 +199,7 @@ text, source paths, raw refs, or per-case details.
 
 ## End-To-End Induction-To-Recall Baseline
 
-Baseline date: 2026-06-24
+Baseline date: 2026-06-25
 
 Code point used for the benchmark harness: this document revision
 
@@ -208,7 +216,7 @@ Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`270017842e43a8a9c30baa6bb821d912bbd3b00fc35d6ab9161ae5ad9ea2023c`
+`59810fbc7e8c1968e88bf67aef520667effab137a43dae5d43f715820de121e4`
 
 Search script fingerprint:
 `de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`

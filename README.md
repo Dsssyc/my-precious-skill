@@ -632,18 +632,27 @@ python benchmarks/updater_induction_benchmark.py \
 
 The induction benchmark reports aggregate-only JSON metrics:
 `induction_success_rate`, `natural_induction_success_rate`,
-`cross_project_generalization_rate`, `project_scope_precision`,
-`ambiguous_candidate_review_rate`, `process_noise_rejection_rate`,
+`natural_false_promotion_rate`, `cross_project_generalization_rate`,
+`project_scope_precision`, `ambiguous_candidate_review_rate`,
+`review_routing_rate`, `process_noise_rejection_rate`,
+`ephemeral_status_rejection_rate`, `hypothetical_rejection_rate`,
+`acknowledgement_only_rejection_rate`,
+`temporary_local_decision_rejection_rate`, `generic_rule_rejection_rate`,
 `evidence_retention_rate`, `source_ref_policy_pass_rate`,
 `lifecycle_link_accuracy`, `forced_memory_capture_rate`,
 `privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`, and
 `privacy_leak_count`. Its packaged synthetic suite covers cross-project
 automatic induction, natural-language preference and workflow induction,
 project-scoped implementation constraints, ambiguous scope candidates routed to
-review, process-noise rejection, source-record forced memory,
-supersede/contradict/deprecate lifecycle links, redacted source records, and
-default refusal of likely-secret source records. It does not render source
-content, memory text, source paths, raw refs, or per-case details.
+review, adversarial natural-language precision cases, process-noise rejection,
+source-record forced memory, supersede/contradict/deprecate lifecycle links,
+redacted source records, and default refusal of likely-secret source records.
+The adversarial precision cases cover one-off status or progress updates with
+`should`/`must`, acknowledgement-only replies, hypothetical `we could` or
+`maybe` statements, temporary local implementation choices, test-result
+chatter, quoted prompt-like text, and broad generic rules without distinctive
+support. It does not render source content, memory text, source paths, raw refs,
+or per-case details.
 
 The end-to-end synthetic benchmark connects the write and read paths. It
 creates temporary synthetic source records, runs the real setup and updater,
@@ -769,6 +778,8 @@ skills/using-my-precious/references/archive-format.md
 - End-to-end synthetic induction-to-recall benchmark that runs setup, updater,
   generated layered recall cases, and the copied search script with
   aggregate-only quality gates.
+- Updater-driven natural-induction precision gates for adversarial synthetic
+  false-promotion cases and review routing.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
   optional preferred-scope ranking, and explainable result reasons.

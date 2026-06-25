@@ -386,17 +386,31 @@ projects must become a `domain` memory, set `project_scope_precision: true`
 when a single-project rule must remain `project` scoped, provide
 `expected_review_candidates` for ambiguous semantic lifecycle candidates, and
 provide `expected_noise_rejections` for process chatter that must not become a
-memory node. `records` contain synthetic `role`/`content` events and a
-synthetic `project_key`; the runner maps those keys to temporary local paths at
-runtime. Secret-like fixtures are represented with placeholders such as
-`{{OPENAI_KEY}}` or `{{AUTHORIZATION_BEARER}}` and expanded only inside the
-temporary source records.
+memory node. Natural precision cases may provide `expected_false_promotions`,
+where each entry contains either `text` or `pattern` plus a `reason`; supported
+aggregate rejection reasons are `ephemeral_status`, `hypothetical`,
+`acknowledgement_only`, `temporary_local_decision`, and `generic_rule`.
+`raw_prompt` false-promotion fixtures contribute to
+`natural_false_promotion_rate` but do not currently have a separate reason-rate
+metric. These cases cover one-off status/progress statements with
+`should`/`must`, acknowledgement-only replies, hypothetical `we could` or
+`maybe` statements, temporary local implementation choices, test-result
+chatter, quoted prompt-like text, and broad generic rules without distinctive
+support. `records` contain synthetic `role`/`content` events and a synthetic
+`project_key`; the runner maps those keys to temporary local paths at runtime.
+Secret-like fixtures are represented with placeholders such as `{{OPENAI_KEY}}`
+or `{{AUTHORIZATION_BEARER}}` and expanded only inside the temporary source
+records.
 
 The runner reports aggregate-only JSON. It does not render case details, source
 content, memory text, source paths, or raw refs. Core metrics are
 `induction_success_rate`, `natural_induction_success_rate`,
-`cross_project_generalization_rate`, `project_scope_precision`,
-`ambiguous_candidate_review_rate`, `process_noise_rejection_rate`,
+`natural_false_promotion_rate`, `cross_project_generalization_rate`,
+`project_scope_precision`, `ambiguous_candidate_review_rate`,
+`review_routing_rate`, `process_noise_rejection_rate`,
+`ephemeral_status_rejection_rate`, `hypothetical_rejection_rate`,
+`acknowledgement_only_rejection_rate`,
+`temporary_local_decision_rejection_rate`, `generic_rule_rejection_rate`,
 `layer_assignment_accuracy`, `evidence_retention_rate`,
 `source_ref_policy_pass_rate`,
 `lifecycle_link_accuracy`, `forced_memory_capture_rate`,
@@ -404,7 +418,8 @@ content, memory text, source paths, or raw refs. Core metrics are
 `privacy_leak_count`, `failed_case_count`, and `case_pass_rate`. The packaged
 gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
 `benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
-pass-rate metrics to remain at 1.0 and `privacy_leak_count` to remain 0.
+pass-rate metrics to remain at 1.0, `natural_false_promotion_rate` to remain 0,
+and `privacy_leak_count` to remain 0.
 
 ## End-To-End Induction-To-Recall Benchmark
 

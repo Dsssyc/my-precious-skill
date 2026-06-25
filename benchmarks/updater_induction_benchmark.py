@@ -38,6 +38,13 @@ SENSITIVE_OUTPUT_RE = re.compile(
     r"\bAKIA[0-9A-Z]{16}\b"
     r")"
 )
+FALSE_PROMOTION_REASON_METRICS = {
+    "ephemeral_status": "ephemeral_status",
+    "hypothetical": "hypothetical",
+    "acknowledgement_only": "acknowledgement_only",
+    "temporary_local_decision": "temporary_local_decision",
+    "generic_rule": "generic_rule",
+}
 
 
 @dataclass
@@ -53,6 +60,18 @@ class CaseScore:
     leaked: bool
     induction_cases: int = 0
     induction_hits: int = 0
+    false_promotion_cases: int = 0
+    false_promotions: int = 0
+    ephemeral_status_cases: int = 0
+    ephemeral_status_rejections: int = 0
+    hypothetical_cases: int = 0
+    hypothetical_rejections: int = 0
+    acknowledgement_only_cases: int = 0
+    acknowledgement_only_rejections: int = 0
+    temporary_local_decision_cases: int = 0
+    temporary_local_decision_rejections: int = 0
+    generic_rule_cases: int = 0
+    generic_rule_rejections: int = 0
     natural_cases: int = 0
     natural_hits: int = 0
     cross_project_generalization_cases: int = 0
@@ -83,6 +102,12 @@ class CaseScore:
 def ratio(numerator: int, denominator: int) -> float:
     if denominator == 0:
         return 1.0
+    return numerator / denominator
+
+
+def false_rate(numerator: int, denominator: int) -> float:
+    if denominator == 0:
+        return 0.0
     return numerator / denominator
 
 
@@ -442,6 +467,24 @@ def noise_rejection_hit(nodes: list[dict[str, Any]], expected: dict[str, Any]) -
     return True
 
 
+def false_promotion_present(nodes: list[dict[str, Any]], expected: dict[str, Any]) -> bool:
+    text = str(expected.get("text") or "").strip()
+    pattern = str(expected.get("pattern") or "").strip()
+    if not text and not pattern:
+        raise SystemExit("expected_false_promotions entries must include text or pattern")
+    for node in nodes:
+        node_text = str(node.get("text") or "")
+        if text and node_text == text:
+            return True
+        if pattern:
+            try:
+                if re.search(pattern, node_text, re.IGNORECASE):
+                    return True
+            except re.error as exc:
+                raise SystemExit("invalid expected false promotion pattern") from exc
+    return False
+
+
 def score_natural_quality_expectations(
     case: dict[str, Any],
     memory_repo: Path,
@@ -474,6 +517,18 @@ def score_natural_quality_expectations(
             raise SystemExit("expected_noise_rejections entries must be objects")
         score["noise_cases"] += 1
         score["noise_hits"] += int(noise_rejection_hit(nodes, expected))
+
+    for expected in case.get("expected_false_promotions") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_false_promotions entries must be objects")
+        score["false_promotion_cases"] += 1
+        promoted = false_promotion_present(nodes, expected)
+        score["false_promotions"] += int(promoted)
+        reason = str(expected.get("reason") or "")
+        metric = FALSE_PROMOTION_REASON_METRICS.get(reason)
+        if metric:
+            score[f"{metric}_cases"] += 1
+            score[f"{metric}_rejections"] += int(not promoted)
     return score
 
 
@@ -485,7 +540,15 @@ def natural_quality_expectations_pass(score: Counter) -> bool:
         ("review_hits", "review_cases"),
         ("noise_hits", "noise_cases"),
     )
-    return all(score[hits] == score[cases] for hits, cases in pairs)
+    rejection_pairs = tuple(
+        (f"{metric}_rejections", f"{metric}_cases")
+        for metric in FALSE_PROMOTION_REASON_METRICS.values()
+    )
+    return (
+        score["false_promotions"] == 0
+        and all(score[hits] == score[cases] for hits, cases in pairs)
+        and all(score[hits] == score[cases] for hits, cases in rejection_pairs)
+    )
 
 
 def list_texts(value: object) -> list[str]:
@@ -600,6 +663,18 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         refusal_cases=refusal_cases,
         refusal_hits=refusal_hits,
         source_records=source_records,
+        false_promotion_cases=natural_quality["false_promotion_cases"],
+        false_promotions=natural_quality["false_promotions"],
+        ephemeral_status_cases=natural_quality["ephemeral_status_cases"],
+        ephemeral_status_rejections=natural_quality["ephemeral_status_rejections"],
+        hypothetical_cases=natural_quality["hypothetical_cases"],
+        hypothetical_rejections=natural_quality["hypothetical_rejections"],
+        acknowledgement_only_cases=natural_quality["acknowledgement_only_cases"],
+        acknowledgement_only_rejections=natural_quality["acknowledgement_only_rejections"],
+        temporary_local_decision_cases=natural_quality["temporary_local_decision_cases"],
+        temporary_local_decision_rejections=natural_quality["temporary_local_decision_rejections"],
+        generic_rule_cases=natural_quality["generic_rule_cases"],
+        generic_rule_rejections=natural_quality["generic_rule_rejections"],
         natural_cases=natural_quality["natural_cases"],
         natural_hits=natural_quality["natural_hits"],
         cross_project_generalization_cases=natural_quality["cross_project_generalization_cases"],
@@ -739,6 +814,18 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["source_records"] += score.source_records
         totals["induction_cases"] += score.induction_cases
         totals["induction_hits"] += score.induction_hits
+        totals["false_promotion_cases"] += score.false_promotion_cases
+        totals["false_promotions"] += score.false_promotions
+        totals["ephemeral_status_cases"] += score.ephemeral_status_cases
+        totals["ephemeral_status_rejections"] += score.ephemeral_status_rejections
+        totals["hypothetical_cases"] += score.hypothetical_cases
+        totals["hypothetical_rejections"] += score.hypothetical_rejections
+        totals["acknowledgement_only_cases"] += score.acknowledgement_only_cases
+        totals["acknowledgement_only_rejections"] += score.acknowledgement_only_rejections
+        totals["temporary_local_decision_cases"] += score.temporary_local_decision_cases
+        totals["temporary_local_decision_rejections"] += score.temporary_local_decision_rejections
+        totals["generic_rule_cases"] += score.generic_rule_cases
+        totals["generic_rule_rejections"] += score.generic_rule_rejections
         totals["natural_cases"] += score.natural_cases
         totals["natural_hits"] += score.natural_hits
         totals["cross_project_generalization_cases"] += score.cross_project_generalization_cases
@@ -787,6 +874,7 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "expected_privacy_redactions": int(totals["redaction_cases"]),
         "induction_success_rate": ratio(totals["induction_hits"], totals["induction_cases"]),
         "natural_induction_success_rate": ratio(totals["natural_hits"], totals["natural_cases"]),
+        "natural_false_promotion_rate": false_rate(totals["false_promotions"], totals["false_promotion_cases"]),
         "cross_project_generalization_rate": ratio(
             totals["cross_project_generalization_hits"],
             totals["cross_project_generalization_cases"],
@@ -796,6 +884,27 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
             totals["project_scope_precision_cases"],
         ),
         "ambiguous_candidate_review_rate": ratio(totals["review_hits"], totals["review_cases"]),
+        "review_routing_rate": ratio(totals["review_hits"], totals["review_cases"]),
+        "ephemeral_status_rejection_rate": ratio(
+            totals["ephemeral_status_rejections"],
+            totals["ephemeral_status_cases"],
+        ),
+        "hypothetical_rejection_rate": ratio(
+            totals["hypothetical_rejections"],
+            totals["hypothetical_cases"],
+        ),
+        "acknowledgement_only_rejection_rate": ratio(
+            totals["acknowledgement_only_rejections"],
+            totals["acknowledgement_only_cases"],
+        ),
+        "temporary_local_decision_rejection_rate": ratio(
+            totals["temporary_local_decision_rejections"],
+            totals["temporary_local_decision_cases"],
+        ),
+        "generic_rule_rejection_rate": ratio(
+            totals["generic_rule_rejections"],
+            totals["generic_rule_cases"],
+        ),
         "process_noise_rejection_rate": ratio(totals["noise_hits"], totals["noise_cases"]),
         "layer_assignment_accuracy": ratio(totals["layer_hits"], totals["layer_cases"]),
         "evidence_retention_rate": ratio(totals["evidence_hits"], totals["evidence_cases"]),

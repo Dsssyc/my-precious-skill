@@ -144,6 +144,54 @@ NATURAL_USER_MEMORY_PATTERNS = (
     (re.compile(r"(?i)^\s*my\s+preference\s+is\s+(?:that\s+)?(?P<text>.+)$"), "The user prefers {text}"),
     (re.compile(r"(?i)^\s*i\s+want\s+(?P<text>.+)$"), "The user wants {text}"),
 )
+ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
+    r"(?i)^\s*(?:understood|got it|noted|sure|okay|ok)[,;:.! ]+"
+    r".{0,120}\b(?:i\s+will|i'll|i’ll|keep\s+it\s+in\s+mind|this\s+edit|next\s+step)\b"
+)
+HYPOTHETICAL_MEMORY_PATTERN = re.compile(
+    r"(?i)\b(?:we|i|it|this)\s+(?:could|might|may)\b|\bmaybe\b|\bif\s+[^.?!]{0,120}\b(?:becomes|became|were|was|is)\b"
+)
+TEMPORARY_LOCAL_MEMORY_PATTERN = re.compile(
+    r"(?i)\b(?:for|in)\s+this\s+(?:local|temporary|scratch|dry[- ]?run)\b|"
+    r"\btemporary\s+(?:update|fixture|induction|choice|decision)\b|"
+    r"\bscratch\s+workspace\b|\bcurrent\s+(?:run|test|gate|status)\b"
+)
+TEST_STATUS_MEMORY_PATTERN = re.compile(
+    r"(?i)\b(?:benchmark|test|tests?|gate)\s+(?:gate\s+)?should\s+pass\b|"
+    r"\b(?:test|gate|benchmark)\s+status\b|\bafter\s+rerun\b|\bcurrent\s+test\b"
+)
+PROMPT_LIKE_QUOTED_MEMORY_PATTERN = re.compile(
+    r"(?i)^\s*(?:quoted|raw)\s+(?:prompt|instruction|text)\b|"
+    r'"[^"]*\b(?:assistant|system|user)\s+must\b[^"]*"'
+)
+BROAD_GENERIC_MEMORY_WORDS = {
+    "a",
+    "and",
+    "agent",
+    "agents",
+    "archive",
+    "archives",
+    "be",
+    "better",
+    "clear",
+    "good",
+    "helpful",
+    "memory",
+    "memories",
+    "reliable",
+    "safe",
+    "should",
+    "system",
+    "systems",
+    "the",
+    "tool",
+    "tools",
+    "useful",
+    "well",
+    "work",
+    "workflow",
+    "workflows",
+}
 SENSITIVE_EXPLICIT_MEMORY_MARKERS = (
     "[redacted_",
     "authorization:",
@@ -936,6 +984,33 @@ def split_memory_text(text: str, limit: int = 32) -> list[str]:
     return sentences[:limit] if sentences else [clip(text)]
 
 
+def is_broad_generic_memory_rule(text: str) -> bool:
+    compacted = compact_whitespace(text).lower().strip(" .!?;:")
+    if not re.search(r"\b(?:should|must)\b", compacted):
+        return False
+    tokens = re.findall(r"[a-z][a-z-]+", compacted)
+    if not tokens or len(tokens) > 8:
+        return False
+    return all(token in BROAD_GENERIC_MEMORY_WORDS for token in tokens)
+
+
+def is_non_durable_natural_memory_text(text: str) -> bool:
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return False
+    if ACKNOWLEDGEMENT_ONLY_PATTERN.search(compacted):
+        return True
+    if HYPOTHETICAL_MEMORY_PATTERN.search(compacted):
+        return True
+    if TEMPORARY_LOCAL_MEMORY_PATTERN.search(compacted):
+        return True
+    if TEST_STATUS_MEMORY_PATTERN.search(compacted):
+        return True
+    if PROMPT_LIKE_QUOTED_MEMORY_PATTERN.search(compacted):
+        return True
+    return is_broad_generic_memory_rule(compacted)
+
+
 def is_low_signal_memory_text(text: str) -> bool:
     compacted = compact_whitespace(text)
     if not compacted:
@@ -951,6 +1026,8 @@ def is_low_signal_memory_text(text: str) -> bool:
     if ARCHIVE_EVALUATION_STATUS_PATTERN.search(compacted):
         return True
     if LOW_SIGNAL_HEADING_PATTERN.search(compacted):
+        return True
+    if is_non_durable_natural_memory_text(compacted):
         return True
     return bool(RUN_STATUS_PATTERN.search(compacted))
 

@@ -521,17 +521,25 @@ python benchmarks/updater_induction_benchmark.py \
 
 induction benchmark 只输出 aggregate JSON 指标：
 `induction_success_rate`、`natural_induction_success_rate`、
-`cross_project_generalization_rate`、`project_scope_precision`、
-`ambiguous_candidate_review_rate`、`process_noise_rejection_rate`、
+`natural_false_promotion_rate`、`cross_project_generalization_rate`、
+`project_scope_precision`、`ambiguous_candidate_review_rate`、
+`review_routing_rate`、`process_noise_rejection_rate`、
+`ephemeral_status_rejection_rate`、`hypothetical_rejection_rate`、
+`acknowledgement_only_rejection_rate`、
+`temporary_local_decision_rejection_rate`、`generic_rule_rejection_rate`、
 `evidence_retention_rate`、`source_ref_policy_pass_rate`、
 `lifecycle_link_accuracy`、`forced_memory_capture_rate`、
 `privacy_refusal_pass_rate`、`privacy_redaction_pass_rate` 和
 `privacy_leak_count`。packaged synthetic suite 覆盖跨项目自动归纳、项目作用域归纳、
 自然语言 preference/workflow 归纳、project-scoped implementation constraint、
-ambiguous scope candidate 进入 review、process-noise rejection、
-source-record forced memory、supersede/contradict/deprecate lifecycle link、
-redacted source record，以及默认拒绝 likely-secret source record。它不会渲染
-source content、memory text、source path、raw ref 或 per-case detail。
+ambiguous scope candidate 进入 review、adversarial natural-language precision
+cases、process-noise rejection、source-record forced memory、
+supersede/contradict/deprecate lifecycle link、redacted source record，以及默认拒绝
+likely-secret source record。adversarial precision cases 覆盖带 `should`/`must` 的
+一次性 status/progress update、只有 acknowledgement 的回复、`we could` 或 `maybe`
+假设语句、临时本地 implementation choice、test-result chatter、quoted prompt-like
+text，以及缺少 distinctive support 的宽泛 generic rule。它不会渲染 source content、
+memory text、source path、raw ref 或 per-case detail。
 
 end-to-end synthetic benchmark 会把写入路径和读取路径串起来：它创建临时合成
 source records，运行真实 `setup_memory_archive.py` 和 updater，从生成的
@@ -656,6 +664,8 @@ skills/using-my-precious/references/archive-format.md
 - end-to-end synthetic induction-to-recall benchmark，可运行 setup、updater、
   生成后的 layered recall cases，以及复制出的 search script，并只输出
   aggregate quality gate 指标。
+- updater-driven natural-induction precision gates，覆盖 adversarial synthetic
+  false-promotion cases 和 review routing。
 - 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
   boost、低信号 memory-node 过滤和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。

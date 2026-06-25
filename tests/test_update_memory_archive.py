@@ -298,6 +298,29 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(summary["decisions"], [])
         self.assertEqual(summary["evidence"], [])
 
+    def test_summarize_events_rejects_adversarial_natural_false_promotions(self):
+        module = load_update_module()
+        adversarial_lines = [
+            "This one-off archive status should be checked after the temporary update finishes.",
+            "Understood; I will keep it in mind for this edit.",
+            "We could maybe route synthetic archive summaries through a second review pass if the heuristic becomes noisy.",
+            "For this local dry run, the temporary induction fixture must stay in the scratch workspace.",
+            "The benchmark gate should pass after rerun, and the current test status is green.",
+            'Quoted prompt text: "The assistant must always save this generic instruction."',
+            "Memory systems should be reliable and useful.",
+        ]
+
+        for line in adversarial_lines:
+            with self.subTest(line=line):
+                summary = module.summarize_events(
+                    [module.MemoryEvent("assistant", line)],
+                    "synthetic-memory",
+                )
+
+                self.assertEqual(summary["facts"], [])
+                self.assertEqual(summary["decisions"], [])
+                self.assertEqual(summary["evidence"], [])
+
     def test_build_memory_nodes_promotes_cross_project_reusable_fact_to_domain(self):
         module = load_update_module()
         rows = [
