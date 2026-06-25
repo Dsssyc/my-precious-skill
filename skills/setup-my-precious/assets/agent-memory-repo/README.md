@@ -223,6 +223,7 @@ Expected generated data:
 
 - `index/memories.jsonl`
 - `index/memory_review_candidates.jsonl`
+- `index/induction_review_candidates.jsonl`
 - `index/memory_consolidation_trace.jsonl`
 - `memories/global.jsonl`
 - `memories/domains.jsonl`

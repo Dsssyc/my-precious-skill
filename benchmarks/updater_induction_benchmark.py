@@ -45,6 +45,11 @@ FALSE_PROMOTION_REASON_METRICS = {
     "temporary_local_decision": "temporary_local_decision",
     "generic_rule": "generic_rule",
 }
+INDUCTION_REVIEW_REASON_METRICS = {
+    "low_confidence_natural_induction_requires_review": "low_confidence",
+    "scope_change_natural_induction_requires_review": "scope_change",
+    "conflicting_natural_induction_requires_review": "conflict",
+}
 
 
 @dataclass
@@ -72,6 +77,14 @@ class CaseScore:
     temporary_local_decision_rejections: int = 0
     generic_rule_cases: int = 0
     generic_rule_rejections: int = 0
+    induction_review_cases: int = 0
+    induction_review_hits: int = 0
+    low_confidence_review_cases: int = 0
+    low_confidence_review_hits: int = 0
+    scope_change_review_cases: int = 0
+    scope_change_review_hits: int = 0
+    conflict_review_cases: int = 0
+    conflict_review_hits: int = 0
     natural_cases: int = 0
     natural_hits: int = 0
     cross_project_generalization_cases: int = 0
@@ -97,6 +110,7 @@ class CaseScore:
     redaction_cases: int = 0
     redaction_hits: int = 0
     source_records: int = 0
+    automatic_node_count: int = 0
 
 
 def ratio(numerator: int, denominator: int) -> float:
@@ -311,6 +325,10 @@ def load_review_candidates(memory_repo: Path) -> list[dict[str, Any]]:
     return load_jsonl(memory_repo / "index/memory_review_candidates.jsonl")
 
 
+def load_induction_review_candidates(memory_repo: Path) -> list[dict[str, Any]]:
+    return load_jsonl(memory_repo / "index/induction_review_candidates.jsonl")
+
+
 def node_by_text(nodes: list[dict[str, Any]], text: str, source: str) -> dict[str, Any] | None:
     for node in nodes:
         if node.get("text") == text and node.get("source") == source:
@@ -399,6 +417,79 @@ def raw_refs_policy_pass(memory_repo: Path, node: dict[str, Any]) -> bool:
         if not (memory_repo / path_text).is_file():
             return False
     return True
+
+
+def natural_candidate_text_sha256(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip(" -").lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def induction_review_refs_pass(memory_repo: Path, candidate: dict[str, Any], expected: dict[str, Any]) -> bool:
+    if expected.get("expect_evidence_ref") is True:
+        derived_from = candidate.get("derived_from")
+        evidence_refs = candidate.get("evidence_refs")
+        if not isinstance(derived_from, list) or not derived_from:
+            return False
+        if not isinstance(evidence_refs, list) or not evidence_refs:
+            return False
+        for path_text in derived_from:
+            if not isinstance(path_text, str) or not is_safe_relative_path(path_text):
+                return False
+            if not (memory_repo / path_text).is_file():
+                return False
+        for ref in evidence_refs:
+            if not isinstance(ref, dict):
+                return False
+            path_text = ref.get("path")
+            quote_id = ref.get("quote_id")
+            if not isinstance(path_text, str) or not isinstance(quote_id, str):
+                return False
+            if not is_safe_relative_path(path_text):
+                return False
+            evidence_path = memory_repo / path_text
+            if not evidence_path.is_file() or not evidence_quote_id_exists(evidence_path, quote_id):
+                return False
+    if expected.get("expect_source_ref") is True:
+        raw_refs = candidate.get("raw_refs")
+        if not isinstance(raw_refs, list) or not raw_refs:
+            return False
+        for ref in raw_refs:
+            if not isinstance(ref, dict):
+                return False
+            path_text = ref.get("path")
+            anchor = ref.get("anchor")
+            if not isinstance(path_text, str) or not isinstance(anchor, str):
+                return False
+            if not is_safe_relative_path(path_text) or not SAFE_REL_PATH_RE.fullmatch(anchor):
+                return False
+            if not (memory_repo / path_text).is_file():
+                return False
+    return True
+
+
+def induction_review_candidate_hit(
+    memory_repo: Path,
+    nodes: list[dict[str, Any]],
+    induction_review_candidates: list[dict[str, Any]],
+    expected: dict[str, Any],
+) -> bool:
+    text = str(expected.get("text") or "")
+    reason = str(expected.get("reason") or "")
+    if not text or not reason:
+        raise SystemExit("expected_induction_review_candidates entries must include text and reason")
+    if expected.get("expected_no_memory") is True and node_by_text(nodes, text, "automatic") is not None:
+        return False
+    text_hash = natural_candidate_text_sha256(text)
+    for candidate in induction_review_candidates:
+        if (
+            candidate.get("candidate_text_sha256") == text_hash
+            and candidate.get("reason") == reason
+            and candidate.get("candidate_type") == "natural_induction_review"
+            and candidate.get("recommended_action") == "manual_review"
+            and induction_review_refs_pass(memory_repo, candidate, expected)
+        ):
+            return True
+    return False
 
 
 def lifecycle_link_hit(
@@ -512,6 +603,19 @@ def score_natural_quality_expectations(
         score["review_cases"] += 1
         score["review_hits"] += int(review_candidate_hit(nodes, review_candidates, expected))
 
+    induction_review_candidates = load_induction_review_candidates(memory_repo)
+    for expected in case.get("expected_induction_review_candidates") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_induction_review_candidates entries must be objects")
+        score["induction_review_cases"] += 1
+        hit = induction_review_candidate_hit(memory_repo, nodes, induction_review_candidates, expected)
+        score["induction_review_hits"] += int(hit)
+        reason = str(expected.get("reason") or "")
+        metric = INDUCTION_REVIEW_REASON_METRICS.get(reason)
+        if metric:
+            score[f"{metric}_review_cases"] += 1
+            score[f"{metric}_review_hits"] += int(hit)
+
     for expected in case.get("expected_noise_rejections") or []:
         if not isinstance(expected, dict):
             raise SystemExit("expected_noise_rejections entries must be objects")
@@ -544,10 +648,17 @@ def natural_quality_expectations_pass(score: Counter) -> bool:
         (f"{metric}_rejections", f"{metric}_cases")
         for metric in FALSE_PROMOTION_REASON_METRICS.values()
     )
+    review_pairs = (
+        ("induction_review_hits", "induction_review_cases"),
+        ("low_confidence_review_hits", "low_confidence_review_cases"),
+        ("scope_change_review_hits", "scope_change_review_cases"),
+        ("conflict_review_hits", "conflict_review_cases"),
+    )
     return (
         score["false_promotions"] == 0
         and all(score[hits] == score[cases] for hits, cases in pairs)
         and all(score[hits] == score[cases] for hits, cases in rejection_pairs)
+        and all(score[hits] == score[cases] for hits, cases in review_pairs)
     )
 
 
@@ -675,6 +786,14 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         temporary_local_decision_rejections=natural_quality["temporary_local_decision_rejections"],
         generic_rule_cases=natural_quality["generic_rule_cases"],
         generic_rule_rejections=natural_quality["generic_rule_rejections"],
+        induction_review_cases=natural_quality["induction_review_cases"],
+        induction_review_hits=natural_quality["induction_review_hits"],
+        low_confidence_review_cases=natural_quality["low_confidence_review_cases"],
+        low_confidence_review_hits=natural_quality["low_confidence_review_hits"],
+        scope_change_review_cases=natural_quality["scope_change_review_cases"],
+        scope_change_review_hits=natural_quality["scope_change_review_hits"],
+        conflict_review_cases=natural_quality["conflict_review_cases"],
+        conflict_review_hits=natural_quality["conflict_review_hits"],
         natural_cases=natural_quality["natural_cases"],
         natural_hits=natural_quality["natural_hits"],
         cross_project_generalization_cases=natural_quality["cross_project_generalization_cases"],
@@ -685,6 +804,7 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         review_hits=natural_quality["review_hits"],
         noise_cases=natural_quality["noise_cases"],
         noise_hits=natural_quality["noise_hits"],
+        automatic_node_count=sum(1 for node in nodes if node.get("source") == "automatic"),
     )
     if case.get("expected_redaction") is True:
         score.redaction_cases += 1
@@ -826,6 +946,14 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["temporary_local_decision_rejections"] += score.temporary_local_decision_rejections
         totals["generic_rule_cases"] += score.generic_rule_cases
         totals["generic_rule_rejections"] += score.generic_rule_rejections
+        totals["induction_review_cases"] += score.induction_review_cases
+        totals["induction_review_hits"] += score.induction_review_hits
+        totals["low_confidence_review_cases"] += score.low_confidence_review_cases
+        totals["low_confidence_review_hits"] += score.low_confidence_review_hits
+        totals["scope_change_review_cases"] += score.scope_change_review_cases
+        totals["scope_change_review_hits"] += score.scope_change_review_hits
+        totals["conflict_review_cases"] += score.conflict_review_cases
+        totals["conflict_review_hits"] += score.conflict_review_hits
         totals["natural_cases"] += score.natural_cases
         totals["natural_hits"] += score.natural_hits
         totals["cross_project_generalization_cases"] += score.cross_project_generalization_cases
@@ -850,6 +978,7 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["refusal_hits"] += score.refusal_hits
         totals["redaction_cases"] += score.redaction_cases
         totals["redaction_hits"] += score.redaction_hits
+        totals["automatic_node_count"] += score.automatic_node_count
         totals["privacy_leak_count"] += int(score.leaked)
         totals["failed_case_count"] += int(not score.passed)
     return {
@@ -875,6 +1004,29 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "induction_success_rate": ratio(totals["induction_hits"], totals["induction_cases"]),
         "natural_induction_success_rate": ratio(totals["natural_hits"], totals["natural_cases"]),
         "natural_false_promotion_rate": false_rate(totals["false_promotions"], totals["false_promotion_cases"]),
+        "auto_promotion_precision": ratio(
+            totals["induction_hits"]
+            + totals["induction_review_hits"]
+            + totals["false_promotion_cases"]
+            - totals["false_promotions"],
+            totals["induction_cases"] + totals["induction_review_cases"] + totals["false_promotion_cases"],
+        ),
+        "induction_review_routing_rate": ratio(
+            totals["induction_review_hits"],
+            totals["induction_review_cases"],
+        ),
+        "low_confidence_review_rate": ratio(
+            totals["low_confidence_review_hits"],
+            totals["low_confidence_review_cases"],
+        ),
+        "scope_change_review_rate": ratio(
+            totals["scope_change_review_hits"],
+            totals["scope_change_review_cases"],
+        ),
+        "conflict_review_rate": ratio(
+            totals["conflict_review_hits"],
+            totals["conflict_review_cases"],
+        ),
         "cross_project_generalization_rate": ratio(
             totals["cross_project_generalization_hits"],
             totals["cross_project_generalization_cases"],

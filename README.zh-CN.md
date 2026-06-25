@@ -521,8 +521,11 @@ python benchmarks/updater_induction_benchmark.py \
 
 induction benchmark 只输出 aggregate JSON 指标：
 `induction_success_rate`、`natural_induction_success_rate`、
-`natural_false_promotion_rate`、`cross_project_generalization_rate`、
-`project_scope_precision`、`ambiguous_candidate_review_rate`、
+`natural_false_promotion_rate`、`auto_promotion_precision`、
+`cross_project_generalization_rate`、`project_scope_precision`、
+`ambiguous_candidate_review_rate`、`induction_review_routing_rate`、
+`low_confidence_review_rate`、`scope_change_review_rate`、
+`conflict_review_rate`、
 `review_routing_rate`、`process_noise_rejection_rate`、
 `ephemeral_status_rejection_rate`、`hypothetical_rejection_rate`、
 `acknowledgement_only_rejection_rate`、
@@ -532,10 +535,15 @@ induction benchmark 只输出 aggregate JSON 指标：
 `privacy_refusal_pass_rate`、`privacy_redaction_pass_rate` 和
 `privacy_leak_count`。packaged synthetic suite 覆盖跨项目自动归纳、项目作用域归纳、
 自然语言 preference/workflow 归纳、project-scoped implementation constraint、
-ambiguous scope candidate 进入 review、adversarial natural-language precision
-cases、process-noise rejection、source-record forced memory、
-supersede/contradict/deprecate lifecycle link、redacted source record，以及默认拒绝
-likely-secret source record。adversarial precision cases 覆盖带 `should`/`must` 的
+ambiguous scope candidate 进入 review、natural induction review calibration、
+adversarial natural-language precision cases、process-noise rejection、
+source-record forced memory、supersede/contradict/deprecate lifecycle link、
+redacted source record，以及默认拒绝 likely-secret source record。natural review
+calibration 覆盖只有部分支持的重复 statement、冲突 preference、scope broadening
+或 narrowing、低置信一次性 candidate，以及应该保持 reviewable 而不是被拒绝或
+提升的 candidate。review candidate row 会保留 evidence/source refs 供审计使用，
+但只存 `candidate_text_sha256`，不渲染 candidate text。adversarial precision cases
+覆盖带 `should`/`must` 的
 一次性 status/progress update、只有 acknowledgement 的回复、`we could` 或 `maybe`
 假设语句、临时本地 implementation choice、test-result chatter、quoted prompt-like
 text，以及缺少 distinctive support 的宽泛 generic rule。它不会渲染 source content、
@@ -622,6 +630,8 @@ whitespace 错误。
   私有 reviewer decisions。
 - `index/memories.jsonl`：合并后的分层 memory 搜索索引。
 - `index/memory_review_candidates.jsonl`：需要人工 review 的模糊 lifecycle pairs。
+- `index/induction_review_candidates.jsonl`：promotion 前需要 review 的
+  aggregate-safe natural induction candidates。
 - `index/memory_review_decision_results.jsonl`：applied/ignored review decision
   状态，供聚合检查使用。
 - `index/memory_consolidation_trace.jsonl`：updater 生成的 merge、supersede、
@@ -653,6 +663,8 @@ skills/using-my-precious/references/archive-format.md
   confidence revision 和 robustness benchmark gates。
 - 面向语义 lifecycle 模糊关系的 review queue，以及解释 merge、supersede、
   contradict、deprecate 和 skip 决策的 consolidation trace index。
+- aggregate-safe natural induction review candidate index，用于低置信、冲突或
+  scope-changing 的 natural candidates，避免自动提升。
 - 只输出聚合结果的 review-decision dry-run/apply 工具，可把已确认的
   lifecycle review decisions 转成 reciprocal memory links。
 - privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、
@@ -665,7 +677,8 @@ skills/using-my-precious/references/archive-format.md
   生成后的 layered recall cases，以及复制出的 search script，并只输出
   aggregate quality gate 指标。
 - updater-driven natural-induction precision gates，覆盖 adversarial synthetic
-  false-promotion cases 和 review routing。
+  false-promotion cases 和 review routing，并包含 low-confidence、scope-change
+  和 conflict candidates 的 induction-review routing rate。
 - 零依赖 hybrid lexical 搜索脚本，支持字段加权、短语覆盖、可选项目上下文
   boost、低信号 memory-node 过滤和可解释结果原因。
 - 基于项目路径和 source/session timestamp 的增量 update 脚本。

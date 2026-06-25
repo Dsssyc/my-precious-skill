@@ -87,6 +87,11 @@ MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "compression_reason",
 )
 MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
+NATURAL_FACT_SOURCE_LABELS = frozenset({"natural_user", "natural_assistant", "natural_record"})
+LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN = re.compile(
+    r"(?i)\b(?:review\s+candidate|reviewable|reviewer\s+confirmation|before\s+(?:automatic\s+)?promotion|"
+    r"wait\s+for\s+repeated\s+support|until\s+supporting\s+evidence\s+repeats|provisional|unconfirmed)\b"
+)
 REDACTION_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
     "bearer_token": re.compile(r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+"),
@@ -228,6 +233,7 @@ class MemoryCandidate:
     source_map_path: str
     source_updated_at: str
     tags: tuple[str, ...]
+    provenance: str = ""
     supersedes_texts: tuple[str, ...] = ()
     deprecates_texts: tuple[str, ...] = ()
 
@@ -1310,6 +1316,48 @@ def durable_user_memory_text(text: str) -> str:
     return cleaned
 
 
+def event_has_reusable_fact_text(events: list[MemoryEvent], fact: str) -> bool:
+    fact_key = normalize_memory_text(fact).lower()
+    if not fact_key:
+        return False
+    for event in events:
+        if event.kind not in {"assistant", "record"}:
+            continue
+        for part in split_memory_text(event.text):
+            match = REUSABLE_FACT_PREFIX.match(part)
+            if not match:
+                continue
+            text = normalize_memory_text(match.group("text"))
+            if text.lower() == fact_key:
+                return True
+    return False
+
+
+def fact_source_entries(
+    facts: list[str],
+    events: list[MemoryEvent],
+    natural_user_facts: list[str],
+    retrieval_literals: list[str],
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    natural_user_keys = {normalize_memory_text(text).lower() for text in natural_user_facts}
+    retrieval_literal_keys = {normalize_memory_text(text).lower() for text in retrieval_literals}
+    for fact in facts:
+        fact_key = normalize_memory_text(fact).lower()
+        if not fact_key:
+            continue
+        if fact_key in natural_user_keys:
+            source = "natural_user"
+        elif fact_key in retrieval_literal_keys:
+            source = "retrieval_literal"
+        elif event_has_reusable_fact_text(events, fact):
+            source = "explicit_reusable_fact"
+        else:
+            source = "natural_assistant"
+        entries.append({"text": fact, "source": source})
+    return entries
+
+
 def clean_command_output(text: str) -> str:
     stripped = text.strip()
     if stripped.lower().startswith("chunk id:") and "\nOutput:\n" in stripped:
@@ -1928,6 +1976,7 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         "summary": summary,
         "context": context[:5],
         "facts": facts,
+        "fact_sources": fact_source_entries(facts, events, natural_user_facts, retrieval_literals),
         "decisions": decisions,
         "problems": problems,
         "unresolved": unresolved,
@@ -2203,6 +2252,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "user_intent": summary_data["user_intent"],
         "summary": summary_data["summary"],
         "reusable_facts": summary_data["facts"],
+        "reusable_fact_sources": summary_data["fact_sources"],
         "tags": summary_data["tags"],
         "decisions": summary_data["decisions"],
         "explicit_memories": explicit_memories,
@@ -2495,9 +2545,18 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
         tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
         summary_path = str(row.get("summary_path", ""))
         evidence_path = str(row.get("evidence_path", ""))
+        fact_sources = {}
+        for item in row.get("reusable_fact_sources") or []:
+            if not isinstance(item, dict):
+                continue
+            text = normalize_memory_text(str(item.get("text") or ""))
+            source = str(item.get("source") or "")
+            if text and source:
+                fact_sources[text.lower()] = source
         if not summary_path or not evidence_path:
             continue
         for text, rationale in iter_memory_candidate_texts(row):
+            provenance = fact_sources.get(normalize_memory_text(text).lower(), "")
             text, supersedes_texts = parse_memory_refresh_text(text, is_noisy_text)
             text, deprecates_texts = parse_memory_deprecation_text(text, is_noisy_text)
             if deprecates_texts:
@@ -2518,6 +2577,7 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     source_map_path=str(row.get("source_map_path", "")),
                     source_updated_at=str(row.get("source_updated_at", "")),
                     tags=tags,
+                    provenance=provenance,
                     supersedes_texts=supersedes_texts,
                     deprecates_texts=deprecates_texts,
                 )
@@ -2536,9 +2596,167 @@ def evidence_ref_for_path(memory_repo: Path | None, path: str) -> dict[str, str]
     return {"path": path, "quote_id": quote_id}
 
 
-def build_memory_nodes(rows: list[dict], memory_repo: Path | None = None) -> list[dict]:
+def is_natural_memory_candidate(candidate: MemoryCandidate) -> bool:
+    return candidate.provenance in NATURAL_FACT_SOURCE_LABELS
+
+
+def candidate_identity(candidate: MemoryCandidate) -> tuple[str, str, str, str]:
+    return (
+        normalize_memory_text(candidate.text).lower(),
+        candidate.summary_path,
+        candidate.evidence_path,
+        candidate.source_updated_at,
+    )
+
+
+def natural_candidate_text_sha256(text: str) -> str:
+    normalized = normalize_memory_text(text).lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def induction_review_candidate_id(candidate: MemoryCandidate, reason: str) -> str:
+    payload = "\n".join(
+        [
+            normalize_memory_text(candidate.text).lower(),
+            reason,
+            candidate.summary_path,
+            candidate.evidence_path,
+            candidate.source_updated_at,
+        ]
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"indrev_{digest[:16]}"
+
+
+def should_low_confidence_review_natural_candidate(candidate: MemoryCandidate) -> bool:
+    return bool(LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN.search(candidate.text))
+
+
+def induction_review_reason_from_relation(detail: dict) -> str:
+    relation = str(detail.get("relation") or "")
+    review_reason = str(detail.get("review_reason") or "")
+    if relation == "contradiction" or review_reason == "low_confidence_contradiction_requires_review":
+        return "conflicting_natural_induction_requires_review"
+    if review_reason == "ambiguous_scope_narrowing_requires_review":
+        return "scope_change_natural_induction_requires_review"
+    if review_reason == "low_confidence_semantic_overlap_requires_review":
+        return "low_confidence_natural_induction_requires_review"
+    return ""
+
+
+def archive_relative_ref_exists(memory_repo: Path | None, path: str) -> bool:
+    if not path:
+        return False
+    if memory_repo is None:
+        return True
+    return archive_ref_path(memory_repo, path) is not None
+
+
+def natural_induction_review_candidate_row(
+    candidate: MemoryCandidate,
+    reason: str,
+    memory_repo: Path | None,
+    related: MemoryCandidate | None = None,
+    detail: dict | None = None,
+) -> dict:
+    row = {
+        "candidate_id": induction_review_candidate_id(candidate, reason),
+        "candidate_type": "natural_induction_review",
+        "candidate_text_sha256": natural_candidate_text_sha256(candidate.text),
+        "candidate_source": candidate.provenance,
+        "reason": reason,
+        "recommended_action": "manual_review",
+        "topic": candidate.topic,
+        "support_count": 1,
+        "source_updated_at": candidate.source_updated_at,
+        "derived_from": [candidate.summary_path] if archive_relative_ref_exists(memory_repo, candidate.summary_path) else [],
+        "evidence_refs": [
+            ref
+            for ref in [evidence_ref_for_path(memory_repo, candidate.evidence_path)]
+            if ref is not None
+        ],
+        "raw_refs": [
+            ref
+            for ref in [raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, "source_record")]
+            if ref is not None
+        ],
+    }
+    if related is not None:
+        row["related_candidate_text_sha256"] = natural_candidate_text_sha256(related.text)
+        row["related_source_updated_at"] = related.source_updated_at
+    if detail:
+        row["overlap_token_count"] = int(detail.get("overlap_token_count") or 0)
+        row["overlap_ratio"] = round(float(detail.get("overlap_ratio") or 0.0), 6)
+    return row
+
+
+def add_induction_review_candidate(
+    rows_by_id: dict[str, dict],
+    withheld: set[tuple[str, str, str, str]],
+    candidate: MemoryCandidate,
+    reason: str,
+    memory_repo: Path | None,
+    related: MemoryCandidate | None = None,
+    detail: dict | None = None,
+) -> None:
+    row = natural_induction_review_candidate_row(candidate, reason, memory_repo, related, detail)
+    rows_by_id.setdefault(str(row["candidate_id"]), row)
+    withheld.add(candidate_identity(candidate))
+    if related is not None:
+        withheld.add(candidate_identity(related))
+
+
+def build_induction_review_candidates(
+    candidates: list[MemoryCandidate],
+    memory_repo: Path | None = None,
+) -> tuple[list[dict], set[tuple[str, str, str, str]]]:
+    rows_by_id: dict[str, dict] = {}
+    withheld: set[tuple[str, str, str, str]] = set()
+    natural_candidates = [candidate for candidate in candidates if is_natural_memory_candidate(candidate)]
+    for candidate in natural_candidates:
+        if should_low_confidence_review_natural_candidate(candidate):
+            add_induction_review_candidate(
+                rows_by_id,
+                withheld,
+                candidate,
+                "low_confidence_natural_induction_requires_review",
+                memory_repo,
+            )
+
+    ordered = sorted(natural_candidates, key=lambda candidate: (candidate.source_updated_at, candidate.summary_path, candidate.text))
+    for index, current in enumerate(ordered):
+        for older in ordered[:index]:
+            if memory_text_key(current.text) == memory_text_key(older.text):
+                continue
+            detail = semantic_relation_detail(current.text, older.text)
+            reason = induction_review_reason_from_relation(detail)
+            if not reason:
+                continue
+            add_induction_review_candidate(rows_by_id, withheld, current, reason, memory_repo, older, detail)
+
+    return (
+        sorted(
+            rows_by_id.values(),
+            key=lambda row: (
+                str(row.get("reason", "")),
+                str(row.get("source_updated_at", "")),
+                str(row.get("candidate_id", "")),
+            ),
+        ),
+        withheld,
+    )
+
+
+def build_memory_nodes_and_induction_review_candidates(
+    rows: list[dict],
+    memory_repo: Path | None = None,
+) -> tuple[list[dict], list[dict]]:
+    memory_candidates = memory_candidates_from_meta(rows)
+    induction_review_candidates, withheld_candidates = build_induction_review_candidates(memory_candidates, memory_repo)
     grouped: dict[str, list[MemoryCandidate]] = {}
-    for candidate in memory_candidates_from_meta(rows):
+    for candidate in memory_candidates:
+        if candidate_identity(candidate) in withheld_candidates:
+            continue
         key = memory_consolidation_key(candidate.text)
         grouped.setdefault(key, []).append(candidate)
 
@@ -2630,6 +2848,11 @@ def build_memory_nodes(rows: list[dict], memory_repo: Path | None = None) -> lis
             nodes.append(node)
             existing_ids.add(str(node["memory_id"]))
     nodes.sort(key=lambda node: (str(node.get("layer", "")), str(node.get("memory_id", ""))))
+    return nodes, induction_review_candidates
+
+
+def build_memory_nodes(rows: list[dict], memory_repo: Path | None = None) -> list[dict]:
+    nodes, _ = build_memory_nodes_and_induction_review_candidates(rows, memory_repo)
     return nodes
 
 
@@ -3144,7 +3367,7 @@ def rebuild_indexes(memory_repo: Path) -> None:
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
     repair_legacy_source_map_paths(memory_repo, rows)
-    memory_nodes = build_memory_nodes(rows, memory_repo)
+    memory_nodes, induction_review_candidates = build_memory_nodes_and_induction_review_candidates(rows, memory_repo)
     review_decisions = load_memory_review_decisions(memory_repo)
     initial_review_candidates = build_memory_review_candidates(memory_nodes)
     review_decision_results = apply_memory_review_decisions(
@@ -3263,6 +3486,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
         "index file",
     )
     write_jsonl_index(memory_repo, index_dir / "memory_review_candidates.jsonl", review_candidates, "memory review index")
+    write_jsonl_index(
+        memory_repo,
+        index_dir / "induction_review_candidates.jsonl",
+        induction_review_candidates,
+        "induction review index",
+    )
     write_jsonl_index(
         memory_repo,
         index_dir / "memory_review_decision_results.jsonl",

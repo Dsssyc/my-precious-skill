@@ -632,8 +632,11 @@ python benchmarks/updater_induction_benchmark.py \
 
 The induction benchmark reports aggregate-only JSON metrics:
 `induction_success_rate`, `natural_induction_success_rate`,
-`natural_false_promotion_rate`, `cross_project_generalization_rate`,
-`project_scope_precision`, `ambiguous_candidate_review_rate`,
+`natural_false_promotion_rate`, `auto_promotion_precision`,
+`cross_project_generalization_rate`, `project_scope_precision`,
+`ambiguous_candidate_review_rate`, `induction_review_routing_rate`,
+`low_confidence_review_rate`, `scope_change_review_rate`,
+`conflict_review_rate`,
 `review_routing_rate`, `process_noise_rejection_rate`,
 `ephemeral_status_rejection_rate`, `hypothetical_rejection_rate`,
 `acknowledgement_only_rejection_rate`,
@@ -644,9 +647,15 @@ The induction benchmark reports aggregate-only JSON metrics:
 `privacy_leak_count`. Its packaged synthetic suite covers cross-project
 automatic induction, natural-language preference and workflow induction,
 project-scoped implementation constraints, ambiguous scope candidates routed to
-review, adversarial natural-language precision cases, process-noise rejection,
-source-record forced memory, supersede/contradict/deprecate lifecycle links,
-redacted source records, and default refusal of likely-secret source records.
+review, natural induction review calibration, adversarial natural-language
+precision cases, process-noise rejection, source-record forced memory,
+supersede/contradict/deprecate lifecycle links, redacted source records, and
+default refusal of likely-secret source records.
+Natural review calibration covers repeated statements with partial support,
+conflicting preferences, scope broadening or narrowing, low-confidence one-off
+candidates, and candidates that should remain reviewable instead of being
+rejected or promoted. Review candidate rows preserve evidence/source refs for
+audit, but store `candidate_text_sha256` instead of rendering candidate text.
 The adversarial precision cases cover one-off status or progress updates with
 `should`/`must`, acknowledgement-only replies, hypothetical `we could` or
 `maybe` statements, temporary local implementation choices, test-result
@@ -739,6 +748,8 @@ A compatible deployment repository should expose:
 - `index/memories.jsonl`: combined layered-memory search index.
 - `index/memory_review_candidates.jsonl`: ambiguous lifecycle pairs requiring
   manual review before automatic retirement.
+- `index/induction_review_candidates.jsonl`: aggregate-safe natural induction
+  candidates that require review before promotion.
 - `index/memory_review_decision_results.jsonl`: aggregate-safe applied/ignored
   review decision statuses.
 - `index/memory_consolidation_trace.jsonl`: explainable merge, supersede,
@@ -770,6 +781,9 @@ skills/using-my-precious/references/archive-format.md
   retired nodes, and robustness benchmark gates.
 - Ambiguity review queue and consolidation decision trace indexes for semantic
   lifecycle cases that should not be auto-retired.
+- Aggregate-safe natural induction review candidate index for low-confidence,
+  conflicting, or scope-changing natural candidates that should not be
+  auto-promoted.
 - Aggregate-only review-decision dry-run/apply tool for converting approved
   lifecycle review decisions into reciprocal memory links.
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,
@@ -779,7 +793,8 @@ skills/using-my-precious/references/archive-format.md
   generated layered recall cases, and the copied search script with
   aggregate-only quality gates.
 - Updater-driven natural-induction precision gates for adversarial synthetic
-  false-promotion cases and review routing.
+  false-promotion cases and review routing, including induction-review routing
+  rates for low-confidence, scope-change, and conflict candidates.
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
   optional preferred-scope ranking, and explainable result reasons.

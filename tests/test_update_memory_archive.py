@@ -282,6 +282,13 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "The user prefers benchmark review summaries to lead with quantified risks before implementation notes.",
             summary["facts"],
         )
+        self.assertIn(
+            {
+                "text": "The user prefers benchmark review summaries to lead with quantified risks before implementation notes.",
+                "source": "natural_user",
+            },
+            summary["fact_sources"],
+        )
 
     def test_summarize_events_rejects_process_noise_without_marker(self):
         module = load_update_module()
@@ -418,6 +425,73 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         nodes = module.build_memory_nodes(rows)
 
         self.assertEqual(nodes, [])
+
+    def test_rebuild_indexes_routes_natural_induction_candidates_to_review_surface(self):
+        module = load_update_module()
+        low_confidence = "Synthetic induction review candidate should wait for repeated support before promotion."
+        conflict_keep = "The user prefers synthetic review summaries to include benchmark counts before conclusions."
+        conflict_avoid = "The user prefers synthetic review summaries to exclude benchmark counts before conclusions."
+        scoped = "Synthetic induction review calibration should preserve evidence refs for project-specific natural memories."
+        broader = "Synthetic induction review calibration should preserve evidence refs for natural memories."
+        rows = [
+            ("low", low_confidence, "synthetic-low", "2026-06-26T10:00:00Z"),
+            ("conflict-a", conflict_keep, "synthetic-conflict-a", "2026-06-26T11:00:00Z"),
+            ("conflict-b", conflict_avoid, "synthetic-conflict-b", "2026-06-26T12:00:00Z"),
+            ("scope-a", scoped, "synthetic-scope-a", "2026-06-26T13:00:00Z"),
+            ("scope-b", broader, "synthetic-scope-b", "2026-06-26T14:00:00Z"),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            for session_id, fact, project, updated_at in rows:
+                entry_dir = memory_repo / "sessions/2026/06/26" / session_id
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {session_id}\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text("ev_001: Synthetic redacted evidence\n", encoding="utf-8")
+                row = {
+                    "session_id": session_id,
+                    "project": project,
+                    "project_path": f"/tmp/{project}",
+                    "source_record": f"source-records/{session_id}.jsonl",
+                    "source_updated_at": updated_at,
+                    "summary_path": f"sessions/2026/06/26/{session_id}/summary.md",
+                    "evidence_path": f"sessions/2026/06/26/{session_id}/evidence.md",
+                    "reusable_facts": [fact],
+                    "reusable_fact_sources": [{"text": fact, "source": "natural_assistant"}],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["memory", "induction"],
+                }
+                (entry_dir / "meta.json").write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+
+            module.rebuild_indexes(memory_repo)
+
+            memory_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertFalse({low_confidence, conflict_keep, conflict_avoid, scoped, broader} & {row["text"] for row in memory_rows})
+
+            review_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/induction_review_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            reasons = {row["reason"] for row in review_rows}
+            self.assertIn("low_confidence_natural_induction_requires_review", reasons)
+            self.assertIn("conflicting_natural_induction_requires_review", reasons)
+            self.assertIn("scope_change_natural_induction_requires_review", reasons)
+            for row in review_rows:
+                self.assertEqual(row["candidate_type"], "natural_induction_review")
+                self.assertEqual(row["recommended_action"], "manual_review")
+                self.assertRegex(row["candidate_id"], r"^indrev_[0-9a-f]{16}$")
+                self.assertRegex(row["candidate_text_sha256"], r"^[0-9a-f]{64}$")
+                self.assertNotIn("text", row)
+                self.assertNotIn("candidate_text", row)
+                self.assertTrue(row["derived_from"])
+                self.assertTrue(row["evidence_refs"])
+                self.assertTrue(row["raw_refs"])
 
     def test_build_memory_nodes_semantically_merges_paraphrased_reusable_facts(self):
         module = load_update_module()

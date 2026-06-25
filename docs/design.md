@@ -368,12 +368,15 @@ archive uses:
    and explicit memory directives.
 3. `write_record()` writes `summary.md`, `evidence.md`, `meta.json`,
    `redactions.md`, and `source-map.json`.
-4. `build_memory_nodes()` promotes automatic memories from `reusable_facts`,
-   writes explicit memories from source-record directives, assigns
-   `global`/`domain`/`project` layers, attaches evidence/source references, and
-   applies supersede, contradict, and deprecate lifecycle links.
+4. `build_memory_nodes_and_induction_review_candidates()` promotes automatic
+   memories from `reusable_facts`, writes explicit memories from source-record
+   directives, assigns `global`/`domain`/`project` layers, attaches
+   evidence/source references, applies supersede, contradict, and deprecate
+   lifecycle links, and withholds low-confidence, conflicting, or scope-changing
+   natural induction candidates for review.
 5. `write_memory_nodes()` and `rebuild_indexes()` write the searchable
-   `memories/*.jsonl` and `index/*.jsonl` surfaces.
+   `memories/*.jsonl`, `index/memories.jsonl`, review indexes, and supporting
+   `index/*.jsonl` surfaces.
 
 The synthetic case file is
 `benchmarks/cases/updater_induction_synthetic.jsonl`. Each JSONL row is one
@@ -385,11 +388,23 @@ optional `expected_lifecycle_links`, `expected_privacy_refusal`, or
 projects must become a `domain` memory, set `project_scope_precision: true`
 when a single-project rule must remain `project` scoped, provide
 `expected_review_candidates` for ambiguous semantic lifecycle candidates, and
-provide `expected_noise_rejections` for process chatter that must not become a
-memory node. Natural precision cases may provide `expected_false_promotions`,
-where each entry contains either `text` or `pattern` plus a `reason`; supported
-aggregate rejection reasons are `ephemeral_status`, `hypothetical`,
-`acknowledgement_only`, `temporary_local_decision`, and `generic_rule`.
+provide `expected_induction_review_candidates` for natural induction candidates
+that must become reviewable instead of automatic memories. Each
+`expected_induction_review_candidates` entry contains an exact synthetic `text`,
+the expected aggregate `reason`, and optional `expect_evidence_ref`,
+`expect_source_ref`, and `expected_no_memory` booleans. Supported reasons are
+`low_confidence_natural_induction_requires_review`,
+`scope_change_natural_induction_requires_review`, and
+`conflicting_natural_induction_requires_review`. Review candidate rows preserve
+derived session, evidence, and source references for audit, but they store
+`candidate_text_sha256` rather than candidate text so benchmark and archive
+reports do not render private natural-language content.
+Cases may also provide `expected_noise_rejections` for process chatter that
+must not become a memory node. Natural precision cases may provide
+`expected_false_promotions`, where each entry contains either `text` or
+`pattern` plus a `reason`; supported aggregate rejection reasons are
+`ephemeral_status`, `hypothetical`, `acknowledgement_only`,
+`temporary_local_decision`, and `generic_rule`.
 `raw_prompt` false-promotion fixtures contribute to
 `natural_false_promotion_rate` but do not currently have a separate reason-rate
 metric. These cases cover one-off status/progress statements with
@@ -406,8 +421,10 @@ The runner reports aggregate-only JSON. It does not render case details, source
 content, memory text, source paths, or raw refs. Core metrics are
 `induction_success_rate`, `natural_induction_success_rate`,
 `natural_false_promotion_rate`, `cross_project_generalization_rate`,
-`project_scope_precision`, `ambiguous_candidate_review_rate`,
-`review_routing_rate`, `process_noise_rejection_rate`,
+`project_scope_precision`, `auto_promotion_precision`,
+`ambiguous_candidate_review_rate`, `induction_review_routing_rate`,
+`low_confidence_review_rate`, `scope_change_review_rate`,
+`conflict_review_rate`, `review_routing_rate`, `process_noise_rejection_rate`,
 `ephemeral_status_rejection_rate`, `hypothetical_rejection_rate`,
 `acknowledgement_only_rejection_rate`,
 `temporary_local_decision_rejection_rate`, `generic_rule_rejection_rate`,
@@ -418,8 +435,9 @@ content, memory text, source paths, or raw refs. Core metrics are
 `privacy_leak_count`, `failed_case_count`, and `case_pass_rate`. The packaged
 gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
 `benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
-pass-rate metrics to remain at 1.0, `natural_false_promotion_rate` to remain 0,
-and `privacy_leak_count` to remain 0.
+pass-rate metrics to remain at 1.0, including natural induction review routing
+by low-confidence, scope-change, and conflict reason. They require
+`natural_false_promotion_rate` to remain 0 and `privacy_leak_count` to remain 0.
 
 ## End-To-End Induction-To-Recall Benchmark
 

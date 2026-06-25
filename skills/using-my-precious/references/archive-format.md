@@ -112,11 +112,15 @@ Updater diagnostics may also write internal index sidecars:
 
 - `index/memory_review_candidates.jsonl`: ambiguous semantic lifecycle pairs
   that require manual review before one memory retires another.
+- `index/induction_review_candidates.jsonl`: natural induction candidates that
+  require manual review before promotion; rows keep aggregate metadata,
+  derived-session/evidence/source references, and candidate text hashes rather
+  than candidate text.
 - `index/memory_consolidation_trace.jsonl`: aggregate decision traces for
   merge, supersede, contradict, deprecate, and skip decisions.
 
 These sidecars should reference memory IDs and decision metadata rather than
-raw source content.
+raw source content or private natural-language candidate text.
 
 Sessions remain event-level evidence. A memory node should point to session
 summaries or evidence snippets for support instead of duplicating the full
