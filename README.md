@@ -273,6 +273,25 @@ The induction report includes candidate, promotion, noise-rejection, review
 reason distribution, overlap buckets, low-risk review compression, contradiction,
 lifecycle reciprocity, evidence reachability, and privacy-pass metrics.
 
+Generate aggregate-safe natural induction review decision skeletons:
+
+```bash
+python ~/repos/agent-memory/tools/author_induction_review_decisions.py \
+  --memory-repo ~/repos/agent-memory \
+  --dry-run
+```
+
+The recommended flow is: generate the skeleton report with `--dry-run`, append
+missing skeleton rows with `--write`, have a reviewer fill the private
+`reviews/induction_review_decisions.jsonl` actions, then run
+`apply_memory_review_decisions.py --dry-run` followed by `--write`. Skeleton
+rows contain `candidate_id`, `candidate_text_sha256`, and
+`candidate_fingerprint` only; the authoring report is aggregate JSON and never
+prints candidate text, memory text, source paths, queries, raw refs, or
+transcripts. This is a safe authoring helper for the private deployment archive,
+not an approval UI and not generated private archive data for this development
+repository.
+
 Preview or apply lifecycle review decisions without rendering private memory
 text:
 
@@ -666,7 +685,10 @@ review candidates into memory nodes. Decision-set validation rejects duplicate
 `decision_id` values, repeated exact rows, and conflicting actions for the same
 candidate or candidate fingerprint. Dry-run reports expose only aggregate
 duplicate/conflict/stale/unsafe/unknown counts, never candidate text, memory
-text, source paths, or raw refs.
+text, source paths, or raw refs. The aggregate-safe authoring helper can append
+pending skeleton rows for active candidates while preserving existing manual
+decisions and skipping already reflected decisions; reviewers still fill the
+private action field themselves before apply preflight/write.
 The adversarial precision cases cover one-off status or progress updates with
 `should`/`must`, acknowledgement-only replies, hypothetical `we could` or
 `maybe` statements, temporary local implementation choices, test-result

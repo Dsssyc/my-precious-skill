@@ -143,6 +143,21 @@ The tool rejects duplicate IDs, repeated exact rows, and conflicting actions for
 the same candidate or candidate fingerprint. Dry-run preflight reports only
 aggregate duplicate/conflict/stale/unsafe/unknown counts.
 
+Generate pending induction decision skeletons without rendering candidate text
+or source paths:
+
+```bash
+python tools/author_induction_review_decisions.py --memory-repo . --dry-run
+python tools/author_induction_review_decisions.py --memory-repo . --write
+```
+
+The authoring helper appends only missing private skeleton rows containing
+`candidate_id`, `candidate_text_sha256`, and `candidate_fingerprint`. It
+preserves existing manual decisions, skips already reflected decisions, and
+prints aggregate JSON only. The recommended flow is author `--dry-run`, author
+`--write`, reviewer fills `action`, apply `--dry-run`, then apply `--write`.
+This helper is not a manual approval UI.
+
 Run an aggregate, privacy-safe shadow evaluation against this archive:
 
 ```bash

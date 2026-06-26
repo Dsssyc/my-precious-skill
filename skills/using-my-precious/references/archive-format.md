@@ -120,7 +120,11 @@ Updater diagnostics may also write internal index sidecars:
   natural induction candidates, using candidate IDs, candidate text hashes, and
   candidate fingerprints. The apply path rejects duplicate decision IDs,
   repeated exact rows, and conflicting actions for the same candidate or
-  candidate fingerprint.
+  candidate fingerprint. The aggregate-safe authoring flow is to generate
+  pending skeletons with `tools/author_induction_review_decisions.py --dry-run`,
+  append missing skeletons with `--write`, fill reviewer `action` values in this
+  private file, then run `tools/apply_memory_review_decisions.py --dry-run` and
+  `--write`.
 - `index/induction_review_decision_results.jsonl`: aggregate applied/ignored
   result rows for induction review decisions.
 - `index/memory_consolidation_trace.jsonl`: aggregate decision traces for

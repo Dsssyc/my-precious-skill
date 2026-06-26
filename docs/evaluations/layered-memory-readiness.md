@@ -217,6 +217,11 @@ suppression rates. Unit coverage now also rejects duplicate decision IDs,
 repeated exact rows, and conflicting candidate/fingerprint actions, while
 dry-run preflight reports aggregate duplicate/conflict/stale/unsafe/unknown
 counts.
+A separate aggregate-safe authoring helper now generates pending private
+decision skeletons from active `index/induction_review_candidates.jsonl` rows
+without rendering candidate text, source paths, queries, raw refs, or
+transcripts; it preserves existing manual decisions and skips already reflected
+decisions before reviewers fill actions and run apply preflight/write.
 The JSON report is aggregate-only: it does not render source content, memory
 text, source paths, raw refs, or per-case details.
 
@@ -955,6 +960,11 @@ This run used the reusable `apply_memory_review_decisions.py` dry-run and write
 commands against the private deployment archive. The commands emitted aggregate
 JSON only and did not render private memory text, source paths, raw refs, review
 candidate content, queries, or memory ids.
+
+Future induction review authoring should use
+`author_induction_review_decisions.py --dry-run` followed by `--write` only to
+append aggregate-safe skeleton rows, then keep manual action selection inside
+the private deployment archive before apply preflight/write.
 
 | metric | value |
 | --- | ---: |

@@ -25,6 +25,7 @@ def load_update_module():
 
 
 APPLY_REVIEW_DECISIONS_SCRIPT = Path("templates/agent-memory-repo/tools/apply_memory_review_decisions.py").resolve()
+AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT = Path("templates/agent-memory-repo/tools/author_induction_review_decisions.py").resolve()
 
 
 class UpdateMemoryArchiveTests(unittest.TestCase):
@@ -849,6 +850,297 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(write_payload["induction_promoted_count"], 1)
         self.assertTrue(write_payload["write_enabled"])
         self.assertIn(fact, {row["text"] for row in memory_rows})
+
+    def test_author_induction_review_decisions_tool_writes_pending_skeleton_aggregate_safe(self):
+        module = load_update_module()
+        fact = "PRIVATE AUTHOR SKELETON CANDIDATE TEXT SHOULD NOT RENDER before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "author-skeleton", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+
+            dry_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            review_file = memory_repo / "reviews/induction_review_decisions.jsonl"
+            self.assertFalse(review_file.exists())
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--write",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            rows = self.load_index_jsonl(memory_repo, "reviews/induction_review_decisions.jsonl")
+
+        self.assertNotIn("PRIVATE AUTHOR SKELETON CANDIDATE TEXT", dry_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR SKELETON CANDIDATE TEXT", dry_run.stderr)
+        self.assertNotIn("PRIVATE AUTHOR SKELETON CANDIDATE TEXT", write_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR SKELETON CANDIDATE TEXT", write_run.stderr)
+        dry_payload = json.loads(dry_run.stdout)
+        write_payload = json.loads(write_run.stdout)
+        self.assertFalse(dry_payload["write_enabled"])
+        self.assertTrue(write_payload["write_enabled"])
+        self.assertEqual(dry_payload["skeleton_count"], 1)
+        self.assertEqual(dry_payload["would_append_count"], 1)
+        self.assertEqual(write_payload["appended_count"], 1)
+        self.assertEqual(write_payload["decision_error_counts"], {})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "noop")
+        self.assertEqual(rows[0]["candidate_id"], candidate["candidate_id"])
+        self.assertEqual(rows[0]["candidate_text_sha256"], candidate["candidate_text_sha256"])
+        self.assertEqual(rows[0]["candidate_fingerprint"], module.induction_review_candidate_fingerprint(candidate))
+        self.assertNotIn("text", rows[0])
+        self.assertNotIn("candidate_text", rows[0])
+        self.assertNotIn("source_path", rows[0])
+        self.assertNotIn("raw_refs", rows[0])
+
+    def test_author_induction_review_decisions_tool_preserves_existing_manual_decisions(self):
+        module = load_update_module()
+        fact = "Synthetic author existing decision candidate should wait for repeated support before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "author-existing", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            existing = self.synthetic_induction_review_decision(module, candidate, "approve_promote")
+            existing["decision_id"] = "manual_existing_decision"
+            self.write_induction_review_decisions(memory_repo, [existing])
+
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--write",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            rows = self.load_index_jsonl(memory_repo, "reviews/induction_review_decisions.jsonl")
+
+        payload = json.loads(write_run.stdout)
+        self.assertEqual(payload["existing_decision_count"], 1)
+        self.assertEqual(payload["skeleton_count"], 0)
+        self.assertEqual(payload["appended_count"], 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["decision_id"], "manual_existing_decision")
+        self.assertEqual(rows[0]["action"], "approve_promote")
+
+    def test_author_induction_review_decisions_tool_rejects_mutating_default_action(self):
+        module = load_update_module()
+        fact = "PRIVATE AUTHOR MUTATING DEFAULT SHOULD NOT RENDER before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "author-mutating-default", fact)
+            module.rebuild_indexes(memory_repo)
+            review_file = memory_repo / "reviews/induction_review_decisions.jsonl"
+
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--default-action",
+                    "approve_promote",
+                    "--write",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            review_file_exists = review_file.exists()
+
+        self.assertNotEqual(write_run.returncode, 0)
+        self.assertFalse(review_file_exists)
+        self.assertNotIn("PRIVATE AUTHOR MUTATING DEFAULT", write_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR MUTATING DEFAULT", write_run.stderr)
+
+    def test_author_induction_review_decisions_tool_skips_reflected_candidates(self):
+        module = load_update_module()
+        fact = "Synthetic author reflected candidate should wait for repeated support before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "author-reflected", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            reflected = self.synthetic_induction_review_decision(module, candidate, "reject")
+            reflected["decision_id"] = "manual_reflected_reject"
+            self.write_induction_review_decisions(memory_repo, [reflected])
+            module.rebuild_indexes(memory_repo)
+
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--write",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            rows = self.load_index_jsonl(memory_repo, "reviews/induction_review_decisions.jsonl")
+
+        payload = json.loads(write_run.stdout)
+        self.assertEqual(payload["reflected_decision_count"], 1)
+        self.assertEqual(payload["pending_candidate_count"], 0)
+        self.assertEqual(payload["skeleton_count"], 0)
+        self.assertEqual(payload["appended_count"], 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["decision_id"], "manual_reflected_reject")
+
+    def test_author_induction_review_decisions_tool_refuses_reflected_decision_id_collision(self):
+        module = load_update_module()
+        old_fact = "PRIVATE AUTHOR OLD REFLECTED CANDIDATE TEXT SHOULD NOT RENDER before promotion."
+        new_fact = "PRIVATE AUTHOR NEW PENDING CANDIDATE TEXT SHOULD NOT RENDER before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "author-reflected-old", old_fact)
+            self.write_natural_induction_meta(memory_repo, "author-reflected-new", new_fact)
+            module.rebuild_indexes(memory_repo)
+            candidates = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")
+            old_candidate = next(
+                candidate
+                for candidate in candidates
+                if candidate["derived_from"] == ["sessions/2026/06/26/author-reflected-old/summary.md"]
+            )
+            new_candidate = next(
+                candidate
+                for candidate in candidates
+                if candidate["derived_from"] == ["sessions/2026/06/26/author-reflected-new/summary.md"]
+            )
+            reflected = self.synthetic_induction_review_decision(module, old_candidate, "reject")
+            reflected["decision_id"] = f"induction_review_{new_candidate['candidate_id']}"
+            self.write_induction_review_decisions(memory_repo, [reflected])
+            module.rebuild_indexes(memory_repo)
+
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--write",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            rows = self.load_index_jsonl(memory_repo, "reviews/induction_review_decisions.jsonl")
+
+        self.assertNotEqual(write_run.returncode, 0)
+        self.assertNotIn("PRIVATE AUTHOR OLD REFLECTED", write_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR OLD REFLECTED", write_run.stderr)
+        self.assertNotIn("PRIVATE AUTHOR NEW PENDING", write_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR NEW PENDING", write_run.stderr)
+        payload = json.loads(write_run.stdout)
+        self.assertFalse(payload["preflight_passed"])
+        self.assertEqual(payload["decision_error_counts"], {"duplicate_decision_id": 1})
+        self.assertEqual(payload["appended_count"], 0)
+        self.assertEqual(len(rows), 1)
+
+    def test_author_induction_review_decisions_tool_refuses_invalid_existing_decisions_before_write(self):
+        module = load_update_module()
+        fact = "PRIVATE AUTHOR INVALID CANDIDATE TEXT SHOULD NOT RENDER before promotion."
+        private_path = "/example/private/author/source.jsonl"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "author-invalid", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            approve = self.synthetic_induction_review_decision(module, candidate, "approve_promote")
+            reject = self.synthetic_induction_review_decision(module, candidate, "reject")
+            reject["decision_id"] = "manual_conflicting_reject"
+            stale = self.synthetic_induction_review_decision(module, candidate, "noop")
+            stale["decision_id"] = "manual_stale_noop"
+            stale["candidate_fingerprint"] = "sha256:stale"
+            unsafe = self.synthetic_induction_review_decision(module, candidate, "noop")
+            unsafe["decision_id"] = "manual token=PRIVATE"
+            unsafe["reviewer"] = private_path
+            unsafe["rationale"] = fact
+            self.write_induction_review_decisions(memory_repo, [approve, reject, stale, unsafe])
+
+            dry_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--write",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            rows = self.load_index_jsonl(memory_repo, "reviews/induction_review_decisions.jsonl")
+
+        self.assertNotIn("PRIVATE AUTHOR INVALID CANDIDATE TEXT", dry_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR INVALID CANDIDATE TEXT", dry_run.stderr)
+        self.assertNotIn("PRIVATE AUTHOR INVALID CANDIDATE TEXT", write_run.stdout)
+        self.assertNotIn("PRIVATE AUTHOR INVALID CANDIDATE TEXT", write_run.stderr)
+        self.assertNotIn(private_path, dry_run.stdout)
+        self.assertNotIn(private_path, dry_run.stderr)
+        self.assertNotIn(private_path, write_run.stdout)
+        self.assertNotIn(private_path, write_run.stderr)
+        dry_payload = json.loads(dry_run.stdout)
+        self.assertFalse(dry_payload["preflight_passed"])
+        self.assertEqual(
+            dry_payload["decision_error_counts"],
+            {
+                "conflicting_candidate_action": 1,
+                "conflicting_fingerprint_action": 1,
+                "stale": 1,
+                "unsafe": 1,
+            },
+        )
+        self.assertNotEqual(write_run.returncode, 0)
+        self.assertEqual(len(rows), 4)
 
     def test_build_memory_nodes_semantically_merges_paraphrased_reusable_facts(self):
         module = load_update_module()

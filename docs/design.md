@@ -92,6 +92,10 @@ and JSONL indexes.
 - `templates/agent-memory-repo/tools/apply_memory_review_decisions.py`:
   aggregate-only dry-run/apply tool that reads private lifecycle review
   decisions and converts approved decisions into reciprocal memory links.
+- `templates/agent-memory-repo/tools/author_induction_review_decisions.py`:
+  aggregate-only authoring helper that appends pending private induction review
+  decision skeletons without rendering candidate text, memory text, source
+  paths, queries, raw refs, or transcripts.
 - `templates/agent-memory-repo/tools/sync_memory_archive.py`: safe Git sync
   helper that stages only generated archive paths and refuses unexpected files
   or unredacted key-like values.
@@ -410,7 +414,14 @@ decision file is a private input surface, not generated archive output.
 Decision-set validation rejects duplicate `decision_id` values, repeated exact
 rows, and conflicting actions for the same candidate ID or candidate
 fingerprint. Dry-run preflight reports only aggregate duplicate, conflict,
-stale, unsafe, and unknown counts.
+stale, unsafe, and unknown counts. Real deployment archives can use
+`author_induction_review_decisions.py` to generate pending skeleton rows from
+`index/induction_review_candidates.jsonl`; the tool writes only
+`candidate_id`, `candidate_text_sha256`, and `candidate_fingerprint`, preserves
+existing manual decisions, and skips decisions already reflected in
+`index/induction_review_decision_results.jsonl`. Reviewers still fill actions in
+the private decision file before running apply dry-run/write; this is not a
+manual approval UI.
 Cases may also provide `expected_noise_rejections` for process chatter that
 must not become a memory node. Natural precision cases may provide
 `expected_false_promotions`, where each entry contains either `text` or
