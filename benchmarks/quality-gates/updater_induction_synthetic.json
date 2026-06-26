@@ -1,6 +1,6 @@
 {
   "case_pass_rate": 1.0,
-  "cases": 26,
+  "cases": 29,
   "acknowledgement_only_rejection_rate": 1.0,
   "ambiguous_candidate_review_rate": 1.0,
   "auto_promotion_precision": 1.0,
@@ -12,6 +12,9 @@
   "generic_rule_rejection_rate": 1.0,
   "hypothetical_rejection_rate": 1.0,
   "induction_review_routing_rate": 1.0,
+  "induction_review_decision_apply_rate": 1.0,
+  "induction_review_approve_promotion_rate": 1.0,
+  "induction_review_ignore_suppression_rate": 1.0,
   "induction_success_rate": 1.0,
   "layer_assignment_accuracy": 1.0,
   "lifecycle_link_accuracy": 1.0,
@@ -23,7 +26,7 @@
   "privacy_redaction_pass_rate": 1.0,
   "privacy_refusal_pass_rate": 1.0,
   "scope_change_review_rate": 1.0,
-  "source_records": 38,
+  "source_records": 41,
   "source_ref_policy_pass_rate": 1.0,
   "temporary_local_decision_rejection_rate": 1.0
 }

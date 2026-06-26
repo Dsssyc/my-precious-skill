@@ -50,6 +50,21 @@ INDUCTION_REVIEW_REASON_METRICS = {
     "scope_change_natural_induction_requires_review": "scope_change",
     "conflicting_natural_induction_requires_review": "conflict",
 }
+INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
+    "candidate_id",
+    "candidate_type",
+    "candidate_text_sha256",
+    "candidate_source",
+    "reason",
+    "recommended_action",
+    "topic",
+    "support_count",
+    "source_updated_at",
+    "related_candidate_text_sha256",
+    "related_source_updated_at",
+    "overlap_token_count",
+    "overlap_ratio",
+)
 
 
 @dataclass
@@ -85,6 +100,12 @@ class CaseScore:
     scope_change_review_hits: int = 0
     conflict_review_cases: int = 0
     conflict_review_hits: int = 0
+    induction_review_decision_cases: int = 0
+    induction_review_decision_hits: int = 0
+    induction_review_approve_cases: int = 0
+    induction_review_approve_hits: int = 0
+    induction_review_ignore_cases: int = 0
+    induction_review_ignore_hits: int = 0
     natural_cases: int = 0
     natural_hits: int = 0
     cross_project_generalization_cases: int = 0
@@ -329,6 +350,10 @@ def load_induction_review_candidates(memory_repo: Path) -> list[dict[str, Any]]:
     return load_jsonl(memory_repo / "index/induction_review_candidates.jsonl")
 
 
+def load_induction_review_decision_results(memory_repo: Path) -> list[dict[str, Any]]:
+    return load_jsonl(memory_repo / "index/induction_review_decision_results.jsonl")
+
+
 def node_by_text(nodes: list[dict[str, Any]], text: str, source: str) -> dict[str, Any] | None:
     for node in nodes:
         if node.get("text") == text and node.get("source") == source:
@@ -422,6 +447,116 @@ def raw_refs_policy_pass(memory_repo: Path, node: dict[str, Any]) -> bool:
 def natural_candidate_text_sha256(text: str) -> str:
     normalized = re.sub(r"\s+", " ", text).strip(" -").lower()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def induction_review_candidate_fingerprint(candidate: dict[str, Any]) -> str:
+    payload = {
+        field: candidate.get(field)
+        for field in INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS
+        if field in candidate
+    }
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
+
+
+def find_induction_review_candidate(
+    induction_review_candidates: list[dict[str, Any]],
+    expected: dict[str, Any],
+) -> dict[str, Any] | None:
+    text = str(expected.get("text") or "")
+    reason = str(expected.get("reason") or "")
+    if not text or not reason:
+        raise SystemExit("induction review decision expectations must include text and reason")
+    text_hash = natural_candidate_text_sha256(text)
+    for candidate in induction_review_candidates:
+        if candidate.get("candidate_text_sha256") == text_hash and candidate.get("reason") == reason:
+            return candidate
+    return None
+
+
+def write_induction_review_decisions(
+    memory_repo: Path,
+    case: dict[str, Any],
+    induction_review_candidates: list[dict[str, Any]],
+) -> int:
+    decisions = []
+    for index, expected in enumerate(case.get("expected_induction_review_decisions") or [], start=1):
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_induction_review_decisions entries must be objects")
+        action = str(expected.get("action") or "")
+        if action not in {"approve_promote", "reject", "noop"}:
+            raise SystemExit("unsupported induction review decision action")
+        candidate = find_induction_review_candidate(induction_review_candidates, expected)
+        if candidate is None:
+            continue
+        decisions.append(
+            {
+                "decision_id": f"synthetic_induction_decision_{index:02d}_{action}",
+                "action": action,
+                "candidate_id": candidate["candidate_id"],
+                "candidate_text_sha256": candidate["candidate_text_sha256"],
+                "candidate_fingerprint": induction_review_candidate_fingerprint(candidate),
+                "reviewed_at": "2026-06-26T00:00:00Z",
+                "reviewer": "synthetic",
+                "rationale": "Synthetic induction review decision.",
+            }
+        )
+    if not decisions:
+        return 0
+    review_dir = memory_repo / "reviews"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / "induction_review_decisions.jsonl").write_text(
+        "\n".join(json.dumps(decision, sort_keys=True) for decision in decisions) + "\n",
+        encoding="utf-8",
+    )
+    return len(decisions)
+
+
+def run_apply_review_decisions(memory_repo: Path) -> CommandResult:
+    return run_command(
+        [
+            sys.executable,
+            str(memory_repo / "tools/apply_memory_review_decisions.py"),
+            "--memory-repo",
+            str(memory_repo),
+            "--write",
+        ]
+    )
+
+
+def score_induction_review_decisions(
+    memory_repo: Path,
+    nodes: list[dict[str, Any]],
+    case: dict[str, Any],
+) -> Counter:
+    score: Counter = Counter()
+    results = load_induction_review_decision_results(memory_repo)
+    for expected in case.get("expected_induction_review_decisions") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_induction_review_decisions entries must be objects")
+        text = str(expected.get("text") or "")
+        action = str(expected.get("action") or "")
+        expected_status = str(expected.get("expected_status") or "")
+        text_hash = natural_candidate_text_sha256(text)
+        result = next(
+            (
+                row
+                for row in results
+                if row.get("candidate_text_sha256") == text_hash and row.get("action") == action
+            ),
+            None,
+        )
+        score["decision_cases"] += 1
+        status_hit = result is not None and result.get("status") == expected_status
+        score["decision_hits"] += int(status_hit)
+        node = node_by_text(nodes, text, "automatic")
+        if action == "approve_promote":
+            score["approve_cases"] += 1
+            score["approve_hits"] += int(status_hit and expected.get("expected_memory") is True and node is not None)
+        elif action in {"reject", "noop"}:
+            score["ignore_cases"] += 1
+            score["ignore_hits"] += int(status_hit and expected.get("expected_no_memory") is True and node is None)
+    return score
 
 
 def induction_review_refs_pass(memory_repo: Path, candidate: dict[str, Any], expected: dict[str, Any]) -> bool:
@@ -765,8 +900,23 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
 
     nodes = load_nodes(memory_repo)
     meta_rows = load_meta_rows(memory_repo)
-    leaked = privacy_leaked(case, command_outputs, memory_repo)
     natural_quality = score_natural_quality_expectations(case, memory_repo, nodes)
+    decision_write_count = write_induction_review_decisions(
+        memory_repo,
+        case,
+        load_induction_review_candidates(memory_repo),
+    )
+    expected_decision_count = len(case.get("expected_induction_review_decisions") or [])
+    if expected_decision_count:
+        if decision_write_count != expected_decision_count:
+            unexpected_update_failure = True
+        apply_result = run_apply_review_decisions(memory_repo)
+        command_outputs.append(apply_result)
+        if apply_result.returncode != 0:
+            unexpected_update_failure = True
+        nodes = load_nodes(memory_repo)
+    leaked = privacy_leaked(case, command_outputs, memory_repo)
+    induction_decision_quality = score_induction_review_decisions(memory_repo, nodes, case)
 
     score = CaseScore(
         passed=not unexpected_update_failure and not leaked,
@@ -794,6 +944,12 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         scope_change_review_hits=natural_quality["scope_change_review_hits"],
         conflict_review_cases=natural_quality["conflict_review_cases"],
         conflict_review_hits=natural_quality["conflict_review_hits"],
+        induction_review_decision_cases=induction_decision_quality["decision_cases"],
+        induction_review_decision_hits=induction_decision_quality["decision_hits"],
+        induction_review_approve_cases=induction_decision_quality["approve_cases"],
+        induction_review_approve_hits=induction_decision_quality["approve_hits"],
+        induction_review_ignore_cases=induction_decision_quality["ignore_cases"],
+        induction_review_ignore_hits=induction_decision_quality["ignore_hits"],
         natural_cases=natural_quality["natural_cases"],
         natural_hits=natural_quality["natural_hits"],
         cross_project_generalization_cases=natural_quality["cross_project_generalization_cases"],
@@ -861,6 +1017,9 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
             score.forced_hits == score.forced_cases,
             score.refusal_hits == score.refusal_cases,
             score.redaction_hits == score.redaction_cases,
+            score.induction_review_decision_hits == score.induction_review_decision_cases,
+            score.induction_review_approve_hits == score.induction_review_approve_cases,
+            score.induction_review_ignore_hits == score.induction_review_ignore_cases,
             natural_quality_expectations_pass(natural_quality),
         )
     )
@@ -954,6 +1113,12 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["scope_change_review_hits"] += score.scope_change_review_hits
         totals["conflict_review_cases"] += score.conflict_review_cases
         totals["conflict_review_hits"] += score.conflict_review_hits
+        totals["induction_review_decision_cases"] += score.induction_review_decision_cases
+        totals["induction_review_decision_hits"] += score.induction_review_decision_hits
+        totals["induction_review_approve_cases"] += score.induction_review_approve_cases
+        totals["induction_review_approve_hits"] += score.induction_review_approve_hits
+        totals["induction_review_ignore_cases"] += score.induction_review_ignore_cases
+        totals["induction_review_ignore_hits"] += score.induction_review_ignore_hits
         totals["natural_cases"] += score.natural_cases
         totals["natural_hits"] += score.natural_hits
         totals["cross_project_generalization_cases"] += score.cross_project_generalization_cases
@@ -999,6 +1164,7 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "expected_automatic_memories": int(totals["induction_cases"]),
         "expected_forced_memories": int(totals["forced_cases"]),
         "expected_lifecycle_links": int(totals["lifecycle_cases"]),
+        "expected_induction_review_decisions": int(totals["induction_review_decision_cases"]),
         "expected_privacy_refusals": int(totals["refusal_cases"]),
         "expected_privacy_redactions": int(totals["redaction_cases"]),
         "induction_success_rate": ratio(totals["induction_hits"], totals["induction_cases"]),
@@ -1014,6 +1180,18 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "induction_review_routing_rate": ratio(
             totals["induction_review_hits"],
             totals["induction_review_cases"],
+        ),
+        "induction_review_decision_apply_rate": ratio(
+            totals["induction_review_decision_hits"],
+            totals["induction_review_decision_cases"],
+        ),
+        "induction_review_approve_promotion_rate": ratio(
+            totals["induction_review_approve_hits"],
+            totals["induction_review_approve_cases"],
+        ),
+        "induction_review_ignore_suppression_rate": ratio(
+            totals["induction_review_ignore_hits"],
+            totals["induction_review_ignore_cases"],
         ),
         "low_confidence_review_rate": ratio(
             totals["low_confidence_review_hits"],

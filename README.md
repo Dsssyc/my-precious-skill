@@ -635,6 +635,9 @@ The induction benchmark reports aggregate-only JSON metrics:
 `natural_false_promotion_rate`, `auto_promotion_precision`,
 `cross_project_generalization_rate`, `project_scope_precision`,
 `ambiguous_candidate_review_rate`, `induction_review_routing_rate`,
+`induction_review_decision_apply_rate`,
+`induction_review_approve_promotion_rate`,
+`induction_review_ignore_suppression_rate`,
 `low_confidence_review_rate`, `scope_change_review_rate`,
 `conflict_review_rate`,
 `review_routing_rate`, `process_noise_rejection_rate`,
@@ -656,6 +659,10 @@ conflicting preferences, scope broadening or narrowing, low-confidence one-off
 candidates, and candidates that should remain reviewable instead of being
 rejected or promoted. Review candidate rows preserve evidence/source refs for
 audit, but store `candidate_text_sha256` instead of rendering candidate text.
+Synthetic induction review decisions use private
+`reviews/induction_review_decisions.jsonl` rows with `approve_promote`,
+`reject`, or `noop`; approve decisions are the only path that promotes those
+review candidates into memory nodes.
 The adversarial precision cases cover one-off status or progress updates with
 `should`/`must`, acknowledgement-only replies, hypothetical `we could` or
 `maybe` statements, temporary local implementation choices, test-result
@@ -745,11 +752,15 @@ A compatible deployment repository should expose:
   and `memories/explicit.jsonl`: layered memory nodes.
 - `reviews/memory_lifecycle_decisions.jsonl`: private reviewer decisions for
   ambiguous lifecycle candidates.
+- `reviews/induction_review_decisions.jsonl`: private reviewer decisions for
+  natural induction candidates.
 - `index/memories.jsonl`: combined layered-memory search index.
 - `index/memory_review_candidates.jsonl`: ambiguous lifecycle pairs requiring
   manual review before automatic retirement.
 - `index/induction_review_candidates.jsonl`: aggregate-safe natural induction
   candidates that require review before promotion.
+- `index/induction_review_decision_results.jsonl`: aggregate-safe applied/ignored
+  induction review decision statuses.
 - `index/memory_review_decision_results.jsonl`: aggregate-safe applied/ignored
   review decision statuses.
 - `index/memory_consolidation_trace.jsonl`: explainable merge, supersede,
@@ -784,6 +795,8 @@ skills/using-my-precious/references/archive-format.md
 - Aggregate-safe natural induction review candidate index for low-confidence,
   conflicting, or scope-changing natural candidates that should not be
   auto-promoted.
+- Aggregate-safe induction review decision results for synthetic approve,
+  reject, and noop calibration.
 - Aggregate-only review-decision dry-run/apply tool for converting approved
   lifecycle review decisions into reciprocal memory links.
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,

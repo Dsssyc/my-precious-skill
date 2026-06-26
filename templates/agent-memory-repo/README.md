@@ -214,21 +214,24 @@ The sync helper refuses to proceed when non-archive paths changed, when
 generated archive files still contain recognized key-like values, when archive
 audit finds low-quality index text, or when `git diff --cached --check` fails.
 Expected archive paths are limited to
-`INDEX.md`, `config/projects.jsonl`, `index/`, `memories/`, `daily/`, and
-`sessions/`.
+`INDEX.md`, `config/projects.jsonl`, `index/`, `memories/`, `reviews/`,
+`daily/`, and `sessions/`.
 
 ## Archive Data
 
-Expected generated data:
+Expected archive data:
 
 - `index/memories.jsonl`
 - `index/memory_review_candidates.jsonl`
 - `index/induction_review_candidates.jsonl`
+- `index/induction_review_decision_results.jsonl`
 - `index/memory_consolidation_trace.jsonl`
 - `memories/global.jsonl`
 - `memories/domains.jsonl`
 - `memories/projects.jsonl`
 - `memories/explicit.jsonl`
+- `reviews/memory_lifecycle_decisions.jsonl` (private review input)
+- `reviews/induction_review_decisions.jsonl` (private review input)
 - `sessions/YYYY/MM/DD/.../summary.md`
 - `sessions/YYYY/MM/DD/.../evidence.md`
 - `sessions/YYYY/MM/DD/.../meta.json`

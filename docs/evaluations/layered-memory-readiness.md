@@ -116,7 +116,7 @@ load.
 
 ## Updater-Driven Induction Baseline
 
-Baseline date: 2026-06-25
+Baseline date: 2026-06-26
 
 Code point used for the benchmark harness: this document revision
 
@@ -124,16 +124,16 @@ Case file:
 `benchmarks/cases/updater_induction_synthetic.jsonl`
 
 Case fingerprint:
-`4f6877d915a897b0aaa6d2da45d0a71328e5d6910bf33b7fd785b39c98be4fe1`
+`bfc1cd71ca7e50755cf68e487f39c2bb8ed23c137f1822a0216a5906f88c9bca`
 
 Runner fingerprint:
-`93ebb51b6af1afc91e8fcc0d3017d30a6f57ffd836b25423f6d3c163aa0d52b6`
+`da94d3800a46664891f998d9dac7fe06c0a03631df4668e15cf3a797ce290c62`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`b9a9de72024b2ff6277960deb6b99eca4c44b85928e8d1254a2de7f536e1e1b5`
+`b811d68366062e6116623e1278292f139b84d9d787017f64fdd4ec8b771f7b2b`
 
 Baseline command:
 
@@ -148,11 +148,12 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 26 |
-| source_records | 38 |
-| expected_automatic_memories | 13 |
+| cases | 29 |
+| source_records | 41 |
+| expected_automatic_memories | 14 |
 | expected_forced_memories | 1 |
 | expected_lifecycle_links | 3 |
+| expected_induction_review_decisions | 3 |
 | expected_privacy_refusals | 1 |
 | expected_privacy_redactions | 1 |
 | induction_success_rate | 1.0 |
@@ -163,6 +164,9 @@ Baseline result:
 | project_scope_precision | 1.0 |
 | ambiguous_candidate_review_rate | 1.0 |
 | induction_review_routing_rate | 1.0 |
+| induction_review_decision_apply_rate | 1.0 |
+| induction_review_approve_promotion_rate | 1.0 |
+| induction_review_ignore_suppression_rate | 1.0 |
 | low_confidence_review_rate | 1.0 |
 | scope_change_review_rate | 1.0 |
 | conflict_review_rate | 1.0 |
@@ -194,6 +198,7 @@ The updater-driven suite contains synthetic scenarios across these categories:
 | natural_induction | 6 |
 | natural_precision | 8 |
 | natural_review_calibration | 6 |
+| natural_review_decision | 3 |
 | privacy | 2 |
 
 The runner creates temporary synthetic source records and invokes the deployed
@@ -204,6 +209,11 @@ The natural review calibration cases require partial-support, conflict, and
 scope-change candidates to land in `index/induction_review_candidates.jsonl`
 instead of `index/memories.jsonl`; those review rows preserve evidence and
 source refs while storing only candidate-text hashes.
+The natural review decision cases write synthetic private
+`reviews/induction_review_decisions.jsonl` decisions, then verify that
+`approve_promote` creates a memory node while `reject` and `noop` remain
+non-mutating. The report records only aggregate apply, promotion, and
+suppression rates.
 The JSON report is aggregate-only: it does not render source content, memory
 text, source paths, raw refs, or per-case details.
 
@@ -226,7 +236,7 @@ Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`b9a9de72024b2ff6277960deb6b99eca4c44b85928e8d1254a2de7f536e1e1b5`
+`b811d68366062e6116623e1278292f139b84d9d787017f64fdd4ec8b771f7b2b`
 
 Search script fingerprint:
 `de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`
@@ -1068,11 +1078,14 @@ same-scope low-risk compression rule for semantic lifecycle cases that should
 not be auto-retired. Natural induction now has a separate aggregate-safe review
 candidate surface for low-confidence, conflicting, and scope-changing synthetic
 candidates, with evidence/source refs preserved and candidate text hashed rather
-than rendered. It also has an initial gated source-depth workflow with synthetic
-quality gates and a real deployment aggregate baseline that passes the stricter
-source-map anchor audit. Shadow evaluation now has a private
-redacted real-history probe set with numeric recall, precision, noise,
-abstention, suppression, privacy, provenance, lifecycle, and audit gates. The
+than rendered. It now also has a synthetic private decision/apply loop for those
+candidates: approve decisions promote, while reject/noop decisions stay
+non-mutating, with aggregate-only result indexes. It also has an initial gated
+source-depth workflow with synthetic quality gates and a real deployment
+aggregate baseline that passes the stricter source-map anchor audit. Shadow
+evaluation now has a private redacted real-history probe set with numeric
+recall, precision, noise, abstention, suppression, privacy, provenance,
+lifecycle, and audit gates. The
 post-hard-negative v2 run preserves recall while eliminating current no-hit
 false positives and reducing broad lexical noise under redacted
 natural-language labels. It still records scope-mixed and broad lexical top-k

@@ -64,7 +64,10 @@ CONFIG_CANDIDATES = (
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 MEMORY_REVIEW_DECISION_REL_PATH = Path("reviews/memory_lifecycle_decisions.jsonl")
+INDUCTION_REVIEW_DECISION_REL_PATH = Path("reviews/induction_review_decisions.jsonl")
 SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
+SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
     "approve_supersedes",
     "approve_contradicts",
@@ -72,6 +75,9 @@ MEMORY_REVIEW_APPROVAL_ACTIONS = {
 }
 MEMORY_REVIEW_IGNORE_ACTIONS = {"reject", "noop"}
 MEMORY_REVIEW_ACTIONS = MEMORY_REVIEW_APPROVAL_ACTIONS | MEMORY_REVIEW_IGNORE_ACTIONS
+INDUCTION_REVIEW_APPROVAL_ACTIONS = {"approve_promote"}
+INDUCTION_REVIEW_IGNORE_ACTIONS = {"reject", "noop"}
+INDUCTION_REVIEW_ACTIONS = INDUCTION_REVIEW_APPROVAL_ACTIONS | INDUCTION_REVIEW_IGNORE_ACTIONS
 MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "candidate_type",
     "current_memory_id",
@@ -85,6 +91,21 @@ MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "compressed_candidate_count",
     "compressed_older_memory_ids",
     "compression_reason",
+)
+INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
+    "candidate_id",
+    "candidate_type",
+    "candidate_text_sha256",
+    "candidate_source",
+    "reason",
+    "recommended_action",
+    "topic",
+    "support_count",
+    "source_updated_at",
+    "related_candidate_text_sha256",
+    "related_source_updated_at",
+    "overlap_token_count",
+    "overlap_ratio",
 )
 MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
 NATURAL_FACT_SOURCE_LABELS = frozenset({"natural_user", "natural_assistant", "natural_record"})
@@ -2693,6 +2714,7 @@ def natural_induction_review_candidate_row(
 def add_induction_review_candidate(
     rows_by_id: dict[str, dict],
     withheld: set[tuple[str, str, str, str]],
+    identities_by_id: dict[str, tuple[str, str, str, str]],
     candidate: MemoryCandidate,
     reason: str,
     memory_repo: Path | None,
@@ -2701,6 +2723,7 @@ def add_induction_review_candidate(
 ) -> None:
     row = natural_induction_review_candidate_row(candidate, reason, memory_repo, related, detail)
     rows_by_id.setdefault(str(row["candidate_id"]), row)
+    identities_by_id.setdefault(str(row["candidate_id"]), candidate_identity(candidate))
     withheld.add(candidate_identity(candidate))
     if related is not None:
         withheld.add(candidate_identity(related))
@@ -2709,15 +2732,17 @@ def add_induction_review_candidate(
 def build_induction_review_candidates(
     candidates: list[MemoryCandidate],
     memory_repo: Path | None = None,
-) -> tuple[list[dict], set[tuple[str, str, str, str]]]:
+) -> tuple[list[dict], set[tuple[str, str, str, str]], dict[str, tuple[str, str, str, str]]]:
     rows_by_id: dict[str, dict] = {}
     withheld: set[tuple[str, str, str, str]] = set()
+    identities_by_id: dict[str, tuple[str, str, str, str]] = {}
     natural_candidates = [candidate for candidate in candidates if is_natural_memory_candidate(candidate)]
     for candidate in natural_candidates:
         if should_low_confidence_review_natural_candidate(candidate):
             add_induction_review_candidate(
                 rows_by_id,
                 withheld,
+                identities_by_id,
                 candidate,
                 "low_confidence_natural_induction_requires_review",
                 memory_repo,
@@ -2732,7 +2757,7 @@ def build_induction_review_candidates(
             reason = induction_review_reason_from_relation(detail)
             if not reason:
                 continue
-            add_induction_review_candidate(rows_by_id, withheld, current, reason, memory_repo, older, detail)
+            add_induction_review_candidate(rows_by_id, withheld, identities_by_id, current, reason, memory_repo, older, detail)
 
     return (
         sorted(
@@ -2744,15 +2769,32 @@ def build_induction_review_candidates(
             ),
         ),
         withheld,
+        identities_by_id,
     )
 
 
 def build_memory_nodes_and_induction_review_candidates(
     rows: list[dict],
     memory_repo: Path | None = None,
-) -> tuple[list[dict], list[dict]]:
+    induction_review_decisions: list[dict] | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
     memory_candidates = memory_candidates_from_meta(rows)
-    induction_review_candidates, withheld_candidates = build_induction_review_candidates(memory_candidates, memory_repo)
+    induction_review_candidates, withheld_candidates, induction_candidate_identities = build_induction_review_candidates(memory_candidates, memory_repo)
+    induction_review_decision_results = apply_induction_review_decisions(
+        induction_review_candidates,
+        induction_review_decisions or [],
+    )
+    for result in induction_review_decision_results:
+        if result.get("status") != "applied" or result.get("action") != "approve_promote":
+            continue
+        candidate_id = str(result.get("candidate_id") or "")
+        identity = induction_candidate_identities.get(candidate_id)
+        if identity is not None:
+            withheld_candidates.discard(identity)
+    active_induction_review_candidates = filter_reviewed_induction_candidates(
+        induction_review_candidates,
+        induction_review_decision_results,
+    )
     grouped: dict[str, list[MemoryCandidate]] = {}
     for candidate in memory_candidates:
         if candidate_identity(candidate) in withheld_candidates:
@@ -2848,11 +2890,11 @@ def build_memory_nodes_and_induction_review_candidates(
             nodes.append(node)
             existing_ids.add(str(node["memory_id"]))
     nodes.sort(key=lambda node: (str(node.get("layer", "")), str(node.get("memory_id", ""))))
-    return nodes, induction_review_candidates
+    return nodes, active_induction_review_candidates, induction_review_decision_results
 
 
 def build_memory_nodes(rows: list[dict], memory_repo: Path | None = None) -> list[dict]:
-    nodes, _ = build_memory_nodes_and_induction_review_candidates(rows, memory_repo)
+    nodes, _, _ = build_memory_nodes_and_induction_review_candidates(rows, memory_repo)
     return nodes
 
 
@@ -3040,6 +3082,105 @@ def review_candidate_fingerprint(candidate: dict) -> str:
     }
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
+
+
+def is_safe_induction_review_candidate_id(value: object) -> bool:
+    return isinstance(value, str) and INDUCTION_REVIEW_CANDIDATE_ID_PATTERN.fullmatch(value) is not None
+
+
+def is_safe_sha256_hex(value: object) -> bool:
+    return isinstance(value, str) and SHA256_HEX_PATTERN.fullmatch(value) is not None
+
+
+def induction_review_candidate_fingerprint(candidate: dict) -> str:
+    payload = {
+        field: candidate.get(field)
+        for field in INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS
+        if field in candidate
+    }
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
+
+
+def build_induction_review_candidate_index(candidates: list[dict]) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for candidate in candidates:
+        candidate_id = candidate.get("candidate_id")
+        if is_safe_induction_review_candidate_id(candidate_id):
+            index.setdefault(str(candidate_id), candidate)
+    return index
+
+
+def apply_induction_review_decisions(
+    induction_review_candidates: list[dict],
+    induction_review_decisions: list[dict],
+) -> list[dict]:
+    candidates_by_id = build_induction_review_candidate_index(induction_review_candidates)
+    results: list[dict] = []
+    for decision in induction_review_decisions:
+        action = decision.get("action")
+        decision_id = decision.get("decision_id")
+        candidate_id = decision.get("candidate_id")
+        candidate_text_sha256 = decision.get("candidate_text_sha256")
+        if (
+            not isinstance(action, str)
+            or action not in INDUCTION_REVIEW_ACTIONS
+            or not is_safe_memory_review_id(decision_id)
+            or not is_safe_induction_review_candidate_id(candidate_id)
+            or not is_safe_sha256_hex(candidate_text_sha256)
+        ):
+            raise SystemExit("unsafe induction review decision")
+        candidate = candidates_by_id.get(str(candidate_id))
+        if candidate is None:
+            raise SystemExit("unknown induction review candidate")
+        candidate_fingerprint = decision.get("candidate_fingerprint")
+        if (
+            candidate.get("candidate_text_sha256") != candidate_text_sha256
+            or not isinstance(candidate_fingerprint, str)
+            or candidate_fingerprint != induction_review_candidate_fingerprint(candidate)
+        ):
+            raise SystemExit("stale induction review decision")
+        result = {
+            "decision_id": safe_memory_review_scalar(decision_id, 120),
+            "action": action,
+            "candidate_id": str(candidate_id),
+            "candidate_text_sha256": str(candidate_text_sha256),
+            "candidate_fingerprint": candidate_fingerprint,
+        }
+        if action in INDUCTION_REVIEW_IGNORE_ACTIONS:
+            result["status"] = "ignored"
+            results.append(result)
+            continue
+        if action == "approve_promote":
+            result["status"] = "applied"
+            results.append(result)
+            continue
+        raise SystemExit("unsafe induction review decision")
+    return results
+
+
+def load_induction_review_decisions(memory_repo: Path) -> list[dict]:
+    path = memory_repo / INDUCTION_REVIEW_DECISION_REL_PATH
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit("Refusing to read unsafe induction review decision path")
+    return list(iter_jsonl(path))
+
+
+def filter_reviewed_induction_candidates(induction_review_candidates: list[dict], decision_results: list[dict]) -> list[dict]:
+    if not decision_results:
+        return induction_review_candidates
+    reviewed_ids = {
+        str(result.get("candidate_id") or "")
+        for result in decision_results
+        if result.get("status") in {"applied", "ignored"}
+    }
+    if not reviewed_ids:
+        return induction_review_candidates
+    return [
+        candidate
+        for candidate in induction_review_candidates
+        if str(candidate.get("candidate_id") or "") not in reviewed_ids
+    ]
 
 
 def review_candidate_pairs(candidate: dict) -> list[tuple[str, str]]:
@@ -3367,7 +3508,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
     repair_legacy_source_map_paths(memory_repo, rows)
-    memory_nodes, induction_review_candidates = build_memory_nodes_and_induction_review_candidates(rows, memory_repo)
+    induction_review_decisions = load_induction_review_decisions(memory_repo)
+    memory_nodes, induction_review_candidates, induction_review_decision_results = build_memory_nodes_and_induction_review_candidates(
+        rows,
+        memory_repo,
+        induction_review_decisions,
+    )
     review_decisions = load_memory_review_decisions(memory_repo)
     initial_review_candidates = build_memory_review_candidates(memory_nodes)
     review_decision_results = apply_memory_review_decisions(
@@ -3491,6 +3637,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
         index_dir / "induction_review_candidates.jsonl",
         induction_review_candidates,
         "induction review index",
+    )
+    write_jsonl_index(
+        memory_repo,
+        index_dir / "induction_review_decision_results.jsonl",
+        induction_review_decision_results,
+        "induction review decision index",
     )
     write_jsonl_index(
         memory_repo,

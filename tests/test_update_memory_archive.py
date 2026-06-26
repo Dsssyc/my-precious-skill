@@ -87,6 +87,53 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "rationale": "Synthetic reviewer decision.",
         }
 
+    def write_natural_induction_meta(
+        self,
+        memory_repo: Path,
+        session_id: str,
+        fact: str,
+        *,
+        updated_at: str = "2026-06-26T10:00:00Z",
+        project: str = "synthetic-induction-review",
+    ) -> None:
+        entry_dir = memory_repo / "sessions/2026/06/26" / session_id
+        entry_dir.mkdir(parents=True, exist_ok=True)
+        (entry_dir / "summary.md").write_text(f"Summary for {session_id}\n", encoding="utf-8")
+        (entry_dir / "evidence.md").write_text("ev_001: Synthetic redacted evidence\n", encoding="utf-8")
+        row = {
+            "session_id": session_id,
+            "project": project,
+            "project_path": f"/tmp/{project}",
+            "source_record": f"source-records/{session_id}.jsonl",
+            "source_updated_at": updated_at,
+            "summary_path": f"sessions/2026/06/26/{session_id}/summary.md",
+            "evidence_path": f"sessions/2026/06/26/{session_id}/evidence.md",
+            "reusable_facts": [fact],
+            "reusable_fact_sources": [{"text": fact, "source": "natural_assistant"}],
+            "decisions": [],
+            "unresolved_tasks": [],
+            "tags": ["memory", "induction"],
+        }
+        (entry_dir / "meta.json").write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+
+    def synthetic_induction_review_decision(self, module, candidate: dict, action: str) -> dict:
+        return {
+            "decision_id": f"induction_decision_{action}",
+            "action": action,
+            "candidate_id": candidate["candidate_id"],
+            "candidate_text_sha256": candidate["candidate_text_sha256"],
+            "candidate_fingerprint": module.induction_review_candidate_fingerprint(candidate),
+            "reviewed_at": "2026-06-26T00:00:00Z",
+            "reviewer": "synthetic",
+            "rationale": "Synthetic induction reviewer decision.",
+        }
+
+    def load_index_jsonl(self, memory_repo: Path, relative: str) -> list[dict]:
+        path = memory_repo / relative
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
     def test_extract_explicit_memory_texts_trims_task_tail(self):
         module = load_update_module()
 
@@ -492,6 +539,173 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 self.assertTrue(row["derived_from"])
                 self.assertTrue(row["evidence_refs"])
                 self.assertTrue(row["raw_refs"])
+
+    def test_rebuild_indexes_applies_induction_review_approve_promote_decision(self):
+        module = load_update_module()
+        fact = "Synthetic induction approval candidate should wait for repeated support before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "approve", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            decision = self.synthetic_induction_review_decision(module, candidate, "approve_promote")
+            (decision_dir / "induction_review_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            module.rebuild_indexes(memory_repo)
+
+            memory_rows = self.load_index_jsonl(memory_repo, "index/memories.jsonl")
+            active_candidates = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")
+            result_rows = self.load_index_jsonl(memory_repo, "index/induction_review_decision_results.jsonl")
+
+        self.assertIn(fact, {row["text"] for row in memory_rows})
+        self.assertEqual(active_candidates, [])
+        self.assertEqual(result_rows[0]["status"], "applied")
+        self.assertEqual(result_rows[0]["action"], "approve_promote")
+        self.assertEqual(result_rows[0]["candidate_id"], candidate["candidate_id"])
+        self.assertEqual(result_rows[0]["candidate_text_sha256"], candidate["candidate_text_sha256"])
+        self.assertNotIn("text", result_rows[0])
+        self.assertNotIn("candidate_text", result_rows[0])
+
+    def test_rebuild_indexes_keeps_rejected_and_noop_induction_reviews_non_mutating(self):
+        module = load_update_module()
+
+        for action in ("reject", "noop"):
+            with self.subTest(action=action):
+                fact = f"Synthetic induction {action} candidate should wait for repeated support before promotion."
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    memory_repo = Path(tmpdir) / "agent-memory"
+                    self.write_natural_induction_meta(memory_repo, action, fact)
+                    module.rebuild_indexes(memory_repo)
+                    candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+                    decision_dir = memory_repo / "reviews"
+                    decision_dir.mkdir()
+                    decision = self.synthetic_induction_review_decision(module, candidate, action)
+                    (decision_dir / "induction_review_decisions.jsonl").write_text(
+                        json.dumps(decision, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+
+                    module.rebuild_indexes(memory_repo)
+
+                    memory_rows = self.load_index_jsonl(memory_repo, "index/memories.jsonl")
+                    active_candidates = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")
+                    result_rows = self.load_index_jsonl(memory_repo, "index/induction_review_decision_results.jsonl")
+
+                self.assertNotIn(fact, {row["text"] for row in memory_rows})
+                self.assertEqual(active_candidates, [])
+                self.assertEqual(result_rows[0]["status"], "ignored")
+                self.assertEqual(result_rows[0]["action"], action)
+
+    def test_rebuild_indexes_refuses_stale_induction_review_decision(self):
+        module = load_update_module()
+        fact = "Synthetic induction stale candidate should wait for repeated support before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "stale", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            decision = self.synthetic_induction_review_decision(module, candidate, "approve_promote")
+            decision["candidate_fingerprint"] = "sha256:stale"
+            (decision_dir / "induction_review_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(SystemExit, "stale induction review decision"):
+                module.rebuild_indexes(memory_repo)
+
+    def test_rebuild_indexes_refuses_unsafe_induction_review_decision(self):
+        module = load_update_module()
+        fact = "Synthetic induction unsafe candidate should wait for repeated support before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "unsafe", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            decision = self.synthetic_induction_review_decision(module, candidate, "approve_promote")
+            decision["decision_id"] = "induction token=SHOULD_NOT_RENDER"
+            (decision_dir / "induction_review_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(SystemExit, "unsafe induction review decision"):
+                module.rebuild_indexes(memory_repo)
+
+    def test_apply_memory_review_decisions_tool_handles_induction_reviews_aggregate_only(self):
+        module = load_update_module()
+        fact = "PRIVATE INDUCTION CANDIDATE TEXT SHOULD NOT RENDER before promotion."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(memory_repo, "tool", fact)
+            module.rebuild_indexes(memory_repo)
+            candidate = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")[0]
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            decision = self.synthetic_induction_review_decision(module, candidate, "approve_promote")
+            (decision_dir / "induction_review_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            dry_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(APPLY_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            write_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(APPLY_REVIEW_DECISIONS_SCRIPT),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--write",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            memory_rows = self.load_index_jsonl(memory_repo, "index/memories.jsonl")
+
+        self.assertNotIn("PRIVATE INDUCTION CANDIDATE TEXT", dry_run.stdout)
+        self.assertNotIn("PRIVATE INDUCTION CANDIDATE TEXT", dry_run.stderr)
+        self.assertNotIn("PRIVATE INDUCTION CANDIDATE TEXT", write_run.stdout)
+        self.assertNotIn("PRIVATE INDUCTION CANDIDATE TEXT", write_run.stderr)
+        dry_payload = json.loads(dry_run.stdout)
+        write_payload = json.loads(write_run.stdout)
+        self.assertEqual(dry_payload["induction_decision_count"], 1)
+        self.assertEqual(dry_payload["induction_result_status_counts"], {"applied": 1})
+        self.assertEqual(dry_payload["induction_result_action_counts"], {"approve_promote": 1})
+        self.assertEqual(dry_payload["induction_promoted_count"], 1)
+        self.assertFalse(dry_payload["write_enabled"])
+        self.assertEqual(write_payload["induction_decision_count"], 1)
+        self.assertEqual(write_payload["induction_result_status_counts"], {"applied": 1})
+        self.assertEqual(write_payload["induction_result_action_counts"], {"approve_promote": 1})
+        self.assertEqual(write_payload["induction_promoted_count"], 1)
+        self.assertTrue(write_payload["write_enabled"])
+        self.assertIn(fact, {row["text"] for row in memory_rows})
 
     def test_build_memory_nodes_semantically_merges_paraphrased_reusable_facts(self):
         module = load_update_module()

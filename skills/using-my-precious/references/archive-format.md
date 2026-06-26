@@ -116,6 +116,11 @@ Updater diagnostics may also write internal index sidecars:
   require manual review before promotion; rows keep aggregate metadata,
   derived-session/evidence/source references, and candidate text hashes rather
   than candidate text.
+- `reviews/induction_review_decisions.jsonl`: private reviewer decisions for
+  natural induction candidates, using candidate IDs, candidate text hashes, and
+  candidate fingerprints.
+- `index/induction_review_decision_results.jsonl`: aggregate applied/ignored
+  result rows for induction review decisions.
 - `index/memory_consolidation_trace.jsonl`: aggregate decision traces for
   merge, supersede, contradict, deprecate, and skip decisions.
 

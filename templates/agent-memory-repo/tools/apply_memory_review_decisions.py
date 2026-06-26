@@ -61,6 +61,67 @@ def decision_result_key(row: dict) -> tuple[str, str, str, str, str]:
     )
 
 
+def induction_decision_result_key(row: dict) -> tuple[str, str, str, str, str]:
+    return (
+        str(row.get("decision_id") or ""),
+        str(row.get("action") or ""),
+        str(row.get("candidate_id") or ""),
+        str(row.get("candidate_text_sha256") or ""),
+        str(row.get("candidate_fingerprint") or ""),
+    )
+
+
+def induction_promoted_count(results: list[dict]) -> int:
+    return sum(
+        1
+        for result in results
+        if result.get("status") == "applied" and result.get("action") == "approve_promote"
+    )
+
+
+def split_reflected_induction_results_and_pending_decisions(
+    repo: Path,
+    decisions: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    results = load_index_rows(repo, "index/induction_review_decision_results.jsonl")
+    if not decisions or not results:
+        return [], decisions
+    results_by_key = {induction_decision_result_key(result): result for result in results}
+    reflected_results: list[dict] = []
+    pending_decisions: list[dict] = []
+    for decision in decisions:
+        result = results_by_key.get(induction_decision_result_key(decision))
+        if result is not None:
+            reflected_results.append(result)
+        else:
+            pending_decisions.append(decision)
+    return reflected_results, pending_decisions
+
+
+def induction_dry_run_results(repo: Path, candidates: list[dict], decisions: list[dict]) -> list[dict]:
+    reflected_results, pending_decisions = split_reflected_induction_results_and_pending_decisions(repo, decisions)
+    pending_results = update_memory_archive.apply_induction_review_decisions(candidates, pending_decisions)
+    return [*reflected_results, *pending_results]
+
+
+def add_induction_report_fields(
+    report: dict[str, Any],
+    candidates: list[dict],
+    decisions: list[dict],
+    results: list[dict],
+) -> dict[str, Any]:
+    report.update(
+        {
+            "induction_decision_count": len(decisions),
+            "induction_review_candidate_count": len(candidates),
+            "induction_result_status_counts": count_by(results, "status"),
+            "induction_result_action_counts": count_by(results, "action"),
+            "induction_promoted_count": induction_promoted_count(results),
+        }
+    )
+    return report
+
+
 def result_reflected_by_nodes(result: dict, nodes_by_id: dict[str, dict]) -> bool:
     status = result.get("status")
     if status == "ignored":
@@ -156,15 +217,25 @@ def dry_run_report(repo: Path) -> dict[str, Any]:
     nodes = load_index_rows(repo, "index/memories.jsonl")
     candidates = load_index_rows(repo, "index/memory_review_candidates.jsonl")
     decisions = update_memory_archive.load_memory_review_decisions(repo)
+    induction_candidates = load_index_rows(repo, "index/induction_review_candidates.jsonl")
+    induction_decisions = update_memory_archive.load_induction_review_decisions(repo)
     persisted_report = persisted_results_report(repo, nodes, candidates, decisions)
     if persisted_report is not None:
-        return persisted_report
+        induction_results = induction_dry_run_results(repo, induction_candidates, induction_decisions)
+        return add_induction_report_fields(
+            persisted_report,
+            induction_candidates,
+            induction_decisions,
+            induction_results,
+        )
     before = relation_record_counts(nodes)
     reflected_results, pending_decisions = split_reflected_results_and_pending_decisions(repo, nodes, decisions)
     pending_results = update_memory_archive.apply_memory_review_decisions(nodes, candidates, pending_decisions)
     results = [*reflected_results, *pending_results]
+    induction_results = induction_dry_run_results(repo, induction_candidates, induction_decisions)
     after = relation_record_counts(nodes)
-    return {
+    return add_induction_report_fields(
+        {
         "decision_count": len(decisions),
         "review_candidate_count": len(candidates),
         "result_status_counts": count_by(results, "status"),
@@ -172,7 +243,11 @@ def dry_run_report(repo: Path) -> dict[str, Any]:
         "relation_record_counts_before": before,
         "relation_record_counts_after": after,
         "write_enabled": False,
-    }
+        },
+        induction_candidates,
+        induction_decisions,
+        induction_results,
+    )
 
 
 def write_report(repo: Path) -> dict[str, Any]:
@@ -181,7 +256,11 @@ def write_report(repo: Path) -> dict[str, Any]:
     update_memory_archive.rebuild_indexes(repo)
     after_nodes = load_index_rows(repo, "index/memories.jsonl")
     results = load_index_rows(repo, "index/memory_review_decision_results.jsonl")
-    return {
+    induction_candidates = load_index_rows(repo, "index/induction_review_candidates.jsonl")
+    induction_decisions = update_memory_archive.load_induction_review_decisions(repo)
+    induction_results = load_index_rows(repo, "index/induction_review_decision_results.jsonl")
+    return add_induction_report_fields(
+        {
         "decision_count": len(update_memory_archive.load_memory_review_decisions(repo)),
         "review_candidate_count": len(load_index_rows(repo, "index/memory_review_candidates.jsonl")),
         "result_status_counts": count_by(results, "status"),
@@ -189,7 +268,11 @@ def write_report(repo: Path) -> dict[str, Any]:
         "relation_record_counts_before": before,
         "relation_record_counts_after": relation_record_counts(after_nodes),
         "write_enabled": True,
-    }
+        },
+        induction_candidates,
+        induction_decisions,
+        induction_results,
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

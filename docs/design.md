@@ -399,6 +399,13 @@ the expected aggregate `reason`, and optional `expect_evidence_ref`,
 derived session, evidence, and source references for audit, but they store
 `candidate_text_sha256` rather than candidate text so benchmark and archive
 reports do not render private natural-language content.
+Natural review decision cases may provide `expected_induction_review_decisions`;
+each entry binds a synthetic `text` and `reason` to an `action` of
+`approve_promote`, `reject`, or `noop`, plus the expected aggregate result
+status. The runner writes private synthetic
+`reviews/induction_review_decisions.jsonl` rows with `candidate_id`,
+`candidate_text_sha256`, and a candidate fingerprint, reruns the archive apply
+path, and verifies that only `approve_promote` creates a memory node.
 Cases may also provide `expected_noise_rejections` for process chatter that
 must not become a memory node. Natural precision cases may provide
 `expected_false_promotions`, where each entry contains either `text` or
@@ -423,6 +430,9 @@ content, memory text, source paths, or raw refs. Core metrics are
 `natural_false_promotion_rate`, `cross_project_generalization_rate`,
 `project_scope_precision`, `auto_promotion_precision`,
 `ambiguous_candidate_review_rate`, `induction_review_routing_rate`,
+`induction_review_decision_apply_rate`,
+`induction_review_approve_promotion_rate`,
+`induction_review_ignore_suppression_rate`,
 `low_confidence_review_rate`, `scope_change_review_rate`,
 `conflict_review_rate`, `review_routing_rate`, `process_noise_rejection_rate`,
 `ephemeral_status_rejection_rate`, `hypothetical_rejection_rate`,
@@ -436,7 +446,8 @@ content, memory text, source paths, or raw refs. Core metrics are
 gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
 `benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
 pass-rate metrics to remain at 1.0, including natural induction review routing
-by low-confidence, scope-change, and conflict reason. They require
+by low-confidence, scope-change, and conflict reason, plus induction review
+decision apply/promotion/suppression behavior. They require
 `natural_false_promotion_rate` to remain 0 and `privacy_leak_count` to remain 0.
 
 ## End-To-End Induction-To-Recall Benchmark

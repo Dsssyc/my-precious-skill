@@ -524,6 +524,9 @@ induction benchmark 只输出 aggregate JSON 指标：
 `natural_false_promotion_rate`、`auto_promotion_precision`、
 `cross_project_generalization_rate`、`project_scope_precision`、
 `ambiguous_candidate_review_rate`、`induction_review_routing_rate`、
+`induction_review_decision_apply_rate`、
+`induction_review_approve_promotion_rate`、
+`induction_review_ignore_suppression_rate`、
 `low_confidence_review_rate`、`scope_change_review_rate`、
 `conflict_review_rate`、
 `review_routing_rate`、`process_noise_rejection_rate`、
@@ -542,7 +545,10 @@ redacted source record，以及默认拒绝 likely-secret source record。natura
 calibration 覆盖只有部分支持的重复 statement、冲突 preference、scope broadening
 或 narrowing、低置信一次性 candidate，以及应该保持 reviewable 而不是被拒绝或
 提升的 candidate。review candidate row 会保留 evidence/source refs 供审计使用，
-但只存 `candidate_text_sha256`，不渲染 candidate text。adversarial precision cases
+但只存 `candidate_text_sha256`，不渲染 candidate text。synthetic induction
+review decisions 使用私有 `reviews/induction_review_decisions.jsonl`，action
+为 `approve_promote`、`reject` 或 `noop`；只有 approve decision 会把这些
+review candidates 提升为 memory nodes。adversarial precision cases
 覆盖带 `should`/`must` 的
 一次性 status/progress update、只有 acknowledgement 的回复、`we could` 或 `maybe`
 假设语句、临时本地 implementation choice、test-result chatter、quoted prompt-like
@@ -628,10 +634,14 @@ whitespace 错误。
   `memories/projects.jsonl` 和 `memories/explicit.jsonl`：分层 memory nodes。
 - `reviews/memory_lifecycle_decisions.jsonl`：针对模糊 lifecycle candidates 的
   私有 reviewer decisions。
+- `reviews/induction_review_decisions.jsonl`：针对 natural induction candidates
+  的私有 reviewer decisions。
 - `index/memories.jsonl`：合并后的分层 memory 搜索索引。
 - `index/memory_review_candidates.jsonl`：需要人工 review 的模糊 lifecycle pairs。
 - `index/induction_review_candidates.jsonl`：promotion 前需要 review 的
   aggregate-safe natural induction candidates。
+- `index/induction_review_decision_results.jsonl`：applied/ignored induction
+  review decision 状态，供聚合检查使用。
 - `index/memory_review_decision_results.jsonl`：applied/ignored review decision
   状态，供聚合检查使用。
 - `index/memory_consolidation_trace.jsonl`：updater 生成的 merge、supersede、
@@ -665,6 +675,8 @@ skills/using-my-precious/references/archive-format.md
   contradict、deprecate 和 skip 决策的 consolidation trace index。
 - aggregate-safe natural induction review candidate index，用于低置信、冲突或
   scope-changing 的 natural candidates，避免自动提升。
+- aggregate-safe induction review decision results，用于 synthetic approve、
+  reject 和 noop calibration。
 - 只输出聚合结果的 review-decision dry-run/apply 工具，可把已确认的
   lifecycle review decisions 转成 reciprocal memory links。
 - privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、
