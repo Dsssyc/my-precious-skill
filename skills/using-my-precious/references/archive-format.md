@@ -118,7 +118,9 @@ Updater diagnostics may also write internal index sidecars:
   than candidate text.
 - `reviews/induction_review_decisions.jsonl`: private reviewer decisions for
   natural induction candidates, using candidate IDs, candidate text hashes, and
-  candidate fingerprints.
+  candidate fingerprints. The apply path rejects duplicate decision IDs,
+  repeated exact rows, and conflicting actions for the same candidate or
+  candidate fingerprint.
 - `index/induction_review_decision_results.jsonl`: aggregate applied/ignored
   result rows for induction review decisions.
 - `index/memory_consolidation_trace.jsonl`: aggregate decision traces for

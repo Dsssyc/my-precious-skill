@@ -78,6 +78,15 @@ MEMORY_REVIEW_ACTIONS = MEMORY_REVIEW_APPROVAL_ACTIONS | MEMORY_REVIEW_IGNORE_AC
 INDUCTION_REVIEW_APPROVAL_ACTIONS = {"approve_promote"}
 INDUCTION_REVIEW_IGNORE_ACTIONS = {"reject", "noop"}
 INDUCTION_REVIEW_ACTIONS = INDUCTION_REVIEW_APPROVAL_ACTIONS | INDUCTION_REVIEW_IGNORE_ACTIONS
+INDUCTION_REVIEW_DECISION_SET_ERROR_KEYS = (
+    "duplicate_decision_id",
+    "exact_duplicate",
+    "conflicting_candidate_action",
+    "conflicting_fingerprint_action",
+    "stale",
+    "unknown",
+    "unsafe",
+)
 MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "candidate_type",
     "current_memory_id",
@@ -3111,10 +3120,98 @@ def build_induction_review_candidate_index(candidates: list[dict]) -> dict[str, 
     return index
 
 
+def increment_induction_review_decision_error(counts: dict[str, int], key: str) -> None:
+    if key in INDUCTION_REVIEW_DECISION_SET_ERROR_KEYS:
+        counts[key] = counts.get(key, 0) + 1
+
+
+def induction_review_decision_error_counts(
+    induction_review_candidates: list[dict],
+    induction_review_decisions: list[dict],
+) -> dict[str, int]:
+    candidates_by_id = build_induction_review_candidate_index(induction_review_candidates)
+    counts: dict[str, int] = {}
+    seen_decision_ids: set[str] = set()
+    seen_exact_rows: set[str] = set()
+    actions_by_candidate_id: dict[str, set[str]] = {}
+    actions_by_fingerprint: dict[str, set[str]] = {}
+
+    for decision in induction_review_decisions:
+        row_fingerprint = json.dumps(decision, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if row_fingerprint in seen_exact_rows:
+            increment_induction_review_decision_error(counts, "exact_duplicate")
+        else:
+            seen_exact_rows.add(row_fingerprint)
+
+        action = decision.get("action")
+        decision_id = decision.get("decision_id")
+        candidate_id = decision.get("candidate_id")
+        candidate_text_sha256 = decision.get("candidate_text_sha256")
+        if (
+            not isinstance(action, str)
+            or action not in INDUCTION_REVIEW_ACTIONS
+            or not is_safe_memory_review_id(decision_id)
+            or not is_safe_induction_review_candidate_id(candidate_id)
+            or not is_safe_sha256_hex(candidate_text_sha256)
+        ):
+            increment_induction_review_decision_error(counts, "unsafe")
+            continue
+
+        safe_decision_id = str(decision_id)
+        if safe_decision_id in seen_decision_ids:
+            increment_induction_review_decision_error(counts, "duplicate_decision_id")
+        else:
+            seen_decision_ids.add(safe_decision_id)
+
+        safe_candidate_id = str(candidate_id)
+        candidate = candidates_by_id.get(safe_candidate_id)
+        if candidate is None:
+            increment_induction_review_decision_error(counts, "unknown")
+            continue
+
+        candidate_fingerprint = decision.get("candidate_fingerprint")
+        if (
+            candidate.get("candidate_text_sha256") != candidate_text_sha256
+            or not isinstance(candidate_fingerprint, str)
+            or candidate_fingerprint != induction_review_candidate_fingerprint(candidate)
+        ):
+            increment_induction_review_decision_error(counts, "stale")
+            continue
+
+        candidate_actions = actions_by_candidate_id.setdefault(safe_candidate_id, set())
+        if candidate_actions and action not in candidate_actions:
+            increment_induction_review_decision_error(counts, "conflicting_candidate_action")
+        candidate_actions.add(action)
+
+        fingerprint_actions = actions_by_fingerprint.setdefault(candidate_fingerprint, set())
+        if fingerprint_actions and action not in fingerprint_actions:
+            increment_induction_review_decision_error(counts, "conflicting_fingerprint_action")
+        fingerprint_actions.add(action)
+
+    return dict(sorted(counts.items()))
+
+
+def raise_induction_review_decision_error(error_counts: dict[str, int]) -> None:
+    if not error_counts:
+        return
+    if set(error_counts) == {"unsafe"}:
+        raise SystemExit("unsafe induction review decision")
+    if set(error_counts) == {"unknown"}:
+        raise SystemExit("unknown induction review candidate")
+    if set(error_counts) == {"stale"}:
+        raise SystemExit("stale induction review decision")
+    raise SystemExit("invalid induction review decision set")
+
+
 def apply_induction_review_decisions(
     induction_review_candidates: list[dict],
     induction_review_decisions: list[dict],
 ) -> list[dict]:
+    error_counts = induction_review_decision_error_counts(
+        induction_review_candidates,
+        induction_review_decisions,
+    )
+    raise_induction_review_decision_error(error_counts)
     candidates_by_id = build_induction_review_candidate_index(induction_review_candidates)
     results: list[dict] = []
     for decision in induction_review_decisions:

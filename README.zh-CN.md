@@ -548,7 +548,12 @@ calibration 覆盖只有部分支持的重复 statement、冲突 preference、sc
 但只存 `candidate_text_sha256`，不渲染 candidate text。synthetic induction
 review decisions 使用私有 `reviews/induction_review_decisions.jsonl`，action
 为 `approve_promote`、`reject` 或 `noop`；只有 approve decision 会把这些
-review candidates 提升为 memory nodes。adversarial precision cases
+review candidates 提升为 memory nodes。decision-set validation 会拒绝重复
+`decision_id`、重复的完整行，以及同一 candidate 或 candidate fingerprint 上
+互相冲突的 action。dry-run 只输出 aggregate duplicate、conflict、stale、
+unsafe 和 unknown 计数，不渲染 candidate text、memory text、source path 或
+raw refs。
+adversarial precision cases
 覆盖带 `should`/`must` 的
 一次性 status/progress update、只有 acknowledgement 的回复、`we could` 或 `maybe`
 假设语句、临时本地 implementation choice、test-result chatter、quoted prompt-like
@@ -635,7 +640,8 @@ whitespace 错误。
 - `reviews/memory_lifecycle_decisions.jsonl`：针对模糊 lifecycle candidates 的
   私有 reviewer decisions。
 - `reviews/induction_review_decisions.jsonl`：针对 natural induction candidates
-  的私有 reviewer decisions。
+  的私有 reviewer decisions。重复 ID、重复完整行，以及同一 candidate 或
+  fingerprint 上冲突的 action 会被拒绝。
 - `index/memories.jsonl`：合并后的分层 memory 搜索索引。
 - `index/memory_review_candidates.jsonl`：需要人工 review 的模糊 lifecycle pairs。
 - `index/induction_review_candidates.jsonl`：promotion 前需要 review 的
@@ -676,7 +682,7 @@ skills/using-my-precious/references/archive-format.md
 - aggregate-safe natural induction review candidate index，用于低置信、冲突或
   scope-changing 的 natural candidates，避免自动提升。
 - aggregate-safe induction review decision results，用于 synthetic approve、
-  reject 和 noop calibration。
+  reject、noop、duplicate、conflict、stale、unsafe 和 unknown calibration。
 - 只输出聚合结果的 review-decision dry-run/apply 工具，可把已确认的
   lifecycle review decisions 转成 reciprocal memory links。
 - privacy-safe real-archive shadow evaluation runner，可输出聚合 recall、

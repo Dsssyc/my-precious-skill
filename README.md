@@ -662,7 +662,11 @@ audit, but store `candidate_text_sha256` instead of rendering candidate text.
 Synthetic induction review decisions use private
 `reviews/induction_review_decisions.jsonl` rows with `approve_promote`,
 `reject`, or `noop`; approve decisions are the only path that promotes those
-review candidates into memory nodes.
+review candidates into memory nodes. Decision-set validation rejects duplicate
+`decision_id` values, repeated exact rows, and conflicting actions for the same
+candidate or candidate fingerprint. Dry-run reports expose only aggregate
+duplicate/conflict/stale/unsafe/unknown counts, never candidate text, memory
+text, source paths, or raw refs.
 The adversarial precision cases cover one-off status or progress updates with
 `should`/`must`, acknowledgement-only replies, hypothetical `we could` or
 `maybe` statements, temporary local implementation choices, test-result
@@ -753,7 +757,8 @@ A compatible deployment repository should expose:
 - `reviews/memory_lifecycle_decisions.jsonl`: private reviewer decisions for
   ambiguous lifecycle candidates.
 - `reviews/induction_review_decisions.jsonl`: private reviewer decisions for
-  natural induction candidates.
+  natural induction candidates. Duplicate IDs, exact duplicate rows, and
+  conflicting actions for the same candidate or fingerprint are rejected.
 - `index/memories.jsonl`: combined layered-memory search index.
 - `index/memory_review_candidates.jsonl`: ambiguous lifecycle pairs requiring
   manual review before automatic retirement.
@@ -796,7 +801,7 @@ skills/using-my-precious/references/archive-format.md
   conflicting, or scope-changing natural candidates that should not be
   auto-promoted.
 - Aggregate-safe induction review decision results for synthetic approve,
-  reject, and noop calibration.
+  reject, noop, duplicate, conflict, stale, unsafe, and unknown calibration.
 - Aggregate-only review-decision dry-run/apply tool for converting approved
   lifecycle review decisions into reciprocal memory links.
 - Privacy-safe real-archive shadow evaluation runner with aggregate recall,

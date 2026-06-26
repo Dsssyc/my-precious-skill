@@ -405,7 +405,12 @@ each entry binds a synthetic `text` and `reason` to an `action` of
 status. The runner writes private synthetic
 `reviews/induction_review_decisions.jsonl` rows with `candidate_id`,
 `candidate_text_sha256`, and a candidate fingerprint, reruns the archive apply
-path, and verifies that only `approve_promote` creates a memory node.
+path, and verifies that only `approve_promote` creates a memory node. The
+decision file is a private input surface, not generated archive output.
+Decision-set validation rejects duplicate `decision_id` values, repeated exact
+rows, and conflicting actions for the same candidate ID or candidate
+fingerprint. Dry-run preflight reports only aggregate duplicate, conflict,
+stale, unsafe, and unknown counts.
 Cases may also provide `expected_noise_rejections` for process chatter that
 must not become a memory node. Natural precision cases may provide
 `expected_false_promotions`, where each entry contains either `text` or
@@ -447,7 +452,9 @@ gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
 `benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
 pass-rate metrics to remain at 1.0, including natural induction review routing
 by low-confidence, scope-change, and conflict reason, plus induction review
-decision apply/promotion/suppression behavior. They require
+decision apply/promotion/suppression behavior. Unit coverage additionally gates
+duplicate/conflicting induction review decision rejection and aggregate-only
+preflight output. They require
 `natural_false_promotion_rate` to remain 0 and `privacy_leak_count` to remain 0.
 
 ## End-To-End Induction-To-Recall Benchmark

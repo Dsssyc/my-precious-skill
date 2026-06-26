@@ -213,7 +213,10 @@ The natural review decision cases write synthetic private
 `reviews/induction_review_decisions.jsonl` decisions, then verify that
 `approve_promote` creates a memory node while `reject` and `noop` remain
 non-mutating. The report records only aggregate apply, promotion, and
-suppression rates.
+suppression rates. Unit coverage now also rejects duplicate decision IDs,
+repeated exact rows, and conflicting candidate/fingerprint actions, while
+dry-run preflight reports aggregate duplicate/conflict/stale/unsafe/unknown
+counts.
 The JSON report is aggregate-only: it does not render source content, memory
 text, source paths, raw refs, or per-case details.
 
@@ -1080,9 +1083,10 @@ candidate surface for low-confidence, conflicting, and scope-changing synthetic
 candidates, with evidence/source refs preserved and candidate text hashed rather
 than rendered. It now also has a synthetic private decision/apply loop for those
 candidates: approve decisions promote, while reject/noop decisions stay
-non-mutating, with aggregate-only result indexes. It also has an initial gated
-source-depth workflow with synthetic quality gates and a real deployment
-aggregate baseline that passes the stricter source-map anchor audit. Shadow
+non-mutating, with aggregate-only result indexes and aggregate-only
+duplicate/conflict preflight. It also has an initial gated source-depth workflow
+with synthetic quality gates and a real deployment aggregate baseline that
+passes the stricter source-map anchor audit. Shadow
 evaluation now has a private redacted real-history probe set with numeric
 recall, precision, noise, abstention, suppression, privacy, provenance,
 lifecycle, and audit gates. The

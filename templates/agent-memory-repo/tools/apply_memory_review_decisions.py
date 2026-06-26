@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply or preview memory lifecycle review decisions."""
+"""Apply or preview memory lifecycle and induction review decisions."""
 
 from __future__ import annotations
 
@@ -79,6 +79,10 @@ def induction_promoted_count(results: list[dict]) -> int:
     )
 
 
+def induction_decision_error_counts(candidates: list[dict], decisions: list[dict]) -> dict[str, int]:
+    return update_memory_archive.induction_review_decision_error_counts(candidates, decisions)
+
+
 def split_reflected_induction_results_and_pending_decisions(
     repo: Path,
     decisions: list[dict],
@@ -98,10 +102,17 @@ def split_reflected_induction_results_and_pending_decisions(
     return reflected_results, pending_decisions
 
 
-def induction_dry_run_results(repo: Path, candidates: list[dict], decisions: list[dict]) -> list[dict]:
+def induction_dry_run_results(
+    repo: Path,
+    candidates: list[dict],
+    decisions: list[dict],
+) -> tuple[list[dict], dict[str, int]]:
     reflected_results, pending_decisions = split_reflected_induction_results_and_pending_decisions(repo, decisions)
+    error_counts = induction_decision_error_counts(candidates, pending_decisions)
+    if error_counts:
+        return [], error_counts
     pending_results = update_memory_archive.apply_induction_review_decisions(candidates, pending_decisions)
-    return [*reflected_results, *pending_results]
+    return [*reflected_results, *pending_results], {}
 
 
 def add_induction_report_fields(
@@ -109,11 +120,15 @@ def add_induction_report_fields(
     candidates: list[dict],
     decisions: list[dict],
     results: list[dict],
+    error_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    error_counts = error_counts or {}
     report.update(
         {
             "induction_decision_count": len(decisions),
             "induction_review_candidate_count": len(candidates),
+            "induction_decision_preflight_passed": not error_counts,
+            "induction_decision_error_counts": error_counts,
             "induction_result_status_counts": count_by(results, "status"),
             "induction_result_action_counts": count_by(results, "action"),
             "induction_promoted_count": induction_promoted_count(results),
@@ -221,57 +236,63 @@ def dry_run_report(repo: Path) -> dict[str, Any]:
     induction_decisions = update_memory_archive.load_induction_review_decisions(repo)
     persisted_report = persisted_results_report(repo, nodes, candidates, decisions)
     if persisted_report is not None:
-        induction_results = induction_dry_run_results(repo, induction_candidates, induction_decisions)
+        induction_results, induction_errors = induction_dry_run_results(repo, induction_candidates, induction_decisions)
         return add_induction_report_fields(
             persisted_report,
             induction_candidates,
             induction_decisions,
             induction_results,
+            induction_errors,
         )
     before = relation_record_counts(nodes)
     reflected_results, pending_decisions = split_reflected_results_and_pending_decisions(repo, nodes, decisions)
     pending_results = update_memory_archive.apply_memory_review_decisions(nodes, candidates, pending_decisions)
     results = [*reflected_results, *pending_results]
-    induction_results = induction_dry_run_results(repo, induction_candidates, induction_decisions)
+    induction_results, induction_errors = induction_dry_run_results(repo, induction_candidates, induction_decisions)
     after = relation_record_counts(nodes)
     return add_induction_report_fields(
         {
-        "decision_count": len(decisions),
-        "review_candidate_count": len(candidates),
-        "result_status_counts": count_by(results, "status"),
-        "result_action_counts": count_by(results, "action"),
-        "relation_record_counts_before": before,
-        "relation_record_counts_after": after,
-        "write_enabled": False,
+            "decision_count": len(decisions),
+            "review_candidate_count": len(candidates),
+            "result_status_counts": count_by(results, "status"),
+            "result_action_counts": count_by(results, "action"),
+            "relation_record_counts_before": before,
+            "relation_record_counts_after": after,
+            "write_enabled": False,
         },
         induction_candidates,
         induction_decisions,
         induction_results,
+        induction_errors,
     )
 
 
 def write_report(repo: Path) -> dict[str, Any]:
     before_nodes = load_index_rows(repo, "index/memories.jsonl")
     before = relation_record_counts(before_nodes)
+    before_induction_candidates = load_index_rows(repo, "index/induction_review_candidates.jsonl")
+    induction_decisions = update_memory_archive.load_induction_review_decisions(repo)
+    induction_errors = induction_decision_error_counts(before_induction_candidates, induction_decisions)
+    update_memory_archive.raise_induction_review_decision_error(induction_errors)
     update_memory_archive.rebuild_indexes(repo)
     after_nodes = load_index_rows(repo, "index/memories.jsonl")
     results = load_index_rows(repo, "index/memory_review_decision_results.jsonl")
     induction_candidates = load_index_rows(repo, "index/induction_review_candidates.jsonl")
-    induction_decisions = update_memory_archive.load_induction_review_decisions(repo)
     induction_results = load_index_rows(repo, "index/induction_review_decision_results.jsonl")
     return add_induction_report_fields(
         {
-        "decision_count": len(update_memory_archive.load_memory_review_decisions(repo)),
-        "review_candidate_count": len(load_index_rows(repo, "index/memory_review_candidates.jsonl")),
-        "result_status_counts": count_by(results, "status"),
-        "result_action_counts": count_by(results, "action"),
-        "relation_record_counts_before": before,
-        "relation_record_counts_after": relation_record_counts(after_nodes),
-        "write_enabled": True,
+            "decision_count": len(update_memory_archive.load_memory_review_decisions(repo)),
+            "review_candidate_count": len(load_index_rows(repo, "index/memory_review_candidates.jsonl")),
+            "result_status_counts": count_by(results, "status"),
+            "result_action_counts": count_by(results, "action"),
+            "relation_record_counts_before": before,
+            "relation_record_counts_after": relation_record_counts(after_nodes),
+            "write_enabled": True,
         },
         induction_candidates,
         induction_decisions,
         induction_results,
+        induction_errors,
     )
 
 
