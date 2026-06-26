@@ -95,9 +95,11 @@ Each memory node should contain:
 - `support_count`: number of supporting sessions or evidence items.
 - `first_seen`: first known observation timestamp or date.
 - `last_seen`: latest known observation timestamp or date.
-- `derived_from`: session summary paths or memory IDs used to derive the node.
-- `evidence_refs`: supporting evidence references, usually objects with `path`
-  and `quote_id`.
+- `derived_from`: non-empty session summary paths or memory IDs used to derive
+  the node.
+- `evidence_refs`: non-empty supporting evidence references, usually objects
+  with `path` and `quote_id`. High-level memory nodes must be evidence-bound;
+  nodes with only a summary path and no evidence reference are invalid.
 - `raw_refs`: protected source anchors, usually objects with `path` and
   `anchor`.
 - `supersedes`: older memory IDs this node replaces.

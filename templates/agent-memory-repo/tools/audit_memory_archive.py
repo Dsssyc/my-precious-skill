@@ -830,7 +830,11 @@ def is_valid_memory_node_shape(row: dict) -> bool:
             if value is not None and not is_safe_memory_identifier(value):
                 return False
     evidence_refs = row.get("evidence_refs")
-    if not isinstance(evidence_refs, list) or not all(is_valid_evidence_ref_shape(ref) for ref in evidence_refs):
+    if (
+        not isinstance(evidence_refs, list)
+        or not evidence_refs
+        or not all(is_valid_evidence_ref_shape(ref) for ref in evidence_refs)
+    ):
         return False
     superseded_by = row.get("superseded_by")
     return superseded_by is None or is_safe_memory_identifier(superseded_by)
