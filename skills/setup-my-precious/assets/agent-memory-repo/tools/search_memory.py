@@ -1160,7 +1160,7 @@ def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
     paths: list[str] = []
     for path in iter_ref_paths(record.get("derived_from")):
         safe_path = safe_repo_relative_path(repo, path)
-        if safe_path and is_reachable_drill_path(repo, safe_path):
+        if safe_path and is_archive_internal_ref_path(safe_path) and is_reachable_drill_path(repo, safe_path):
             paths.append(safe_path)
     paths.extend(iter_evidence_drill_paths(repo, record.get("evidence_refs")))
     return unique_ordered(paths)

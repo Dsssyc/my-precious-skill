@@ -62,7 +62,10 @@ and JSONL indexes.
 - `memories/*.jsonl` and `index/memories.jsonl`: layered memory nodes induced
   from sessions or created from explicit memory requests. These nodes make
   global, domain, and project memories first-class recall targets while keeping
-  sessions as event-level evidence.
+  sessions as event-level evidence. A node's `derived_from` may point to
+  concrete archive summary/evidence-support paths or to an existing memory ID
+  for higher-level induction provenance; evidence_refs remain the drillable
+  support contract.
 - `skills/setup-my-precious/SKILL.md`: asks the user how to store the archive
   and scaffolds a local or hosted-Git-backed deployment repository.
 - `skills/setup-my-precious/scripts/setup_memory_archive.py`: copies the

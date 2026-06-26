@@ -612,6 +612,9 @@ The current implementation can be trusted for these bounded claims:
 - Archive audit rejects high-level memory nodes without non-empty
   `derived_from` and `evidence_refs`, and it checks missing evidence quote IDs
   in both root memory files and `index/memories.jsonl`.
+- `derived_from` may also link to an existing memory ID for high-level
+  memory-to-memory induction provenance, but this does not replace concrete
+  `evidence_refs` or make the memory ID a drilldown file path.
 - The updater can induce a `domain` high-level memory from multiple synthetic
   session source records. The generated memory is automatic, has two supporting
   summaries, has evidence refs whose quote IDs exist in `evidence.md`, and is

@@ -1221,6 +1221,99 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/global.jsonl:1 category=invalid_memory_node", combined)
             self.assertIn("memories/global.jsonl:2 category=invalid_memory_node", combined)
 
+    def test_audit_memory_archive_allows_existing_memory_id_provenance(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            base = valid_memory_node(
+                memory_id="mem_base_provenance",
+                text="Base memory ID provenance remains evidence-bound.",
+                **write_memory_node_provenance(memory_repo, "base-memory-id-provenance"),
+            )
+            derived_provenance = write_memory_node_provenance(memory_repo, "derived-memory-id-provenance")
+            derived = valid_memory_node(
+                memory_id="mem_derived_from_memory_id",
+                text="Derived memory ID provenance can reference an existing memory.",
+                derived_from=["mem_base_provenance"],
+                evidence_refs=derived_provenance["evidence_refs"],
+            )
+            rows = json.dumps(base, sort_keys=True) + "\n" + json.dumps(derived, sort_keys=True) + "\n"
+            (memory_repo / "memories/global.jsonl").write_text(rows, encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(rows, encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_audit_memory_archive_rejects_unknown_self_and_unsafe_memory_id_provenance(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            unknown_provenance = write_memory_node_provenance(memory_repo, "unknown-memory-id-provenance")
+            unknown = valid_memory_node(
+                memory_id="mem_unknown_parent",
+                derived_from=["mem_missing_parent"],
+                evidence_refs=unknown_provenance["evidence_refs"],
+            )
+            self_ref = valid_memory_node(
+                memory_id="mem_self_parent",
+                derived_from=["mem_self_parent"],
+                evidence_refs=write_memory_node_provenance(memory_repo, "self-memory-id-provenance")["evidence_refs"],
+            )
+            unsafe = valid_memory_node(
+                memory_id="mem_unsafe_parent",
+                derived_from=["mem token=PRIVATE"],
+                evidence_refs=write_memory_node_provenance(memory_repo, "unsafe-memory-id-provenance")["evidence_refs"],
+            )
+            rows = (
+                json.dumps(unknown, sort_keys=True)
+                + "\n"
+                + json.dumps(self_ref, sort_keys=True)
+                + "\n"
+                + json.dumps(unsafe, sort_keys=True)
+                + "\n"
+            )
+            (memory_repo / "memories/global.jsonl").write_text(rows, encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(rows, encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            for line_number in (1, 2, 3):
+                self.assertIn(f"memories/global.jsonl:{line_number} category=broken_memory_ref", combined)
+                self.assertIn(f"index/memories.jsonl:{line_number} category=broken_memory_ref", combined)
+
     def test_audit_memory_archive_scans_memory_jsonl_quality_fields_not_raw_json(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

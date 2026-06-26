@@ -567,6 +567,65 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/06/17/permission/summary.md", first_hit)
         self.assertNotIn("sessions/2026/06/17/permission/evidence.md", first_hit)
 
+    def test_search_memory_does_not_render_derived_memory_ids_as_drill_paths(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/memory-id-provenance"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Memory ID provenance\n\n"
+                "Derived memory ID provenance should still drill only to real files.\n",
+                encoding="utf-8",
+            )
+            (session_dir / "evidence.md").write_text(
+                "ev_001: Evidence for derived memory ID provenance.\n",
+                encoding="utf-8",
+            )
+            parent = synthetic_memory_row(
+                "mem_parent_provenance",
+                "Parent provenance memory should not win this query.",
+                layer="global",
+                scope="global",
+                topic="memory-id-provenance-parent",
+                derived_from=["sessions/2026/06/17/memory-id-provenance/summary.md"],
+            )
+            child = synthetic_memory_row(
+                "mem_child_provenance",
+                "Derived memory ID drill sentinel should show concrete support paths only.",
+                layer="global",
+                scope="global",
+                topic="memory-id-provenance-child",
+                derived_from=[
+                    "mem_parent_provenance",
+                    "sessions/2026/06/17/memory-id-provenance/summary.md",
+                ],
+            )
+            child["evidence_refs"] = [
+                {"path": "sessions/2026/06/17/memory-id-provenance/evidence.md", "quote_id": "ev_001"}
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(parent, ensure_ascii=False) + "\n" + json.dumps(child, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(script), "Derived memory ID drill sentinel", "--repo", str(repo)],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("memory_id: mem_child_provenance", first_hit)
+        self.assertIn("drill:", first_hit)
+        self.assertIn("sessions/2026/06/17/memory-id-provenance/summary.md", first_hit)
+        self.assertIn("sessions/2026/06/17/memory-id-provenance/evidence.md#ev_001", first_hit)
+        self.assertNotIn("mem_parent_provenance", first_hit)
+
     def test_search_memory_ranks_durable_memory_above_repeated_process_noise(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

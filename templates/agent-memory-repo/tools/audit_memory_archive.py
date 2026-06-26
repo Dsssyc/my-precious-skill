@@ -840,6 +840,34 @@ def is_valid_memory_node_shape(row: dict) -> bool:
     return superseded_by is None or is_safe_memory_identifier(superseded_by)
 
 
+def existing_memory_ids(repo: Path) -> set[str]:
+    memory_ids: set[str] = set()
+    for _, _, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if isinstance(memory_id, str):
+            memory_ids.add(memory_id)
+    return memory_ids
+
+
+def is_valid_derived_from_ref(
+    repo: Path,
+    memory_ids: set[str],
+    current_memory_id: str,
+    ref_text: object,
+) -> bool:
+    if not isinstance(ref_text, str):
+        return False
+    if ref_text == current_memory_id:
+        return False
+    if safe_existing_archive_ref(repo, ref_text):
+        return True
+    if not is_safe_memory_identifier(ref_text):
+        return False
+    return ref_text in memory_ids
+
+
 def is_safe_raw_ref(ref: object) -> bool:
     if not isinstance(ref, dict):
         return False
@@ -1076,6 +1104,7 @@ def audit_memory_index_consistency(repo: Path) -> list[Finding]:
 
 def audit_memory_references(repo: Path) -> list[Finding]:
     findings: list[Finding] = []
+    memory_ids = existing_memory_ids(repo)
     for relative, line_number, row in iter_memory_node_rows(repo):
         if row.get("__invalid_json__"):
             findings.append(Finding(relative, line_number, "invalid_json"))
@@ -1090,8 +1119,9 @@ def audit_memory_references(repo: Path) -> list[Finding]:
         if not isinstance(derived_from, list):
             findings.append(Finding(relative, line_number, "invalid_memory_node"))
         else:
-            for path_text in derived_from:
-                if not isinstance(path_text, str) or not safe_existing_archive_ref(repo, path_text):
+            current_memory_id = row.get("memory_id") if isinstance(row.get("memory_id"), str) else ""
+            for ref_text in derived_from:
+                if not is_valid_derived_from_ref(repo, memory_ids, current_memory_id, ref_text):
                     findings.append(Finding(relative, line_number, "broken_memory_ref"))
         evidence_refs = row.get("evidence_refs", [])
         if not isinstance(evidence_refs, list):
