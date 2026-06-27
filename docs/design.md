@@ -64,8 +64,10 @@ and JSONL indexes.
   global, domain, and project memories first-class recall targets while keeping
   sessions as event-level evidence. A node's `derived_from` may point to
   concrete archive summary/evidence-support paths or to an existing memory ID
-  for higher-level induction provenance; evidence_refs remain the drillable
-  support contract.
+  for higher-level induction provenance. Search resolves bounded active
+  memory-id edges to concrete supporting summary, evidence, and source refs
+  while never rendering the memory ID itself as a drilldown path; evidence_refs
+  remain the required support contract.
 - `skills/setup-my-precious/SKILL.md`: asks the user how to store the archive
   and scaffolds a local or hosted-Git-backed deployment repository.
 - `skills/setup-my-precious/scripts/setup_memory_archive.py`: copies the
@@ -214,6 +216,9 @@ summary session output. These metrics are reported as `memory_recall_at_1`,
 `evidence_text_cases`, `evidence_text_reachability`, `source_reachability`,
 `source_ref_reachability`, `source_depth_policy_pass_rate`,
 `raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
+`memory_graph_drilldown_cases`, `memory_graph_drilldown_rate`,
+`memory_graph_invalid_edge_cases`,
+`memory_graph_invalid_edge_suppression_rate`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`,
 `abstain_pass_rate`, `suppression_pass_rate`, `privacy_leak_count`,
@@ -304,7 +309,16 @@ Optional fields include `category`, `source_benchmark`,
 `case_id`, `required_evidence_paths`, `reference_answer`,
 `reference_evidence`,
 `expected_not_memory_id`, `stale_memory_id`, `temporal_scope`, and
-`forbidden_output_patterns`.
+`forbidden_output_patterns`. Memory graph drilldown cases may also provide
+`derived_from_memory_ids` plus invalid-edge fields such as
+`self_cycle_derived_from_memory_id`, `missing_derived_from_memory_id`,
+`superseded_derived_from_memory_id`, and
+`deprecated_derived_from_memory_id`; these fields test that bounded read-path
+resolution follows valid active memory-to-memory support edges while
+suppressing unsafe or inactive edges. Packaged audit-clean benchmark archives
+should use only structurally valid graph edges, so missing and cyclic edge
+fixtures belong in focused search tests or explicitly invalid benchmark
+fixtures rather than the golden layered recall archive.
 `forbidden_output_patterns` values are Python regular expressions matched
 against combined memory, session, source, and explicit raw-preview output.
 `privacy_leak_count` also treats generic secret-like output identifiers as

@@ -155,6 +155,16 @@ def validate_case_memory_identifier(value: object, field: str) -> None:
 def validate_case_memory_identifiers(case: dict) -> None:
     if positive_case(case):
         validate_case_memory_identifier(case.get("expected_memory_id"), "expected_memory_id")
+    for support_id in text_list(case.get("derived_from_memory_ids")):
+        validate_case_memory_identifier(support_id, "derived_from_memory_ids")
+    for field in (
+        "self_cycle_derived_from_memory_id",
+        "missing_derived_from_memory_id",
+        "superseded_derived_from_memory_id",
+        "deprecated_derived_from_memory_id",
+    ):
+        for memory_id in text_list(case.get(field)):
+            validate_case_memory_identifier(memory_id, field)
     for stale_id in text_list(case.get("stale_memory_id")):
         validate_case_memory_identifier(stale_id, "stale_memory_id")
     for contradicted_id in text_list(case.get("contradicted_memory_id")):
@@ -194,6 +204,19 @@ def summary_paths_for_case(case: dict) -> list[str]:
     return [str(case["expected_summary_path"])]
 
 
+def memory_graph_source_ids(case: dict) -> list[str]:
+    ids = []
+    ids.extend(text_list(case.get("derived_from_memory_ids")))
+    for field in (
+        "self_cycle_derived_from_memory_id",
+        "missing_derived_from_memory_id",
+        "superseded_derived_from_memory_id",
+        "deprecated_derived_from_memory_id",
+    ):
+        ids.extend(text_list(case.get(field)))
+    return ids
+
+
 def build_memory_record(case: dict, *, include_superseded_refs: bool = False) -> dict:
     category = str(case.get("category") or "uncategorized")
     summary_paths = summary_paths_for_case(case)
@@ -207,6 +230,7 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
         text_parts.append(answer_text)
     text_parts.append(f"{query} {query} {query}.")
     is_explicit_memory = category == "explicit_memory"
+    graph_source_ids = memory_graph_source_ids(case)
     record = {
         "memory_id": memory_id,
         "layer": memory_layer(case),
@@ -220,9 +244,9 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
         "support_count": max(1, len(summary_paths), len(evidence_paths)),
         "first_seen": "2026-06-19",
         "last_seen": "2026-06-19",
-        "derived_from": summary_paths,
+        "derived_from": graph_source_ids or summary_paths,
         "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
-        "raw_refs": [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
+        "raw_refs": [] if graph_source_ids else [raw_ref_from_anchor(str(case["expected_source_anchor"]))],
         "supersedes": text_list(case.get("stale_memory_id")) if include_superseded_refs else [],
         "superseded_by": None,
         "tags": [category, "synthetic-benchmark", str(case.get("source_benchmark") or "synthetic")],
@@ -231,6 +255,89 @@ def build_memory_record(case: dict, *, include_superseded_refs: bool = False) ->
     if include_superseded_refs and contradicted_ids:
         record["contradicts"] = contradicted_ids
     return record
+
+
+def build_memory_graph_support_records(case: dict) -> list[dict]:
+    summary_paths = summary_paths_for_case(case)
+    evidence_paths = evidence_paths_for_case(case)
+    raw_refs = [raw_ref_from_anchor(str(case["expected_source_anchor"]))]
+    category = str(case.get("category") or "uncategorized")
+    records = []
+
+    def graph_support_paths(memory_id: str) -> tuple[list[str], list[str]]:
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", memory_id).strip("._") or "memory-graph-support"
+        base = f"sessions/synthetic/2027/05/graph-invalid/{slug}"
+        return [f"{base}/summary.md"], [f"{base}/evidence.md"]
+
+    def support_record(
+        memory_id: str,
+        *,
+        derived_from: list[str] | None = None,
+        evidence_ref_paths: list[str] | None = None,
+    ) -> dict:
+        record_evidence_paths = evidence_ref_paths if evidence_ref_paths is not None else evidence_paths
+        return {
+            "memory_id": memory_id,
+            "layer": "domain",
+            "scope": "synthetic",
+            "topic": f"{category.replace('_', '-')}-support",
+            "text": f"Synthetic memory graph support node: {memory_id}.",
+            "rationale": "Synthetic support node for memory graph drilldown.",
+            "source": "automatic",
+            "confidence": "high",
+            "persistence": "normal",
+            "support_count": max(1, len(summary_paths), len(evidence_paths)),
+            "first_seen": "2026-06-19",
+            "last_seen": "2026-06-19",
+            "derived_from": derived_from if derived_from is not None else summary_paths,
+            "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in record_evidence_paths],
+            "raw_refs": raw_refs,
+            "supersedes": [],
+            "superseded_by": None,
+            "tags": [category, "synthetic-benchmark", "memory-graph-support"],
+        }
+
+    for support_id in text_list(case.get("derived_from_memory_ids")):
+        records.append(support_record(support_id))
+
+    for self_cycle_id in text_list(case.get("self_cycle_derived_from_memory_id")):
+        invalid_summary_paths, invalid_evidence_paths = graph_support_paths(self_cycle_id)
+        records.append(
+            support_record(
+                self_cycle_id,
+                derived_from=[self_cycle_id, *invalid_summary_paths],
+                evidence_ref_paths=invalid_evidence_paths,
+            )
+        )
+
+    for superseded_id in text_list(case.get("superseded_derived_from_memory_id")):
+        invalid_summary_paths, invalid_evidence_paths = graph_support_paths(superseded_id)
+        replacement_id = f"{superseded_id}_replacement"
+        superseded = support_record(
+            superseded_id,
+            derived_from=invalid_summary_paths,
+            evidence_ref_paths=invalid_evidence_paths,
+        )
+        superseded["superseded_by"] = replacement_id
+        replacement = support_record(replacement_id)
+        replacement["supersedes"] = [superseded_id]
+        records.extend([superseded, replacement])
+
+    for deprecated_id in text_list(case.get("deprecated_derived_from_memory_id")):
+        invalid_summary_paths, invalid_evidence_paths = graph_support_paths(deprecated_id)
+        marker_id = f"{deprecated_id}_deprecation"
+        deprecated = support_record(
+            deprecated_id,
+            derived_from=invalid_summary_paths,
+            evidence_ref_paths=invalid_evidence_paths,
+        )
+        deprecated["confidence"] = "low"
+        deprecated["deprecated_by"] = marker_id
+        marker = support_record(marker_id)
+        marker["deprecates"] = [deprecated_id]
+        records.extend([deprecated, marker])
+
+    return records
 
 
 def build_superseded_distractor_records(case: dict) -> list[dict]:
@@ -411,7 +518,7 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
     answer_section = ""
     if reference_answers:
         answer_section = "Reference answers:\n" + "".join(f"- {answer}\n" for answer in reference_answers) + "\n"
-    for summary_path in record["derived_from"]:
+    for summary_path in summary_paths_for_case(case):
         write_text(
             repo / str(summary_path),
             "# Synthetic Layered Recall Session\n\n"
@@ -429,10 +536,52 @@ def write_positive_case_files(repo: Path, case: dict, record: dict) -> None:
             f"syn_ev_001: Evidence supporting {case['expected_memory_id']} for query {case['query']}. "
             f"{answer_evidence} {evidence_text}\n",
         )
-    for raw_ref in record["raw_refs"]:
+    raw_refs = record["raw_refs"] or [raw_ref_from_anchor(str(case["expected_source_anchor"]))]
+    for raw_ref in raw_refs:
         raw_path = repo / raw_ref["path"]
         append_text(
             raw_path,
+            json.dumps(
+                {
+                    "anchor": raw_ref.get("anchor", ""),
+                    "note": "Synthetic source anchor placeholder. No raw private transcript.",
+                },
+                sort_keys=True,
+            )
+            + "\n",
+        )
+
+
+def write_memory_record_support_files(repo: Path, case: dict, record: dict) -> None:
+    for summary_path in text_list(record.get("derived_from")):
+        if "/" not in summary_path or not summary_path.endswith("summary.md"):
+            continue
+        write_text(
+            repo / summary_path,
+            "# Synthetic Memory Graph Support\n\n"
+            f"Query: {case['query']}\n\n"
+            f"Support memory: {record.get('memory_id', '')}\n\n"
+            "This file is generated synthetic benchmark data only.\n",
+        )
+    for evidence_ref in record.get("evidence_refs", []):
+        if not isinstance(evidence_ref, dict):
+            continue
+        evidence_path = evidence_ref.get("path")
+        if not isinstance(evidence_path, str) or not evidence_path.strip():
+            continue
+        write_text(
+            repo / evidence_path,
+            "# Synthetic Evidence\n\n"
+            f"syn_ev_001: Evidence supporting {record.get('memory_id', '')} for query {case['query']}.\n",
+        )
+    for raw_ref in record.get("raw_refs", []):
+        if not isinstance(raw_ref, dict):
+            continue
+        raw_path_value = raw_ref.get("path")
+        if not isinstance(raw_path_value, str) or not raw_path_value.strip():
+            continue
+        append_text(
+            repo / raw_path_value,
             json.dumps(
                 {
                     "anchor": raw_ref.get("anchor", ""),
@@ -483,8 +632,12 @@ def write_archive(repo: Path, cases: list[dict], *, include_superseded_distracto
             record = build_memory_record(case, include_superseded_refs=include_superseded_distractors)
             if include_superseded_distractors:
                 records.extend(build_superseded_distractor_records(case))
+            graph_support_records = build_memory_graph_support_records(case)
+            records.extend(graph_support_records)
             records.append(record)
             write_positive_case_files(repo, case, record)
+            for support_record in graph_support_records:
+                write_memory_record_support_files(repo, case, support_record)
 
         (repo / "index" / "memories.jsonl").write_text(
             "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),

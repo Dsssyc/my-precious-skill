@@ -626,6 +626,217 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("sessions/2026/06/17/memory-id-provenance/evidence.md#ev_001", first_hit)
         self.assertNotIn("mem_parent_provenance", first_hit)
 
+    def test_search_memory_resolves_derived_memory_id_to_support_paths_and_source_refs(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/17/memory-graph-support"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Memory Graph Support\n\n"
+                "Graph support summary reachable through a supporting memory node.\n",
+                encoding="utf-8",
+            )
+            (session_dir / "evidence.md").write_text(
+                "ev_001: Evidence reachable through memory graph support.\n",
+                encoding="utf-8",
+            )
+            (repo / "records").mkdir()
+            (repo / "records/graph-source.jsonl").write_text(
+                "message:77: Source anchor reachable through memory graph support.\n",
+                encoding="utf-8",
+            )
+
+            support = synthetic_memory_row(
+                "mem_graph_support",
+                "Supporting memory node with concrete drilldown refs.",
+                layer="domain",
+                scope="memory-retrieval",
+                topic="memory-graph-support",
+                derived_from=["sessions/2026/06/17/memory-graph-support/summary.md"],
+            )
+            support["evidence_refs"] = [
+                {"path": "sessions/2026/06/17/memory-graph-support/evidence.md", "quote_id": "ev_001"}
+            ]
+            support["raw_refs"] = [{"path": "records/graph-source.jsonl", "anchor": "message:77"}]
+            top = synthetic_memory_row(
+                "mem_graph_top",
+                "Memory graph drilldown sentinel resolves support through a derived memory id.",
+                layer="global",
+                scope="global",
+                topic="memory-graph-drilldown",
+                derived_from=["mem_graph_support"],
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(top, ensure_ascii=False)
+                + "\n"
+                + json.dumps(support, ensure_ascii=False)
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "memory graph drilldown sentinel",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("memory_id: mem_graph_top", first_hit)
+        self.assertIn("drill:", first_hit)
+        self.assertIn("sessions/2026/06/17/memory-graph-support/summary.md", first_hit)
+        self.assertIn("sessions/2026/06/17/memory-graph-support/evidence.md", first_hit)
+        self.assertIn("evidence:", first_hit)
+        self.assertIn("sessions/2026/06/17/memory-graph-support/evidence.md#ev_001", first_hit)
+        self.assertIn("source_ref_id:", first_hit)
+        self.assertIn("status: available", first_hit)
+        self.assertNotIn("mem_graph_support", first_hit)
+
+    def test_search_memory_suppresses_invalid_memory_id_graph_edges(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+
+            def write_support_files(slug: str) -> tuple[str, str]:
+                session_dir = repo / "sessions/2026/06/17" / slug
+                session_dir.mkdir(parents=True)
+                (session_dir / "summary.md").write_text(f"# Session: {slug}\n", encoding="utf-8")
+                (session_dir / "evidence.md").write_text("ev_001: Evidence snippet.\n", encoding="utf-8")
+                return (
+                    f"sessions/2026/06/17/{slug}/summary.md",
+                    f"sessions/2026/06/17/{slug}/evidence.md",
+                )
+
+            valid_summary, valid_evidence = write_support_files("valid-graph-support")
+            self_summary, self_evidence = write_support_files("self-cycle-graph-support")
+            superseded_summary, superseded_evidence = write_support_files("superseded-graph-support")
+            deprecated_summary, deprecated_evidence = write_support_files("deprecated-graph-support")
+            overdeep_summary, overdeep_evidence = write_support_files("overdeep-graph-support")
+
+            valid = synthetic_memory_row(
+                "mem_valid_graph_support",
+                "Valid memory graph support node.",
+                derived_from=[valid_summary],
+            )
+            valid["evidence_refs"] = [{"path": valid_evidence, "quote_id": "ev_001"}]
+            self_cycle = synthetic_memory_row(
+                "mem_self_cycle_graph_support",
+                "Self-cycle support node should not expand.",
+                derived_from=["mem_self_cycle_graph_support", self_summary],
+            )
+            self_cycle["evidence_refs"] = [{"path": self_evidence, "quote_id": "ev_001"}]
+            superseded = synthetic_memory_row(
+                "mem_superseded_graph_support",
+                "Superseded support node should not expand.",
+                derived_from=[superseded_summary],
+            )
+            superseded["evidence_refs"] = [{"path": superseded_evidence, "quote_id": "ev_001"}]
+            superseded["superseded_by"] = "mem_replacement_graph_support"
+            replacement = synthetic_memory_row(
+                "mem_replacement_graph_support",
+                "Replacement marks the old graph support inactive.",
+                derived_from=[],
+            )
+            replacement["supersedes"] = ["mem_superseded_graph_support"]
+            deprecated = synthetic_memory_row(
+                "mem_deprecated_graph_support",
+                "Deprecated support node should not expand.",
+                derived_from=[deprecated_summary],
+            )
+            deprecated["evidence_refs"] = [{"path": deprecated_evidence, "quote_id": "ev_001"}]
+            deprecated["deprecated_by"] = "mem_deprecation_graph_marker"
+            marker = synthetic_memory_row(
+                "mem_deprecation_graph_marker",
+                "Deprecation marker retires old graph support.",
+                derived_from=[],
+            )
+            marker["deprecates"] = ["mem_deprecated_graph_support"]
+            overdeep_rows = []
+            for idx in range(6):
+                next_refs = [f"mem_overdeep_graph_support_{idx + 1}"] if idx < 5 else [overdeep_summary]
+                row = synthetic_memory_row(
+                    f"mem_overdeep_graph_support_{idx}",
+                    "Over-depth graph support node should not expand past the resolver limit.",
+                    derived_from=next_refs,
+                )
+                if idx == 5:
+                    row["evidence_refs"] = [{"path": overdeep_evidence, "quote_id": "ev_001"}]
+                overdeep_rows.append(row)
+            top = synthetic_memory_row(
+                "mem_invalid_graph_top",
+                "Invalid memory graph edge sentinel keeps only valid support paths.",
+                layer="global",
+                scope="global",
+                topic="memory-graph-invalid-edges",
+                derived_from=[
+                    "mem_valid_graph_support",
+                    "mem_missing_graph_support",
+                    "mem_self_cycle_graph_support",
+                    "mem_superseded_graph_support",
+                    "mem_deprecated_graph_support",
+                    "mem_overdeep_graph_support_0",
+                ],
+            )
+            (repo / "index/memories.jsonl").write_text(
+                "".join(
+                    json.dumps(row, ensure_ascii=False) + "\n"
+                    for row in [
+                        top,
+                        valid,
+                        self_cycle,
+                        superseded,
+                        replacement,
+                        deprecated,
+                        marker,
+                        *overdeep_rows,
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "invalid memory graph edge sentinel",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "evidence",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("memory_id: mem_invalid_graph_top", first_hit)
+        self.assertIn(valid_summary, first_hit)
+        self.assertIn(f"{valid_evidence}#ev_001", first_hit)
+        self.assertNotIn("mem_missing_graph_support", first_hit)
+        self.assertNotIn("mem_self_cycle_graph_support", first_hit)
+        self.assertNotIn("mem_superseded_graph_support", first_hit)
+        self.assertNotIn("mem_deprecated_graph_support", first_hit)
+        self.assertNotIn(self_summary, first_hit)
+        self.assertNotIn(superseded_summary, first_hit)
+        self.assertNotIn(deprecated_summary, first_hit)
+        self.assertNotIn(overdeep_summary, first_hit)
+
     def test_search_memory_ranks_durable_memory_above_repeated_process_noise(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

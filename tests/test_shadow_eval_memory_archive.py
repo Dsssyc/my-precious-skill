@@ -311,7 +311,7 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
 
         payload = json.loads(result.stdout)
         self.assertEqual(payload["report_version"], 1)
-        self.assertEqual(payload["probe_cases"]["cases"], 44)
+        self.assertEqual(payload["probe_cases"]["cases"], 45)
         self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
         self.assertIn("memory_precision_at_5", payload["metrics"])
         self.assertIn("top_k_noise_at_5", payload["metrics"])

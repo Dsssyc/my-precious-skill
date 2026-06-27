@@ -50,6 +50,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 "cross_project_recall",
                 "source_reachability",
                 "scope_calibration",
+                "memory_graph_drilldown",
             }.issubset(categories)
         )
         self.assertTrue(any(row.get("expected_abstain") is True for row in rows))
@@ -73,7 +74,20 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 self.assertTrue(row[key].strip())
         self.assertEqual(len(set(case_ids)), len(case_ids))
         self.assertEqual(case_ids[0], "synthetic:info_permission_prompt")
-        self.assertEqual(case_ids[-1], "synthetic:scope_domain_benchmark")
+        self.assertEqual(case_ids[-1], "synthetic:memory_graph_transitive_support")
+        graph_cases = [row for row in rows if row.get("category") == "memory_graph_drilldown"]
+        self.assertEqual(len(graph_cases), 1)
+        self.assertEqual(graph_cases[0].get("derived_from_memory_ids"), ["syn_graph_support_memory"])
+        self.assertNotIn("self_cycle_derived_from_memory_id", graph_cases[0])
+        self.assertNotIn("missing_derived_from_memory_id", graph_cases[0])
+        self.assertEqual(
+            graph_cases[0].get("superseded_derived_from_memory_id"),
+            "syn_graph_superseded_memory",
+        )
+        self.assertEqual(
+            graph_cases[0].get("deprecated_derived_from_memory_id"),
+            "syn_graph_deprecated_memory",
+        )
         expected_layers = {
             row["case_id"]: row.get("expected_layer")
             for row in rows
@@ -109,7 +123,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
 
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["cases"], 44)
+            self.assertEqual(payload["cases"], 45)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
             self.assertEqual(payload["memory_precision_at_5"], 1.0)
@@ -132,11 +146,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["memory_explainability_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_explainability"], 1.0)
             self.assertEqual(payload["layer_path_success_rate"], 1.0)
-            self.assertEqual(payload["layer_calibration_cases"], 15)
+            self.assertEqual(payload["layer_calibration_cases"], 16)
             self.assertEqual(payload["layer_calibration"], 1.0)
-            self.assertEqual(payload["scope_filter_cases"], 15)
+            self.assertEqual(payload["scope_filter_cases"], 16)
             self.assertEqual(payload["scope_filter_recall"], 1.0)
-            self.assertEqual(payload["wrong_scope_suppression_cases"], 15)
+            self.assertEqual(payload["wrong_scope_suppression_cases"], 16)
             self.assertEqual(payload["wrong_scope_suppression"], 1.0)
             self.assertEqual(payload["memory_ranked_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_rank_missing_cases"], 0)
@@ -163,6 +177,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["evidence_reachability"], 1.0)
             self.assertEqual(payload["memory_evidence_ref_cases"], payload["positive_cases"])
             self.assertEqual(payload["memory_evidence_ref_reachability"], 1.0)
+            self.assertEqual(payload["memory_graph_drilldown_cases"], 1)
+            self.assertEqual(payload["memory_graph_drilldown_rate"], 1.0)
+            self.assertEqual(payload["memory_graph_invalid_edge_cases"], 2)
+            self.assertEqual(payload["memory_graph_invalid_edge_suppression_rate"], 1.0)
             self.assertEqual(payload["evidence_text_cases"], 13)
             self.assertEqual(payload["evidence_text_reachability"], 1.0)
             self.assertEqual(payload["answer_cases"], 11)
@@ -205,6 +223,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 1.0,
             )
             self.assertEqual(payload["categories"]["knowledge_update"]["update_consistency"], 1.0)
+            self.assertEqual(payload["categories"]["memory_graph_drilldown"]["case_pass_rate"], 1.0)
+            self.assertEqual(
+                payload["categories"]["memory_graph_drilldown"]["memory_graph_drilldown_rate"],
+                1.0,
+            )
+            self.assertEqual(
+                payload["categories"]["memory_graph_drilldown"]["memory_graph_invalid_edge_suppression_rate"],
+                1.0,
+            )
             self.assertEqual(payload["categories"]["privacy_boundary"]["privacy_boundary_pass_rate"], 1.0)
 
     def test_packaged_synthetic_archive_passes_archive_audit(self):
@@ -250,9 +277,13 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["suppression_pass_rate"], 1.0)
             self.assertEqual(lower_gates["memory_ndcg_at_5"], 1.0)
             self.assertEqual(lower_gates["memory_explainability"], 1.0)
-            self.assertEqual(lower_gates["memory_explainability_cases"], 39)
-            self.assertEqual(lower_gates["memory_evidence_ref_cases"], 39)
+            self.assertEqual(lower_gates["memory_explainability_cases"], 40)
+            self.assertEqual(lower_gates["memory_evidence_ref_cases"], 40)
             self.assertEqual(lower_gates["memory_evidence_ref_reachability"], 1.0)
+            self.assertEqual(lower_gates["memory_graph_drilldown_cases"], 1)
+            self.assertEqual(lower_gates["memory_graph_drilldown_rate"], 1.0)
+            self.assertEqual(lower_gates["memory_graph_invalid_edge_cases"], 2)
+            self.assertEqual(lower_gates["memory_graph_invalid_edge_suppression_rate"], 1.0)
             self.assertEqual(lower_gates["lifecycle_supersession_cases"], 9)
             self.assertEqual(lower_gates["lifecycle_supersession_reciprocity"], 1.0)
             self.assertEqual(lower_gates["semantic_lifecycle_cases"], 10)
@@ -266,22 +297,22 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["semantic_evidence_retention_cases"], 10)
             self.assertEqual(lower_gates["semantic_evidence_retention"], 1.0)
             self.assertEqual(lower_gates["layer_calibration"], 1.0)
-            self.assertEqual(lower_gates["layer_calibration_cases"], 15)
+            self.assertEqual(lower_gates["layer_calibration_cases"], 16)
             self.assertEqual(lower_gates["scope_filter_recall"], 1.0)
-            self.assertEqual(lower_gates["scope_filter_cases"], 15)
+            self.assertEqual(lower_gates["scope_filter_cases"], 16)
             self.assertEqual(lower_gates["wrong_scope_suppression"], 1.0)
-            self.assertEqual(lower_gates["wrong_scope_suppression_cases"], 15)
+            self.assertEqual(lower_gates["wrong_scope_suppression_cases"], 16)
             self.assertEqual(lower_gates["evidence_text_cases"], 13)
             self.assertEqual(lower_gates["evidence_text_reachability"], 1.0)
             self.assertEqual(lower_gates["source_precision_at_5"], 1.0)
             self.assertEqual(lower_gates["source_micro_precision_at_5"], 1.0)
-            self.assertEqual(lower_gates["source_relevant_count_at_5"], 39)
-            self.assertEqual(lower_gates["memory_ranked_cases"], 39)
+            self.assertEqual(lower_gates["source_relevant_count_at_5"], 40)
+            self.assertEqual(lower_gates["memory_ranked_cases"], 40)
             self.assertEqual(upper_gates["memory_rank_missing_cases"], 0)
             self.assertEqual(upper_gates["memory_rank_mean"], 1.0)
             self.assertEqual(upper_gates["memory_rank_median"], 1.0)
             self.assertEqual(upper_gates["memory_noise_count_at_5"], 0)
-            self.assertEqual(upper_gates["source_result_count_at_5"], 39)
+            self.assertEqual(upper_gates["source_result_count_at_5"], 40)
             self.assertEqual(upper_gates["top_k_noise_at_5"], 0.0)
             self.assertEqual(upper_gates["privacy_leak_count"], 0)
             self.assertEqual(upper_gates["unsafe_source_anchor_count_at_5"], 0)
@@ -319,6 +350,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(lower_gates["categories.semantic_lifecycle.deprecated_lifecycle_suppression"], 1.0)
             self.assertEqual(lower_gates["categories.semantic_lifecycle.semantic_false_merge_guard"], 1.0)
             self.assertEqual(lower_gates["categories.semantic_lifecycle.semantic_evidence_retention"], 1.0)
+            self.assertEqual(lower_gates["categories.memory_graph_drilldown.case_pass_rate"], 1.0)
+            self.assertEqual(
+                lower_gates["categories.memory_graph_drilldown.memory_graph_drilldown_rate"],
+                1.0,
+            )
+            self.assertEqual(
+                lower_gates["categories.memory_graph_drilldown.memory_graph_invalid_edge_suppression_rate"],
+                1.0,
+            )
             subprocess.run(
                 [
                     sys.executable,
@@ -355,7 +395,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 for line in details.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            self.assertEqual(payload["cases"], 44)
+            self.assertEqual(payload["cases"], 45)
             self.assertEqual(payload["answer_cases"], 11)
             self.assertGreaterEqual(payload["memory_precision_at_5"], lower_gates["memory_precision_at_5"])
             self.assertGreaterEqual(payload["memory_ndcg_at_5"], lower_gates["memory_ndcg_at_5"])
@@ -365,6 +405,14 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertGreaterEqual(
                 payload["memory_evidence_ref_reachability"],
                 lower_gates["memory_evidence_ref_reachability"],
+            )
+            self.assertGreaterEqual(
+                payload["memory_graph_drilldown_rate"],
+                lower_gates["memory_graph_drilldown_rate"],
+            )
+            self.assertGreaterEqual(
+                payload["memory_graph_invalid_edge_suppression_rate"],
+                lower_gates["memory_graph_invalid_edge_suppression_rate"],
             )
             self.assertGreaterEqual(
                 payload["lifecycle_supersession_cases"],
@@ -454,6 +502,10 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["semantic_false_merge_guard"], 1.0)
             self.assertEqual(payload["semantic_evidence_retention_cases"], 10)
             self.assertEqual(payload["semantic_evidence_retention"], 1.0)
+            self.assertEqual(payload["memory_graph_drilldown_cases"], 1)
+            self.assertEqual(payload["memory_graph_drilldown_rate"], 1.0)
+            self.assertEqual(payload["memory_graph_invalid_edge_cases"], 2)
+            self.assertEqual(payload["memory_graph_invalid_edge_suppression_rate"], 1.0)
             lifecycle_rows = [
                 row
                 for row in detail_rows
@@ -480,9 +532,9 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(all(row["semantic_evidence_retention_hit"] for row in semantic_rows))
             self.assertEqual(payload["failed_case_count"], 0)
             self.assertEqual(payload["case_pass_rate"], 1.0)
-            self.assertEqual(len(detail_rows), 44)
+            self.assertEqual(len(detail_rows), 45)
             self.assertEqual(detail_rows[0]["case_id"], "synthetic:info_permission_prompt")
-            self.assertEqual(detail_rows[-1]["case_id"], "synthetic:scope_domain_benchmark")
+            self.assertEqual(detail_rows[-1]["case_id"], "synthetic:memory_graph_transitive_support")
 
     def test_synthetic_builder_can_add_superseded_stale_distractors(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -546,7 +598,11 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 if row.get("deprecated_memory_id")
             }
             deprecated_records = [record for record in records if record.get("memory_id") in deprecated_ids]
-            deprecation_markers = [record for record in records if record.get("deprecates")]
+            deprecation_markers = [
+                record
+                for record in records
+                if set(record.get("deprecates") or []).intersection(deprecated_ids)
+            ]
             self.assertEqual(len(deprecated_records), 2)
             self.assertEqual(len(deprecation_markers), 2)
             self.assertTrue(all(record.get("deprecated_by") for record in deprecated_records))
@@ -568,7 +624,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             result = self.run_benchmark(repo, SYNTHETIC_CASES, SEARCH_SCRIPT)
 
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["cases"], 44)
+            self.assertEqual(payload["cases"], 45)
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["stale_memory_suppression"], 1.0)
             self.assertEqual(payload["update_consistency"], 1.0)
@@ -581,6 +637,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["deprecated_lifecycle_suppression"], 1.0)
             self.assertEqual(payload["semantic_false_merge_cases"], 3)
             self.assertEqual(payload["semantic_false_merge_guard"], 1.0)
+            self.assertEqual(payload["memory_graph_drilldown_cases"], 1)
+            self.assertEqual(payload["memory_graph_drilldown_rate"], 1.0)
 
     def test_synthetic_builder_omits_supersedes_when_stale_records_are_absent(self):
         with tempfile.TemporaryDirectory() as tmpdir:

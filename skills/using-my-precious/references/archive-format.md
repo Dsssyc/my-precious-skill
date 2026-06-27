@@ -98,7 +98,9 @@ Each memory node should contain:
 - `derived_from`: non-empty archive-relative summary/evidence-support paths or
   existing memory IDs used to derive the node. Memory ID references describe
   high-level memory-to-memory induction chains; they must point to another
-  existing memory node and must not self-reference.
+  existing memory node and must not self-reference. Read-path tooling may
+  resolve active memory-id references with a bounded graph walk, but memory IDs
+  are metadata edges, not drilldown file paths.
 - `evidence_refs`: non-empty supporting evidence references, usually objects
   with `path` and `quote_id`. High-level memory nodes must be evidence-bound;
   nodes with only `derived_from` paths or memory IDs and no evidence reference
@@ -144,6 +146,10 @@ event narrative. When a lifecycle or consolidation step derives one high-level
 memory from another, `derived_from` may include the source memory ID as a
 memory-to-memory provenance link, but the node should still retain concrete
 `evidence_refs` and any available summary/evidence-support paths.
+Search should only render concrete summary/evidence paths and source-ref status
+metadata in drilldown output. Missing memory IDs, self-cycles, cyclic chains,
+over-depth chains, superseded nodes, deprecated nodes, and deprecation marker
+nodes should not contribute support paths through memory-id graph resolution.
 
 `raw_refs` may point to protected source anchors or source-map entries rather
 than committed raw files. Compatible archives should not commit raw transcripts

@@ -18,7 +18,7 @@ LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
 ## Current Baseline
 
-Baseline date: 2026-06-24
+Baseline date: 2026-06-27
 
 Code point used for the benchmark harness: this document revision
 
@@ -26,10 +26,10 @@ Case file:
 `benchmarks/cases/layered_recall_synthetic.jsonl`
 
 Case fingerprint:
-`690fd6c13c9072bd3d91cfb41c47c00d9f5a2432e47760d9e231313c3d464783`
+`331638f9fba7bdf753d44ca0f04c784b3682ab399f2b3f44387bb2531b008d75`
 
 Search implementation fingerprint:
-`de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`
+`af4425503d18e1759306fb3ef404c9a2445ecc75380be4e05942ecac29c0427a`
 
 Baseline commands:
 
@@ -52,8 +52,8 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 44 |
-| positive_cases | 39 |
+| cases | 45 |
+| positive_cases | 40 |
 | abstain_cases | 5 |
 | answer_cases | 11 |
 | evidence_text_cases | 13 |
@@ -63,8 +63,8 @@ Baseline result:
 | memory_ndcg_at_5 | 1.0 |
 | memory_precision_at_5 | 1.0 |
 | memory_micro_precision_at_5 | 1.0 |
-| memory_result_count_at_5 | 39 |
-| memory_relevant_count_at_5 | 39 |
+| memory_result_count_at_5 | 40 |
+| memory_relevant_count_at_5 | 40 |
 | memory_noise_count_at_5 | 0 |
 | top_k_noise_at_5 | 0.0 |
 | memory_explainability | 1.0 |
@@ -78,10 +78,14 @@ Baseline result:
 | source_ref_reachability | 1.0 |
 | source_precision_at_5 | 1.0 |
 | source_micro_precision_at_5 | 1.0 |
-| source_result_count_at_5 | 39 |
-| source_relevant_count_at_5 | 39 |
-| memory_evidence_ref_cases | 39 |
+| source_result_count_at_5 | 40 |
+| source_relevant_count_at_5 | 40 |
+| memory_evidence_ref_cases | 40 |
 | memory_evidence_ref_reachability | 1.0 |
+| memory_graph_drilldown_cases | 1 |
+| memory_graph_drilldown_rate | 1.0 |
+| memory_graph_invalid_edge_cases | 2 |
+| memory_graph_invalid_edge_suppression_rate | 1.0 |
 | lifecycle_supersession_cases | 9 |
 | lifecycle_supersession_reciprocity | 1.0 |
 | semantic_lifecycle_cases | 10 |
@@ -109,7 +113,7 @@ Baseline result:
 | failed_case_count | 0 |
 | case_pass_rate | 1.0 |
 
-Latency for local verification runs is about `22 s` total, or about `500 ms`
+Latency for local verification runs is about `24 s` total, or about `533 ms`
 mean per case. Treat these as local smoke-test timings, not a performance
 claim; they depend on the local Python runtime, filesystem cache, and machine
 load.
@@ -229,7 +233,7 @@ text, source paths, raw refs, or per-case details.
 
 ## End-To-End Induction-To-Recall Baseline
 
-Baseline date: 2026-06-25
+Baseline date: 2026-06-27
 
 Code point used for the benchmark harness: this document revision
 
@@ -240,16 +244,16 @@ Case fingerprint:
 `4a619e0895e52f493ed97c2e0ca3be3ce8c526c26c3d3a288eb7e45a7feb6b89`
 
 Runner fingerprint:
-`a2a31257c71edd98c3a538e052cf2c26e1e8a7bf07747ce28b113af513a21ac2`
+`06e45bd2f8fb12c6746978729c700fc93f0325c8b3184fc5fc4a51fc3e9a55a2`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`b811d68366062e6116623e1278292f139b84d9d787017f64fdd4ec8b771f7b2b`
+`e1c78d281c8d8aca995c9f81420bc59fadca0f4abc06209e175b97d79b998f48`
 
 Search script fingerprint:
-`de607dc3e9fc3c85cc9aa78c9ec062429911a7c89dfaa87af9289965d261ff63`
+`af4425503d18e1759306fb3ef404c9a2445ecc75380be4e05942ecac29c0427a`
 
 Baseline command:
 
@@ -306,7 +310,7 @@ text, source paths, raw refs, or per-case details.
 
 ## Synthetic Case Coverage
 
-The packaged synthetic suite contains 44 cases across these categories:
+The packaged synthetic suite contains 45 cases across these categories:
 
 | Category | Cases |
 | --- | ---: |
@@ -317,6 +321,7 @@ The packaged synthetic suite contains 44 cases across these categories:
 | explicit_memory | 1 |
 | information_extraction | 3 |
 | knowledge_update | 3 |
+| memory_graph_drilldown | 1 |
 | multi_session_reasoning | 3 |
 | privacy_boundary | 3 |
 | scope_calibration | 3 |
@@ -455,6 +460,16 @@ Measured:
   reference evidence snippets.
 - `source_reachability`: whether the expected source anchor appears on the
   expected memory's `source: memory` block at source depth.
+- `memory_graph_drilldown_rate`: whether a high-level memory whose
+  `derived_from` names another memory ID can still expose the supporting
+  summary, evidence, and source ref through bounded active-memory graph
+  resolution.
+- `memory_graph_invalid_edge_suppression_rate`: whether audit-valid inactive
+  memory-id graph edges, currently superseded and deprecated nodes, avoid
+  leaking their memory IDs or support paths into the expected memory's
+  drilldown context. Structurally invalid missing or cyclic edges are covered
+  by focused search tests rather than the packaged audit-clean benchmark
+  archive.
 
 Recent hardening:
 
@@ -464,13 +479,16 @@ Recent hardening:
   without printing evidence file text.
 - Diagnostic result IDs are filtered to memory blocks so index/source blocks
   cannot impersonate memory results.
+- Valid `derived_from` memory IDs are resolved through a bounded active-memory
+  graph to concrete support paths and source ref statuses; memory IDs
+  themselves remain metadata and are not rendered as `drill:` file paths.
 
 Not measured:
 
 - Raw transcript retrieval or rendering.
 - Authorization gates for raw source access.
-- Multi-hop drilldown from high-level memory through multiple sessions into
-  original raw records.
+- Multi-hop raw transcript content retrieval beyond source-ref status and
+  optional redacted preview checks.
 - Whether source anchors remain valid after archive migration or compaction.
 
 ### Answer Reachability
@@ -618,6 +636,10 @@ The current implementation can be trusted for these bounded claims:
 - `derived_from` may also link to an existing memory ID for high-level
   memory-to-memory induction provenance, but this does not replace concrete
   `evidence_refs` or make the memory ID a drilldown file path.
+- The read path now resolves bounded, active memory-id `derived_from` edges to
+  concrete summary/evidence/source support paths while suppressing inactive
+  graph edges in the packaged benchmark and missing or cyclic graph edges in
+  focused search tests.
 - The updater now writes memory-id `derived_from` provenance for synthetic
   lifecycle supersession, contradiction, and deprecation links, while retaining
   concrete summary/evidence support paths. Updater and e2e benchmark gates keep
@@ -632,7 +654,7 @@ The current implementation can be trusted for these bounded claims:
 - The packaged synthetic benchmark now includes `automatic_induction` and
   `explicit_memory` categories with category pass rate and layer calibration
   gated at `1.0`.
-- The benchmark gates `memory_evidence_ref_reachability` at `1.0` across all 29
+- The benchmark gates `memory_evidence_ref_reachability` at `1.0` across all 40
   positive cases, including the `automatic_induction` and `explicit_memory`
   categories.
 - Repeated exact explicit memories merge support and evidence instead of

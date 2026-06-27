@@ -150,6 +150,11 @@ def validate_case(case: dict, path: Path, line_no: int) -> None:
     for key in (
         "category",
         "expected_not_memory_id",
+        "derived_from_memory_ids",
+        "self_cycle_derived_from_memory_id",
+        "missing_derived_from_memory_id",
+        "superseded_derived_from_memory_id",
+        "deprecated_derived_from_memory_id",
         "reference_answer",
         "reference_evidence",
         "stale_memory_id",
@@ -327,6 +332,10 @@ def new_totals() -> Totals:
         "source_drilldown_privacy_hits": 0,
         "memory_evidence_ref_cases": 0,
         "memory_evidence_ref_hits": 0,
+        "memory_graph_drilldown_cases": 0,
+        "memory_graph_drilldown_hits": 0,
+        "memory_graph_invalid_edge_cases": 0,
+        "memory_graph_invalid_edge_hits": 0,
         "lifecycle_supersession_cases": 0,
         "lifecycle_supersession_hits": 0,
         "semantic_lifecycle_cases": 0,
@@ -487,6 +496,16 @@ def finalize_totals(totals: Totals) -> dict:
             totals["memory_evidence_ref_hits"],
             totals["memory_evidence_ref_cases"],
         ),
+        "memory_graph_drilldown_cases": int(totals["memory_graph_drilldown_cases"]),
+        "memory_graph_drilldown_rate": ratio(
+            totals["memory_graph_drilldown_hits"],
+            totals["memory_graph_drilldown_cases"],
+        ),
+        "memory_graph_invalid_edge_cases": int(totals["memory_graph_invalid_edge_cases"]),
+        "memory_graph_invalid_edge_suppression_rate": ratio(
+            totals["memory_graph_invalid_edge_hits"],
+            totals["memory_graph_invalid_edge_cases"],
+        ),
         "lifecycle_supersession_cases": int(totals["lifecycle_supersession_cases"]),
         "lifecycle_supersession_reciprocity": ratio(
             totals["lifecycle_supersession_hits"],
@@ -596,6 +615,10 @@ def add_result(totals: Totals, result: dict) -> None:
         totals["evidence_hits"] += int(result["evidence_reachability_hit"])
         totals["memory_evidence_ref_cases"] += int(result["evidence_expected"])
         totals["memory_evidence_ref_hits"] += int(result["memory_evidence_ref_reachability_hit"])
+        totals["memory_graph_drilldown_cases"] += int(result["memory_graph_drilldown_expected"])
+        totals["memory_graph_drilldown_hits"] += int(result["memory_graph_drilldown_hit"])
+        totals["memory_graph_invalid_edge_cases"] += result["memory_graph_invalid_edge_cases"]
+        totals["memory_graph_invalid_edge_hits"] += result["memory_graph_invalid_edge_hits"]
         totals["evidence_text_cases"] += int(result["evidence_text_expected"])
         totals["evidence_text_hits"] += int(result["evidence_text_reachability_hit"])
         totals["answer_cases"] += int(result["answer_expected"])
@@ -1439,6 +1462,57 @@ def memory_evidence_ref_reachability_hit(
     return all(any(evidence_ref_matches_path(ref, required_path) for ref in evidence_refs) for required_path in required_paths)
 
 
+def graph_invalid_memory_ids(case: dict) -> list[str]:
+    out: list[str] = []
+    for key in (
+        "self_cycle_derived_from_memory_id",
+        "missing_derived_from_memory_id",
+        "superseded_derived_from_memory_id",
+        "deprecated_derived_from_memory_id",
+    ):
+        out.extend(case_texts(case, key))
+    return out
+
+
+def memory_record_direct_support_refs(record: dict | None) -> list[str]:
+    if not isinstance(record, dict):
+        return []
+    refs: list[str] = []
+    for ref in record_texts(record, "derived_from"):
+        if "/" in ref or ref.endswith((".md", ".json", ".jsonl")):
+            refs.append(ref)
+    evidence_refs = record.get("evidence_refs")
+    if isinstance(evidence_refs, list):
+        for evidence_ref in evidence_refs:
+            if isinstance(evidence_ref, dict):
+                path = evidence_ref.get("path")
+                quote_id = evidence_ref.get("quote_id")
+                if isinstance(path, str) and path.strip():
+                    refs.append(path.strip())
+                    if isinstance(quote_id, str) and quote_id.strip():
+                        refs.append(f"{path.strip()}#{quote_id.strip()}")
+            elif isinstance(evidence_ref, str) and evidence_ref.strip():
+                refs.append(evidence_ref.strip())
+    return unique_texts(refs)
+
+
+def memory_graph_invalid_edge_suppressed(
+    blocks: list[str],
+    invalid_memory_id: str,
+    memory_records: dict[str, dict],
+    expected_memory_id: str,
+    expected_record: dict | None,
+) -> bool:
+    if blocks_contain_memory_ids(blocks, [invalid_memory_id], memory_records):
+        return False
+    invalid_record = memory_records.get(invalid_memory_id)
+    if invalid_record is None:
+        return True
+    expected_blocks = expected_memory_blocks(blocks, expected_memory_id, expected_record)
+    visible_text = "\n".join(expected_blocks)
+    return not any(ref and ref in visible_text for ref in memory_record_direct_support_refs(invalid_record))
+
+
 def safe_repo_file(repo: Path, path_text: str) -> Path | None:
     if not path_text.strip():
         return None
@@ -1576,6 +1650,13 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("evidence_reachability")
         if result["evidence_expected"] and not result["memory_evidence_ref_reachability_hit"]:
             checks.append("memory_evidence_ref_reachability")
+        if result["memory_graph_drilldown_expected"] and not result["memory_graph_drilldown_hit"]:
+            checks.append("memory_graph_drilldown_rate")
+        if (
+            result["memory_graph_invalid_edge_cases"]
+            and result["memory_graph_invalid_edge_hits"] < result["memory_graph_invalid_edge_cases"]
+        ):
+            checks.append("memory_graph_invalid_edge_suppression_rate")
         if result["evidence_text_expected"] and not result["evidence_text_reachability_hit"]:
             checks.append("evidence_text_reachability")
         if result["answer_expected"]:
@@ -1661,6 +1742,10 @@ def case_detail(case: Case, result: dict) -> dict:
         "raw_preview_redaction_pass": result["raw_preview_redaction_pass"],
         "source_drilldown_privacy_pass": result["source_drilldown_privacy_pass"],
         "memory_evidence_ref_reachability_hit": result["memory_evidence_ref_reachability_hit"],
+        "memory_graph_drilldown_expected": result["memory_graph_drilldown_expected"],
+        "memory_graph_drilldown_hit": result["memory_graph_drilldown_hit"],
+        "memory_graph_invalid_edge_cases": result["memory_graph_invalid_edge_cases"],
+        "memory_graph_invalid_edge_hits": result["memory_graph_invalid_edge_hits"],
         "evidence_reachability_hit": result["evidence_reachability_hit"],
         "evidence_text_reachability_hit": result["evidence_text_reachability_hit"],
         "answer_expected": result["answer_expected"],
@@ -1787,6 +1872,8 @@ def score_case(
     contradicted_memory_ids = case_texts(data, "contradicted_memory_id")
     deprecated_memory_ids = case_texts(data, "deprecated_memory_id")
     false_merge_memory_ids = case_texts(data, "semantic_false_merge_memory_id")
+    graph_support_memory_ids = case_texts(data, "derived_from_memory_ids")
+    invalid_graph_memory_ids = graph_invalid_memory_ids(data)
 
     expected_record = memory_records.get(expected_memory_id)
     rank = None
@@ -1968,6 +2055,25 @@ def score_case(
         and (not expected_source_anchor or (source_hit and source_policy_pass and source_drilldown_privacy))
         and (not required_evidence_paths or (evidence_hit and memory_evidence_ref_hit))
     )
+    memory_graph_expected = bool(is_positive and graph_support_memory_ids)
+    expected_record_derived_from = record_texts(expected_record, "derived_from")
+    memory_graph_hit = bool(
+        memory_graph_expected
+        and drilldown_hit
+        and all(memory_id in expected_record_derived_from for memory_id in graph_support_memory_ids)
+    )
+    invalid_graph_edge_hits = sum(
+        int(
+            memory_graph_invalid_edge_suppressed(
+                suppression_blocks,
+                memory_id,
+                memory_records,
+                expected_memory_id,
+                expected_record,
+            )
+        )
+        for memory_id in invalid_graph_memory_ids
+    )
     suppression_expected = bool(
         negative_memory_ids
         or stale_memory_ids
@@ -2016,6 +2122,10 @@ def score_case(
         "evidence_expected": bool(is_positive and required_evidence_paths),
         "evidence_reachability_hit": evidence_hit,
         "memory_evidence_ref_reachability_hit": memory_evidence_ref_hit,
+        "memory_graph_drilldown_expected": memory_graph_expected,
+        "memory_graph_drilldown_hit": memory_graph_hit,
+        "memory_graph_invalid_edge_cases": len(invalid_graph_memory_ids),
+        "memory_graph_invalid_edge_hits": invalid_graph_edge_hits,
         "evidence_text_expected": bool(is_positive and required_evidence_paths and reference_evidence),
         "evidence_text_reachability_hit": evidence_text_hit,
         "answer_expected": bool(is_positive and reference_answers),

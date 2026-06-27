@@ -30,6 +30,7 @@ CONFIG_CANDIDATES = (
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 UNSAFE_SOURCE_REF = "[unsafe-source-ref]"
 UNSAFE_DISPLAY_FIELD = "[unsafe-field]"
+MAX_MEMORY_GRAPH_DRILLDOWN_DEPTH = 4
 ARCHIVE_INTERNAL_REF_ROOTS = (
     "INDEX.md",
     "config/projects.jsonl",
@@ -94,6 +95,13 @@ class SourceRefStatus:
     reason: str
     unsafe_ref: bool = False
     preview: str = ""
+
+
+@dataclass(frozen=True)
+class MemorySupportRefs:
+    drill_paths: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    raw_refs: tuple[str, ...] = ()
 
 
 HIGH_SIGNAL_FIELDS = {
@@ -1156,7 +1164,39 @@ def sanitized_raw_refs(repo: Path, value: object) -> tuple[str, ...]:
     return unique_ordered(refs)
 
 
-def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
+def is_memory_id_reference(repo: Path, value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    text = value.strip()
+    if "/" in text or "\\" in text or text.endswith((".md", ".json", ".jsonl")):
+        return False
+    safe_path = safe_repo_relative_path(repo, text)
+    if safe_path and is_archive_internal_ref_path(safe_path):
+        return False
+    return is_safe_memory_identifier(text)
+
+
+def iter_derived_memory_ids(repo: Path, value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        if is_memory_id_reference(repo, text):
+            yield text
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_derived_memory_ids(repo, item)
+
+
+def memory_record_id(record: dict) -> str:
+    memory_id = record.get("memory_id")
+    return memory_id if is_safe_memory_identifier(memory_id) else ""
+
+
+def memory_record_has_self_reference(repo: Path, record: dict) -> bool:
+    memory_id = memory_record_id(record)
+    return bool(memory_id and memory_id in set(iter_derived_memory_ids(repo, record.get("derived_from"))))
+
+
+def direct_memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
     paths: list[str] = []
     for path in iter_ref_paths(record.get("derived_from")):
         safe_path = safe_repo_relative_path(repo, path)
@@ -1168,6 +1208,54 @@ def memory_drill_paths(repo: Path, record: dict) -> tuple[str, ...]:
 
 def memory_evidence_refs(repo: Path, record: dict) -> tuple[str, ...]:
     return unique_ordered(iter_evidence_display_refs(repo, record.get("evidence_refs")))
+
+
+def memory_support_refs(
+    repo: Path,
+    record: dict,
+    records_by_id: dict[str, dict],
+    remaining_depth: int = MAX_MEMORY_GRAPH_DRILLDOWN_DEPTH,
+    visiting: tuple[str, ...] = (),
+) -> MemorySupportRefs:
+    memory_id = memory_record_id(record)
+    if memory_id:
+        if memory_id in visiting or memory_record_has_self_reference(repo, record):
+            return MemorySupportRefs()
+        visiting = (*visiting, memory_id)
+
+    drill_paths = list(direct_memory_drill_paths(repo, record))
+    evidence_refs = list(memory_evidence_refs(repo, record))
+    raw_refs = list(sanitized_raw_refs(repo, record.get("raw_refs")))
+
+    if remaining_depth <= 0:
+        return MemorySupportRefs(
+            unique_ordered(drill_paths),
+            unique_ordered(evidence_refs),
+            unique_ordered(raw_refs),
+        )
+
+    for derived_memory_id in iter_derived_memory_ids(repo, record.get("derived_from")):
+        if derived_memory_id in visiting:
+            continue
+        support_record = records_by_id.get(derived_memory_id)
+        if support_record is None:
+            continue
+        support_refs = memory_support_refs(
+            repo,
+            support_record,
+            records_by_id,
+            remaining_depth - 1,
+            visiting,
+        )
+        drill_paths.extend(support_refs.drill_paths)
+        evidence_refs.extend(support_refs.evidence_refs)
+        raw_refs.extend(support_refs.raw_refs)
+
+    return MemorySupportRefs(
+        unique_ordered(drill_paths),
+        unique_ordered(evidence_refs),
+        unique_ordered(raw_refs),
+    )
 
 
 def memory_hit_path(repo: Path, memory_id: str, line_no: int) -> Path:
@@ -1311,6 +1399,48 @@ def has_deprecation_marker(record: dict) -> bool:
     return isinstance(deprecates, list) and any(is_safe_memory_identifier(item) for item in deprecates)
 
 
+def collect_inactive_memory_ids(
+    records: list[dict],
+    supersedes_by_memory_id: dict[str, set[str]],
+    forward_superseded_ids: set[str],
+    contradicts_by_memory_id: dict[str, set[str]],
+    forward_contradicted_ids: set[str],
+    deprecates_by_memory_id: dict[str, set[str]],
+    forward_deprecated_ids: set[str],
+) -> set[str]:
+    inactive_ids: set[str] = set()
+    for record in records:
+        memory_id = memory_record_id(record)
+        if not memory_id:
+            continue
+        if (
+            not has_valid_memory_lifecycle(record)
+            or memory_id in forward_superseded_ids
+            or has_confirmed_superseded_by(record, supersedes_by_memory_id)
+            or memory_id in forward_contradicted_ids
+            or has_confirmed_contradicted_by(record, contradicts_by_memory_id)
+            or memory_id in forward_deprecated_ids
+            or has_confirmed_deprecated_by(record, deprecates_by_memory_id)
+            or has_deprecation_marker(record)
+        ):
+            inactive_ids.add(memory_id)
+    return inactive_ids
+
+
+def active_memory_records_by_id(
+    repo: Path,
+    records: list[dict],
+    inactive_ids: set[str],
+) -> dict[str, dict]:
+    records_by_id: dict[str, dict] = {}
+    for record in records:
+        memory_id = memory_record_id(record)
+        if not memory_id or memory_id in inactive_ids or memory_record_has_self_reference(repo, record):
+            continue
+        records_by_id[memory_id] = record
+    return records_by_id
+
+
 def collect_memory_hits(
     repo: Path,
     query_tokens: list[str],
@@ -1329,20 +1459,22 @@ def collect_memory_hits(
     forward_contradicted_ids = collect_forward_contradicted_ids(contradicts_by_memory_id)
     deprecates_by_memory_id = collect_deprecates_by_memory_id(records)
     forward_deprecated_ids = collect_forward_deprecated_ids(deprecates_by_memory_id)
+    inactive_ids = collect_inactive_memory_ids(
+        records,
+        supersedes_by_memory_id,
+        forward_superseded_ids,
+        contradicts_by_memory_id,
+        forward_contradicted_ids,
+        deprecates_by_memory_id,
+        forward_deprecated_ids,
+    )
+    memory_records_by_id = active_memory_records_by_id(repo, records, inactive_ids)
     for line_no, record in enumerate(records, 1):
         raw_memory_id = str(record.get("memory_id") or "")
         layer = safe_display_scalar(record.get("layer") or "", 60)
         if scope != "all" and layer != scope:
             continue
-        if (
-            raw_memory_id in forward_superseded_ids
-            or has_confirmed_superseded_by(record, supersedes_by_memory_id)
-            or raw_memory_id in forward_contradicted_ids
-            or has_confirmed_contradicted_by(record, contradicts_by_memory_id)
-            or raw_memory_id in forward_deprecated_ids
-            or has_confirmed_deprecated_by(record, deprecates_by_memory_id)
-            or has_deprecation_marker(record)
-        ):
+        if raw_memory_id in inactive_ids:
             continue
         if not has_valid_memory_lifecycle(record):
             continue
@@ -1376,6 +1508,7 @@ def collect_memory_hits(
             why.append(f"support_count:{safe_display_scalar(support_count, 60)}")
         why.extend(reasons)
         why.append(matched_reason(matched))
+        support_refs = memory_support_refs(repo, record, memory_records_by_id)
         hits.append(
             Hit(
                 path=memory_hit_path(repo, raw_memory_id, line_no),
@@ -1388,9 +1521,9 @@ def collect_memory_hits(
                 scope=safe_display_scalar(record.get("scope") or "", 120),
                 topic=safe_display_scalar(record.get("topic") or "", 120),
                 text=text,
-                drill_paths=memory_drill_paths(repo, record),
-                evidence_refs=memory_evidence_refs(repo, record),
-                raw_refs=sanitized_raw_refs(repo, record.get("raw_refs")),
+                drill_paths=support_refs.drill_paths,
+                evidence_refs=support_refs.evidence_refs,
+                raw_refs=support_refs.raw_refs,
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
