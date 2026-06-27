@@ -557,7 +557,13 @@ only when no memory hits are returned; false-positive hit counts are reported
 as aggregate metrics. Probe cases may live in a private deployment repository
 or another local private path, but private probe files, raw transcripts, memory
 text, source paths, and source records must not be committed to this reusable
-skill repository. The shadow runner can
+skill repository. The shadow runner emits a privacy-safe `diagnostics` block
+that groups failures by
+`recall_miss`, `abstain_false_positive`, `suppression_failure`,
+`privacy_failure`, and `top_k_noise`. Diagnostics entries use case ordinals,
+short case-label hashes, counts, and noise buckets only; they do not render
+queries, memory IDs, memory text, source paths, raw refs, or forbidden-pattern
+text. The shadow runner can
 enforce aggregate numeric gates with `--fail-under`, `--fail-over`,
 `--fail-under-file`, and `--fail-over-file`; metric keys may be top-level
 metric names such as `memory_recall_at_5` or dotted paths such as

@@ -703,10 +703,13 @@ Current gaps:
   source-depth robustness on real private histories.
 - The reusable template now includes a privacy-safe shadow evaluation runner
   that can report aggregate recall, active-memory suppression, lifecycle
-  integrity, top-k noise, noise-source buckets, and provenance coverage for a
-  target archive without rendering source content. It can also emit a structural
-  report for legacy deployment archives that do not yet have layered memory
-  nodes. The 2026-06-23 v2 private-probe gate below expanded the fixed
+  integrity, top-k noise, noise-source buckets, provenance coverage, and a
+  privacy-safe diagnostic summary for recall misses, abstention false
+  positives, suppression failures, privacy failures, and top-k noise. The
+  diagnostic summary uses only case ordinals, short case-label hashes, counts,
+  and noise buckets. It can also emit a structural report for legacy deployment
+  archives that do not yet have layered memory nodes. The 2026-06-23 v2
+  private-probe gate below expanded the fixed
   redacted real-history probe set with natural-language labels, hard negatives,
   abstention checks, and a lifecycle relation-gap baseline kept outside this
   reusable repository.
@@ -1131,7 +1134,7 @@ with synthetic quality gates and a real deployment aggregate baseline that
 passes the stricter source-map anchor audit. Shadow
 evaluation now has a private redacted real-history probe set with numeric
 recall, precision, noise, abstention, suppression, privacy, provenance,
-lifecycle, and audit gates. The
+lifecycle, audit gates, and privacy-safe diagnostic grouping. The
 post-hard-negative v2 run preserves recall while eliminating current no-hit
 false positives and reducing broad lexical noise under redacted
 natural-language labels. It still records scope-mixed and broad lexical top-k

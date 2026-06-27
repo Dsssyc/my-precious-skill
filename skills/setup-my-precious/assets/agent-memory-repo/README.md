@@ -180,9 +180,14 @@ outputs. Top-k precision and noise are computed against the full relevant-ID
 set, so another listed relevant memory is not counted as noise. Use the report
 to inspect recall, active-memory suppression, abstain pass rate, abstain
 false-positive result count, lifecycle integrity, top-k noise, noise-source
-buckets, provenance coverage, and aggregate case-detail count/status fields
-without copying private transcripts or source records elsewhere.
+buckets, provenance coverage, and aggregate hashed case-detail count/status
+fields without copying private transcripts or source records elsewhere.
 `expected_abstain: true` cases pass only when no memory hits are returned.
+The JSON report also includes a `diagnostics` block grouped by failure type:
+`recall_miss`, `abstain_false_positive`, `suppression_failure`,
+`privacy_failure`, and `top_k_noise`. Diagnostic entries contain only case
+ordinals, short case-label hashes, counts, and noise-source buckets; they do
+not render queries, memory IDs, source paths, raw refs, or forbidden patterns.
 `--fail-under`, `--fail-over`, `--fail-under-file`, and
 `--fail-over-file` enforce numeric aggregate metrics or dotted metric paths.
 Threshold failures print only metric names, actual values, and thresholds; they

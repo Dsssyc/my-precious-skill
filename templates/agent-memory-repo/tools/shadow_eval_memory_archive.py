@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -62,10 +63,11 @@ def safe_memory_id(value: object) -> str:
     return str(value)
 
 
-def safe_case_label(value: object) -> str:
+def case_label_hash(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         return ""
-    return search_memory.safe_display_text(value.strip(), 120)
+    digest = hashlib.sha256(value.strip().encode("utf-8")).hexdigest()[:12]
+    return f"sha256:{digest}"
 
 
 def expected_memory_ids(case: dict) -> list[str]:
@@ -262,7 +264,7 @@ def evaluate_cases(
         details.append(
             {
                 "case_index": totals["cases"],
-                "case_id": safe_case_label(case.get("case_id")),
+                "case_label_hash": case_label_hash(case.get("case_id")),
                 "positive_case": bool(expected_ids),
                 "expected_memory_count": len(expected_ids),
                 "result_count": len(result_ids),
@@ -296,6 +298,73 @@ def evaluate_cases(
         "active_memory_suppression": ratio(totals["suppression_hits"], totals["suppression_cases"]),
         "privacy_boundary_pass_rate": ratio(totals["privacy_hits"], totals["privacy_cases"]),
         "case_details": details,
+    }
+
+
+def diagnostic_case_summary(detail: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "case_ordinal": detail["case_index"],
+        "case_label_hash": detail.get("case_label_hash", ""),
+        "expected_memory_count": detail["expected_memory_count"],
+        "result_count": detail["result_count"],
+        "relevant_result_count": detail["relevant_result_count"],
+        "noise_result_count": detail["noise_result_count"],
+        "abstain_false_positive_result_count": detail["abstain_false_positive_result_count"],
+        "forbidden_output_patterns_count": detail["forbidden_output_patterns_count"],
+        "forbidden_output_violation_count": detail["forbidden_output_violation_count"],
+        "noise_sources_at_5": detail["noise_sources_at_5"],
+    }
+
+
+def diagnostic_failure_types(details: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = {
+        "recall_miss": [],
+        "abstain_false_positive": [],
+        "suppression_failure": [],
+        "privacy_failure": [],
+        "top_k_noise": [],
+    }
+    for detail in details:
+        summary = diagnostic_case_summary(detail)
+        if detail["positive_case"] and not detail["recall_hit"]:
+            groups["recall_miss"].append(summary)
+        if detail["abstention_hit"] is False:
+            groups["abstain_false_positive"].append(summary)
+        if detail["suppression_hit"] is False:
+            groups["suppression_failure"].append(summary)
+        if not detail["privacy_boundary_pass"]:
+            groups["privacy_failure"].append(summary)
+        if detail["noise_result_count"] > 0:
+            groups["top_k_noise"].append(summary)
+    return {
+        failure_type: {"count": len(cases), "cases": cases}
+        for failure_type, cases in groups.items()
+    }
+
+
+def diagnostic_summary(case_metrics: dict[str, Any]) -> dict[str, Any]:
+    failure_types = diagnostic_failure_types(case_metrics["case_details"])
+    failure_ordinals = {
+        case["case_ordinal"]
+        for summary in failure_types.values()
+        for case in summary["cases"]
+    }
+    return {
+        "privacy": {
+            "aggregate_only": True,
+            "case_labels_hashed": True,
+            "queries_rendered": False,
+            "memory_ids_rendered": False,
+            "memory_text_rendered": False,
+            "source_refs_rendered": False,
+            "raw_refs_rendered": False,
+            "forbidden_patterns_rendered": False,
+        },
+        "totals": {
+            "failure_case_count": len(failure_ordinals),
+            "failure_observation_count": sum(summary["count"] for summary in failure_types.values()),
+        },
+        "failure_types": failure_types,
     }
 
 
@@ -581,6 +650,7 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "lifecycle_integrity": lifecycle_integrity(records),
         },
         "case_details": case_metrics["case_details"],
+        "diagnostics": diagnostic_summary(case_metrics),
         "audit": audit,
     }
 

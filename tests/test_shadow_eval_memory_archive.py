@@ -527,6 +527,108 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["audit"]["status"], "passed")
         self.assertFalse(payload["privacy"]["source_content_rendered"])
 
+    def test_shadow_eval_reports_privacy_safe_diagnostics_for_failure_types(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "redacted-agent-memory"
+            cases = Path(tmpdir) / "redacted_cases.jsonl"
+            audit_script = Path(tmpdir) / "audit_with_forbidden_output.py"
+            write_minimal_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:recall_miss_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": "plausible non-target neighbor",
+                        "expected_memory_id": "mem_shadow_current",
+                    },
+                    {
+                        "case_id": "redacted:abstain_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": "shadow recall marker",
+                        "expected_abstain": True,
+                    },
+                    {
+                        "case_id": "redacted:suppression_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": "shadow recall marker",
+                        "expected_memory_id": "mem_shadow_current",
+                        "expected_not_memory_id": "mem_shadow_current",
+                    },
+                    {
+                        "case_id": "redacted:privacy_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": "zzqprivacy918273",
+                        "expected_abstain": True,
+                        "forbidden_output_patterns": ["SECRET_AUDIT_STDOUT", "SECRET_AUDIT_STDERR"],
+                    },
+                ],
+            )
+            audit_script.write_text(
+                "import sys\n"
+                "print('SECRET_AUDIT_STDOUT')\n"
+                "print('SECRET_AUDIT_STDERR', file=sys.stderr)\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--audit-script",
+                    str(audit_script),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotIn("SECRET_CASE_SHOULD_NOT_RENDER", combined)
+        payload = json.loads(result.stdout)
+        diagnostics = payload["diagnostics"]
+        failure_types = diagnostics["failure_types"]
+        self.assertEqual(failure_types["recall_miss"]["count"], 1)
+        self.assertEqual(failure_types["abstain_false_positive"]["count"], 1)
+        self.assertEqual(failure_types["suppression_failure"]["count"], 1)
+        self.assertEqual(failure_types["privacy_failure"]["count"], 1)
+        self.assertEqual(failure_types["top_k_noise"]["count"], 1)
+        self.assertEqual(diagnostics["totals"]["failure_case_count"], 4)
+        self.assertTrue(diagnostics["privacy"]["case_labels_hashed"])
+        self.assertTrue(diagnostics["privacy"]["queries_rendered"] is False)
+        self.assertTrue(diagnostics["privacy"]["memory_ids_rendered"] is False)
+        self.assertTrue(diagnostics["privacy"]["source_refs_rendered"] is False)
+
+        for failure_summary in failure_types.values():
+            self.assertIn("cases", failure_summary)
+            for case in failure_summary["cases"]:
+                self.assertIn("case_ordinal", case)
+                self.assertRegex(case["case_label_hash"], r"^sha256:[0-9a-f]{12}$")
+                self.assertIn("expected_memory_count", case)
+                self.assertIn("result_count", case)
+                self.assertIn("noise_sources_at_5", case)
+                self.assertNotIn("case_id", case)
+                self.assertNotIn("query", case)
+                self.assertNotIn("memory_id", case)
+                self.assertNotIn("source_path", case)
+                self.assertNotIn("raw_refs", case)
+
+        serialized_diagnostics = json.dumps(diagnostics, sort_keys=True)
+        for forbidden in (
+            "SECRET_CASE_SHOULD_NOT_RENDER",
+            "SECRET_AUDIT_STDOUT",
+            "SECRET_AUDIT_STDERR",
+            "SECRET_RAW_ANCHOR",
+            "shadow recall marker",
+            "plausible non-target neighbor",
+            "mem_shadow_current",
+            "mem_shadow_noise",
+            "sessions/2026/06/21/redacted",
+            "records/private.jsonl",
+        ):
+            self.assertNotIn(forbidden, serialized_diagnostics)
+
     def test_shadow_eval_keeps_legacy_single_expected_memory_id_compatible_with_case_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "redacted-agent-memory"
@@ -576,7 +678,8 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["forbidden_output_violations"], 1)
         self.assertEqual(payload["metrics"]["privacy_boundary_pass_rate"], 0.0)
         detail = payload["case_details"][0]
-        self.assertEqual(detail["case_id"], "redacted:single_current")
+        self.assertNotIn("case_id", detail)
+        self.assertRegex(detail["case_label_hash"], r"^sha256:[0-9a-f]{12}$")
         self.assertEqual(detail["expected_memory_count"], 1)
         self.assertEqual(detail["relevant_result_count"], 1)
         self.assertEqual(detail["forbidden_output_violation_count"], 2)
@@ -693,7 +796,8 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["noise_sources_at_5"]["broad_lexical_match"], 0)
         self.assertEqual(payload["metrics"]["noise_sources_at_5"]["scope_mixed"], 0)
         detail = payload["case_details"][0]
-        self.assertEqual(detail["case_id"], "redacted:multi_relevant")
+        self.assertNotIn("case_id", detail)
+        self.assertRegex(detail["case_label_hash"], r"^sha256:[0-9a-f]{12}$")
         self.assertEqual(detail["expected_memory_count"], 2)
         self.assertEqual(detail["result_count"], 1)
         self.assertEqual(detail["relevant_result_count"], 1)
@@ -704,6 +808,7 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         serialized = json.dumps(payload)
         self.assertNotIn("mem_multi_primary", serialized)
         self.assertNotIn("mem_multi_secondary", serialized)
+        self.assertNotIn("redacted:multi_relevant", serialized)
         self.assertNotIn("sessions/2026/06/21/redacted", serialized)
 
     def test_shadow_eval_rejects_invalid_forbidden_output_pattern(self):
