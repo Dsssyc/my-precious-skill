@@ -459,16 +459,21 @@ content, memory text, source paths, or raw refs. Core metrics are
 `temporary_local_decision_rejection_rate`, `generic_rule_rejection_rate`,
 `layer_assignment_accuracy`, `evidence_retention_rate`,
 `source_ref_policy_pass_rate`,
-`lifecycle_link_accuracy`, `forced_memory_capture_rate`,
+`lifecycle_link_accuracy`, `memory_id_provenance_rate`,
+`forced_memory_capture_rate`,
 `privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`,
 `privacy_leak_count`, `failed_case_count`, and `case_pass_rate`. The packaged
 gates in `benchmarks/quality-gates/updater_induction_synthetic.json` and
 `benchmarks/quality-gates/updater_induction_synthetic_max.json` require all
 pass-rate metrics to remain at 1.0, including natural induction review routing
 by low-confidence, scope-change, and conflict reason, plus induction review
-decision apply/promotion/suppression behavior. Unit coverage additionally gates
-duplicate/conflicting induction review decision rejection and aggregate-only
-preflight output. They require
+decision apply/promotion/suppression behavior and lifecycle memory-id
+provenance. `memory_id_provenance_rate` measures whether current lifecycle
+memory nodes include the older target memory ID in `derived_from` after
+supersession, contradiction, or deprecation; this is a memory-to-memory
+induction trace and does not replace summary paths or `evidence_refs`. Unit
+coverage additionally gates duplicate/conflicting induction review decision
+rejection and aggregate-only preflight output. They require
 `natural_false_promotion_rate` to remain 0 and `privacy_leak_count` to remain 0.
 
 ## End-To-End Induction-To-Recall Benchmark
@@ -515,6 +520,7 @@ goal-level metrics:
 - `e2e_evidence_reachability_rate`
 - `e2e_source_policy_pass_rate`
 - `e2e_lifecycle_active_suppression_rate`
+- `e2e_memory_id_provenance_rate`
 - `e2e_forced_memory_recall_rate`
 - `privacy_leak_count`
 

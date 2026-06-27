@@ -1241,6 +1241,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
         self.assertEqual(current_node["contradicts"], [old_node["memory_id"]])
         self.assertEqual(old_node["contradicted_by"], [current_node["memory_id"]])
+        self.assertIn(old_node["memory_id"], current_node["derived_from"])
         self.assertEqual(current_node["support_count"], 2)
         self.assertEqual(current_node["last_seen"], "2026-06-02T10:00:00Z")
         self.assertEqual(len(current_node["evidence_refs"]), 2)
@@ -1285,9 +1286,10 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
         self.assertEqual(current_node["supersedes"], [old_node["memory_id"]])
         self.assertEqual(old_node["superseded_by"], current_node["memory_id"])
+        self.assertIn(old_node["memory_id"], current_node["derived_from"])
         self.assertEqual(current_node["support_count"], 2)
         self.assertEqual(current_node["last_seen"], "2026-06-02T10:00:00Z")
-        self.assertEqual(len(current_node["derived_from"]), 2)
+        self.assertEqual(len(current_node["derived_from"]), 3)
         self.assertEqual(len(current_node["evidence_refs"]), 2)
 
     def test_build_memory_nodes_does_not_partially_supersede_scope_narrowing(self):
@@ -2160,8 +2162,106 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
         self.assertEqual(deprecation_node["deprecates"], [deprecated_node["memory_id"]])
         self.assertEqual(deprecated_node["deprecated_by"], deprecation_node["memory_id"])
+        self.assertIn(deprecated_node["memory_id"], deprecation_node["derived_from"])
         self.assertEqual(deprecated_node["confidence"], "low")
         self.assertEqual(len(deprecation_node["evidence_refs"]), 2)
+
+    def test_rebuild_indexes_writes_memory_id_provenance_that_audit_and_search_accept(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            old_fact = "Synthetic lifecycle memory may omit evidence refs during induction."
+            current_fact = "Synthetic lifecycle memory must preserve evidence refs during induction."
+            rows = [
+                {
+                    "session_id": "s1",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/alpha.jsonl",
+                    "source_updated_at": "2026-06-01T10:00:00Z",
+                    "summary_path": "sessions/2026/06/01/alpha/summary.md",
+                    "evidence_path": "sessions/2026/06/01/alpha/evidence.md",
+                    "reusable_facts": [old_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["lifecycle-provenance"],
+                },
+                {
+                    "session_id": "s2",
+                    "project": "beta",
+                    "project_path": "/tmp/beta",
+                    "source_record": "source-records/beta.jsonl",
+                    "source_updated_at": "2026-06-02T10:00:00Z",
+                    "summary_path": "sessions/2026/06/02/beta/summary.md",
+                    "evidence_path": "sessions/2026/06/02/beta/evidence.md",
+                    "reusable_facts": [
+                        "Updated fact: Synthetic lifecycle memory may omit evidence refs during induction. => "
+                        "Synthetic lifecycle memory must preserve evidence refs during induction."
+                    ],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["lifecycle-provenance"],
+                },
+            ]
+            for row in rows:
+                entry_dir = memory_repo / Path(row["summary_path"]).parent
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {row['session_id']}.\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text("ev_001: Synthetic lifecycle evidence.\n", encoding="utf-8")
+                (entry_dir / "meta.json").write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+
+            module.rebuild_indexes(memory_repo)
+
+            nodes = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            by_text = {node["text"]: node for node in nodes}
+            old_node = by_text[old_fact]
+            current_node = by_text[current_fact]
+            self.assertIn(old_node["memory_id"], current_node["derived_from"])
+            self.assertIn("sessions/2026/06/01/alpha/summary.md", current_node["derived_from"])
+            self.assertIn("sessions/2026/06/02/beta/summary.md", current_node["derived_from"])
+            self.assertEqual(len(current_node["evidence_refs"]), 2)
+
+            audit = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
+
+            search = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/search_memory.py"),
+                    "Synthetic lifecycle memory must preserve evidence refs during induction",
+                    "--repo",
+                    str(memory_repo),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            first_hit = search.stdout.split("\n\n", 2)[1]
+            self.assertIn(f"memory_id: {current_node['memory_id']}", first_hit)
+            self.assertIn("sessions/2026/06/01/alpha/summary.md", first_hit)
+            self.assertIn("sessions/2026/06/02/beta/summary.md", first_hit)
+            self.assertNotIn(old_node["memory_id"], first_hit)
 
     def test_update_memory_archive_induces_domain_memory_from_two_project_sessions(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
@@ -2541,7 +2641,8 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertEqual(current_node["supersedes"], [old_node["memory_id"]])
             self.assertEqual(old_node["superseded_by"], current_node["memory_id"])
             self.assertEqual(current_node["support_count"], 2)
-            self.assertEqual(len(current_node["derived_from"]), 2)
+            self.assertIn(old_node["memory_id"], current_node["derived_from"])
+            self.assertEqual(len(current_node["derived_from"]), 3)
             self.assertEqual(len(current_node["evidence_refs"]), 2)
 
             search = subprocess.run(

@@ -124,6 +124,8 @@ class CaseScore:
     source_ref_hits: int = 0
     lifecycle_cases: int = 0
     lifecycle_hits: int = 0
+    memory_id_provenance_cases: int = 0
+    memory_id_provenance_hits: int = 0
     forced_cases: int = 0
     forced_hits: int = 0
     refusal_cases: int = 0
@@ -399,6 +401,22 @@ def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
     return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
 
 
+def existing_memory_ids(nodes: list[dict[str, Any]]) -> set[str]:
+    return {
+        memory_id
+        for node in nodes
+        if isinstance((memory_id := node.get("memory_id")), str) and memory_id
+    }
+
+
+def derived_ref_retained(memory_repo: Path, ref_text: object, memory_ids: set[str]) -> bool:
+    if not isinstance(ref_text, str):
+        return False
+    if is_safe_relative_path(ref_text) and (memory_repo / ref_text).is_file():
+        return True
+    return SAFE_ID_RE.fullmatch(ref_text) is not None and ref_text in memory_ids
+
+
 def evidence_retained(memory_repo: Path, node: dict[str, Any], expected: dict[str, Any]) -> bool:
     derived_from = node.get("derived_from")
     evidence_refs = node.get("evidence_refs")
@@ -408,8 +426,9 @@ def evidence_retained(memory_repo: Path, node: dict[str, Any], expected: dict[st
         return False
     if len(evidence_refs) < int(expected.get("min_evidence_refs") or 0):
         return False
-    for path_text in derived_from:
-        if not is_safe_relative_path(path_text) or not (memory_repo / str(path_text)).is_file():
+    memory_ids = existing_memory_ids(load_nodes(memory_repo))
+    for ref_text in derived_from:
+        if not derived_ref_retained(memory_repo, ref_text, memory_ids):
             return False
     for ref in evidence_refs:
         if not isinstance(ref, dict):
@@ -650,6 +669,19 @@ def lifecycle_link_hit(
     if relation == "deprecates":
         return target_id in list_texts(current.get("deprecates")) and target.get("deprecated_by") == current_id
     return False
+
+
+def memory_id_provenance_hit(
+    nodes: list[dict[str, Any]],
+    current_text: str,
+    target_text: str,
+) -> bool:
+    current = next((node for node in nodes if node.get("text") == current_text), None)
+    target = next((node for node in nodes if node.get("text") == target_text), None)
+    if current is None or target is None:
+        return False
+    target_id = target.get("memory_id")
+    return isinstance(target_id, str) and target_id in list_texts(current.get("derived_from"))
 
 
 def review_candidate_hit(
@@ -1006,6 +1038,14 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
                 str(expected.get("target_text") or ""),
             )
         )
+        score.memory_id_provenance_cases += 1
+        score.memory_id_provenance_hits += int(
+            memory_id_provenance_hit(
+                nodes,
+                str(expected.get("current_text") or ""),
+                str(expected.get("target_text") or ""),
+            )
+        )
 
     score.passed = score.passed and all(
         (
@@ -1014,6 +1054,7 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
             score.evidence_hits == score.evidence_cases,
             score.source_ref_hits == score.source_ref_cases,
             score.lifecycle_hits == score.lifecycle_cases,
+            score.memory_id_provenance_hits == score.memory_id_provenance_cases,
             score.forced_hits == score.forced_cases,
             score.refusal_hits == score.refusal_cases,
             score.redaction_hits == score.redaction_cases,
@@ -1137,6 +1178,8 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["source_ref_hits"] += score.source_ref_hits
         totals["lifecycle_cases"] += score.lifecycle_cases
         totals["lifecycle_hits"] += score.lifecycle_hits
+        totals["memory_id_provenance_cases"] += score.memory_id_provenance_cases
+        totals["memory_id_provenance_hits"] += score.memory_id_provenance_hits
         totals["forced_cases"] += score.forced_cases
         totals["forced_hits"] += score.forced_hits
         totals["refusal_cases"] += score.refusal_cases
@@ -1164,6 +1207,7 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "expected_automatic_memories": int(totals["induction_cases"]),
         "expected_forced_memories": int(totals["forced_cases"]),
         "expected_lifecycle_links": int(totals["lifecycle_cases"]),
+        "expected_memory_id_provenance_links": int(totals["memory_id_provenance_cases"]),
         "expected_induction_review_decisions": int(totals["induction_review_decision_cases"]),
         "expected_privacy_refusals": int(totals["refusal_cases"]),
         "expected_privacy_redactions": int(totals["redaction_cases"]),
@@ -1240,6 +1284,10 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "evidence_retention_rate": ratio(totals["evidence_hits"], totals["evidence_cases"]),
         "source_ref_policy_pass_rate": ratio(totals["source_ref_hits"], totals["source_ref_cases"]),
         "lifecycle_link_accuracy": ratio(totals["lifecycle_hits"], totals["lifecycle_cases"]),
+        "memory_id_provenance_rate": ratio(
+            totals["memory_id_provenance_hits"],
+            totals["memory_id_provenance_cases"],
+        ),
         "forced_memory_capture_rate": ratio(totals["forced_hits"], totals["forced_cases"]),
         "privacy_refusal_pass_rate": ratio(totals["refusal_hits"], totals["refusal_cases"]),
         "privacy_redaction_pass_rate": ratio(totals["redaction_hits"], totals["redaction_cases"]),

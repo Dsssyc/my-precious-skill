@@ -100,6 +100,14 @@ PARTIAL_SUPERSESSION_DETAIL_TOKENS = {
     "source",
 }
 MISSING = object()
+ARCHIVE_SUPPORT_REF_ROOTS = (
+    "INDEX.md",
+    "config/",
+    "index/",
+    "memories/",
+    "daily/",
+    "sessions/",
+)
 
 
 def compact_whitespace(text: str) -> str:
@@ -292,6 +300,14 @@ def positive_int_value(value: object) -> int:
     return value if isinstance(value, int) and value > 0 else 0
 
 
+def archive_support_ref_count(values: list[str]) -> int:
+    return sum(
+        1
+        for value in values
+        if any(value == root.rstrip("/") or value.startswith(root) for root in ARCHIVE_SUPPORT_REF_ROOTS)
+    )
+
+
 def set_optional_string_list(node: dict, field: str, values: list[str]) -> None:
     if values:
         node[field] = values
@@ -329,7 +345,7 @@ def merge_memory_node_provenance(existing: dict, incoming: dict) -> dict:
         merged["last_seen"] = seen_times[-1]
     merged["support_count"] = max(
         1,
-        len(derived_from),
+        archive_support_ref_count(derived_from),
         len(evidence_refs),
         positive_int_value(existing.get("support_count")),
         positive_int_value(incoming.get("support_count")),
@@ -360,6 +376,14 @@ def merge_support_into_memory_node(node: dict, support: dict) -> None:
         node["deprecated_by"] = original_deprecated_by
 
 
+def add_memory_id_provenance(current: dict, source: dict) -> None:
+    current_id = current.get("memory_id")
+    source_id = source.get("memory_id")
+    if not isinstance(current_id, str) or not isinstance(source_id, str) or current_id == source_id:
+        return
+    current["derived_from"] = unique_strings(current.get("derived_from"), [source_id])
+
+
 def add_supersession_link(current: dict, old: dict) -> None:
     current_id = current.get("memory_id")
     old_id = old.get("memory_id")
@@ -369,6 +393,7 @@ def add_supersession_link(current: dict, old: dict) -> None:
     old["superseded_by"] = current_id
     old["confidence"] = "low"
     merge_support_into_memory_node(current, old)
+    add_memory_id_provenance(current, old)
 
 
 def add_contradiction_link(current: dict, old: dict) -> None:
@@ -380,6 +405,7 @@ def add_contradiction_link(current: dict, old: dict) -> None:
     old["contradicted_by"] = unique_strings(old.get("contradicted_by"), [current_id])
     old["confidence"] = "low"
     merge_support_into_memory_node(current, old)
+    add_memory_id_provenance(current, old)
 
 
 def add_deprecation_link(current: dict, old: dict) -> None:
@@ -391,6 +417,7 @@ def add_deprecation_link(current: dict, old: dict) -> None:
     old["deprecated_by"] = current_id
     old["confidence"] = "low"
     merge_support_into_memory_node(current, old)
+    add_memory_id_provenance(current, old)
 
 
 def apply_memory_id_supersession_links(nodes: list[dict]) -> None:

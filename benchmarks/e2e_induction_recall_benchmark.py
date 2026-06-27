@@ -41,6 +41,8 @@ class CaseRun:
     natural_quality: dict[str, int]
     lifecycle_suppression_cases: int
     lifecycle_suppression_hits: int
+    memory_id_provenance_cases: int
+    memory_id_provenance_hits: int
     recall_details: list[dict[str, Any]]
     failed: bool
     leaked: bool
@@ -223,6 +225,26 @@ def score_lifecycle_suppression_probes(
     return cases, hits, leaked
 
 
+def score_memory_id_provenance(
+    case: dict[str, Any],
+    nodes: list[dict[str, Any]],
+) -> tuple[int, int]:
+    cases = 0
+    hits = 0
+    for link in case.get("expected_lifecycle_links") or []:
+        if not isinstance(link, dict):
+            continue
+        cases += 1
+        hits += int(
+            induction_benchmark.memory_id_provenance_hit(
+                nodes,
+                str(link.get("current_text") or ""),
+                str(link.get("target_text") or ""),
+            )
+        )
+    return cases, hits
+
+
 def write_recall_cases(path: Path, cases: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -276,6 +298,7 @@ def score_e2e_case(
         nodes,
         search_timeout_s,
     )
+    memory_id_provenance_cases, memory_id_provenance_hits = score_memory_id_provenance(case, nodes)
     leaked = leaked or lifecycle_leaked
 
     for expected in case.get("expected_memories") or []:
@@ -319,10 +342,13 @@ def score_e2e_case(
         natural_quality=dict(natural_quality),
         lifecycle_suppression_cases=lifecycle_cases,
         lifecycle_suppression_hits=lifecycle_hits,
+        memory_id_provenance_cases=memory_id_provenance_cases,
+        memory_id_provenance_hits=memory_id_provenance_hits,
         recall_details=details,
         failed=failed
         or leaked
         or lifecycle_hits != lifecycle_cases
+        or memory_id_provenance_hits != memory_id_provenance_cases
         or not induction_benchmark.natural_quality_expectations_pass(natural_quality),
         leaked=leaked,
     )
@@ -411,6 +437,10 @@ def build_report(cases: list[dict[str, Any]], runs: list[CaseRun], fingerprint: 
         "e2e_lifecycle_active_suppression_rate": ratio(
             sum(run.lifecycle_suppression_hits for run in runs),
             sum(run.lifecycle_suppression_cases for run in runs),
+        ),
+        "e2e_memory_id_provenance_rate": ratio(
+            sum(run.memory_id_provenance_hits for run in runs),
+            sum(run.memory_id_provenance_cases for run in runs),
         ),
         "e2e_forced_memory_recall_rate": ratio(
             sum(detail_hit(detail, "memory_recall_at_5") for detail in forced_details),

@@ -153,6 +153,7 @@ Baseline result:
 | expected_automatic_memories | 14 |
 | expected_forced_memories | 1 |
 | expected_lifecycle_links | 3 |
+| expected_memory_id_provenance_links | 3 |
 | expected_induction_review_decisions | 3 |
 | expected_privacy_refusals | 1 |
 | expected_privacy_redactions | 1 |
@@ -181,6 +182,7 @@ Baseline result:
 | evidence_retention_rate | 1.0 |
 | source_ref_policy_pass_rate | 1.0 |
 | lifecycle_link_accuracy | 1.0 |
+| memory_id_provenance_rate | 1.0 |
 | forced_memory_capture_rate | 1.0 |
 | privacy_refusal_pass_rate | 1.0 |
 | privacy_redaction_pass_rate | 1.0 |
@@ -277,6 +279,7 @@ Baseline result:
 | e2e_evidence_reachability_rate | 1.0 |
 | e2e_source_policy_pass_rate | 1.0 |
 | e2e_lifecycle_active_suppression_rate | 1.0 |
+| e2e_memory_id_provenance_rate | 1.0 |
 | e2e_forced_memory_recall_rate | 1.0 |
 | privacy_leak_count | 0 |
 | failed_case_count | 0 |
@@ -615,6 +618,10 @@ The current implementation can be trusted for these bounded claims:
 - `derived_from` may also link to an existing memory ID for high-level
   memory-to-memory induction provenance, but this does not replace concrete
   `evidence_refs` or make the memory ID a drilldown file path.
+- The updater now writes memory-id `derived_from` provenance for synthetic
+  lifecycle supersession, contradiction, and deprecation links, while retaining
+  concrete summary/evidence support paths. Updater and e2e benchmark gates keep
+  this memory-to-memory provenance rate at `1.0`.
 - The updater can induce a `domain` high-level memory from multiple synthetic
   session source records. The generated memory is automatic, has two supporting
   summaries, has evidence refs whose quote IDs exist in `evidence.md`, and is

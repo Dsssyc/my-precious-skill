@@ -140,7 +140,10 @@ raw source content or private natural-language candidate text.
 
 Sessions remain event-level evidence. A memory node should point to session
 summaries or evidence snippets for support instead of duplicating the full
-event narrative.
+event narrative. When a lifecycle or consolidation step derives one high-level
+memory from another, `derived_from` may include the source memory ID as a
+memory-to-memory provenance link, but the node should still retain concrete
+`evidence_refs` and any available summary/evidence-support paths.
 
 `raw_refs` may point to protected source anchors or source-map entries rather
 than committed raw files. Compatible archives should not commit raw transcripts
