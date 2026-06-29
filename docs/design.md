@@ -85,6 +85,11 @@ and JSONL indexes.
   benchmark that drives setup, updater, generated memory indexes, layered
   recall scoring, and the copied search script without rendering private case
   details.
+- `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
+  combines required packaged synthetic reports with optional adapted public
+  benchmark and private shadow-eval aggregate reports. It reports bounded
+  readiness status without rendering private probe cases, queries, memory text,
+  source paths, or raw refs.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.

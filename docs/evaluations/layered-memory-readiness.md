@@ -16,6 +16,48 @@ induction-to-recall behavior on synthetic source records. It is not a direct
 leaderboard score against public long-memory systems such as MemPalace,
 LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
+## V1 Readiness Gate
+
+`benchmarks/v1_readiness_gate.py` is the convergence entrypoint for this
+evaluation. It aggregates existing JSON reports without rendering queries,
+memory text, source paths, raw refs, private probe cases, or forbidden-pattern
+text. The gate requires three packaged synthetic dimensions:
+
+- layered recall and drilldown;
+- updater-driven automatic induction; and
+- end-to-end induction-to-recall.
+
+When those required dimensions pass, the gate reports
+`overall_status: core_synthetic_ready`. That status is deliberately bounded: it
+means the core synthetic evidence is green, not that the full non-project-boundary
+v1 target, public leaderboard parity, generated-answer accuracy, or long-horizon
+multi-principal governance has been proven.
+
+Optional report inputs extend the evidence surface without changing the privacy
+boundary:
+
+- `--public-report` accepts a layered recall aggregate report produced from
+  converted public benchmark cases outside this repository. The result is an
+  adapted local score only, not an official public leaderboard claim.
+- `--shadow-report` accepts a private real-archive shadow-eval aggregate report.
+  The report must remain aggregate-only. Use `--require-shadow` only when the
+  local private probe set should be a required readiness gate for the run.
+
+Run the packaged convergence gate locally with:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+```
+
+Or aggregate existing reports:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py \
+  --layered-report /tmp/layered.json \
+  --updater-report /tmp/updater.json \
+  --e2e-report /tmp/e2e.json
+```
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
@@ -713,6 +755,12 @@ Current gaps:
   redacted real-history probe set with natural-language labels, hard negatives,
   abstention checks, and a lifecycle relation-gap baseline kept outside this
   reusable repository.
+- The reusable benchmark folder now includes a v1 readiness convergence gate
+  that aggregates the required synthetic layered/updater/e2e reports and
+  optional public-adapter or private shadow-eval aggregate reports. This closes
+  the "many separate green checks with no single bounded readiness summary"
+  gap, but it does not close the underlying project-boundary, long-horizon,
+  generated-answer, or governance gaps by itself.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
   public datasets.

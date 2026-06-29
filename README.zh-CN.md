@@ -319,6 +319,30 @@ text、source paths、raw anchors、returned memory IDs、queries 或
 forbidden-pattern text；非法 `forbidden_output_patterns` 正则也不会回显原始
 pattern。
 
+从已有 aggregate 报告运行 v1 readiness 收敛 gate：
+
+```bash
+python benchmarks/v1_readiness_gate.py \
+  --layered-report /tmp/layered.json \
+  --updater-report /tmp/updater.json \
+  --e2e-report /tmp/e2e.json
+```
+
+也可以直接运行内置 packaged synthetic gates：
+
+```bash
+python benchmarks/v1_readiness_gate.py --run-packaged
+```
+
+readiness gate 只输出 aggregate JSON。它要求 packaged layered recall、
+updater induction 和 e2e induction-to-recall 三个核心维度通过后，才会报告
+`core_synthetic_ready`。可选的 `--public-report` 和 `--shadow-report` 可以接入
+仓库外 adapted public benchmark 报告和私有真实 archive 的 aggregate shadow eval
+报告；如果希望这些可选维度缺失时也让 gate 失败，使用 `--require-public` 或
+`--require-shadow`。`core_synthetic_ready` 是有边界的结论：它只说明核心合成 gate
+通过，不代表已经证明完整 v1 readiness、公开 leaderboard 等价、生成答案准确率或
+长期多主体治理。
+
 不用 agent，也可以直接运行搜索脚本：
 
 ```bash
@@ -792,6 +816,7 @@ python3 -m py_compile \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \
   benchmarks/convert_public_memory_benchmark.py \
+  benchmarks/v1_readiness_gate.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \

@@ -350,6 +350,32 @@ IDs, queries, or forbidden-pattern text.
 Invalid `forbidden_output_patterns` regular expressions fail the run without
 rendering the pattern text.
 
+Run the v1 readiness convergence gate from existing aggregate reports:
+
+```bash
+python benchmarks/v1_readiness_gate.py \
+  --layered-report /tmp/layered.json \
+  --updater-report /tmp/updater.json \
+  --e2e-report /tmp/e2e.json
+```
+
+Or run the packaged synthetic gates directly:
+
+```bash
+python benchmarks/v1_readiness_gate.py --run-packaged
+```
+
+The readiness gate emits aggregate-only JSON. It requires the packaged layered
+recall, updater induction, and e2e induction-to-recall dimensions to pass before
+reporting `core_synthetic_ready`. Optional `--public-report` and
+`--shadow-report` inputs can add adapted public-benchmark and private
+real-archive aggregate evidence; add `--require-public` or `--require-shadow`
+when those optional dimensions should fail the gate if absent. A
+`core_synthetic_ready` result is deliberately bounded: it means the core
+synthetic gates passed, not that the repository has proven full v1 readiness,
+public leaderboard parity, generated-answer accuracy, or long-horizon
+multi-principal governance.
+
 Search without invoking an agent:
 
 ```bash
@@ -912,6 +938,7 @@ python3 -m py_compile \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \
   benchmarks/convert_public_memory_benchmark.py \
+  benchmarks/v1_readiness_gate.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \
