@@ -762,9 +762,11 @@ Current gaps:
   source-hash freshness are partitioned by source partition inside the archive
   scope, so multiple source streams can feed the same domain without one
   stream's newer timestamp hiding another stream's older unarchived records.
-  Project path still remains the source-record filtering context and registry
-  bootstrap signal, so project is not yet merely one scope among a complete
-  ontology.
+  The global runner now also supports explicit `config/source_streams.jsonl`
+  rows that can update a domain/global stream without first materializing a
+  project registry row. Project path still remains a possible source-record
+  filtering context and automatic discovery signal, so project is not yet
+  merely one scope among a complete ontology.
 - Automatic induction is implemented as a conservative minimum slice. It can
   promote synthetic reusable facts into high-level memories and run a
   dependency-light semantic lifecycle pass. Aggregate-only private deployment
@@ -1574,12 +1576,11 @@ consolidation/decay evidence.
    policy, and noisy multi-month evidence histories.
 
 3. Continue reducing project-boundary centrality.
-   The archive now has opt-in `archive_scope` and `source_partition` keys, so
-   both the memory domain and high-water/source-hash stream can be independent
-   from `project_path`. Source discovery and registry bootstrap still start
-   from project metadata. The next step is a broader source/scope registry or
-   ontology that can discover and schedule domain/global streams without first
-   materializing project rows.
+   The archive now has opt-in `archive_scope` and `source_partition` keys, plus
+   an explicit `config/source_streams.jsonl` runner path, so both the memory
+   domain and high-water/source-hash stream can be independent from
+   `project_path`. Automatic source discovery and ontology mapping are still
+   not solved; source-stream rows are manual runtime policy.
 
 4. Deepen source-depth governance.
    Keep raw source anchors private by default. The current CLI now requires a

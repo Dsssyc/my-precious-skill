@@ -26,6 +26,8 @@ The private deployment repository contains:
 - real `sessions/`, `daily/`, `memories/`, and `index/` data
 - `config/projects.jsonl`, the runtime project registry used by scheduled
   global updates
+- `config/source_streams.jsonl`, optional explicit runtime registry for
+  non-project source streams
 - ingestion and summarization configuration
 - local scheduling such as launchd or cron
 - Git remotes and credentials managed outside source files
@@ -112,7 +114,9 @@ and JSONL indexes.
   without installing or enabling them.
 - `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
   bootstraps an empty project registry by scanning source records for project
-  paths, then invokes the per-project updater for each enabled project.
+  paths, invokes the per-project updater for each enabled project, and can run
+  explicit source streams keyed by stable archive scope plus source partition
+  without first materializing a project row.
 - `templates/agent-memory-repo/tools/induction_consolidation_audit.py`:
   privacy-safe read-only audit for automatic induction, lifecycle consolidation,
   evidence reachability, and aggregate real-history output safety.
@@ -133,9 +137,12 @@ and JSONL indexes.
 Default scheduled updates should call `tools/run_memory_updates.py`, not the
 single-project updater. The runner reads `config/projects.jsonl`, scans the
 shared source-record directory for project metadata, registers newly discovered
-projects, and updates each enabled project. This avoids a bootstrap deadlock
-where an empty deployment repository has no project registry and therefore no
-scheduled work.
+projects, and updates each enabled project. It also reads
+`config/source_streams.jsonl` when present, so a deployment can schedule a
+domain/global source stream whose primary identity is `archive_scope` plus
+`source_partition` rather than a project registry row. This avoids a bootstrap
+deadlock where an empty deployment repository has no project registry and
+reduces the requirement that every source stream first become a project.
 
 `config/projects.jsonl` is runtime configuration, while `index/projects.jsonl`
 and `index/scopes.jsonl` are generated archive indexes. Disabled projects in
@@ -147,6 +154,14 @@ incremental high-water and source-hash freshness follow a stable source stream
 that is independent from `project_path`. When omitted, source partition defaults
 to the resolved project path, so one registered path cannot hide older
 unarchived records from another path in the same domain stream.
+
+`config/source_streams.jsonl` rows are explicit runtime configuration for
+non-project streams. Enabled rows must include `stream_id`, `archive_scope`,
+and `source_partition`; they may include `source_dir`, `project_path`,
+`project`, and `require_project_metadata`. When `project_path` is absent, the
+runner passes the stream `source_dir` as source-record filter context and does
+not require project metadata. Source stream configuration is not automatic
+ontology discovery and should be reviewed intentionally.
 
 Agent-native automations should use exactly one working directory: the private
 deployment repository. Multiple working directories can create multiple
@@ -205,6 +220,9 @@ If none are set, tools may try `~/repos/agent-memory`.
   source record directories.
 - The global runner can bootstrap an empty project registry from source records
   and respects disabled registry entries.
+- The global runner can update explicit non-project source streams from
+  `config/source_streams.jsonl` using stable archive scope and source partition
+  keys.
 - The update script writes `source-map.json`, daily summaries, and JSONL indexes.
 - The template can render global-runner and single-project scheduler
   configuration without enabling recurring jobs.

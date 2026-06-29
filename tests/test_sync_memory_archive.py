@@ -160,6 +160,28 @@ class SyncMemoryArchiveTests(unittest.TestCase):
             self.assertIn("- reviews", result.stdout)
             self.assertNotIn("unexpected files", result.stderr)
 
+    def test_sync_memory_archive_dry_run_allows_source_stream_registry_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = create_git_backed_archive(Path(tmpdir))
+            (memory_repo / "config/source_streams.jsonl").write_text(
+                '{"stream_id":"synthetic","archive_scope":"domain:synthetic",'
+                '"source_partition":"source:synthetic","source_dir":"/tmp/synthetic","enabled":true}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/sync_memory_archive.py"), "--dry-run"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Would stage allowed archive roots", result.stdout)
+            self.assertIn("- config/source_streams.jsonl", result.stdout)
+            self.assertNotIn("unexpected files", result.stderr)
+
     def test_sync_memory_archive_refuses_key_like_values_without_leaking_them(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))

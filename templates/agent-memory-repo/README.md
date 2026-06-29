@@ -56,6 +56,18 @@ stable memory domain that is not the project path. Incremental high-water and
 source-hash freshness are tracked by `source_partition` inside that archive
 scope. When omitted, `source_partition` defaults to the resolved project path.
 
+For non-project domains, add explicit source streams to
+`config/source_streams.jsonl`:
+
+```json
+{"stream_id":"domain-agent-memory","source_dir":"/path/to/source-records","archive_scope":"domain:agent-memory","source_partition":"source:agent-memory","project":"agent-memory-domain","enabled":true}
+```
+
+Enabled source stream rows must include `archive_scope` and `source_partition`.
+When `project_path` is omitted, the stream `source_dir` is used only as the
+source-record filter context; the memory domain and freshness key remain the
+configured scope and partition.
+
 Archive new source records for a project:
 
 ```bash
@@ -248,8 +260,8 @@ The sync helper refuses to proceed when non-archive paths changed, when
 generated archive files still contain recognized key-like values, when archive
 audit finds low-quality index text, or when `git diff --cached --check` fails.
 Expected archive paths are limited to
-`INDEX.md`, `config/projects.jsonl`, `index/`, `memories/`, `reviews/`,
-`daily/`, and `sessions/`.
+`INDEX.md`, `config/projects.jsonl`, `config/source_streams.jsonl`, `index/`,
+`memories/`, `reviews/`, `daily/`, and `sessions/`.
 
 ## Archive Data
 
@@ -273,6 +285,7 @@ Expected archive data:
 - `daily/YYYY/YYYY-MM-DD.md`
 - `index/*.jsonl`
 - `config/projects.jsonl`
+- `config/source_streams.jsonl` (optional explicit source-stream registry)
 
 ## Security
 

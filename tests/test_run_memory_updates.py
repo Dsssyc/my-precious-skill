@@ -7,6 +7,88 @@ from pathlib import Path
 
 
 class RunMemoryUpdatesTests(unittest.TestCase):
+    def test_run_memory_updates_runs_registered_source_stream_without_project_registry(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "agent-source-stream"
+            runner_source_dir = root / "empty-project-discovery"
+            source_dir.mkdir(parents=True)
+            runner_source_dir.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (memory_repo / "config/projects.jsonl").write_text("", encoding="utf-8")
+            (memory_repo / "config/source_streams.jsonl").write_text(
+                json.dumps(
+                    {
+                        "stream_id": "domain-agent-memory",
+                        "source_dir": str(source_dir.resolve()),
+                        "archive_scope": "domain:agent-memory",
+                        "source_partition": "source:agent-memory",
+                        "project": "agent-memory-domain",
+                        "enabled": True,
+                        "source": "manual",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "domain.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "role": "user",
+                        "content": "Decision: domain source streams should update without project metadata.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(runner_source_dir),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Enabled source streams: 1", result.stdout)
+            self.assertIn("Source streams updated: 1", result.stdout)
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 1)
+            self.assertEqual(session_rows[0]["archive_scope"], "domain:agent-memory")
+            self.assertEqual(session_rows[0]["source_partition"], "source:agent-memory")
+            self.assertEqual(session_rows[0]["project"], "agent-memory-domain")
+            self.assertEqual(session_rows[0]["project_path"], str(source_dir.resolve()))
+            scope_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/scopes.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(scope_rows[0]["archive_scope"], "domain:agent-memory")
+
     def test_run_memory_updates_bootstraps_empty_project_registry(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

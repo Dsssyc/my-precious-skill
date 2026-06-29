@@ -231,6 +231,19 @@ the source partition defaults to the resolved project path, so one project path
 cannot hide older unarchived records from another path in the same domain
 stream.
 
+For non-project domains, register explicit source streams in
+`config/source_streams.jsonl`:
+
+```json
+{"stream_id":"domain-agent-memory","source_dir":"/path/to/source-records","archive_scope":"domain:agent-memory","source_partition":"source:agent-memory","project":"agent-memory-domain","enabled":true}
+```
+
+Enabled source stream rows must include stable `archive_scope` and
+`source_partition` values. `project_path` is optional and is used only as
+source-record filter context when present; otherwise the stream `source_dir` is
+used as that context. This is a deliberate non-project registry path, not
+automatic ontology discovery.
+
 For a deliberate historical repair pass, add `--rewrite-existing`. That mode
 rebuilds matching source records and replaces older archive entries for the
 same project/source record; it is not the normal incremental path.
@@ -954,7 +967,9 @@ skills/using-my-precious/references/archive-format.md
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.
 - Optional project-metadata requirement for shared source record directories.
-- Global update runner that bootstraps an empty project registry from source records.
+- Global update runner that bootstraps an empty project registry from source
+  records and can run explicit non-project source streams from
+  `config/source_streams.jsonl`.
 - Backfill mode for deliberately rewriting existing source-record entries.
 - Meta-driven backfill tool for repairing existing archive entries without repeated full source scans.
 - Archive audit tool for wrapper-field noise, process-update text, and key-like values.

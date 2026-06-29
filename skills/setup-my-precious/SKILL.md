@@ -125,7 +125,9 @@ Ask only what is needed, one step at a time:
 - Ask for the scheduler backend: local timer system, cron-like scheduler, or a compatible agent-native recurring task when the runtime supports one.
 - Prefer global scheduling through `tools/run_memory_updates.py`; it can
   bootstrap an empty `config/projects.jsonl` by scanning source records for
-  project metadata.
+  project metadata, and it can run explicit non-project streams from
+  `config/source_streams.jsonl` when a deployment should schedule a stable
+  domain/global source stream.
 - Prefer generating a reviewable scheduler file or command before loading/enabling it.
 - Use `tools/render_scheduler.py` when the deployment repository includes it.
 - Use `tools/sync_memory_archive.py --push` for requested automatic Git upload
