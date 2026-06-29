@@ -1885,9 +1885,18 @@ evidence rather than full public generated-answer readiness. The explicit
 source-stream registry path now has a packaged synthetic benchmark and is
 required by the core v1 readiness gate. The current public/shadow readiness
 runs still cannot claim private real-archive generated-answer behavior or live
-model answer quality. The next valuable work is a private/dogfood
-generated-answer case set with reference answers, remaining scope-mixed top-k
-noise reduction, and broader consolidation/decay evidence.
+model answer quality. The suite now has a separate aggregate-only
+`generated_answer_case_audit.py` preflight for private or public answer case
+sets before answer records exist. That audit can require source benchmark and
+case-origin counts such as `MyPreciousPrivateDogfood` and `private_dogfood`,
+and can gate `answer_scorable_case_rate`, `positive_without_reference_answer`,
+and `unsafe_aggregate_identifier_count` without rendering private case IDs,
+queries, or reference answers. This closes the reusable tooling gap for
+dogfood case-set readiness, but it still does not create the private dogfood
+case set, generate answers, or prove private real-archive answer quality. The
+next valuable work is a private/dogfood generated-answer case set with
+reference answers, remaining scope-mixed top-k noise reduction, and broader
+consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1923,9 +1932,10 @@ noise reduction, and broader consolidation/decay evidence.
    public records outside the repository. The 100-case LongMemEval cleaned
    local probe passes memory/source/answer reachability, privacy, and
    answer-level abstention gates at 1.0. The reusable suite now has offline
-   generated-answer grading for provided answers; the next step is a private
-   dogfood answer case set with reference answers, plus larger bounded public
-   samples, without committing private answer text.
+   generated-answer grading for provided answers plus aggregate-only case-set
+   scoreability audit before answers exist; the next step is a private dogfood
+   answer case set with reference answers, plus larger bounded public samples,
+   without committing private answer text.
 
 6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,

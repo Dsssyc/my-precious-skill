@@ -90,6 +90,7 @@ python3 -m py_compile \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \
   benchmarks/convert_public_memory_benchmark.py \
+  benchmarks/generated_answer_case_audit.py \
   benchmarks/generated_answer_benchmark.py \
   benchmarks/source_stream_registry_benchmark.py \
   benchmarks/v1_readiness_gate.py \

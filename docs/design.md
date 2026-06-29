@@ -106,6 +106,13 @@ and JSONL indexes.
   rendering queries, generated answers, or reference answers. Reports include
   aggregate `source_benchmarks` and `case_origins` counts so the readiness gate
   can reject source-less answer evidence.
+- `benchmarks/generated_answer_case_audit.py`: aggregate-only preflight audit
+  for generated-answer case sets before answer records exist. It reports
+  answer-scorable coverage, positive cases without reference answers,
+  forbidden-pattern coverage, safe aggregate source benchmark and case-origin
+  counts, and a case-file fingerprint without rendering case IDs, queries, or
+  reference answers. This closes the dogfood case-set readiness tooling gap but
+  does not generate or grade answers.
 - `templates/agent-memory-repo/tools/generate_answer_records.py`: extractive
   deployment-repo helper that searches an existing archive and writes private
   generated-answer JSONL records for `generated_answer_benchmark.py`. Its report
@@ -336,6 +343,9 @@ These are retrieval-side checks, not generated-answer semantic grading. The
 separate generated-answer benchmark consumes answer records produced elsewhere
 and reports offline aggregate grading metrics; it does not call a model,
 produce answers, or establish full semantic-equivalence scoring. The
+generated-answer case audit is narrower still: it checks whether a case set has
+the reference-answer and aggregate provenance coverage needed for later
+grading, but it does not consume answer records or score answer quality. The
 aggregate payload and each category payload also include
 denominator counts such as `positive_cases`, `answer_cases`, and `stale_cases`
 so zero-denominator metrics can be distinguished from measured failures.

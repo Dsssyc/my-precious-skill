@@ -57,6 +57,8 @@ my-precious-skill/
     e2e_induction_recall_benchmark.py
     updater_induction_benchmark.py
     layered_recall_benchmark.py
+    generated_answer_case_audit.py
+    generated_answer_benchmark.py
     cases/
     quality-gates/
   skills/
@@ -486,6 +488,26 @@ correctness for positive cases. Its claim boundary is narrow: it grades
 provided answer records against reference answers; it does not call a model,
 generate answers, or claim semantic equivalence beyond exact, normalized, and
 token-overlap checks.
+
+Before generating answers, audit a private or public generated-answer case set
+for scoreability and aggregate provenance without rendering case IDs, queries,
+or reference answers:
+
+```bash
+python benchmarks/generated_answer_case_audit.py \
+  --cases /path/to/private-generated-answer-cases.jsonl \
+  --require-source-benchmark MyPreciousPrivateDogfood \
+  --require-case-origin private_dogfood \
+  --fail-under answer_scorable_case_rate=1.0 \
+  --fail-over positive_without_reference_answer=0 \
+  --fail-over unsafe_aggregate_identifier_count=0
+```
+
+The case audit reports aggregate case counts, positive/abstention split,
+reference-answer coverage, answer-scorable coverage, forbidden-pattern
+coverage, safe aggregate `source_benchmarks` and `case_origins`, and
+`cases_sha256`. It is a readiness check for the case set only; it does not
+produce answer records or prove answer correctness.
 
 Generate extractive answer records from an existing archive for that offline
 grader:
