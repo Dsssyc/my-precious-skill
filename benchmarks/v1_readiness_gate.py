@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
 import tempfile
@@ -115,6 +116,17 @@ GENERATED_ANSWER_GATES = (
     MetricGate("answer_scorable_case_rate", "min", 1.0),
 )
 PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
+SAFE_REQUIRED_COUNT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+SECRET_LIKE_REQUIRED_COUNT_KEY = re.compile(
+    "|".join(
+        (
+            "AKIA" + r"[0-9A-Z]{16}",
+            "sk-" + r"[A-Za-z0-9_-]{20,}",
+            "github" + r"_pat_",
+            "gh[pousr]_" + r"[A-Za-z0-9_]{20,}",
+        )
+    )
+)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -360,7 +372,13 @@ def assess_shadow_report(payload: dict[str, Any] | None, *, required: bool) -> d
     return result
 
 
-def assess_answer_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
+def assess_answer_report(
+    payload: dict[str, Any] | None,
+    *,
+    required: bool,
+    required_source_benchmarks: tuple[str, ...] = (),
+    required_case_origins: tuple[str, ...] = (),
+) -> dict[str, Any]:
     result = assess_report(
         payload,
         expected_kind="generated_answer_benchmark",
@@ -412,8 +430,41 @@ def assess_answer_report(payload: dict[str, Any] | None, *, required: bool) -> d
                 }
             )
             result["status"] = "failed"
+        for source in required_source_benchmarks:
+            if positive_count_for_key(source_benchmarks, source) <= 0:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"source_benchmarks.{source}",
+                        "comparison": "min",
+                        "threshold": 1.0,
+                        "reason": "missing_required_generated_answer_source",
+                    }
+                )
+                result["status"] = "failed"
+        for origin in required_case_origins:
+            if positive_count_for_key(case_origins, origin) <= 0:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"case_origins.{origin}",
+                        "comparison": "min",
+                        "threshold": 1.0,
+                        "reason": "missing_required_generated_answer_case_origin",
+                    }
+                )
+                result["status"] = "failed"
     result["claim_boundary"] = "offline generated-answer grading only; no model-generation claim"
     return result
+
+
+def positive_count_for_key(value: object, key: str) -> int:
+    if not isinstance(value, dict):
+        return 0
+    count = value.get(key)
+    if isinstance(count, bool):
+        return 0
+    if isinstance(count, int) and count > 0:
+        return count
+    return 0
 
 
 def has_positive_count(value: object) -> bool:
@@ -547,6 +598,8 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
                 "answer_normalized_match_rate=1.0",
                 "--fail-under",
                 "abstention_accuracy=1.0",
+                "--fail-under",
+                "answer_scorable_case_rate=1.0",
                 "--fail-over",
                 "privacy_leak_count=0",
                 "--fail-over",
@@ -557,6 +610,8 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
                 "duplicate_answer_count=0",
                 "--fail-over",
                 "unknown_answer_count=0",
+                "--fail-over",
+                "positive_without_reference_answer=0",
             ],
             cwd=REPO_ROOT,
         )
@@ -575,6 +630,8 @@ def build_report(
     require_public: bool,
     require_shadow: bool,
     require_answer: bool,
+    required_answer_source_benchmarks: tuple[str, ...] = (),
+    required_answer_case_origins: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     dimensions = {
         "layered_recall": assess_report(
@@ -601,7 +658,12 @@ def build_report(
         "source_stream_registry": assess_source_stream_report(source_stream),
         "public_benchmark_adapter": assess_public_report(public, required=require_public),
         "real_archive_shadow_eval": assess_shadow_report(shadow, required=require_shadow),
-        "generated_answer_eval": assess_answer_report(answer, required=require_answer),
+        "generated_answer_eval": assess_answer_report(
+            answer,
+            required=require_answer,
+            required_source_benchmarks=required_answer_source_benchmarks,
+            required_case_origins=required_answer_case_origins,
+        ),
     }
     required = [dimension for dimension in dimensions.values() if dimension["required"]]
     optional = [dimension for dimension in dimensions.values() if not dimension["required"]]
@@ -657,13 +719,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--require-public", action="store_true", help="Fail when --public-report is absent or failed")
     parser.add_argument("--require-shadow", action="store_true", help="Fail when --shadow-report is absent or failed")
     parser.add_argument("--require-answer", action="store_true", help="Fail when --answer-report is absent or failed")
+    parser.add_argument(
+        "--require-answer-source-benchmark",
+        action="append",
+        default=[],
+        help="Require --answer-report source_benchmarks to include this aggregate key with a positive count",
+    )
+    parser.add_argument(
+        "--require-answer-case-origin",
+        action="append",
+        default=[],
+        help="Require --answer-report case_origins to include this aggregate key with a positive count",
+    )
     parser.add_argument("--run-packaged", action="store_true", help="Run packaged synthetic gates instead of reading core reports")
     parser.add_argument("--work-dir", help="Scratch directory for --run-packaged")
     return parser.parse_args(argv)
 
 
+def validated_required_count_keys(values: list[str], option: str) -> tuple[str, ...]:
+    keys: list[str] = []
+    for value in values:
+        if not SAFE_REQUIRED_COUNT_KEY.fullmatch(value) or SECRET_LIKE_REQUIRED_COUNT_KEY.search(value):
+            raise SystemExit(f"{option} values must be safe aggregate identifiers")
+        keys.append(value)
+    return tuple(keys)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    required_answer_source_benchmarks = validated_required_count_keys(
+        args.require_answer_source_benchmark,
+        "--require-answer-source-benchmark",
+    )
+    required_answer_case_origins = validated_required_count_keys(
+        args.require_answer_case_origin,
+        "--require-answer-case-origin",
+    )
+    require_answer = args.require_answer or bool(required_answer_source_benchmarks or required_answer_case_origins)
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     try:
         if args.run_packaged:
@@ -674,7 +766,7 @@ def main(argv: list[str] | None = None) -> int:
             work_dir.mkdir(parents=True, exist_ok=True)
             if any(work_dir.iterdir()):
                 raise SystemExit("--work-dir must be empty when using --run-packaged")
-            core = run_packaged_reports(work_dir, include_answer=args.require_answer and not args.answer_report)
+            core = run_packaged_reports(work_dir, include_answer=require_answer and not args.answer_report)
             layered = core["layered"]
             updater = core["updater"]
             e2e = core["e2e"]
@@ -700,7 +792,9 @@ def main(argv: list[str] | None = None) -> int:
             answer=answer,
             require_public=args.require_public,
             require_shadow=args.require_shadow,
-            require_answer=args.require_answer,
+            require_answer=require_answer,
+            required_answer_source_benchmarks=required_answer_source_benchmarks,
+            required_answer_case_origins=required_answer_case_origins,
         )
         print(json.dumps(report, sort_keys=True))
         if report["overall_status"] == "not_ready":

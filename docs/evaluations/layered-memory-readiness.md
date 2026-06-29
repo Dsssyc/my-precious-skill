@@ -1803,6 +1803,25 @@ that boundary explicit through `answer_scorable_case_rate` and
 `positive_without_reference_answer`: a required answer report with unscored
 positive rows is rejected even if other answer metrics are present.
 
+The v1 readiness gate can now also require a specific aggregate answer-evidence
+stream without rendering or committing the private case rows:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --answer-report /tmp/private-generated-answer-report.json \
+  --require-answer \
+  --require-answer-case-origin private_dogfood
+```
+
+For public or mixed answer evaluations, the same gate can require a named
+`source_benchmarks` key with
+`--require-answer-source-benchmark NAME`. These source/origin checks make the
+answer dimension required and prove only aggregate provenance for the supplied
+answer report. They do not create private reference-answer cases, do not score
+live model generation, and do not turn the existing shadow probe fixtures into
+generated-answer fixtures.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation

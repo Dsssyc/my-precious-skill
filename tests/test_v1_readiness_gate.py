@@ -164,6 +164,18 @@ class V1ReadinessGateTests(unittest.TestCase):
             },
         }
 
+    def test_required_answer_count_keys_reject_secret_like_identifiers_without_echo(self):
+        secret_like_origin = "sk-" + "abcdefghijklmnopqrst"
+
+        with self.assertRaises(SystemExit) as raised:
+            readiness_gate.validated_required_count_keys(
+                [secret_like_origin],
+                "--require-answer-case-origin",
+            )
+
+        self.assertIn("safe aggregate identifiers", str(raised.exception))
+        self.assertNotIn(secret_like_origin, str(raised.exception))
+
     def test_core_synthetic_reports_produce_bounded_readiness_summary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -864,6 +876,125 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertIn("positive_without_reference_answer", failed_metrics)
             self.assertIn("answer_scorable_case_rate", failed_metrics)
             self.assertIn("generated_answer_eval", result.stderr)
+
+    def test_required_answer_case_origin_rejects_packaged_only_answer_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer = self.write_json(root, "answer.json", self.passing_answer_report())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                    "--require-answer-case-origin",
+                    "private_dogfood",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["generated_answer_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("case_origins.private_dogfood", failed_metrics)
+            self.assertIn("generated_answer_eval", result.stderr)
+
+    def test_required_answer_case_origin_makes_answer_report_required(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--require-answer-case-origin",
+                    "private_dogfood",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "missing_required")
+            self.assertIn("generated_answer_eval", result.stderr)
+
+    def test_required_answer_source_and_origin_accepts_matching_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            answer_payload["source_benchmarks"] = {"MyPreciousPrivateDogfood": 3}
+            answer_payload["case_origins"] = {"private_dogfood": 3}
+            answer = self.write_json(root, "answer.json", answer_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                    "--require-answer-source-benchmark",
+                    "MyPreciousPrivateDogfood",
+                    "--require-answer-case-origin",
+                    "private_dogfood",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(payload["overall_status"], "extended_evidence_ready")
+            self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
 
     def test_run_packaged_require_answer_uses_packaged_answer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:

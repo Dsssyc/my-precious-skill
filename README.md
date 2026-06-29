@@ -430,8 +430,17 @@ greenwashing; it is not a claim that real retrieval noise is solved. Optional
 `--answer-report` can add offline generated-answer grading evidence. Answer
 reports must include aggregate `source_benchmarks` and `case_origins` counts;
 passing answer metrics alone are not accepted as provenance-backed answer
-evidence. Add `--require-public`, `--require-shadow`, or `--require-answer`
-when those optional dimensions should fail the gate if absent. When
+evidence. When a run needs to prove a specific dogfood or benchmark answer
+stream rather than any answer report, add one or more
+`--require-answer-source-benchmark NAME` or
+`--require-answer-case-origin NAME` checks; each required key must be present
+with a positive aggregate count, and either check makes the answer dimension
+required even if `--require-answer` was omitted. For example,
+`--require-answer-case-origin private_dogfood` prevents the packaged synthetic
+fixture or public-only answer report from standing in for private dogfood
+answer evidence. Add `--require-public`, `--require-shadow`, or
+`--require-answer` when those optional dimensions should fail the gate if
+absent. When
 `--run-packaged --require-answer` is used without an
 `--answer-report`, the gate runs the packaged synthetic generated-answer fixture
 and includes that aggregate report automatically. Public reports must be

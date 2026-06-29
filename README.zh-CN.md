@@ -356,7 +356,15 @@ updater induction、e2e induction-to-recall 和 explicit source stream registry
 `--public-report` 和 `--shadow-report` 可以接入
 仓库外 adapted public benchmark 报告和私有真实 archive 的 aggregate shadow eval
 报告；如果希望这些可选维度缺失时也让 gate 失败，使用 `--require-public` 或
-`--require-shadow`。public report 必须是由公开 benchmark 转换 case 生成的
+`--require-shadow`。`--answer-report` 可以接入离线 generated-answer 评分报告；
+如果需要证明某个特定 dogfood 或 benchmark answer stream，而不是任意 answer
+report，可以添加 `--require-answer-source-benchmark NAME` 或
+`--require-answer-case-origin NAME`。这些参数只检查 aggregate
+`source_benchmarks` / `case_origins` 中对应 key 是否有正计数，并且会隐式要求
+answer 维度必须存在，即使没有额外写 `--require-answer`。例如
+`--require-answer-case-origin private_dogfood` 可以防止 packaged synthetic fixture
+或 public-only answer report 被误当成私有 dogfood answer evidence。public report
+必须是由公开 benchmark 转换 case 生成的
 layered recall 报告，并包含 aggregate `source_benchmarks` 计数和
 `case_origins.public_benchmark_adapter`；converter-only 输出或普通合成 layered
 report 不能作为 public evidence。`core_synthetic_ready` 是有边界的结论：它只说明

@@ -696,8 +696,14 @@ cannot stand in for dogfood or public answer evidence. Required answer reports
 must also prove scoreability coverage with `answer_scorable_case_rate: 1.0` and
 `positive_without_reference_answer: 0`; positive answer rows without reference
 answers are explicitly unscored rather than treated as valid dogfood evidence.
-This remains synthetic dogfood evidence; it does not evaluate a live model or
-private real-history generated answers.
+Runs that need to prove a particular answer-evidence stream can add
+`--require-answer-source-benchmark NAME` and
+`--require-answer-case-origin NAME`; the readiness gate then requires those
+aggregate keys to have positive counts in the answer report and treats the
+answer dimension as required. This lets a private dogfood answer report be
+required without committing private cases or rendering private answers. The
+packaged fixture remains synthetic dogfood evidence; it does not evaluate a
+live model or private real-history generated answers.
 
 The deployment template also includes `tools/generate_answer_records.py`, a
 deterministic extractive adapter that turns memory search hits into private
