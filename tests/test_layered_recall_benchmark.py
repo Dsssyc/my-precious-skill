@@ -1250,6 +1250,53 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertTrue(rows[0]["answer_normalized_reachability_hit"])
             self.assertEqual(rows[0]["answer_token_f1"], 1.0)
 
+    def test_answer_reachability_can_use_verified_drilldown_files_when_output_is_clipped(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            answer = "Full reference answer lives only inside the verified drilldown file."
+            summary = repo / SUMMARY_PATH
+            summary.parent.mkdir(parents=True, exist_ok=True)
+            summary.write_text(
+                "# Session: Answer Drilldown\n\n"
+                f"Reference answers:\n- {answer}\n",
+                encoding="utf-8",
+            )
+            evidence_path = SUMMARY_PATH.replace("/summary.md", "/evidence.md")
+            evidence = repo / evidence_path
+            evidence.write_text(
+                "# Evidence\n\n"
+                f"syn_ev_001: Reference answer: {answer}\n",
+                encoding="utf-8",
+            )
+            cases = self.write_cases(
+                root,
+                {
+                    **self.valid_case(),
+                    "reference_answer": answer,
+                    "required_evidence_paths": [evidence_path],
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["memory_recall_at_1"], 1.0)
+            self.assertEqual(payload["source_reachability"], 1.0)
+            self.assertEqual(payload["answer_reachability"], 1.0)
+            self.assertEqual(payload["answer_normalized_reachability"], 1.0)
+            self.assertEqual(payload["answer_token_f1"], 1.0)
+            self.assertTrue(detail["answer_reachability_hit"])
+            self.assertTrue(detail["answer_normalized_reachability_hit"])
+
     def test_answer_reachability_requires_expected_memory_identity(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

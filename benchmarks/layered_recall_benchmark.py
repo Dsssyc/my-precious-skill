@@ -1553,16 +1553,25 @@ def evidence_text_reachability_hit(repo: Path, evidence_paths: list[str], refere
 
 
 def answer_context_blocks(
+    repo: Path,
     memory_blocks: list[str],
     session_blocks: list[str],
     source_blocks: list[str],
     expected_memory_id: str,
     expected_summary_path: str,
+    required_evidence_paths: list[str],
     record: dict | None,
 ) -> list[str]:
     memory_context = expected_memory_blocks(memory_blocks + source_blocks, expected_memory_id, record)
     session_context = [block for block in session_blocks if expected_summary_path in block_result_paths([block])]
-    return [*memory_context, *session_context]
+    reachable_paths = set(block_result_paths(memory_context + session_context))
+    file_context_paths: list[str] = []
+    if expected_summary_path and expected_summary_path in reachable_paths:
+        file_context_paths.append(expected_summary_path)
+    for evidence_path in required_evidence_paths:
+        if evidence_path in reachable_paths:
+            file_context_paths.append(evidence_path)
+    return [*memory_context, *session_context, *read_repo_texts(repo, unique_texts(file_context_paths))]
 
 
 def answer_reachability_hit(blocks: list[str], reference_answers: list[str]) -> bool:
@@ -1961,11 +1970,13 @@ def score_case(
             evidence_text_hit = evidence_text_reachability_hit(repo, required_evidence_paths, reference_evidence)
         if reference_answers:
             answer_blocks = answer_context_blocks(
+                repo,
                 memory_blocks,
                 session_blocks,
                 source_blocks,
                 expected_memory_id,
                 expected_summary_path,
+                required_evidence_paths,
                 expected_record,
             )
             answer_output = "\n".join(answer_blocks)

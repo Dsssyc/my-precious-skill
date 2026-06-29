@@ -3644,6 +3644,52 @@ class SearchMemoryTests(unittest.TestCase):
         first_hit = result.stdout.split("\n\n", 2)[1]
         self.assertIn("sessions/2026/04/27/exact/summary.md", first_hit)
 
+    def test_search_memory_prioritizes_full_short_query_coverage_over_short_phrase_noise(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            target = synthetic_memory_row(
+                "mem_short_query_entity_target",
+                "Synthetic answer target: mem_short_query_entity_target. Reference answer: two weeks. "
+                "How long was I in Japan for? How long was I in Japan for? How long was I in Japan for?",
+            )
+            target["source"] = "automatic"
+            target["scope"] = "synthetic"
+            target["rationale"] = "Exact synthetic benchmark query match for: How long was I in Japan for."
+            noise = synthetic_memory_row(
+                "mem_short_query_phrase_noise",
+                "Synthetic answer target: mem_short_query_phrase_noise. Reference answer: 45 minutes each way. "
+                "How long is my daily commute to work? How long is my daily commute to work? "
+                "How long is my daily commute to work?",
+            )
+            noise["source"] = "automatic"
+            noise["scope"] = "synthetic"
+            noise["rationale"] = "Exact synthetic benchmark query match for: How long is my daily commute to work."
+            write_synthetic_memory_archive(
+                repo,
+                [target, noise],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "How long was I in Japan for?",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        first_hit = result.stdout.split("\n\n", 2)[1]
+        self.assertIn("mem_short_query_entity_target", first_hit)
+        self.assertNotIn("mem_short_query_phrase_noise", first_hit)
+
     def test_search_memory_prefers_compact_session_title_over_matching_long_summary(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

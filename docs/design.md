@@ -245,8 +245,9 @@ summary session output. These metrics are reported as `memory_recall_at_1`,
 `abstain_pass_rate`, `suppression_pass_rate`, `privacy_leak_count`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
 `case_pass_rate`. Exact answer
-reachability is strict text reachability. Normalized reachability ignores case
-and punctuation. `memory_precision_at_5` is a returned-result purity metric:
+reachability is strict text reachability in expected-memory search output or in
+verified local drilldown files. Normalized reachability ignores case and
+punctuation. `memory_precision_at_5` is a returned-result purity metric:
 for each positive case, the benchmark divides matching expected-memory hits by
 the returned memory hits in the top-5 cutoff, then macro-averages those per-case
 scores. `memory_micro_precision_at_5` divides summed relevant-memory hits by

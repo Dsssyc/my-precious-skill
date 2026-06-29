@@ -509,7 +509,7 @@ stress tests:
   `evidence_text_cases`
 - `answer_reachability`, `answer_normalized_reachability`, and
   `answer_token_f1` for reference-answer snippets that should be present in
-  recalled memory/session/source output
+  recalled memory/session/source output or in verified local drilldown files
 - `abstention_accuracy`, `negative_memory_suppression`,
   `stale_memory_suppression`, `update_consistency`,
   `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`, and
@@ -538,7 +538,8 @@ leaks even when a case does not configure explicit forbidden patterns.
 When present, `case_id` must be unique within the case file.
 Abstention cases set `expected_abstain` to `true` and do not need positive
 expected fields. `answer_reachability` checks exact reference-answer text
-reachability; `answer_normalized_reachability` ignores case and punctuation;
+reachability in expected-memory search output or in verified local drilldown
+files; `answer_normalized_reachability` ignores case and punctuation;
 `answer_token_f1` reports best-window token overlap. These are retrieval-side
 checks, not generated-answer semantic grading. `evidence_text_reachability`
 checks that required evidence files contain exact `reference_evidence` snippets,

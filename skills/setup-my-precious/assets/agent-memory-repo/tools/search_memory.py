@@ -375,6 +375,14 @@ def phrase_score(phrase: str) -> int:
     return sum(token_importance(token) for token in phrase.split()) * 18
 
 
+def high_signal_phrase(phrase: str) -> bool:
+    tokens = phrase.split()
+    return any(
+        token_importance(token) >= 2 or (any(char.isdigit() for char in token) and len(token) >= 3)
+        for token in tokens
+    )
+
+
 def add_reason(reasons: list[str], reason: str) -> None:
     if reason not in reasons:
         reasons.append(reason)
@@ -754,6 +762,8 @@ def score_index_record(query_tokens: list[str], record: dict, context_terms: lis
                 for phrase in phrases:
                     if phrase_matches >= 3:
                         break
+                    if not high_signal_phrase(phrase):
+                        continue
                     if phrase in lowered:
                         score += phrase_score(phrase) * max(1, field_weight // 4)
                         phrase_matches += 1

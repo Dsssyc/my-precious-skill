@@ -550,7 +550,7 @@ Not measured:
 Measured:
 
 - `answer_reachability`: exact reference-answer text is reachable in the
-  expected-memory context.
+  expected-memory context or in verified local drilldown files.
 - `answer_normalized_reachability`: case- and punctuation-insensitive answer
   reachability.
 - `answer_token_f1`: best-window token overlap between retrieved context and
@@ -1356,12 +1356,14 @@ read the first 100 top-level records with `--limit 100`, wrote converted cases
 and a synthetic archive under `/tmp`, then scored that archive with the layered
 recall benchmark.
 
-This is a failed strict public-adapter probe, not a passing v1 readiness gate
-and not a LongMemEval leaderboard result. It proves the adapter can process a
-larger bounded public sample, and it exposes the next real gap: public
-abstention and a small number of answer/source reachability cases are not yet
-modeled strongly enough to pass the same 1.0 gate used by the five-object
-smoke test.
+This is still a failed strict public-adapter probe, not a passing v1 readiness
+gate and not a LongMemEval leaderboard result. It proves the adapter can
+process a larger bounded public sample and that positive retrieval-side cases
+can pass at 1.0 after the short-query ranking and drilldown-answer
+reachability fixes. It also exposes the next real gap: public abstention cases
+need an answer-generation or answer-judging layer, because several
+LongMemEval `_abs` rows intentionally retrieve related context while requiring
+the final answer to say the requested fact was not mentioned.
 
 Commands:
 
@@ -1381,14 +1383,23 @@ python3 benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my_precious_public_limit_20260629/archive_100 \
   --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/my_precious_public_limit_20260629/details_100.jsonl \
+  --details-jsonl /tmp/my_precious_public_limit_20260629/details_100_after_fix.jsonl \
   --fail-under case_pass_rate=1.0 \
   --fail-under memory_recall_at_5=1.0 \
   --fail-under answer_reachability=1.0 \
   --fail-over privacy_leak_count=0 \
   --fail-over failed_case_count=0 \
-  > /tmp/my_precious_public_limit_20260629/layered_report_100.json
+  > /tmp/my_precious_public_limit_20260629/layered_report_100_after_fix.json
+
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_after_fix.json \
+  --require-public \
+  > /tmp/my_precious_v1_public_100_after_fix_20260629.json
 ```
+
+The strict layered benchmark and `--require-public` readiness commands are
+expected to return non-zero until the public abstention boundary is closed.
 
 Limited-read conversion metrics:
 
@@ -1407,18 +1418,20 @@ Strict 100-case probe metrics:
 | case_origins.public_benchmark_adapter | 100 |
 | positive_cases | 94 |
 | abstain_cases | 6 |
-| case_pass_rate | 0.9 |
-| memory_recall_at_5 | 0.9893617021276596 |
-| memory_precision_at_5 | 0.9893617021276596 |
-| answer_reachability | 0.9397590361445783 |
-| answer_normalized_reachability | 0.9397590361445783 |
-| answer_token_f1 | 0.9664298612661768 |
+| case_pass_rate | 0.95 |
+| memory_recall_at_5 | 1.0 |
+| memory_precision_at_5 | 1.0 |
+| source_reachability | 1.0 |
+| source_ref_reachability | 1.0 |
+| answer_reachability | 1.0 |
+| answer_normalized_reachability | 1.0 |
+| answer_token_f1 | 1.0 |
 | abstention_accuracy | 0.16666666666666666 |
 | privacy_leak_count | 0 |
-| failed_case_count | 10 |
+| top_k_noise_at_5 | 0.0 |
+| failed_case_count | 5 |
 | failed_checks.abstention_accuracy | 5 |
-| failed_checks.answer_reachability | 5 |
-| failed_checks.source_reachability | 1 |
+| v1_readiness.public_benchmark_adapter.status | failed |
 | public_adapter.claim_boundary | failed strict larger-sample probe |
 
 ## Recommendation
@@ -1455,12 +1468,15 @@ v2 shadow gate pass. It also has an aggregate-derived candidate-quality rule
 that removes low-overlap ambiguous scope review noise while preserving current
 shadow-eval gates. Same topic/scope result diversification now reduces
 real-history top-k noise while preserving recall and privacy gates. The public
-adapter now has bounded-read support for larger samples, and the 100-case
-LongMemEval cleaned probe shows the next public-evidence gap: stronger
-abstention and answer/source reachability modeling are needed before the
-public-adapter dimension should be promoted beyond smoke evidence. The next
-valuable work is public benchmark hardening, broadening consolidation, decay,
-and source-drilldown authorization.
+adapter now has bounded-read support for larger samples, short-query ranking
+does not let low-signal short phrases outrank full-coverage entity matches, and
+answer reachability can use verified local drilldown files rather than only
+clipped search titles. The 100-case LongMemEval cleaned probe now has perfect
+positive-case retrieval, source, and answer reachability, but it still fails
+strict readiness because public abstention requires an answer-generation or
+answer-judging layer rather than a no-hit retrieval rule. The next valuable
+work is public abstention hardening, broadening consolidation, decay, and
+source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1490,9 +1506,10 @@ and source-drilldown authorization.
 
 5. Harden adapted public benchmarks locally.
    The converter can now run bounded larger-sample probes against downloaded
-   public records outside the repository. The next step is to close the
-   abstention and answer/source reachability failures surfaced by the 100-case
-   LongMemEval cleaned probe before treating the public-adapter dimension as
+   public records outside the repository. Positive 100-case LongMemEval
+   cleaned retrieval now passes memory/source/answer reachability at 1.0. The
+   next step is to add a privacy-safe public abstention answer-judging gate for
+   related-context `_abs` cases before treating the public-adapter dimension as
    more than smoke evidence.
 
 6. Continue v2 hard-negative and no-hit quality.
