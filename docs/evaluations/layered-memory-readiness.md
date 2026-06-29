@@ -47,11 +47,12 @@ boundary:
   The report must remain aggregate-only. Use `--require-shadow` only when the
   local private probe set should be a required readiness gate for the run.
 
-The current strongest local gate also includes a private real-archive
-aggregate shadow report. That extended run reports
-`overall_status: extended_evidence_ready`, which means the packaged synthetic
-dimensions and the private aggregate shadow dimension passed. It still does
-not prove public benchmark parity, generated-answer correctness, or complete
+The current strongest local gate includes both a private real-archive
+aggregate shadow report and a small converted LongMemEval public-adapter smoke
+report. That extended run reports `overall_status: extended_evidence_ready`,
+which means the packaged synthetic dimensions, the private aggregate shadow
+dimension, and the public-adapter plumbing dimension passed. It still does not
+prove full public benchmark parity, generated-answer correctness, or complete
 long-horizon governance.
 
 Run the packaged convergence gate locally with:
@@ -1255,7 +1256,89 @@ suppression, privacy, provenance, lifecycle, and audit gates under
 `--require-shadow`. The top-k profile still shows a real quality gap:
 case-level recall is perfect on the private probe set, but precision is only
 0.424 and most remaining noise is broad lexical match fill. Public benchmark
-adapter evidence is still absent in this run.
+adapter evidence is not included in this run; the separate smoke snapshot below
+adds adapter-plumbing evidence but still does not replace a full public
+benchmark evaluation.
+
+## Public Adapter Smoke Snapshot
+
+Date: 2026-06-29
+
+This run used a five-object sample from the public LongMemEval cleaned
+`longmemeval_s_cleaned` split, sampled outside this repository from:
+`https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned`.
+The sample, converted cases, synthetic archive, details, and JSON reports were
+written only under `/tmp`. No public benchmark raw records were committed.
+
+This is a public-adapter smoke test, not a LongMemEval leaderboard result. It
+proves that real public benchmark rows can pass through the current converter,
+synthetic archive builder, layered recall benchmark, and v1 readiness gate with
+the required public-adapter provenance fields. It does not evaluate retrieval
+over the full public corpus or the original benchmark answer-generation
+protocol.
+
+Commands:
+
+```bash
+python3 benchmarks/convert_public_memory_benchmark.py \
+  --source longmemeval \
+  --input /tmp/longmemeval_s_cleaned_first5_20260629.json \
+  --output /tmp/my_precious_public_adapter_20260629/longmemeval_cases.jsonl \
+  --build-synthetic-archive /tmp/my_precious_public_adapter_20260629/archive
+
+python3 benchmarks/layered_recall_benchmark.py \
+  --repo /tmp/my_precious_public_adapter_20260629/archive \
+  --cases /tmp/my_precious_public_adapter_20260629/longmemeval_cases.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py \
+  --details-jsonl /tmp/my_precious_public_adapter_20260629/details.jsonl \
+  --fail-under case_pass_rate=1.0 \
+  --fail-under memory_recall_at_5=1.0 \
+  --fail-under answer_reachability=1.0 \
+  --fail-over privacy_leak_count=0 \
+  --fail-over failed_case_count=0 \
+  > /tmp/my_precious_public_adapter_20260629/layered_report.json
+
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --public-report /tmp/my_precious_public_adapter_20260629/layered_report.json \
+  --shadow-report /tmp/private-shadow-eval.json \
+  --require-public \
+  --require-shadow \
+  > /tmp/private-v1-readiness-public-shadow.json
+```
+
+Public-adapter smoke metrics:
+
+| metric | value |
+| --- | ---: |
+| source_dataset | LongMemEval cleaned |
+| source_split | longmemeval_s_cleaned |
+| sampled_public_objects | 5 |
+| sample_sha256 | ab78de9138e5580cda2c196973013c7f7915ec52cdbfa0efb8961af2e83de7d8 |
+| converted_case_count | 5 |
+| converted_cases_sha256 | 2a33530937be285cf7f85d446f621b90f92a9c5eab41b258ee23e6aeeab597ab |
+| source_benchmarks.LongMemEval | 5 |
+| case_origins.public_benchmark_adapter | 5 |
+| public_adapter.case_pass_rate | 1.0 |
+| public_adapter.memory_recall_at_5 | 1.0 |
+| public_adapter.memory_precision_at_5 | 1.0 |
+| public_adapter.answer_reachability | 1.0 |
+| public_adapter.answer_normalized_reachability | 1.0 |
+| public_adapter.answer_token_f1 | 1.0 |
+| public_adapter.privacy_leak_count | 0 |
+| public_adapter.failed_case_count | 0 |
+| public_adapter.claim_boundary | adapted local score only |
+
+Combined public-plus-shadow v1 readiness summary:
+
+| metric | value |
+| --- | ---: |
+| v1_readiness.overall_status | extended_evidence_ready |
+| v1_readiness.required_dimensions | 5 |
+| v1_readiness.required_passed | 5 |
+| public_benchmark_adapter.status | passed |
+| real_archive_shadow_eval.status | passed |
+| privacy.aggregate_only | true |
 
 ## Recommendation
 
