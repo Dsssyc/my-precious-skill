@@ -81,6 +81,23 @@ class V1ReadinessGateTests(unittest.TestCase):
             "failed_case_count": 0,
         }
 
+    def passing_source_stream_report(self) -> dict:
+        return {
+            "report_kind": "source_stream_registry_benchmark",
+            "case_pass_rate": 1.0,
+            "source_stream_update_rate": 1.0,
+            "project_registry_independence_rate": 1.0,
+            "metadata_free_source_record_rate": 1.0,
+            "archive_scope_assignment_rate": 1.0,
+            "source_partition_assignment_rate": 1.0,
+            "source_stream_memory_recall_at_5": 1.0,
+            "source_stream_session_drilldown_rate": 1.0,
+            "source_stream_evidence_reachability_rate": 1.0,
+            "source_stream_source_policy_pass_rate": 1.0,
+            "privacy_leak_count": 0,
+            "failed_case_count": 0,
+        }
+
     def passing_answer_report(self) -> dict:
         return {
             "report_kind": "generated_answer_benchmark",
@@ -106,6 +123,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
 
             result = subprocess.run(
                 [
@@ -117,6 +135,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                 ],
                 check=True,
                 text=True,
@@ -127,25 +147,27 @@ class V1ReadinessGateTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["report_kind"], "v1_layered_memory_readiness_gate")
             self.assertEqual(payload["overall_status"], "core_synthetic_ready")
-            self.assertEqual(payload["claim_boundary"], "core synthetic gates passed; full v1 target remains unproven")
+            self.assertEqual(
+                payload["claim_boundary"],
+                "core synthetic gates passed, including explicit source streams; full v1 target remains unproven",
+            )
             self.assertTrue(payload["privacy"]["aggregate_only"])
             self.assertFalse(payload["privacy"]["private_probe_cases_rendered"])
             self.assertEqual(payload["dimensions"]["layered_recall"]["status"], "passed")
             self.assertEqual(payload["dimensions"]["automatic_induction"]["status"], "passed")
             self.assertEqual(payload["dimensions"]["e2e_induction_to_recall"]["status"], "passed")
+            self.assertEqual(payload["dimensions"]["source_stream_registry"]["status"], "passed")
             self.assertEqual(payload["dimensions"]["public_benchmark_adapter"]["status"], "not_run_optional")
             self.assertEqual(payload["dimensions"]["real_archive_shadow_eval"]["status"], "not_run_optional")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "not_run_optional")
-            self.assertEqual(payload["scorecard"]["required_dimensions"], 3)
-            self.assertEqual(payload["scorecard"]["required_passed"], 3)
+            self.assertEqual(payload["scorecard"]["required_dimensions"], 4)
+            self.assertEqual(payload["scorecard"]["required_passed"], 4)
             self.assertEqual(payload["scorecard"]["optional_passed"], 0)
 
-    def test_layered_report_requires_raw_preview_authorization_gate(self):
+    def test_missing_core_source_stream_report_fails_readiness(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            layered_payload = self.passing_layered_report()
-            layered_payload["raw_preview_authorization_pass_rate"] = 0.0
-            layered = self.write_json(root, "layered.json", layered_payload)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
 
@@ -159,6 +181,41 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["source_stream_registry"]["status"], "missing_required")
+            self.assertIn("source_stream_registry", result.stderr)
+
+    def test_layered_report_requires_raw_preview_authorization_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered_payload = self.passing_layered_report()
+            layered_payload["raw_preview_authorization_pass_rate"] = 0.0
+            layered = self.write_json(root, "layered.json", layered_payload)
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                 ],
                 check=False,
                 text=True,
@@ -181,6 +238,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
 
             result = subprocess.run(
                 [
@@ -192,6 +250,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                     "--require-public",
                 ],
                 check=False,
@@ -212,6 +272,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
             generic_public = self.write_json(root, "generic-public.json", self.passing_layered_report())
 
             result = subprocess.run(
@@ -224,6 +285,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                     "--public-report",
                     str(generic_public),
                     "--require-public",
@@ -247,6 +310,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
             public = self.write_json(root, "public.json", self.passing_public_report())
 
             result = subprocess.run(
@@ -259,6 +323,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                     "--public-report",
                     str(public),
                     "--require-public",
@@ -279,6 +345,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
 
             result = subprocess.run(
                 [
@@ -290,6 +357,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                     "--require-answer",
                 ],
                 check=False,
@@ -310,6 +379,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
             answer = self.write_json(root, "answer.json", self.passing_answer_report())
 
             result = subprocess.run(
@@ -322,6 +392,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                     "--answer-report",
                     str(answer),
                     "--require-answer",
@@ -335,8 +407,8 @@ class V1ReadinessGateTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
-            self.assertEqual(payload["scorecard"]["required_dimensions"], 4)
-            self.assertEqual(payload["scorecard"]["required_passed"], 4)
+            self.assertEqual(payload["scorecard"]["required_dimensions"], 5)
+            self.assertEqual(payload["scorecard"]["required_passed"], 5)
             self.assertFalse(payload["privacy"]["generated_answers_rendered"])
             self.assertFalse(payload["privacy"]["reference_answers_rendered"])
 
@@ -346,6 +418,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             layered = self.write_json(root, "layered.json", self.passing_layered_report())
             updater = self.write_json(root, "updater.json", self.passing_updater_report())
             e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
             answer_payload = self.passing_answer_report()
             answer_payload["case_pass_rate"] = 0.5
             answer = self.write_json(root, "answer.json", answer_payload)
@@ -360,6 +433,8 @@ class V1ReadinessGateTests(unittest.TestCase):
                     str(updater),
                     "--e2e-report",
                     str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
                     "--answer-report",
                     str(answer),
                     "--require-answer",
@@ -384,6 +459,7 @@ class V1ReadinessGateTests(unittest.TestCase):
                 "layered": self.passing_layered_report(),
                 "updater": self.passing_updater_report(),
                 "e2e": self.passing_e2e_report(),
+                "source_stream": self.passing_source_stream_report(),
                 "answer": self.passing_answer_report(),
             }
             stdout = io.StringIO()
@@ -404,7 +480,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
-            self.assertEqual(payload["scorecard"]["required_dimensions"], 4)
+            self.assertEqual(payload["scorecard"]["required_dimensions"], 5)
 
 
 if __name__ == "__main__":

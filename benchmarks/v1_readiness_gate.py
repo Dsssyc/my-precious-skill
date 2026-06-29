@@ -73,6 +73,21 @@ E2E_GATES = (
     MetricGate("failed_case_count", "max", 0.0),
 )
 
+SOURCE_STREAM_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("source_stream_update_rate", "min", 1.0),
+    MetricGate("project_registry_independence_rate", "min", 1.0),
+    MetricGate("metadata_free_source_record_rate", "min", 1.0),
+    MetricGate("archive_scope_assignment_rate", "min", 1.0),
+    MetricGate("source_partition_assignment_rate", "min", 1.0),
+    MetricGate("source_stream_memory_recall_at_5", "min", 1.0),
+    MetricGate("source_stream_session_drilldown_rate", "min", 1.0),
+    MetricGate("source_stream_evidence_reachability_rate", "min", 1.0),
+    MetricGate("source_stream_source_policy_pass_rate", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+)
+
 SHADOW_GATES = (
     MetricGate("metrics.memory_recall_at_5", "min", 1.0),
     MetricGate("metrics.privacy_boundary_pass_rate", "min", 1.0),
@@ -398,7 +413,22 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
         ],
         cwd=REPO_ROOT,
     )
-    reports = {"layered": layered, "updater": updater, "e2e": e2e}
+    source_stream = run_command(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "source_stream_registry_benchmark.py"),
+            "--cases",
+            str(SCRIPT_DIR / "cases/source_stream_registry_synthetic.jsonl"),
+            "--work-dir",
+            str(work_dir / "source-stream"),
+            "--fail-under-file",
+            str(SCRIPT_DIR / "quality-gates/source_stream_registry_synthetic.json"),
+            "--fail-over-file",
+            str(SCRIPT_DIR / "quality-gates/source_stream_registry_synthetic_max.json"),
+        ],
+        cwd=REPO_ROOT,
+    )
+    reports = {"layered": layered, "updater": updater, "e2e": e2e, "source_stream": source_stream}
     if include_answer:
         reports["answer"] = run_command(
             [
@@ -437,6 +467,7 @@ def build_report(
     layered: dict[str, Any] | None,
     updater: dict[str, Any] | None,
     e2e: dict[str, Any] | None,
+    source_stream: dict[str, Any] | None,
     public: dict[str, Any] | None,
     shadow: dict[str, Any] | None,
     answer: dict[str, Any] | None,
@@ -466,6 +497,13 @@ def build_report(
             evidence_level="packaged_synthetic",
             required=True,
         ),
+        "source_stream_registry": assess_report(
+            source_stream,
+            expected_kind="source_stream_registry_benchmark",
+            gates=SOURCE_STREAM_GATES,
+            evidence_level="packaged_synthetic",
+            required=True,
+        ),
         "public_benchmark_adapter": assess_public_report(public, required=require_public),
         "real_archive_shadow_eval": assess_shadow_report(shadow, required=require_shadow),
         "generated_answer_eval": assess_answer_report(answer, required=require_answer),
@@ -486,7 +524,7 @@ def build_report(
         "report_version": 1,
         "overall_status": overall_status,
         "claim_boundary": (
-            "core synthetic gates passed; full v1 target remains unproven"
+            "core synthetic gates passed, including explicit source streams; full v1 target remains unproven"
             if overall_status == "core_synthetic_ready"
             else "extended evidence gates passed; generated-answer and long-horizon governance remain bounded claims"
             if overall_status == "extended_evidence_ready"
@@ -517,6 +555,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--layered-report", help="Existing layered recall aggregate JSON report")
     parser.add_argument("--updater-report", help="Existing updater induction aggregate JSON report")
     parser.add_argument("--e2e-report", help="Existing e2e induction-to-recall aggregate JSON report")
+    parser.add_argument("--source-stream-report", help="Existing source stream registry aggregate JSON report")
     parser.add_argument("--public-report", help="Optional adapted public benchmark layered recall aggregate JSON report")
     parser.add_argument("--shadow-report", help="Optional private real-archive shadow aggregate JSON report")
     parser.add_argument("--answer-report", help="Optional generated-answer aggregate JSON report")
@@ -544,11 +583,13 @@ def main(argv: list[str] | None = None) -> int:
             layered = core["layered"]
             updater = core["updater"]
             e2e = core["e2e"]
+            source_stream = core["source_stream"]
             answer = core.get("answer")
         else:
             layered = read_json(Path(args.layered_report).expanduser()) if args.layered_report else None
             updater = read_json(Path(args.updater_report).expanduser()) if args.updater_report else None
             e2e = read_json(Path(args.e2e_report).expanduser()) if args.e2e_report else None
+            source_stream = read_json(Path(args.source_stream_report).expanduser()) if args.source_stream_report else None
             answer = None
         public = read_json(Path(args.public_report).expanduser()) if args.public_report else None
         shadow = read_json(Path(args.shadow_report).expanduser()) if args.shadow_report else None
@@ -558,6 +599,7 @@ def main(argv: list[str] | None = None) -> int:
             layered=layered,
             updater=updater,
             e2e=e2e,
+            source_stream=source_stream,
             public=public,
             shadow=shadow,
             answer=answer,

@@ -12,7 +12,8 @@ repeatable local quality gates for retrieval, layer-path drilldown,
 source-reference reachability, broad lexical noise resistance, stale
 suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
 updater-driven automatic induction on synthetic archives, and end-to-end
-induction-to-recall behavior on synthetic source records. It is not a direct
+induction-to-recall behavior on synthetic source records, plus explicit
+non-project source stream registry updates on synthetic archives. It is not a direct
 leaderboard score against public long-memory systems such as MemPalace,
 LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 
@@ -21,17 +22,19 @@ LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
 `benchmarks/v1_readiness_gate.py` is the convergence entrypoint for this
 evaluation. It aggregates existing JSON reports without rendering queries,
 memory text, source paths, raw refs, private probe cases, or forbidden-pattern
-text. The gate requires three packaged synthetic dimensions:
+text. The gate requires four packaged synthetic dimensions:
 
 - layered recall and drilldown;
-- updater-driven automatic induction; and
-- end-to-end induction-to-recall.
+- updater-driven automatic induction;
+- end-to-end induction-to-recall; and
+- explicit non-project source stream registry update plus layered recall.
 
 When those required dimensions pass, the gate reports
 `overall_status: core_synthetic_ready`. That status is deliberately bounded: it
-means the core synthetic evidence is green, not that the full non-project-boundary
-v1 target, public leaderboard parity, generated-answer accuracy, or long-horizon
-multi-principal governance has been proven.
+means the core synthetic evidence is green, not that the full
+non-project-boundary v1 target, automatic source discovery, public leaderboard
+parity, generated-answer accuracy, or long-horizon multi-principal governance
+has been proven.
 
 Optional report inputs extend the evidence surface without changing the privacy
 boundary:
@@ -52,14 +55,12 @@ boundary:
   synthetic dogfood evidence for the grading path, not proof of live model
   answer quality.
 
-The current strongest local gate combines a private real-archive aggregate
-shadow report with the 100-case converted LongMemEval public-adapter report.
-That run reports `overall_status: extended_evidence_ready` with
-`--require-public` and `--require-shadow`, meaning all five required dimensions
-passed: packaged layered recall, packaged automatic induction, packaged
-end-to-end induction-to-recall, adapted public benchmark evidence, and private
-real-archive shadow evidence. This still does not prove full public benchmark
-parity, generated-answer correctness, or complete long-horizon governance.
+The strongest recorded local gate below combines a private real-archive
+aggregate shadow report with the 100-case converted LongMemEval public-adapter
+report. Under the current gate, an equivalent rerun must also pass the packaged
+`source_stream_registry` core dimension. That still does not prove full public
+benchmark parity, generated-answer correctness, automatic ontology discovery,
+or complete long-horizon governance.
 
 The packaged generated-answer gate can be included in local convergence runs:
 
@@ -74,6 +75,18 @@ cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
 `missing_answer_count: 0`, `duplicate_answer_count: 0`, and
 `unknown_answer_count: 0`.
 
+The current packaged source-stream registry fixture has 1 case and 1
+metadata-free source record. It reports `source_stream_update_rate: 1.0`,
+`project_registry_independence_rate: 1.0`,
+`metadata_free_source_record_rate: 1.0`,
+`archive_scope_assignment_rate: 1.0`,
+`source_partition_assignment_rate: 1.0`,
+`source_stream_memory_recall_at_5: 1.0`,
+`source_stream_session_drilldown_rate: 1.0`,
+`source_stream_evidence_reachability_rate: 1.0`,
+`source_stream_source_policy_pass_rate: 1.0`,
+`privacy_leak_count: 0`, and `failed_case_count: 0`.
+
 Run the packaged convergence gate locally with:
 
 ```bash
@@ -86,7 +99,8 @@ Or aggregate existing reports:
 python3 benchmarks/v1_readiness_gate.py \
   --layered-report /tmp/layered.json \
   --updater-report /tmp/updater.json \
-  --e2e-report /tmp/e2e.json
+  --e2e-report /tmp/e2e.json \
+  --source-stream-report /tmp/source-stream.json
 ```
 
 ## Current Baseline
@@ -1556,11 +1570,12 @@ source-depth path now also requires an explicit raw-preview authorization flag
 before redacted raw snippets render. The reusable benchmark suite now also has
 an offline generated-answer grading gate for provided answer records plus a
 packaged synthetic generated-answer fixture that is wired into
-`--run-packaged --require-answer`. The current public/shadow readiness runs did
-not include generated answer records and therefore still cannot claim real
-generated-answer behavior. The next valuable work is broader public-sample
-scaling, generated-answer real/dogfood adapter evidence, and broader
-consolidation/decay evidence.
+`--run-packaged --require-answer`. The explicit source-stream registry path now
+has a packaged synthetic benchmark and is required by the core v1 readiness
+gate. The current public/shadow readiness runs did not include generated answer
+records and therefore still cannot claim real generated-answer behavior. The
+next valuable work is broader public-sample scaling, generated-answer
+real/dogfood adapter evidence, and broader consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1579,8 +1594,10 @@ consolidation/decay evidence.
    The archive now has opt-in `archive_scope` and `source_partition` keys, plus
    an explicit `config/source_streams.jsonl` runner path, so both the memory
    domain and high-water/source-hash stream can be independent from
-   `project_path`. Automatic source discovery and ontology mapping are still
-   not solved; source-stream rows are manual runtime policy.
+   `project_path`. A packaged synthetic source-stream registry benchmark now
+   gates this path through update, layered recall, evidence reachability, and
+   source-policy checks. Automatic source discovery and ontology mapping are
+   still not solved; source-stream rows are manual runtime policy.
 
 4. Deepen source-depth governance.
    Keep raw source anchors private by default. The current CLI now requires a

@@ -340,7 +340,8 @@ pattern。
 python benchmarks/v1_readiness_gate.py \
   --layered-report /tmp/layered.json \
   --updater-report /tmp/updater.json \
-  --e2e-report /tmp/e2e.json
+  --e2e-report /tmp/e2e.json \
+  --source-stream-report /tmp/source-stream.json
 ```
 
 也可以直接运行内置 packaged synthetic gates：
@@ -350,16 +351,18 @@ python benchmarks/v1_readiness_gate.py --run-packaged
 ```
 
 readiness gate 只输出 aggregate JSON。它要求 packaged layered recall、
-updater induction 和 e2e induction-to-recall 三个核心维度通过后，才会报告
-`core_synthetic_ready`。可选的 `--public-report` 和 `--shadow-report` 可以接入
+updater induction、e2e induction-to-recall 和 explicit source stream registry
+四个核心维度通过后，才会报告 `core_synthetic_ready`。可选的
+`--public-report` 和 `--shadow-report` 可以接入
 仓库外 adapted public benchmark 报告和私有真实 archive 的 aggregate shadow eval
 报告；如果希望这些可选维度缺失时也让 gate 失败，使用 `--require-public` 或
 `--require-shadow`。public report 必须是由公开 benchmark 转换 case 生成的
 layered recall 报告，并包含 aggregate `source_benchmarks` 计数和
 `case_origins.public_benchmark_adapter`；converter-only 输出或普通合成 layered
 report 不能作为 public evidence。`core_synthetic_ready` 是有边界的结论：它只说明
-核心合成 gate 通过，不代表已经证明完整 v1 readiness、公开 leaderboard 等价、
-生成答案准确率或长期多主体治理。
+核心合成 gate 通过，包括显式非项目 source stream 路径；不代表已经证明完整
+v1 readiness、自动 ontology discovery、公开 leaderboard 等价、生成答案准确率或
+长期多主体治理。
 
 不用 agent，也可以直接运行搜索脚本：
 
@@ -653,6 +656,28 @@ source-record forced memory、supersede/contradict/deprecate lifecycle
 suppression、redacted source record，以及默认拒绝 likely-secret source
 record，并且不渲染私有 case detail。
 
+source stream registry synthetic benchmark 会检查显式非项目 runner 路径：
+它创建临时 archive，在空 `config/projects.jsonl` 旁写入
+`config/source_streams.jsonl`，通过 `tools/run_memory_updates.py` 归档一个不带
+project metadata 的合成 source stream，然后用真实 layered recall scorer 检查
+生成的 memory、evidence 和 source-policy：
+
+```bash
+python benchmarks/source_stream_registry_benchmark.py \
+  --cases benchmarks/cases/source_stream_registry_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/source_stream_registry_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/source_stream_registry_synthetic_max.json
+```
+
+它 gate `source_stream_update_rate`、
+`project_registry_independence_rate`、`metadata_free_source_record_rate`、
+`archive_scope_assignment_rate`、`source_partition_assignment_rate`、
+`source_stream_memory_recall_at_5`、`source_stream_session_drilldown_rate`、
+`source_stream_evidence_reachability_rate`、
+`source_stream_source_policy_pass_rate`、`case_pass_rate` 和 privacy counts。
+这证明显式 source-stream 路径在合成 archive 中可用；不代表自动 source
+discovery 或 ontology mapping 已解决。
+
 渲染默认全域 scheduler：
 
 ```bash
@@ -763,6 +788,9 @@ skills/using-my-precious/references/archive-format.md
 - end-to-end synthetic induction-to-recall benchmark，可运行 setup、updater、
   生成后的 layered recall cases，以及复制出的 search script，并只输出
   aggregate quality gate 指标。
+- source stream registry synthetic benchmark，可证明显式
+  `config/source_streams.jsonl` stream 能在没有 project registry row 的情况下
+  更新，并通过 layered recall、evidence 和 source-policy gate。
 - updater-driven natural-induction precision gates，覆盖 adversarial synthetic
   false-promotion cases 和 review routing，并包含 low-confidence、scope-change
   和 conflict candidates 的 induction-review routing rate。
@@ -838,6 +866,7 @@ python3 -m py_compile \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \
   benchmarks/convert_public_memory_benchmark.py \
+  benchmarks/source_stream_registry_benchmark.py \
   benchmarks/v1_readiness_gate.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \

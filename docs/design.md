@@ -96,6 +96,10 @@ and JSONL indexes.
   benchmark that drives setup, updater, generated memory indexes, layered
   recall scoring, and the copied search script without rendering private case
   details.
+- `benchmarks/source_stream_registry_benchmark.py`: synthetic aggregate-only
+  benchmark that drives setup, `config/source_streams.jsonl`, the real global
+  runner, generated memory indexes, layered recall scoring, and source-policy
+  checks without project registry rows or rendered private case details.
 - `benchmarks/generated_answer_benchmark.py`: aggregate-only offline grader for
   already generated answer records. It scores exact, normalized, token-overlap,
   abstention, missing/duplicate/unknown-answer, and privacy metrics without
@@ -104,11 +108,11 @@ and JSONL indexes.
   answer cases and answer records used when `v1_readiness_gate.py` runs with
   `--run-packaged --require-answer` and no external `--answer-report`.
 - `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
-  combines required packaged synthetic reports with optional adapted public
-  benchmark, private shadow-eval, and generated-answer aggregate reports. It
-  reports bounded readiness status without rendering private probe cases,
-  queries, memory text, source paths, raw refs, generated answers, or reference
-  answers.
+  combines required packaged synthetic reports, including the explicit source
+  stream registry benchmark, with optional adapted public benchmark, private
+  shadow-eval, and generated-answer aggregate reports. It reports bounded
+  readiness status without rendering private probe cases, queries, memory text,
+  source paths, raw refs, generated answers, or reference answers.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -223,6 +227,10 @@ If none are set, tools may try `~/repos/agent-memory`.
 - The global runner can update explicit non-project source streams from
   `config/source_streams.jsonl` using stable archive scope and source partition
   keys.
+- The source stream registry benchmark proves that an explicit non-project
+  stream can update without project registry rows and pass memory recall,
+  session drilldown, evidence reachability, source-policy, and privacy gates on
+  a synthetic archive.
 - The update script writes `source-map.json`, daily summaries, and JSONL indexes.
 - The template can render global-runner and single-project scheduler
   configuration without enabling recurring jobs.

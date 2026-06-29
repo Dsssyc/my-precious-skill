@@ -395,7 +395,8 @@ Run the v1 readiness convergence gate from existing aggregate reports:
 python benchmarks/v1_readiness_gate.py \
   --layered-report /tmp/layered.json \
   --updater-report /tmp/updater.json \
-  --e2e-report /tmp/e2e.json
+  --e2e-report /tmp/e2e.json \
+  --source-stream-report /tmp/source-stream.json
 ```
 
 Or run the packaged synthetic gates directly:
@@ -405,8 +406,9 @@ python benchmarks/v1_readiness_gate.py --run-packaged
 ```
 
 The readiness gate emits aggregate-only JSON. It requires the packaged layered
-recall, updater induction, and e2e induction-to-recall dimensions to pass before
-reporting `core_synthetic_ready`. Optional `--public-report` and
+recall, updater induction, e2e induction-to-recall, and explicit source stream
+registry dimensions to pass before reporting `core_synthetic_ready`.
+Optional `--public-report` and
 `--shadow-report` inputs can add adapted public-benchmark and private
 real-archive aggregate evidence. Optional `--answer-report` can add offline
 generated-answer grading evidence. Add `--require-public`, `--require-shadow`,
@@ -419,9 +421,10 @@ public benchmark cases, including aggregate `source_benchmarks` counts and
 `case_origins.public_benchmark_adapter`; converter-only output or ordinary
 synthetic layered reports are not accepted as public evidence. A
 `core_synthetic_ready` result is deliberately bounded: it means the core
-synthetic gates passed, not that the repository has proven full v1 readiness,
-public leaderboard parity, generated-answer accuracy without an answer report,
-or long-horizon multi-principal governance.
+synthetic gates passed, including the explicit non-project source stream path;
+it does not prove full v1 readiness, automatic ontology discovery, public
+leaderboard parity, generated-answer accuracy without an answer report, or
+long-horizon multi-principal governance.
 
 Score generated answers offline without rendering queries, generated answers,
 or reference answers:
@@ -843,6 +846,29 @@ supersede/contradict/deprecate lifecycle suppression, redacted source records,
 and default refusal of likely-secret source records without rendering private
 case details.
 
+The source stream registry synthetic benchmark exercises the explicit
+non-project runner path. It creates a temporary archive, writes
+`config/source_streams.jsonl` with an empty project registry, archives a
+metadata-free synthetic source stream through `tools/run_memory_updates.py`,
+then scores the induced memory through the real layered recall scorer:
+
+```bash
+python benchmarks/source_stream_registry_benchmark.py \
+  --cases benchmarks/cases/source_stream_registry_synthetic.jsonl \
+  --fail-under-file benchmarks/quality-gates/source_stream_registry_synthetic.json \
+  --fail-over-file benchmarks/quality-gates/source_stream_registry_synthetic_max.json
+```
+
+It gates `source_stream_update_rate`,
+`project_registry_independence_rate`, `metadata_free_source_record_rate`,
+`archive_scope_assignment_rate`, `source_partition_assignment_rate`,
+`source_stream_memory_recall_at_5`,
+`source_stream_session_drilldown_rate`,
+`source_stream_evidence_reachability_rate`,
+`source_stream_source_policy_pass_rate`, `case_pass_rate`, and privacy counts.
+This proves the explicit source-stream path in a synthetic archive; it does not
+solve automatic source discovery or ontology mapping.
+
 Render a default global scheduler:
 
 ```bash
@@ -955,6 +981,9 @@ skills/using-my-precious/references/archive-format.md
 - End-to-end synthetic induction-to-recall benchmark that runs setup, updater,
   generated layered recall cases, and the copied search script with
   aggregate-only quality gates.
+- Source stream registry synthetic benchmark that proves an explicit
+  `config/source_streams.jsonl` stream can update without project registry
+  rows and still pass layered recall, evidence, and source-policy gates.
 - Updater-driven natural-induction precision gates for adversarial synthetic
   false-promotion cases and review routing, including induction-review routing
   rates for low-confidence, scope-change, and conflict candidates.
@@ -1034,6 +1063,7 @@ python3 -m py_compile \
   benchmarks/layered_recall_benchmark.py \
   benchmarks/build_synthetic_recall_archive.py \
   benchmarks/convert_public_memory_benchmark.py \
+  benchmarks/source_stream_registry_benchmark.py \
   benchmarks/v1_readiness_gate.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
