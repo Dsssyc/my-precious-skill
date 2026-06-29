@@ -395,16 +395,38 @@ The readiness gate emits aggregate-only JSON. It requires the packaged layered
 recall, updater induction, and e2e induction-to-recall dimensions to pass before
 reporting `core_synthetic_ready`. Optional `--public-report` and
 `--shadow-report` inputs can add adapted public-benchmark and private
-real-archive aggregate evidence; add `--require-public` or `--require-shadow`
-when those optional dimensions should fail the gate if absent. Public reports
-must be layered recall reports produced from converted public benchmark cases,
-including aggregate `source_benchmarks` counts and
+real-archive aggregate evidence. Optional `--answer-report` can add offline
+generated-answer grading evidence. Add `--require-public`, `--require-shadow`,
+or `--require-answer` when those optional dimensions should fail the gate if
+absent. Public reports must be layered recall reports produced from converted
+public benchmark cases, including aggregate `source_benchmarks` counts and
 `case_origins.public_benchmark_adapter`; converter-only output or ordinary
 synthetic layered reports are not accepted as public evidence. A
 `core_synthetic_ready` result is deliberately bounded: it means the core
 synthetic gates passed, not that the repository has proven full v1 readiness,
-public leaderboard parity, generated-answer accuracy, or long-horizon
-multi-principal governance.
+public leaderboard parity, generated-answer accuracy without an answer report,
+or long-horizon multi-principal governance.
+
+Score generated answers offline without rendering queries, generated answers,
+or reference answers:
+
+```bash
+python benchmarks/generated_answer_benchmark.py \
+  --cases /tmp/my-precious-cases.jsonl \
+  --answers /tmp/generated-answers.jsonl \
+  --details-jsonl /tmp/generated-answer-details.jsonl \
+  --fail-under case_pass_rate=1.0 \
+  --fail-under answer_normalized_match_rate=1.0 \
+  --fail-under abstention_accuracy=1.0 \
+  --fail-over privacy_leak_count=0
+```
+
+The answer benchmark reports aggregate `case_pass_rate`,
+`answer_exact_match_rate`, `answer_normalized_match_rate`, `answer_token_f1`,
+`abstention_accuracy`, missing/duplicate/unknown answer counts, and privacy
+counts. Its claim boundary is narrow: it grades provided answer records against
+reference answers; it does not call a model, generate answers, or claim semantic
+equivalence beyond exact, normalized, and token-overlap checks.
 
 Search without invoking an agent:
 
@@ -546,7 +568,9 @@ context is reachable while the requested fact is absent. `answer_reachability`
 checks exact reference-answer text reachability in expected-memory search output
 or in verified local drilldown files; `answer_normalized_reachability` ignores
 case and punctuation; `answer_token_f1` reports best-window token overlap.
-These are retrieval-side checks, not generated-answer semantic grading.
+These are retrieval-side checks, not generated-answer semantic grading. Use
+`benchmarks/generated_answer_benchmark.py` when the input is a JSONL file of
+already generated answers that need aggregate-only grading.
 `evidence_text_reachability`
 checks that required evidence files contain exact `reference_evidence` snippets,
 so source-depth claims are backed by reachable evidence text rather than only

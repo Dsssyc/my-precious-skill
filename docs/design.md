@@ -94,11 +94,16 @@ and JSONL indexes.
   benchmark that drives setup, updater, generated memory indexes, layered
   recall scoring, and the copied search script without rendering private case
   details.
+- `benchmarks/generated_answer_benchmark.py`: aggregate-only offline grader for
+  already generated answer records. It scores exact, normalized, token-overlap,
+  abstention, missing/duplicate/unknown-answer, and privacy metrics without
+  rendering queries, generated answers, or reference answers.
 - `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
   combines required packaged synthetic reports with optional adapted public
-  benchmark and private shadow-eval aggregate reports. It reports bounded
-  readiness status without rendering private probe cases, queries, memory text,
-  source paths, or raw refs.
+  benchmark, private shadow-eval, and generated-answer aggregate reports. It
+  reports bounded readiness status without rendering private probe cases,
+  queries, memory text, source paths, raw refs, generated answers, or reference
+  answers.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -285,6 +290,9 @@ The rank distribution fields report how many positive cases were ranked at all,
 how many were missing, mean and median rank for ranked hits, and a compact
 histogram for ranks 1 through 5, ranks beyond 5, and misses.
 These are retrieval-side checks, not generated-answer semantic grading. The
+separate generated-answer benchmark consumes answer records produced elsewhere
+and reports offline aggregate grading metrics; it does not call a model,
+produce answers, or establish full semantic-equivalence scoring. The
 aggregate payload and each category payload also include
 denominator counts such as `positive_cases`, `answer_cases`, and `stale_cases`
 so zero-denominator metrics can be distinguished from measured failures.

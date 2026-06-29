@@ -80,6 +80,17 @@ SHADOW_GATES = (
     MetricGate("metrics.provenance_coverage.score", "min", 1.0),
     MetricGate("metrics.lifecycle_integrity.score", "min", 1.0),
 )
+
+GENERATED_ANSWER_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("answer_normalized_match_rate", "min", 1.0),
+    MetricGate("abstention_accuracy", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+    MetricGate("missing_answer_count", "max", 0.0),
+    MetricGate("duplicate_answer_count", "max", 0.0),
+    MetricGate("unknown_answer_count", "max", 0.0),
+)
 PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
 
 
@@ -264,6 +275,42 @@ def assess_shadow_report(payload: dict[str, Any] | None, *, required: bool) -> d
     return result
 
 
+def assess_answer_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
+    result = assess_report(
+        payload,
+        expected_kind="generated_answer_benchmark",
+        gates=GENERATED_ANSWER_GATES,
+        evidence_level="offline_generated_answer_grading",
+        required=required,
+    )
+    if payload is not None:
+        privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+        for metric in ("aggregate_only",):
+            if privacy.get(metric) is not True:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": True,
+                        "actual": privacy.get(metric),
+                        "reason": "answer_report_not_aggregate_only",
+                    }
+                )
+                result["status"] = "failed"
+        for metric in ("queries_rendered", "generated_answers_rendered", "reference_answers_rendered"):
+            if privacy.get(metric) is not False:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": False,
+                        "actual": privacy.get(metric),
+                        "reason": "answer_report_rendered_sensitive_text",
+                    }
+                )
+                result["status"] = "failed"
+    result["claim_boundary"] = "offline generated-answer grading only; no model-generation claim"
+    return result
+
+
 def run_command(command: list[str], *, cwd: Path) -> dict[str, Any]:
     result = subprocess.run(
         command,
@@ -361,8 +408,10 @@ def build_report(
     e2e: dict[str, Any] | None,
     public: dict[str, Any] | None,
     shadow: dict[str, Any] | None,
+    answer: dict[str, Any] | None,
     require_public: bool,
     require_shadow: bool,
+    require_answer: bool,
 ) -> dict[str, Any]:
     dimensions = {
         "layered_recall": assess_report(
@@ -388,6 +437,7 @@ def build_report(
         ),
         "public_benchmark_adapter": assess_public_report(public, required=require_public),
         "real_archive_shadow_eval": assess_shadow_report(shadow, required=require_shadow),
+        "generated_answer_eval": assess_answer_report(answer, required=require_answer),
     }
     required = [dimension for dimension in dimensions.values() if dimension["required"]]
     optional = [dimension for dimension in dimensions.values() if not dimension["required"]]
@@ -396,7 +446,7 @@ def build_report(
     required_ready = required_passed == len(required)
     if not required_ready:
         overall_status = "not_ready"
-    elif require_public or require_shadow:
+    elif require_public or require_shadow or require_answer:
         overall_status = "extended_evidence_ready"
     else:
         overall_status = "core_synthetic_ready"
@@ -418,6 +468,8 @@ def build_report(
             "memory_text_rendered": False,
             "source_paths_rendered": False,
             "raw_refs_rendered": False,
+            "generated_answers_rendered": False,
+            "reference_answers_rendered": False,
         },
         "scorecard": {
             "required_dimensions": len(required),
@@ -436,8 +488,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--e2e-report", help="Existing e2e induction-to-recall aggregate JSON report")
     parser.add_argument("--public-report", help="Optional adapted public benchmark layered recall aggregate JSON report")
     parser.add_argument("--shadow-report", help="Optional private real-archive shadow aggregate JSON report")
+    parser.add_argument("--answer-report", help="Optional generated-answer aggregate JSON report")
     parser.add_argument("--require-public", action="store_true", help="Fail when --public-report is absent or failed")
     parser.add_argument("--require-shadow", action="store_true", help="Fail when --shadow-report is absent or failed")
+    parser.add_argument("--require-answer", action="store_true", help="Fail when --answer-report is absent or failed")
     parser.add_argument("--run-packaged", action="store_true", help="Run packaged synthetic gates instead of reading core reports")
     parser.add_argument("--work-dir", help="Scratch directory for --run-packaged")
     return parser.parse_args(argv)
@@ -465,14 +519,17 @@ def main(argv: list[str] | None = None) -> int:
             e2e = read_json(Path(args.e2e_report).expanduser()) if args.e2e_report else None
         public = read_json(Path(args.public_report).expanduser()) if args.public_report else None
         shadow = read_json(Path(args.shadow_report).expanduser()) if args.shadow_report else None
+        answer = read_json(Path(args.answer_report).expanduser()) if args.answer_report else None
         report = build_report(
             layered=layered,
             updater=updater,
             e2e=e2e,
             public=public,
             shadow=shadow,
+            answer=answer,
             require_public=args.require_public,
             require_shadow=args.require_shadow,
+            require_answer=args.require_answer,
         )
         print(json.dumps(report, sort_keys=True))
         if report["overall_status"] == "not_ready":

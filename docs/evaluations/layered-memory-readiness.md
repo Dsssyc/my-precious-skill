@@ -1228,10 +1228,11 @@ Extended readiness summary:
 | v1_readiness.overall_status | extended_evidence_ready |
 | v1_readiness.required_dimensions | 4 |
 | v1_readiness.required_passed | 4 |
-| v1_readiness.optional_dimensions | 1 |
+| v1_readiness.optional_dimensions | 2 |
 | v1_readiness.optional_passed | 0 |
 | public_benchmark_adapter.status | not_run_optional |
 | real_archive_shadow_eval.status | passed |
+| generated_answer_eval.status | not_run_optional |
 | privacy.aggregate_only | true |
 
 Private real-archive shadow metrics:
@@ -1347,8 +1348,11 @@ Combined public-plus-shadow v1 readiness summary:
 | v1_readiness.overall_status | extended_evidence_ready |
 | v1_readiness.required_dimensions | 5 |
 | v1_readiness.required_passed | 5 |
+| v1_readiness.optional_dimensions | 1 |
+| v1_readiness.optional_passed | 0 |
 | public_benchmark_adapter.status | passed |
 | real_archive_shadow_eval.status | passed |
+| generated_answer_eval.status | not_run_optional |
 | layered_recall.raw_preview_authorization_pass_rate | 1.0 |
 | privacy.aggregate_only | true |
 
@@ -1463,7 +1467,10 @@ Strict 100-case probe metrics:
 | v1_readiness.overall_status | extended_evidence_ready |
 | v1_readiness.required_dimensions | 4 |
 | v1_readiness.required_passed | 4 |
+| v1_readiness.optional_dimensions | 2 |
+| v1_readiness.optional_passed | 0 |
 | v1_readiness.public_benchmark_adapter.status | passed |
+| generated_answer_eval.status | not_run_optional |
 | public_adapter.claim_boundary | adapted local score only |
 
 Current combined public-plus-shadow v1 readiness summary:
@@ -1473,10 +1480,11 @@ Current combined public-plus-shadow v1 readiness summary:
 | v1_readiness.overall_status | extended_evidence_ready |
 | v1_readiness.required_dimensions | 5 |
 | v1_readiness.required_passed | 5 |
-| v1_readiness.optional_dimensions | 0 |
+| v1_readiness.optional_dimensions | 1 |
 | v1_readiness.optional_passed | 0 |
 | public_benchmark_adapter.status | passed |
 | real_archive_shadow_eval.status | passed |
+| generated_answer_eval.status | not_run_optional |
 | privacy.aggregate_only | true |
 | privacy.memory_text_rendered | false |
 | privacy.private_probe_cases_rendered | false |
@@ -1525,9 +1533,12 @@ clipped search titles. The 100-case LongMemEval cleaned probe now passes strict
 local public-adapter readiness with perfect positive-case retrieval, source and
 answer reachability, privacy, and answer-level public abstention metrics. The
 source-depth path now also requires an explicit raw-preview authorization flag
-before redacted raw snippets render. The next valuable work is broader
-public-sample scaling, generated-answer grading, and broader
-consolidation/decay evidence.
+before redacted raw snippets render. The reusable benchmark suite now also has
+an offline generated-answer grading gate for provided answer records, but the
+current public/shadow readiness runs did not include generated answer records
+and therefore still cannot claim real generated-answer behavior. The next
+valuable work is broader public-sample scaling, generated-answer dogfood
+adapter evidence, and broader consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1561,9 +1572,10 @@ consolidation/decay evidence.
    The converter can now run bounded larger-sample probes against downloaded
    public records outside the repository. The 100-case LongMemEval cleaned
    local probe passes memory/source/answer reachability, privacy, and
-   answer-level abstention gates at 1.0. The next step is larger bounded samples
-   and, separately, generated-answer grading if the project wants claims closer
-   to public benchmark protocol parity.
+   answer-level abstention gates at 1.0. The reusable suite now has offline
+   generated-answer grading for provided answers; the next step is larger
+   bounded samples and a dogfood adapter that can produce answer records for
+   that gate without committing private answer text.
 
 6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,
