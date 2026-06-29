@@ -390,8 +390,39 @@ def assess_answer_report(payload: dict[str, Any] | None, *, required: bool) -> d
                     }
                 )
                 result["status"] = "failed"
+        source_benchmarks = payload.get("source_benchmarks")
+        if not has_positive_count(source_benchmarks):
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "source_benchmarks",
+                    "expected": "one_or_more_source_benchmark_counts",
+                    "reason": "missing_generated_answer_source_counts",
+                }
+            )
+            result["status"] = "failed"
+        case_origins = payload.get("case_origins")
+        if not has_positive_count(case_origins):
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "case_origins",
+                    "expected": "one_or_more_case_origin_counts",
+                    "reason": "missing_generated_answer_case_origin_counts",
+                }
+            )
+            result["status"] = "failed"
     result["claim_boundary"] = "offline generated-answer grading only; no model-generation claim"
     return result
+
+
+def has_positive_count(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for count in value.values():
+        if isinstance(count, bool):
+            continue
+        if isinstance(count, int) and count > 0:
+            return True
+    return False
 
 
 def run_command(command: list[str], *, cwd: Path) -> dict[str, Any]:

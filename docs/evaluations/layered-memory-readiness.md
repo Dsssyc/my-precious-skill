@@ -55,7 +55,9 @@ boundary:
   `--run-packaged --require-answer` is used without an answer report, the gate
   runs the packaged synthetic generated-answer fixture automatically. This is
   synthetic dogfood evidence for the grading path, not proof of live model
-  answer quality.
+  answer quality. Answer reports must include aggregate `source_benchmarks` and
+  `case_origins`; metric-only generated-answer JSON is rejected because it
+  cannot prove which benchmark or dogfood stream produced the answers.
 
 The strongest recorded local gate below combines a private real-archive
 aggregate shadow report with the 100-case converted LongMemEval public-adapter
@@ -75,7 +77,11 @@ cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
 `answer_normalized_match_rate: 1.0`, `answer_token_f1: 1.0`,
 `abstention_accuracy: 1.0`, `privacy_leak_count: 0`,
 `missing_answer_count: 0`, `duplicate_answer_count: 0`, and
-`unknown_answer_count: 0`.
+`unknown_answer_count: 0`. It also carries
+`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 3` and
+`case_origins.packaged_generated_answer_fixture: 3`, satisfying the answer
+provenance gate without rendering queries, generated answers, or reference
+answers.
 
 The current packaged source-stream registry fixture has 1 case and 1
 metadata-free source record. It reports `source_stream_update_rate: 1.0`,
@@ -1639,13 +1645,14 @@ abstention metrics. The source-depth path now also requires an explicit
 raw-preview authorization flag before redacted raw snippets render. The
 reusable benchmark suite now also has an offline generated-answer grading gate
 for provided answer records plus a packaged synthetic generated-answer fixture
-that is wired into `--run-packaged --require-answer`. The explicit source-stream
-registry path now has a packaged synthetic benchmark and is required by the
-core v1 readiness gate. The current public/shadow readiness runs did not include
-generated answer records and therefore still cannot claim real generated-answer
-behavior. The next valuable work is broader public-sample scaling,
-generated-answer real/dogfood adapter evidence, and broader consolidation/decay
-evidence.
+that is wired into `--run-packaged --require-answer`; answer reports now also
+need aggregate source benchmark and case-origin counts before the readiness gate
+accepts them. The explicit source-stream registry path now has a packaged
+synthetic benchmark and is required by the core v1 readiness gate. The current
+public/shadow readiness runs did not include generated answer records and
+therefore still cannot claim real generated-answer behavior. The next valuable
+work is broader public-sample scaling, generated-answer real/dogfood adapter
+evidence, and broader consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 

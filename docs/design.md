@@ -103,7 +103,9 @@ and JSONL indexes.
 - `benchmarks/generated_answer_benchmark.py`: aggregate-only offline grader for
   already generated answer records. It scores exact, normalized, token-overlap,
   abstention, missing/duplicate/unknown-answer, and privacy metrics without
-  rendering queries, generated answers, or reference answers.
+  rendering queries, generated answers, or reference answers. Reports include
+  aggregate `source_benchmarks` and `case_origins` counts so the readiness gate
+  can reject source-less answer evidence.
 - `benchmarks/cases/generated_answer_synthetic*.jsonl`: packaged synthetic
   answer cases and answer records used when `v1_readiness_gate.py` runs with
   `--run-packaged --require-answer` and no external `--answer-report`.
@@ -113,9 +115,11 @@ and JSONL indexes.
   shadow-eval, and generated-answer aggregate reports. Required private shadow
   reports must include the privacy shape plus a minimum real-archive retrieval
   quality floor for precision, top-k noise, abstention, active-memory
-  suppression, scope-mixed noise, and inactive-lifecycle noise. It reports
-  bounded readiness status without rendering private probe cases, queries,
-  memory text, source paths, raw refs, generated answers, or reference answers.
+  suppression, scope-mixed noise, and inactive-lifecycle noise. Generated-answer
+  reports must include aggregate source benchmark and case-origin counts in
+  addition to metrics and privacy flags. It reports bounded readiness status
+  without rendering private probe cases, queries, memory text, source paths, raw
+  refs, generated answers, or reference answers.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -679,8 +683,11 @@ The generated-answer benchmark has a packaged synthetic fixture with two
 positive answer cases and one abstention case. `v1_readiness_gate.py
 --run-packaged --require-answer` runs that fixture automatically when no
 external `--answer-report` is supplied. This proves that the answer grading gate
-is wired into packaged readiness, but it remains synthetic dogfood evidence; it
-does not evaluate a live model or private real-history generated answers.
+is wired into packaged readiness. External answer reports must also carry
+aggregate `source_benchmarks` and `case_origins`, so source-less answer metrics
+cannot stand in for dogfood or public answer evidence. This remains synthetic
+dogfood evidence; it does not evaluate a live model or private real-history
+generated answers.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive

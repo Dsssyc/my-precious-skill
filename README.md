@@ -426,9 +426,11 @@ the current real-archive quality floor: `memory_precision_at_5 >= 0.4`,
 `noise_sources_at_5.scope_mixed <= 3`, and
 `noise_sources_at_5.inactive_lifecycle == 0`. This floor prevents recall-only
 greenwashing; it is not a claim that real retrieval noise is solved. Optional
-`--answer-report` can add offline generated-answer grading evidence. Add
-`--require-public`, `--require-shadow`, or `--require-answer` when those
-optional dimensions should fail the gate if absent. When
+`--answer-report` can add offline generated-answer grading evidence. Answer
+reports must include aggregate `source_benchmarks` and `case_origins` counts;
+passing answer metrics alone are not accepted as provenance-backed answer
+evidence. Add `--require-public`, `--require-shadow`, or `--require-answer`
+when those optional dimensions should fail the gate if absent. When
 `--run-packaged --require-answer` is used without an
 `--answer-report`, the gate runs the packaged synthetic generated-answer fixture
 and includes that aggregate report automatically. Public reports must be
@@ -463,9 +465,11 @@ python benchmarks/generated_answer_benchmark.py \
 The answer benchmark reports aggregate `case_pass_rate`,
 `answer_exact_match_rate`, `answer_normalized_match_rate`, `answer_token_f1`,
 `abstention_accuracy`, missing/duplicate/unknown answer counts, and privacy
-counts. Its claim boundary is narrow: it grades provided answer records against
-reference answers; it does not call a model, generate answers, or claim semantic
-equivalence beyond exact, normalized, and token-overlap checks.
+counts. It also reports aggregate `source_benchmarks` and `case_origins` so
+`v1_readiness_gate.py` can reject source-less answer reports. Its claim boundary
+is narrow: it grades provided answer records against reference answers; it does
+not call a model, generate answers, or claim semantic equivalence beyond exact,
+normalized, and token-overlap checks.
 
 Search without invoking an agent:
 
