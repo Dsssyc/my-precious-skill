@@ -408,6 +408,10 @@ python benchmarks/v1_readiness_gate.py --run-packaged
 The readiness gate emits aggregate-only JSON. It requires the packaged layered
 recall, updater induction, e2e induction-to-recall, and explicit source stream
 registry dimensions to pass before reporting `core_synthetic_ready`.
+Source-stream reports must also be aggregate-only and must state that case
+details, memory text, source content, source paths, and raw refs were not
+rendered; passing metrics alone are not accepted as source-stream readiness
+evidence.
 Optional `--public-report` and
 `--shadow-report` inputs can add adapted public-benchmark and private
 real-archive aggregate evidence. Optional `--answer-report` can add offline
@@ -866,6 +870,9 @@ It gates `source_stream_update_rate`,
 `source_stream_session_drilldown_rate`,
 `source_stream_evidence_reachability_rate`,
 `source_stream_source_policy_pass_rate`, `case_pass_rate`, and privacy counts.
+The emitted aggregate report includes an explicit privacy block, and the v1
+readiness gate rejects source-stream reports that omit it or claim rendered
+case details, memory text, source content, source paths, or raw refs.
 This proves the explicit source-stream path in a synthetic archive; it does not
 solve automatic source discovery or ontology mapping.
 

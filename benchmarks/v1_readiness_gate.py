@@ -215,6 +215,47 @@ def assess_report(
     }
 
 
+def assess_source_stream_report(payload: dict[str, Any] | None) -> dict[str, Any]:
+    result = assess_report(
+        payload,
+        expected_kind="source_stream_registry_benchmark",
+        gates=SOURCE_STREAM_GATES,
+        evidence_level="packaged_synthetic",
+        required=True,
+    )
+    if payload is not None:
+        privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+        if privacy.get("aggregate_only") is not True:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "privacy.aggregate_only",
+                    "expected": True,
+                    "actual": privacy.get("aggregate_only"),
+                    "reason": "source_stream_report_not_aggregate_only",
+                }
+            )
+            result["status"] = "failed"
+        for metric in (
+            "case_details_rendered",
+            "memory_text_rendered",
+            "source_content_rendered",
+            "source_paths_rendered",
+            "raw_refs_rendered",
+        ):
+            if privacy.get(metric) is not False:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": False,
+                        "actual": privacy.get(metric),
+                        "reason": "source_stream_report_rendered_sensitive_evidence",
+                    }
+                )
+                result["status"] = "failed"
+    result["claim_boundary"] = "source-stream registry aggregate only; no automatic ontology discovery claim"
+    return result
+
+
 def assess_public_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
     # A public-adapter score is a layered recall report produced from converted
     # public cases. Converter-only output is not enough evidence for recall.
@@ -497,13 +538,7 @@ def build_report(
             evidence_level="packaged_synthetic",
             required=True,
         ),
-        "source_stream_registry": assess_report(
-            source_stream,
-            expected_kind="source_stream_registry_benchmark",
-            gates=SOURCE_STREAM_GATES,
-            evidence_level="packaged_synthetic",
-            required=True,
-        ),
+        "source_stream_registry": assess_source_stream_report(source_stream),
         "public_benchmark_adapter": assess_public_report(public, required=require_public),
         "real_archive_shadow_eval": assess_shadow_report(shadow, required=require_shadow),
         "generated_answer_eval": assess_answer_report(answer, required=require_answer),

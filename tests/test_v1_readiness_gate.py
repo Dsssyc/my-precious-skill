@@ -96,6 +96,14 @@ class V1ReadinessGateTests(unittest.TestCase):
             "source_stream_source_policy_pass_rate": 1.0,
             "privacy_leak_count": 0,
             "failed_case_count": 0,
+            "privacy": {
+                "aggregate_only": True,
+                "case_details_rendered": False,
+                "memory_text_rendered": False,
+                "source_content_rendered": False,
+                "source_paths_rendered": False,
+                "raw_refs_rendered": False,
+            },
         }
 
     def passing_answer_report(self) -> dict:
@@ -193,6 +201,78 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["overall_status"], "not_ready")
             self.assertEqual(payload["dimensions"]["source_stream_registry"]["status"], "missing_required")
             self.assertIn("source_stream_registry", result.stderr)
+
+    def test_source_stream_report_requires_aggregate_privacy_shape(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream_payload = self.passing_source_stream_report()
+            source_stream_payload.pop("privacy")
+            source_stream = self.write_json(root, "source-stream.json", source_stream_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["source_stream_registry"]["status"], "failed")
+            failures = payload["dimensions"]["source_stream_registry"]["failures"]
+            self.assertTrue(any(failure["metric"] == "privacy.aggregate_only" for failure in failures))
+
+    def test_source_stream_report_rejects_rendered_source_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream_payload = self.passing_source_stream_report()
+            source_stream_payload["privacy"]["source_paths_rendered"] = True
+            source_stream = self.write_json(root, "source-stream.json", source_stream_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["source_stream_registry"]["status"], "failed")
+            failures = payload["dimensions"]["source_stream_registry"]["failures"]
+            self.assertTrue(any(failure["metric"] == "privacy.source_paths_rendered" for failure in failures))
 
     def test_layered_report_requires_raw_preview_authorization_gate(self):
         with tempfile.TemporaryDirectory() as tmpdir:

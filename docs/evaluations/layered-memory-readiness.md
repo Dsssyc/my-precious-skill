@@ -86,6 +86,10 @@ metadata-free source record. It reports `source_stream_update_rate: 1.0`,
 `source_stream_evidence_reachability_rate: 1.0`,
 `source_stream_source_policy_pass_rate: 1.0`,
 `privacy_leak_count: 0`, and `failed_case_count: 0`.
+The readiness gate also requires the source-stream report's privacy block to
+declare `aggregate_only: true` and no rendered case details, memory text,
+source content, source paths, or raw refs. A report with green source-stream
+metrics but missing or unsafe privacy flags is rejected.
 
 Run the packaged convergence gate locally with:
 
@@ -824,9 +828,11 @@ Current gaps:
   reusable repository.
 - The reusable benchmark folder now includes a v1 readiness convergence gate
   that aggregates the required synthetic layered/updater/e2e reports and
-  optional public-adapter or private shadow-eval aggregate reports. This closes
-  the "many separate green checks with no single bounded readiness summary"
-  gap, but it does not close the underlying project-boundary, long-horizon,
+  optional public-adapter or private shadow-eval aggregate reports. The
+  required source-stream dimension now gates both source-stream metrics and the
+  aggregate-only privacy shape for source/source-ref evidence. This closes the
+  "many separate green checks with no single bounded readiness summary" gap,
+  but it does not close the underlying project-boundary, long-horizon,
   generated-answer, or governance gaps by itself.
 - Search is lexical and explainable. That is a deliberate design choice, but it
   has not been evaluated against embedding or hybrid semantic retrieval on
