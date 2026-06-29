@@ -46,6 +46,11 @@ boundary:
 - `--shadow-report` accepts a private real-archive shadow-eval aggregate report.
   The report must remain aggregate-only. Use `--require-shadow` only when the
   local private probe set should be a required readiness gate for the run.
+- `--answer-report` accepts an offline generated-answer aggregate report. When
+  `--run-packaged --require-answer` is used without an answer report, the gate
+  runs the packaged synthetic generated-answer fixture automatically. This is
+  synthetic dogfood evidence for the grading path, not proof of live model
+  answer quality.
 
 The current strongest local gate combines a private real-archive aggregate
 shadow report with the 100-case converted LongMemEval public-adapter report.
@@ -55,6 +60,19 @@ passed: packaged layered recall, packaged automatic induction, packaged
 end-to-end induction-to-recall, adapted public benchmark evidence, and private
 real-archive shadow evidence. This still does not prove full public benchmark
 parity, generated-answer correctness, or complete long-horizon governance.
+
+The packaged generated-answer gate can be included in local convergence runs:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+```
+
+The current packaged generated-answer fixture has 3 cases: 2 positive answer
+cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
+`answer_normalized_match_rate: 1.0`, `answer_token_f1: 1.0`,
+`abstention_accuracy: 1.0`, `privacy_leak_count: 0`,
+`missing_answer_count: 0`, `duplicate_answer_count: 0`, and
+`unknown_answer_count: 0`.
 
 Run the packaged convergence gate locally with:
 
@@ -1534,11 +1552,13 @@ local public-adapter readiness with perfect positive-case retrieval, source and
 answer reachability, privacy, and answer-level public abstention metrics. The
 source-depth path now also requires an explicit raw-preview authorization flag
 before redacted raw snippets render. The reusable benchmark suite now also has
-an offline generated-answer grading gate for provided answer records, but the
-current public/shadow readiness runs did not include generated answer records
-and therefore still cannot claim real generated-answer behavior. The next
-valuable work is broader public-sample scaling, generated-answer dogfood
-adapter evidence, and broader consolidation/decay evidence.
+an offline generated-answer grading gate for provided answer records plus a
+packaged synthetic generated-answer fixture that is wired into
+`--run-packaged --require-answer`. The current public/shadow readiness runs did
+not include generated answer records and therefore still cannot claim real
+generated-answer behavior. The next valuable work is broader public-sample
+scaling, generated-answer real/dogfood adapter evidence, and broader
+consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 

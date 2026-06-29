@@ -1,10 +1,14 @@
 import json
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
+import benchmarks.v1_readiness_gate as readiness_gate
 
 SCRIPT = Path("benchmarks/v1_readiness_gate.py").resolve()
 
@@ -372,6 +376,35 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "failed")
             failures = payload["dimensions"]["generated_answer_eval"]["failures"]
             self.assertTrue(any(failure["metric"] == "case_pass_rate" for failure in failures))
+
+    def test_run_packaged_require_answer_uses_packaged_answer_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = Path(tmpdir) / "work"
+            packaged_reports = {
+                "layered": self.passing_layered_report(),
+                "updater": self.passing_updater_report(),
+                "e2e": self.passing_e2e_report(),
+                "answer": self.passing_answer_report(),
+            }
+            stdout = io.StringIO()
+
+            with mock.patch.object(readiness_gate, "run_packaged_reports", return_value=packaged_reports) as runner:
+                with redirect_stdout(stdout):
+                    return_code = readiness_gate.main(
+                        [
+                            "--run-packaged",
+                            "--work-dir",
+                            str(work_dir),
+                            "--require-answer",
+                        ]
+                    )
+
+            runner.assert_called_once_with(work_dir.resolve(), include_answer=True)
+            self.assertEqual(return_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["overall_status"], "extended_evidence_ready")
+            self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
+            self.assertEqual(payload["scorecard"]["required_dimensions"], 4)
 
 
 if __name__ == "__main__":

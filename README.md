@@ -398,7 +398,10 @@ reporting `core_synthetic_ready`. Optional `--public-report` and
 real-archive aggregate evidence. Optional `--answer-report` can add offline
 generated-answer grading evidence. Add `--require-public`, `--require-shadow`,
 or `--require-answer` when those optional dimensions should fail the gate if
-absent. Public reports must be layered recall reports produced from converted
+absent. When `--run-packaged --require-answer` is used without an
+`--answer-report`, the gate runs the packaged synthetic generated-answer fixture
+and includes that aggregate report automatically. Public reports must be
+layered recall reports produced from converted
 public benchmark cases, including aggregate `source_benchmarks` counts and
 `case_origins.public_benchmark_adapter`; converter-only output or ordinary
 synthetic layered reports are not accepted as public evidence. A
@@ -412,13 +415,17 @@ or reference answers:
 
 ```bash
 python benchmarks/generated_answer_benchmark.py \
-  --cases /tmp/my-precious-cases.jsonl \
-  --answers /tmp/generated-answers.jsonl \
+  --cases benchmarks/cases/generated_answer_synthetic.jsonl \
+  --answers benchmarks/cases/generated_answer_synthetic_answers.jsonl \
   --details-jsonl /tmp/generated-answer-details.jsonl \
   --fail-under case_pass_rate=1.0 \
   --fail-under answer_normalized_match_rate=1.0 \
   --fail-under abstention_accuracy=1.0 \
-  --fail-over privacy_leak_count=0
+  --fail-over privacy_leak_count=0 \
+  --fail-over failed_case_count=0 \
+  --fail-over missing_answer_count=0 \
+  --fail-over duplicate_answer_count=0 \
+  --fail-over unknown_answer_count=0
 ```
 
 The answer benchmark reports aggregate `case_pass_rate`,

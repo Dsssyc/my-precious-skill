@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 SCRIPT = Path("benchmarks/generated_answer_benchmark.py").resolve()
+PACKAGED_CASES = Path("benchmarks/cases/generated_answer_synthetic.jsonl").resolve()
+PACKAGED_ANSWERS = Path("benchmarks/cases/generated_answer_synthetic_answers.jsonl").resolve()
 
 
 class GeneratedAnswerBenchmarkTests(unittest.TestCase):
@@ -106,6 +108,50 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
             self.assertNotIn("There is not enough information in memory to answer.", rendered)
             self.assertNotIn(str(cases), rendered)
             self.assertNotIn(str(answers), rendered)
+
+    def test_packaged_generated_answer_fixture_passes_strict_quality_gate(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--cases",
+                str(PACKAGED_CASES),
+                "--answers",
+                str(PACKAGED_ANSWERS),
+                "--fail-under",
+                "case_pass_rate=1.0",
+                "--fail-under",
+                "answer_normalized_match_rate=1.0",
+                "--fail-under",
+                "abstention_accuracy=1.0",
+                "--fail-over",
+                "privacy_leak_count=0",
+                "--fail-over",
+                "failed_case_count=0",
+                "--fail-over",
+                "missing_answer_count=0",
+                "--fail-over",
+                "duplicate_answer_count=0",
+                "--fail-over",
+                "unknown_answer_count=0",
+            ],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["report_kind"], "generated_answer_benchmark")
+        self.assertEqual(payload["cases"], 3)
+        self.assertEqual(payload["positive_cases"], 2)
+        self.assertEqual(payload["abstain_cases"], 1)
+        self.assertEqual(payload["source_benchmarks"], {"MyPreciousGeneratedAnswerSynthetic": 3})
+        self.assertEqual(payload["case_origins"], {"packaged_generated_answer_fixture": 3})
+        self.assertEqual(payload["case_pass_rate"], 1.0)
+        self.assertEqual(payload["answer_normalized_match_rate"], 1.0)
+        self.assertEqual(payload["abstention_accuracy"], 1.0)
+        self.assertEqual(payload["privacy_leak_count"], 0)
 
     def test_reports_failures_without_rendering_sensitive_answer_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:

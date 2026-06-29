@@ -98,6 +98,9 @@ and JSONL indexes.
   already generated answer records. It scores exact, normalized, token-overlap,
   abstention, missing/duplicate/unknown-answer, and privacy metrics without
   rendering queries, generated answers, or reference answers.
+- `benchmarks/cases/generated_answer_synthetic*.jsonl`: packaged synthetic
+  answer cases and answer records used when `v1_readiness_gate.py` runs with
+  `--run-packaged --require-answer` and no external `--answer-report`.
 - `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
   combines required packaged synthetic reports with optional adapted public
   benchmark, private shadow-eval, and generated-answer aggregate reports. It
@@ -632,6 +635,13 @@ the converter can also build a temporary synthetic archive from the converted
 cases with `--build-synthetic-archive`; that archive is then scored by the same
 layered recall benchmark and `--fail-under` quality gates as packaged synthetic
 cases.
+
+The generated-answer benchmark has a packaged synthetic fixture with two
+positive answer cases and one abstention case. `v1_readiness_gate.py
+--run-packaged --require-answer` runs that fixture automatically when no
+external `--answer-report` is supplied. This proves that the answer grading gate
+is wired into packaged readiness, but it remains synthetic dogfood evidence; it
+does not evaluate a live model or private real-history generated answers.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive

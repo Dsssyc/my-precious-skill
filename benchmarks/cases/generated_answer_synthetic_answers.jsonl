@@ -1,0 +1,3 @@
+{"case_id":"synthetic-answer:repo_boundary","generated_answer":"Do not store real session data in the reusable skill repository."}
+{"case_id":"synthetic-answer:source_depth","generated_answer":"Use source anchors for provenance without printing raw transcript content."}
+{"case_id":"synthetic-answer:unsupported_fact","generated_answer":"There is not enough information in memory to answer."}

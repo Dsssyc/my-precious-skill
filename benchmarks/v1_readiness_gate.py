@@ -336,7 +336,7 @@ def run_command(command: list[str], *, cwd: Path) -> dict[str, Any]:
     return payload
 
 
-def run_packaged_reports(work_dir: Path) -> dict[str, dict[str, Any]]:
+def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dict[str, dict[str, Any]]:
     archive = work_dir / "layered-synthetic-archive"
     details = work_dir / "layered-details.jsonl"
     run_command(
@@ -398,7 +398,38 @@ def run_packaged_reports(work_dir: Path) -> dict[str, dict[str, Any]]:
         ],
         cwd=REPO_ROOT,
     )
-    return {"layered": layered, "updater": updater, "e2e": e2e}
+    reports = {"layered": layered, "updater": updater, "e2e": e2e}
+    if include_answer:
+        reports["answer"] = run_command(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "generated_answer_benchmark.py"),
+                "--cases",
+                str(SCRIPT_DIR / "cases/generated_answer_synthetic.jsonl"),
+                "--answers",
+                str(SCRIPT_DIR / "cases/generated_answer_synthetic_answers.jsonl"),
+                "--details-jsonl",
+                str(work_dir / "generated-answer-details.jsonl"),
+                "--fail-under",
+                "case_pass_rate=1.0",
+                "--fail-under",
+                "answer_normalized_match_rate=1.0",
+                "--fail-under",
+                "abstention_accuracy=1.0",
+                "--fail-over",
+                "privacy_leak_count=0",
+                "--fail-over",
+                "failed_case_count=0",
+                "--fail-over",
+                "missing_answer_count=0",
+                "--fail-over",
+                "duplicate_answer_count=0",
+                "--fail-over",
+                "unknown_answer_count=0",
+            ],
+            cwd=REPO_ROOT,
+        )
+    return reports
 
 
 def build_report(
@@ -509,17 +540,20 @@ def main(argv: list[str] | None = None) -> int:
             work_dir.mkdir(parents=True, exist_ok=True)
             if any(work_dir.iterdir()):
                 raise SystemExit("--work-dir must be empty when using --run-packaged")
-            core = run_packaged_reports(work_dir)
+            core = run_packaged_reports(work_dir, include_answer=args.require_answer and not args.answer_report)
             layered = core["layered"]
             updater = core["updater"]
             e2e = core["e2e"]
+            answer = core.get("answer")
         else:
             layered = read_json(Path(args.layered_report).expanduser()) if args.layered_report else None
             updater = read_json(Path(args.updater_report).expanduser()) if args.updater_report else None
             e2e = read_json(Path(args.e2e_report).expanduser()) if args.e2e_report else None
+            answer = None
         public = read_json(Path(args.public_report).expanduser()) if args.public_report else None
         shadow = read_json(Path(args.shadow_report).expanduser()) if args.shadow_report else None
-        answer = read_json(Path(args.answer_report).expanduser()) if args.answer_report else None
+        if args.answer_report:
+            answer = read_json(Path(args.answer_report).expanduser())
         report = build_report(
             layered=layered,
             updater=updater,
