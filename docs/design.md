@@ -242,7 +242,8 @@ summary session output. These metrics are reported as `memory_recall_at_1`,
 `memory_graph_invalid_edge_suppression_rate`,
 `answer_reachability`, `answer_normalized_reachability`, `answer_token_f1`,
 `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`,
-`abstain_pass_rate`, `suppression_pass_rate`, `privacy_leak_count`,
+`abstain_pass_rate`, `abstention_answer_cases`,
+`abstention_answer_pass_rate`, `suppression_pass_rate`, `privacy_leak_count`,
 `latency_ms`, `latency_mean_ms`, `latency_max_ms`, `failed_case_count`, and
 `case_pass_rate`. Exact answer
 reachability is strict text reachability in expected-memory search output or in
@@ -301,6 +302,11 @@ Memora, and long-context retrieval stress tests:
   each `global`, `domain`, and `project` layer. Abstention outputs must be empty
   or explicit `No memory hits for:` responses; unstructured non-no-hit text fails
   the check even when it contains no parseable hit block.
+- `abstention_answer_pass_rate`: adapter cases whose reference answer explicitly
+  says the requested fact was not mentioned, not specified, or otherwise
+  unanswerable may pass with structured related context hits. This models
+  public `_abs` rows where the memory system should retrieve the relevant
+  conversation context but still answer that the requested fact is absent.
 - `negative_memory_suppression`: explicitly forbidden memory IDs are absent from
   all executed hit blocks, including scoped memory searches.
 - `stale_memory_suppression`: superseded memory IDs are absent from all executed

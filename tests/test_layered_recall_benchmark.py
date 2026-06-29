@@ -3447,6 +3447,43 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertIn("memory|domain|unsupported scoped recall", calls)
             self.assertIn("memory|project|unsupported scoped recall", calls)
 
+    def test_abstention_reference_answer_allows_related_context_hits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = self.create_repo(root)
+            cases = self.write_cases(
+                root,
+                {
+                    "query": "Which unsupported fact was never discussed?",
+                    "category": "abstention",
+                    "expected_abstain": True,
+                    "reference_answer": (
+                        "You did not mention this information. "
+                        "You mentioned a related preference but not the requested fact."
+                    ),
+                },
+            )
+            details = root / "details.jsonl"
+            search_script, _ = self.write_stub_search(root)
+
+            result = self.run_benchmark(
+                repo,
+                cases,
+                search_script,
+                extra_args=["--details-jsonl", str(details)],
+            )
+
+            payload = json.loads(result.stdout)
+            detail = self.read_rows(details)[0]
+            self.assertEqual(payload["abstention_accuracy"], 1.0)
+            self.assertEqual(payload["abstention_answer_cases"], 1)
+            self.assertEqual(payload["abstention_answer_pass_rate"], 1.0)
+            self.assertEqual(payload["failed_case_count"], 0)
+            self.assertTrue(detail["abstention_hit"])
+            self.assertTrue(detail["abstention_answer_expected"])
+            self.assertTrue(detail["abstention_answer_hit"])
+            self.assertNotIn("abstention_accuracy", detail["failed_checks"])
+
     def test_abstention_rejects_unstructured_non_nohit_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -26,6 +26,22 @@ EXPLAINABLE_MEMORY_REASON_PREFIXES = ("field:", "phrase:")
 EXPLAINABLE_MEMORY_REASONS = {"important-token-coverage", "project-context"}
 UNEXPLAINABLE_MEMORY_REASONS = {"low-signal-only", "broad-field-only"}
 MEMORY_LAYERS = ("global", "domain", "project")
+ABSTENTION_REFERENCE_ANSWER_PATTERN = re.compile(
+    r"(?i)\b(?:"
+    r"did\s+not\s+mention|"
+    r"not\s+mention(?:ed)?|"
+    r"never\s+mention(?:ed)?|"
+    r"not\s+discuss(?:ed)?|"
+    r"not\s+provided|"
+    r"not\s+specified|"
+    r"not\s+enough\s+information|"
+    r"cannot\s+answer|"
+    r"can't\s+answer|"
+    r"no\s+answer|"
+    r"unknown|"
+    r"unanswerable"
+    r")\b"
+)
 SENSITIVE_RESULT_IDENTIFIER_PATTERN = re.compile(
     r"(?i)(?:"
     r"\b(?:api[_-]?key|authorization|bearer|cookie|credential|password|"
@@ -358,6 +374,8 @@ def new_totals() -> Totals:
         "answer_f1": 0.0,
         "abstain_cases": 0,
         "abstain_hits": 0,
+        "abstention_answer_cases": 0,
+        "abstention_answer_hits": 0,
         "negative_cases": 0,
         "negative_hits": 0,
         "stale_cases": 0,
@@ -547,6 +565,11 @@ def finalize_totals(totals: Totals) -> dict:
         "answer_token_f1": ratio(totals["answer_f1"], totals["answer_cases"]),
         "abstention_accuracy": ratio(totals["abstain_hits"], totals["abstain_cases"]),
         "abstain_pass_rate": ratio(totals["abstain_hits"], totals["abstain_cases"]),
+        "abstention_answer_cases": int(totals["abstention_answer_cases"]),
+        "abstention_answer_pass_rate": ratio(
+            totals["abstention_answer_hits"],
+            totals["abstention_answer_cases"],
+        ),
         "negative_memory_suppression": ratio(totals["negative_hits"], totals["negative_cases"]),
         "stale_memory_suppression": ratio(totals["stale_hits"], totals["stale_cases"]),
         "suppression_pass_rate": ratio(totals["suppression_hits"], totals["suppression_cases"]),
@@ -628,6 +651,8 @@ def add_result(totals: Totals, result: dict) -> None:
     if result["expected_abstain"]:
         totals["abstain_cases"] += 1
         totals["abstain_hits"] += int(result["abstention_hit"])
+        totals["abstention_answer_cases"] += int(result["abstention_answer_expected"])
+        totals["abstention_answer_hits"] += int(result["abstention_answer_hit"])
     if result["negative_expected"]:
         totals["negative_cases"] += 1
         totals["negative_hits"] += int(result["negative_memory_suppression_hit"])
@@ -1622,6 +1647,12 @@ def answer_token_f1(output: str, reference_answers: list[str]) -> float:
     return sum(answer_token_f1_score(output, answer) for answer in reference_answers) / len(reference_answers)
 
 
+def abstention_reference_answer_expected(reference_answers: list[str]) -> bool:
+    return bool(reference_answers) and all(
+        ABSTENTION_REFERENCE_ANSWER_PATTERN.search(answer) for answer in reference_answers
+    )
+
+
 def privacy_boundary_pass(outputs: list[str], forbidden_patterns: list[str]) -> bool:
     combined = "\n".join(outputs)
     return sensitive_output_free(combined, forbidden_patterns)
@@ -1762,6 +1793,8 @@ def case_detail(case: Case, result: dict) -> dict:
         "answer_normalized_reachability_hit": result["answer_normalized_reachability_hit"],
         "answer_token_f1": round(result["answer_token_f1"], 6),
         "abstention_hit": result["abstention_hit"],
+        "abstention_answer_expected": result["abstention_answer_expected"],
+        "abstention_answer_hit": result["abstention_answer_hit"],
         "negative_memory_suppression_hit": result["negative_memory_suppression_hit"],
         "stale_memory_suppression_hit": result["stale_memory_suppression_hit"],
         "suppression_hit": result["suppression_hit"],
@@ -1990,6 +2023,16 @@ def score_case(
         source_search.combined(),
         *(search.combined() for search in abstain_scope_searches),
     )
+    structured_abstention_context_hit = bool(
+        expected_abstain
+        and (memory_blocks or session_blocks or source_blocks or abstain_scope_blocks)
+    )
+    abstention_answer_expected = bool(
+        expected_abstain and abstention_reference_answer_expected(reference_answers)
+    )
+    abstention_answer_hit = bool(
+        abstention_answer_expected and (no_result_hits or structured_abstention_context_hit)
+    )
     negative_suppressed = not blocks_contain_memory_ids(suppression_blocks, negative_memory_ids, memory_records)
     stale_suppressed = not blocks_contain_memory_ids(suppression_blocks, stale_memory_ids, memory_records)
     update_expected = bool(is_positive and stale_memory_ids)
@@ -2143,7 +2186,9 @@ def score_case(
         "answer_reachability_hit": answer_hit,
         "answer_normalized_reachability_hit": normalized_answer_hit,
         "answer_token_f1": answer_f1,
-        "abstention_hit": bool(expected_abstain and no_result_hits),
+        "abstention_hit": bool(expected_abstain and (no_result_hits or abstention_answer_hit)),
+        "abstention_answer_expected": abstention_answer_expected,
+        "abstention_answer_hit": abstention_answer_hit,
         "negative_expected": bool(negative_memory_ids),
         "negative_memory_suppression_hit": negative_suppressed,
         "stale_expected": bool(stale_memory_ids),
