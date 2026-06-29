@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import subprocess
 import sys
@@ -7,6 +8,15 @@ from pathlib import Path
 
 
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+
+def load_search_memory_module():
+    spec = importlib.util.spec_from_file_location("search_memory_under_test", SEARCH_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def synthetic_memory_row(
@@ -54,6 +64,16 @@ def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
 
 
 class SearchMemoryTests(unittest.TestCase):
+    def test_prune_low_relative_memory_hits_requires_99_percent_floor(self):
+        search_memory = load_search_memory_module()
+        top = search_memory.Hit(path=Path("top"), score=1000, source="memory", why=[])
+        near_tie = search_memory.Hit(path=Path("near-tie"), score=990, source="memory", why=[])
+        tail = search_memory.Hit(path=Path("tail"), score=989, source="memory", why=[])
+
+        kept = search_memory.prune_low_relative_memory_hits([tail, top, near_tie])
+
+        self.assertEqual([hit.path.name for hit in kept], ["top", "near-tie"])
+
     def test_search_memory_finds_index_and_summary_hits(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
