@@ -380,6 +380,9 @@ failure cases by `recall_miss`, `abstain_false_positive`,
 use only case ordinals, short case-label hashes, counts, and noise buckets; they
 do not render probe queries, memory IDs, source paths, raw refs, or forbidden
 patterns.
+The report-level `privacy` block declares that it is aggregate-only and that
+private probe cases, queries, memory IDs, memory text, source refs, source
+content, source paths, and raw refs were not rendered.
 `--fail-under`, `--fail-over`, `--fail-under-file`, and `--fail-over-file`
 enforce numeric aggregate metrics or dotted metric paths such as
 `metrics.provenance_coverage.score`. Threshold failures print only metric names,
@@ -414,10 +417,12 @@ rendered; passing metrics alone are not accepted as source-stream readiness
 evidence.
 Optional `--public-report` and
 `--shadow-report` inputs can add adapted public-benchmark and private
-real-archive aggregate evidence. Optional `--answer-report` can add offline
-generated-answer grading evidence. Add `--require-public`, `--require-shadow`,
-or `--require-answer` when those optional dimensions should fail the gate if
-absent. When `--run-packaged --require-answer` is used without an
+real-archive aggregate evidence. Shadow reports must include the aggregate-only
+privacy shape from `shadow_eval_memory_archive.py`; passing metrics alone are
+not accepted as private shadow evidence. Optional `--answer-report` can add
+offline generated-answer grading evidence. Add `--require-public`,
+`--require-shadow`, or `--require-answer` when those optional dimensions should
+fail the gate if absent. When `--run-packaged --require-answer` is used without an
 `--answer-report`, the gate runs the packaged synthetic generated-answer fixture
 and includes that aggregate report automatically. Public reports must be
 layered recall reports produced from converted

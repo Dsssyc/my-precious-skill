@@ -328,6 +328,27 @@ def assess_shadow_report(payload: dict[str, Any] | None, *, required: bool) -> d
                 }
             )
             result["status"] = "failed"
+        for metric in (
+            "private_probe_cases_rendered",
+            "queries_rendered",
+            "memory_ids_rendered",
+            "memory_text_rendered",
+            "source_refs_rendered",
+            "source_content_rendered",
+            "source_paths_rendered",
+            "raw_refs_rendered",
+        ):
+            if privacy.get(metric) is not False:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": False,
+                        "actual": privacy.get(metric),
+                        "reason": "shadow_report_rendered_private_probe_material",
+                    }
+                )
+                result["status"] = "failed"
+    result["claim_boundary"] = "private real-archive aggregate only; no private probe material rendered"
     return result
 
 

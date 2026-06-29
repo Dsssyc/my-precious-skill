@@ -525,7 +525,15 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["lifecycle_integrity"]["score"], 1.0)
         self.assertGreater(payload["metrics"]["provenance_coverage"]["score"], 0.0)
         self.assertEqual(payload["audit"]["status"], "passed")
+        self.assertTrue(payload["privacy"]["aggregate_only"])
+        self.assertFalse(payload["privacy"]["private_probe_cases_rendered"])
+        self.assertFalse(payload["privacy"]["queries_rendered"])
+        self.assertFalse(payload["privacy"]["memory_ids_rendered"])
+        self.assertFalse(payload["privacy"]["memory_text_rendered"])
+        self.assertFalse(payload["privacy"]["source_refs_rendered"])
         self.assertFalse(payload["privacy"]["source_content_rendered"])
+        self.assertFalse(payload["privacy"]["source_paths_rendered"])
+        self.assertFalse(payload["privacy"]["raw_refs_rendered"])
 
     def test_shadow_eval_reports_privacy_safe_diagnostics_for_failure_types(self):
         with tempfile.TemporaryDirectory() as tmpdir:

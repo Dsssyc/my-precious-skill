@@ -621,9 +621,14 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
         "report_kind": "real_archive_shadow_evaluation",
         "privacy": {
             "aggregate_only": True,
+            "private_probe_cases_rendered": False,
+            "queries_rendered": False,
+            "memory_ids_rendered": False,
             "source_content_rendered": False,
             "memory_text_rendered": False,
+            "source_refs_rendered": False,
             "source_paths_rendered": False,
+            "raw_refs_rendered": False,
         },
         "archive": {
             "format": "layered" if memory_index_present else "legacy",

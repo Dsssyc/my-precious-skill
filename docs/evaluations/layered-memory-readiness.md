@@ -47,7 +47,9 @@ boundary:
   packaged synthetic report cannot stand in for adapted public benchmark
   evidence.
 - `--shadow-report` accepts a private real-archive shadow-eval aggregate report.
-  The report must remain aggregate-only. Use `--require-shadow` only when the
+  The report must remain aggregate-only and must declare that private probe
+  cases, queries, memory IDs, memory text, source refs, source content, source
+  paths, and raw refs were not rendered. Use `--require-shadow` only when the
   local private probe set should be a required readiness gate for the run.
 - `--answer-report` accepts an offline generated-answer aggregate report. When
   `--run-packaged --require-answer` is used without an answer report, the gate
@@ -1241,7 +1243,9 @@ This run used the current reusable `shadow_eval_memory_archive.py` and
 `v1_readiness_gate.py` against the private deployment archive's redacted v2
 probe cases. The shadow report was written only outside this repository and
 contained aggregate JSON. It did not render private probe cases, queries,
-memory text, source paths, source content, or raw refs.
+memory IDs, memory text, source refs, source paths, source content, or raw refs.
+Current reruns must expose those fields in the report-level `privacy` block or
+the v1 readiness gate rejects the private shadow evidence.
 
 Commands:
 
@@ -1266,14 +1270,19 @@ Extended readiness summary:
 | metric | value |
 | --- | ---: |
 | v1_readiness.overall_status | extended_evidence_ready |
-| v1_readiness.required_dimensions | 4 |
-| v1_readiness.required_passed | 4 |
+| v1_readiness.required_dimensions | 5 |
+| v1_readiness.required_passed | 5 |
 | v1_readiness.optional_dimensions | 2 |
 | v1_readiness.optional_passed | 0 |
 | public_benchmark_adapter.status | not_run_optional |
 | real_archive_shadow_eval.status | passed |
 | generated_answer_eval.status | not_run_optional |
 | privacy.aggregate_only | true |
+| shadow_privacy.private_probe_cases_rendered | false |
+| shadow_privacy.queries_rendered | false |
+| shadow_privacy.memory_ids_rendered | false |
+| shadow_privacy.source_refs_rendered | false |
+| shadow_privacy.raw_refs_rendered | false |
 
 Private real-archive shadow metrics:
 
@@ -1305,7 +1314,10 @@ Private real-archive shadow metrics:
 This is stronger than the packaged-only `core_synthetic_ready` baseline because
 the private deployment archive must pass recall, abstention, active-memory
 suppression, privacy, provenance, lifecycle, and audit gates under
-`--require-shadow`. The top-k profile still shows a real quality gap:
+`--require-shadow`, and the v1 gate now rejects private shadow reports whose
+report-level privacy shape does not explicitly rule out rendered probe cases,
+queries, memory IDs, source refs, and raw refs. The top-k profile still shows a
+real quality gap:
 case-level recall is perfect on the private probe set, but precision is only
 0.424 and most remaining noise is broad lexical match fill. Public benchmark
 adapter evidence is not included in this shadow-only run; the current combined

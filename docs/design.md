@@ -625,8 +625,12 @@ only when no memory hits are returned; false-positive hit counts are reported
 as aggregate metrics. Probe cases may live in a private deployment repository
 or another local private path, but private probe files, raw transcripts, memory
 text, source paths, and source records must not be committed to this reusable
-skill repository. The shadow runner emits a privacy-safe `diagnostics` block
-that groups failures by
+skill repository. The shadow runner's report-level `privacy` block declares
+that the report is aggregate-only and that private probe cases, queries, memory
+IDs, memory text, source refs, source content, source paths, and raw refs were
+not rendered. The v1 readiness gate rejects private shadow reports that omit
+this privacy shape even when recall metrics pass. The shadow runner emits a
+privacy-safe `diagnostics` block that groups failures by
 `recall_miss`, `abstain_false_positive`, `suppression_failure`,
 `privacy_failure`, and `top_k_noise`. Diagnostics entries use case ordinals,
 short case-label hashes, counts, and noise buckets only; they do not render
