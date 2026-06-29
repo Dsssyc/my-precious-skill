@@ -1918,10 +1918,77 @@ the positive answers are extractive from existing memories, the negative cases
 are deterministic no-hit probes, and this is not a live model answer-quality
 benchmark or proof of long-horizon human-authored memory behavior.
 
+## V1 Completion Audit
+
+Date: 2026-06-30
+
+Code point: `dcf69c7 Add abstain cases to private answer dogfood`
+
+Fresh current-code command:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --answer-report /path/to/private-agent-memory/eval/generated_answer_private_dogfood_abstain_benchmark_20260630.json \
+  --require-answer \
+  --require-answer-case-origin private_dogfood \
+  --require-answer-source-benchmark MyPreciousPrivateDogfood
+```
+
+The command emitted aggregate-only JSON and returned success. It did not render
+private case rows, queries, reference answers, generated answers, memory text,
+source paths, or raw refs.
+
+Current required v1 gate summary:
+
+| dimension | status | evidence level | key metrics |
+| --- | --- | --- | --- |
+| layered_recall | passed | packaged synthetic | `memory_recall_at_5=1.0`, `layer_path_success_rate=1.0`, `drilldown_success_rate=1.0`, `source_ref_reachability=1.0`, `raw_preview_authorization_pass_rate=1.0`, `privacy_leak_count=0` |
+| automatic_induction | passed | packaged synthetic | `natural_induction_success_rate=1.0`, `cross_project_generalization_rate=1.0`, `forced_memory_capture_rate=1.0`, `induction_review_routing_rate=1.0`, `privacy_leak_count=0` |
+| e2e_induction_to_recall | passed | packaged synthetic | `e2e_memory_recall_at_5=1.0`, `e2e_layer_assignment_accuracy=1.0`, `e2e_session_drilldown_rate=1.0`, `e2e_source_policy_pass_rate=1.0`, `privacy_leak_count=0` |
+| source_stream_registry | passed | packaged synthetic | `source_stream_update_rate=1.0`, `project_registry_independence_rate=1.0`, `archive_scope_assignment_rate=1.0`, `source_partition_assignment_rate=1.0`, `source_stream_evidence_reachability_rate=1.0`, `privacy_leak_count=0` |
+| generated_answer_eval | passed | private deployment aggregate | `case_pass_rate=1.0`, `answer_normalized_match_rate=1.0`, `abstention_accuracy=1.0`, `answer_scorable_case_rate=1.0`, `privacy_leak_count=0` |
+
+Current v1 readiness status:
+
+| metric | value |
+| --- | ---: |
+| overall_status | extended_evidence_ready |
+| required_dimensions | 5 |
+| required_passed | 5 |
+| optional_dimensions | 2 |
+| optional_passed | 0 |
+
+Requirement audit:
+
+| target requirement | current status | evidence |
+| --- | --- | --- |
+| Reusable agent-neutral skills, not a private archive | satisfied | repository boundary in `AGENTS.md` and `docs/design.md`; setup/update/using skills separate setup, write, and read paths |
+| Non-project-boundary memory path | satisfied for v1 | source-stream registry gate proves archive scope and source partition can update and recall without project registry dependence |
+| Automatic induction | satisfied for v1 | updater and e2e gates pass natural induction, review routing, decision apply, forced capture, and privacy refusal/redaction metrics |
+| Explicit forced memory | satisfied for v1 | updater and e2e gates include `forced_memory_capture_rate=1.0` and `e2e_forced_memory_recall_rate=1.0` |
+| Layered recall across memory/session/source/raw evidence | satisfied for v1 | layered and e2e gates pass layer calibration, session drilldown, evidence/source reachability, source-depth policy, raw-preview authorization, and redaction checks |
+| Safe drilldown from high-level memory to evidence/source | satisfied for v1 | source ref reachability, source-depth policy, source-drilldown privacy, raw-preview authorization, and raw-preview redaction are required gate metrics |
+| Quantified readiness gate | satisfied for v1 | `v1_readiness_gate.py` returns `extended_evidence_ready` with 5/5 required dimensions passed |
+| Privacy boundary proof | satisfied for v1 | all required reports are aggregate-only and gate privacy leak counts are zero; private dogfood artifacts remain in the private deployment archive |
+| Deployment dogfood | satisfied for v1 | private dogfood answer flow authors, audits, answers, grades, and gates 20 positive plus 5 expected-abstain cases as aggregate-only evidence |
+
+This audit closes the v1 required readiness target. The following are not v1
+blockers and should be treated as v1.1 or research work unless the project goal
+is explicitly widened:
+
+- automatic ontology/source discovery beyond explicit source-stream rows;
+- model-backed or human-authored generated-answer quality evaluation;
+- official public leaderboard parity with LongMemEval, LoCoMo, Memora, RULER,
+  or MemPalace-style systems;
+- broader private real-archive shadow coverage and lower top-k noise floors;
+- richer long-horizon lifecycle, decay, deletion, and multi-principal
+  governance.
+
 ## Recommendation
 
-Proceed from the minimum verifiable lifecycle slice to deeper consolidation
-architecture.
+Freeze the required v1 readiness target and proceed only with v1.1 or research
+work that materially improves real-world evidence quality.
 
 The system now has a bounded proof that high-level memories can be induced from
 synthetic session events and that direct explicit memories can be written only
