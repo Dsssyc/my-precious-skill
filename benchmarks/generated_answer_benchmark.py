@@ -301,6 +301,20 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
     total_cases = len(details)
     positive_details = [detail for detail in details if not detail["expected_abstain"]]
     abstain_details = [detail for detail in details if detail["expected_abstain"]]
+    positive_without_reference_answer = 0
+    reference_answer_cases = 0
+    answer_scorable_cases = 0
+    for case in cases:
+        line_no = int(case["_case_line_no"])
+        reference_answers = text_list(case, "reference_answer", cases_path, line_no)
+        has_reference_answer = bool(reference_answers)
+        expected_abstain = case.get("expected_abstain") is True
+        if has_reference_answer:
+            reference_answer_cases += 1
+        if expected_abstain or has_reference_answer:
+            answer_scorable_cases += 1
+        if not expected_abstain and not has_reference_answer:
+            positive_without_reference_answer += 1
     passed_cases = sum(1 for detail in details if detail["case_pass"])
     privacy_hits = sum(1 for detail in details if detail["privacy_boundary_pass"])
     missing_answer_count = sum(1 for detail in details if not detail["generated_answer_present"])
@@ -319,6 +333,10 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
         "answer_cases": len(answer_case_ids),
         "positive_cases": len(positive_details),
         "abstain_cases": len(abstain_details),
+        "reference_answer_cases": reference_answer_cases,
+        "answer_scorable_cases": answer_scorable_cases,
+        "positive_without_reference_answer": positive_without_reference_answer,
+        "answer_scorable_case_rate": ratio(answer_scorable_cases, total_cases),
         "case_pass_rate": ratio(passed_cases, total_cases),
         "answer_exact_match_rate": ratio(exact_hits, len(positive_details)),
         "answer_normalized_match_rate": ratio(normalized_hits, len(positive_details)),

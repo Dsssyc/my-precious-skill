@@ -456,21 +456,27 @@ python benchmarks/generated_answer_benchmark.py \
   --fail-under case_pass_rate=1.0 \
   --fail-under answer_normalized_match_rate=1.0 \
   --fail-under abstention_accuracy=1.0 \
+  --fail-under answer_scorable_case_rate=1.0 \
   --fail-over privacy_leak_count=0 \
   --fail-over failed_case_count=0 \
   --fail-over missing_answer_count=0 \
   --fail-over duplicate_answer_count=0 \
-  --fail-over unknown_answer_count=0
+  --fail-over unknown_answer_count=0 \
+  --fail-over positive_without_reference_answer=0
 ```
 
 The answer benchmark reports aggregate `case_pass_rate`,
 `answer_exact_match_rate`, `answer_normalized_match_rate`, `answer_token_f1`,
-`abstention_accuracy`, missing/duplicate/unknown answer counts, and privacy
-counts. It also reports aggregate `source_benchmarks` and `case_origins` so
-`v1_readiness_gate.py` can reject source-less answer reports. Its claim boundary
-is narrow: it grades provided answer records against reference answers; it does
-not call a model, generate answers, or claim semantic equivalence beyond exact,
-normalized, and token-overlap checks.
+`abstention_accuracy`, missing/duplicate/unknown answer counts, answer-scorable
+case coverage, positive cases without reference answers, and privacy counts. It
+also reports aggregate `source_benchmarks` and `case_origins` so
+`v1_readiness_gate.py` can reject source-less answer reports. Required answer
+reports must have `answer_scorable_case_rate: 1.0` and
+`positive_without_reference_answer: 0`; otherwise the gate cannot prove answer
+correctness for positive cases. Its claim boundary is narrow: it grades
+provided answer records against reference answers; it does not call a model,
+generate answers, or claim semantic equivalence beyond exact, normalized, and
+token-overlap checks.
 
 Generate extractive answer records from an existing archive for that offline
 grader:

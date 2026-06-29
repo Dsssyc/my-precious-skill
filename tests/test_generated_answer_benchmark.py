@@ -90,6 +90,10 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["cases"], 2)
             self.assertEqual(payload["positive_cases"], 1)
             self.assertEqual(payload["abstain_cases"], 1)
+            self.assertEqual(payload["reference_answer_cases"], 2)
+            self.assertEqual(payload["answer_scorable_cases"], 2)
+            self.assertEqual(payload["positive_without_reference_answer"], 0)
+            self.assertEqual(payload["answer_scorable_case_rate"], 1.0)
             self.assertEqual(payload["case_pass_rate"], 1.0)
             self.assertEqual(payload["answer_exact_match_rate"], 1.0)
             self.assertEqual(payload["answer_normalized_match_rate"], 1.0)
@@ -146,6 +150,10 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
         self.assertEqual(payload["cases"], 3)
         self.assertEqual(payload["positive_cases"], 2)
         self.assertEqual(payload["abstain_cases"], 1)
+        self.assertEqual(payload["reference_answer_cases"], 3)
+        self.assertEqual(payload["answer_scorable_cases"], 3)
+        self.assertEqual(payload["positive_without_reference_answer"], 0)
+        self.assertEqual(payload["answer_scorable_case_rate"], 1.0)
         self.assertEqual(payload["source_benchmarks"], {"MyPreciousGeneratedAnswerSynthetic": 3})
         self.assertEqual(payload["case_origins"], {"packaged_generated_answer_fixture": 3})
         self.assertEqual(payload["case_pass_rate"], 1.0)
@@ -230,6 +238,55 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
             self.assertNotIn("unknown answer should not render", rendered)
             self.assertNotIn(str(cases), rendered)
             self.assertNotIn(str(answers), rendered)
+
+    def test_reports_positive_cases_without_reference_answers_as_unscored(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cases = self.write_jsonl(
+                root,
+                "cases.jsonl",
+                [
+                    {
+                        "case_id": "positive_case",
+                        "query": "QUERY SHOULD STAY PRIVATE",
+                        "category": "answer_positive",
+                    }
+                ],
+            )
+            answers = self.write_jsonl(
+                root,
+                "answers.jsonl",
+                [{"case_id": "positive_case", "generated_answer": "Some plausible answer."}],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--cases",
+                    str(cases),
+                    "--answers",
+                    str(answers),
+                    "--fail-over",
+                    "positive_without_reference_answer=0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["reference_answer_cases"], 0)
+            self.assertEqual(payload["answer_scorable_cases"], 0)
+            self.assertEqual(payload["positive_without_reference_answer"], 1)
+            self.assertEqual(payload["answer_scorable_case_rate"], 0.0)
+            self.assertEqual(payload["failed_case_count"], 1)
+            self.assertIn("positive_without_reference_answer", result.stderr)
+            rendered = result.stdout + result.stderr
+            self.assertNotIn("QUERY SHOULD STAY PRIVATE", rendered)
+            self.assertNotIn("Some plausible answer.", rendered)
 
 
 if __name__ == "__main__":

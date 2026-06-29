@@ -111,6 +111,8 @@ GENERATED_ANSWER_GATES = (
     MetricGate("missing_answer_count", "max", 0.0),
     MetricGate("duplicate_answer_count", "max", 0.0),
     MetricGate("unknown_answer_count", "max", 0.0),
+    MetricGate("positive_without_reference_answer", "max", 0.0),
+    MetricGate("answer_scorable_case_rate", "min", 1.0),
 )
 PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
 

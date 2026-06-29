@@ -692,9 +692,12 @@ positive answer cases and one abstention case. `v1_readiness_gate.py
 external `--answer-report` is supplied. This proves that the answer grading gate
 is wired into packaged readiness. External answer reports must also carry
 aggregate `source_benchmarks` and `case_origins`, so source-less answer metrics
-cannot stand in for dogfood or public answer evidence. This remains synthetic
-dogfood evidence; it does not evaluate a live model or private real-history
-generated answers.
+cannot stand in for dogfood or public answer evidence. Required answer reports
+must also prove scoreability coverage with `answer_scorable_case_rate: 1.0` and
+`positive_without_reference_answer: 0`; positive answer rows without reference
+answers are explicitly unscored rather than treated as valid dogfood evidence.
+This remains synthetic dogfood evidence; it does not evaluate a live model or
+private real-history generated answers.
 
 The deployment template also includes `tools/generate_answer_records.py`, a
 deterministic extractive adapter that turns memory search hits into private

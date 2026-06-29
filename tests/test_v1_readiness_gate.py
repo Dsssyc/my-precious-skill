@@ -117,6 +117,10 @@ class V1ReadinessGateTests(unittest.TestCase):
             "missing_answer_count": 0,
             "duplicate_answer_count": 0,
             "unknown_answer_count": 0,
+            "reference_answer_cases": 3,
+            "answer_scorable_cases": 3,
+            "positive_without_reference_answer": 0,
+            "answer_scorable_case_rate": 1.0,
             "source_benchmarks": {"MyPreciousGeneratedAnswerSynthetic": 3},
             "case_origins": {"packaged_generated_answer_fixture": 3},
             "privacy": {
@@ -812,6 +816,54 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "failed")
             failures = payload["dimensions"]["generated_answer_eval"]["failures"]
             self.assertTrue(any(failure["metric"] == "case_pass_rate" for failure in failures))
+
+    def test_required_answer_report_rejects_unscored_positive_cases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            answer_payload["case_pass_rate"] = 0.89
+            answer_payload["answer_normalized_match_rate"] = 0.88
+            answer_payload["failed_case_count"] = 11
+            answer_payload["reference_answer_cases"] = 89
+            answer_payload["answer_scorable_cases"] = 89
+            answer_payload["positive_without_reference_answer"] = 11
+            answer_payload["answer_scorable_case_rate"] = 0.89
+            answer = self.write_json(root, "answer.json", answer_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["generated_answer_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("positive_without_reference_answer", failed_metrics)
+            self.assertIn("answer_scorable_case_rate", failed_metrics)
+            self.assertIn("generated_answer_eval", result.stderr)
 
     def test_run_packaged_require_answer_uses_packaged_answer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:

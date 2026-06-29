@@ -1641,6 +1641,8 @@ Full 100-case generated-answer metrics:
 | metric | value |
 | --- | ---: |
 | reference_answer_cases | 89 |
+| answer_scorable_cases | 89 |
+| answer_scorable_case_rate | 0.89 |
 | positive_without_reference_answer | 11 |
 | case_pass_rate | 0.89 |
 | answer_normalized_match_rate | 0.8829787234042553 |
@@ -1675,6 +1677,8 @@ and therefore cannot prove answer correctness:
 | generated_answer_eval.answer_normalized_match_rate | 0.8829787234042553 |
 | generated_answer_eval.abstention_accuracy | 1.0 |
 | generated_answer_eval.failed_case_count | 11 |
+| generated_answer_eval.positive_without_reference_answer | 11 |
+| generated_answer_eval.answer_scorable_case_rate | 0.89 |
 
 The answer-scorable public subset keeps the same 83 reference-positive cases
 and 6 abstention cases, while excluding the 11 positive rows that carry no
@@ -1695,11 +1699,13 @@ python3 benchmarks/generated_answer_benchmark.py \
   --fail-under case_pass_rate=1.0 \
   --fail-under answer_normalized_match_rate=1.0 \
   --fail-under abstention_accuracy=1.0 \
+  --fail-under answer_scorable_case_rate=1.0 \
   --fail-over privacy_leak_count=0 \
   --fail-over failed_case_count=0 \
   --fail-over missing_answer_count=0 \
   --fail-over duplicate_answer_count=0 \
   --fail-over unknown_answer_count=0 \
+  --fail-over positive_without_reference_answer=0 \
   > /tmp/my_precious_public_limit_20260629/generated_answer_report_89_query_support.json
 ```
 
@@ -1710,6 +1716,10 @@ Answer-scorable subset metrics:
 | cases | 89 |
 | positive_cases | 83 |
 | abstain_cases | 6 |
+| reference_answer_cases | 89 |
+| answer_scorable_cases | 89 |
+| answer_scorable_case_rate | 1.0 |
+| positive_without_reference_answer | 0 |
 | adapter.memory_answer_count | 83 |
 | adapter.abstention_answer_count | 6 |
 | adapter.no_hit_count | 1 |
@@ -1736,6 +1746,8 @@ report:
 | v1_readiness.scorecard.required_passed | 6 |
 | public_benchmark_adapter.status | passed |
 | generated_answer_eval.status | passed |
+| generated_answer_eval.answer_scorable_case_rate | 1.0 |
+| generated_answer_eval.positive_without_reference_answer | 0 |
 
 This closes the public-adapter answer abstention gap without reading
 `expected_abstain` or `reference_answer` inside the answer-record adapter. The
@@ -1758,12 +1770,38 @@ Current packaged-plus-public-answer v1 readiness summary:
 | public_benchmark_adapter.status | passed |
 | real_archive_shadow_eval.status | not_run_optional |
 | generated_answer_eval.status | passed for 89 answer-scorable public cases |
+| generated_answer_eval.answer_scorable_case_rate | 1.0 |
+| generated_answer_eval.positive_without_reference_answer | 0 |
 | privacy.aggregate_only | true |
 | privacy.memory_text_rendered | false |
 | privacy.private_probe_cases_rendered | false |
 | privacy.queries_rendered | false |
 | privacy.source_paths_rendered | false |
 | privacy.raw_refs_rendered | false |
+
+## Private Generated-Answer Dogfood Scoreability Audit
+
+Date: 2026-06-29
+
+The private redacted real-history shadow probe was inspected only for aggregate
+schema readiness. No private queries, case IDs, memory IDs, memory text, source
+paths, raw refs, generated answers, or reference answers were rendered or copied
+into this repository.
+
+Aggregate schema counts:
+
+| probe set | cases | rows with reference_answer | rows with expected_abstain | rows with forbidden_output_patterns |
+| --- | ---: | ---: | ---: | ---: |
+| redacted real-history v1 | 6 | 0 | 0 | 3 |
+| redacted real-history v2 | 27 | 0 | 3 | 9 |
+
+This means the existing private shadow probes are retrieval/no-hit/provenance
+fixtures, not generated-answer scoring fixtures. They cannot produce a private
+generated-answer readiness claim because positive answer correctness requires
+reference answers. The generated-answer benchmark and v1 readiness gate now make
+that boundary explicit through `answer_scorable_case_rate` and
+`positive_without_reference_answer`: a required answer report with unscored
+positive rows is rejected even if other answer metrics are present.
 
 ## Recommendation
 
@@ -1828,9 +1866,9 @@ evidence rather than full public generated-answer readiness. The explicit
 source-stream registry path now has a packaged synthetic benchmark and is
 required by the core v1 readiness gate. The current public/shadow readiness
 runs still cannot claim private real-archive generated-answer behavior or live
-model answer quality. The next valuable work is private/dogfood answer cases
-with references, remaining scope-mixed top-k noise reduction, and broader
-consolidation/decay evidence.
+model answer quality. The next valuable work is a private/dogfood
+generated-answer case set with reference answers, remaining scope-mixed top-k
+noise reduction, and broader consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1866,9 +1904,9 @@ consolidation/decay evidence.
    public records outside the repository. The 100-case LongMemEval cleaned
    local probe passes memory/source/answer reachability, privacy, and
    answer-level abstention gates at 1.0. The reusable suite now has offline
-   generated-answer grading for provided answers; the next step is larger
-   bounded samples and a dogfood adapter that can produce answer records for
-   that gate without committing private answer text.
+   generated-answer grading for provided answers; the next step is a private
+   dogfood answer case set with reference answers, plus larger bounded public
+   samples, without committing private answer text.
 
 6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,
