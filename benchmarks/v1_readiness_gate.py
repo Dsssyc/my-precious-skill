@@ -90,6 +90,12 @@ SOURCE_STREAM_GATES = (
 
 SHADOW_GATES = (
     MetricGate("metrics.memory_recall_at_5", "min", 1.0),
+    MetricGate("metrics.memory_precision_at_5", "min", 0.4),
+    MetricGate("metrics.top_k_noise_at_5", "max", 0.6),
+    MetricGate("metrics.abstain_pass_rate", "min", 1.0),
+    MetricGate("metrics.active_memory_suppression", "min", 1.0),
+    MetricGate("metrics.noise_sources_at_5.scope_mixed", "max", 3.0),
+    MetricGate("metrics.noise_sources_at_5.inactive_lifecycle", "max", 0.0),
     MetricGate("metrics.privacy_boundary_pass_rate", "min", 1.0),
     MetricGate("metrics.forbidden_output_violations", "max", 0.0),
     MetricGate("metrics.provenance_coverage.score", "min", 1.0),

@@ -110,9 +110,12 @@ and JSONL indexes.
 - `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
   combines required packaged synthetic reports, including the explicit source
   stream registry benchmark, with optional adapted public benchmark, private
-  shadow-eval, and generated-answer aggregate reports. It reports bounded
-  readiness status without rendering private probe cases, queries, memory text,
-  source paths, raw refs, generated answers, or reference answers.
+  shadow-eval, and generated-answer aggregate reports. Required private shadow
+  reports must include the privacy shape plus a minimum real-archive retrieval
+  quality floor for precision, top-k noise, abstention, active-memory
+  suppression, scope-mixed noise, and inactive-lifecycle noise. It reports
+  bounded readiness status without rendering private probe cases, queries,
+  memory text, source paths, raw refs, generated answers, or reference answers.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -629,8 +632,14 @@ skill repository. The shadow runner's report-level `privacy` block declares
 that the report is aggregate-only and that private probe cases, queries, memory
 IDs, memory text, source refs, source content, source paths, and raw refs were
 not rendered. The v1 readiness gate rejects private shadow reports that omit
-this privacy shape even when recall metrics pass. The shadow runner emits a
-privacy-safe `diagnostics` block that groups failures by
+this privacy shape even when recall metrics pass. The gate also requires the
+private shadow report to carry a minimum real-archive quality floor:
+`memory_precision_at_5 >= 0.4`, `top_k_noise_at_5 <= 0.6`,
+`abstain_pass_rate == 1.0`, `active_memory_suppression == 1.0`,
+`noise_sources_at_5.scope_mixed <= 3`, and
+`noise_sources_at_5.inactive_lifecycle == 0`. Those thresholds are current
+regression floors, not the final desired quality level. The shadow runner emits
+a privacy-safe `diagnostics` block that groups failures by
 `recall_miss`, `abstain_false_positive`, `suppression_failure`,
 `privacy_failure`, and `top_k_noise`. Diagnostics entries use case ordinals,
 short case-label hashes, counts, and noise buckets only; they do not render

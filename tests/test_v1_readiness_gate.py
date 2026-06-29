@@ -130,6 +130,16 @@ class V1ReadinessGateTests(unittest.TestCase):
             "report_kind": "real_archive_shadow_evaluation",
             "metrics": {
                 "memory_recall_at_5": 1.0,
+                "memory_precision_at_5": 0.42424242424242425,
+                "top_k_noise_at_5": 0.5757575757575757,
+                "noise_sources_at_5": {
+                    "broad_lexical_match": 35,
+                    "inactive_lifecycle": 0,
+                    "low_signal_memory_node": 0,
+                    "scope_mixed": 3,
+                },
+                "abstain_pass_rate": 1.0,
+                "active_memory_suppression": 1.0,
                 "privacy_boundary_pass_rate": 1.0,
                 "forbidden_output_violations": 0,
                 "provenance_coverage": {"score": 1.0},
@@ -476,6 +486,96 @@ class V1ReadinessGateTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
             self.assertEqual(payload["dimensions"]["real_archive_shadow_eval"]["status"], "passed")
+
+    def test_required_shadow_report_requires_retrieval_quality_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            shadow_payload = self.passing_shadow_report()
+            shadow_payload["metrics"].pop("memory_precision_at_5")
+            shadow = self.write_json(root, "shadow.json", shadow_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--shadow-report",
+                    str(shadow),
+                    "--require-shadow",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["real_archive_shadow_eval"]["status"], "failed")
+            failures = payload["dimensions"]["real_archive_shadow_eval"]["failures"]
+            self.assertTrue(any(failure["metric"] == "metrics.memory_precision_at_5" for failure in failures))
+
+    def test_required_shadow_report_rejects_retrieval_quality_regression(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            shadow_payload = self.passing_shadow_report()
+            shadow_payload["metrics"]["memory_precision_at_5"] = 0.39
+            shadow_payload["metrics"]["top_k_noise_at_5"] = 0.61
+            shadow_payload["metrics"]["abstain_pass_rate"] = 0.5
+            shadow_payload["metrics"]["active_memory_suppression"] = 0.5
+            shadow_payload["metrics"]["noise_sources_at_5"]["scope_mixed"] = 4
+            shadow_payload["metrics"]["noise_sources_at_5"]["inactive_lifecycle"] = 1
+            shadow = self.write_json(root, "shadow.json", shadow_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--shadow-report",
+                    str(shadow),
+                    "--require-shadow",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["real_archive_shadow_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("metrics.memory_precision_at_5", failed_metrics)
+            self.assertIn("metrics.top_k_noise_at_5", failed_metrics)
+            self.assertIn("metrics.abstain_pass_rate", failed_metrics)
+            self.assertIn("metrics.active_memory_suppression", failed_metrics)
+            self.assertIn("metrics.noise_sources_at_5.scope_mixed", failed_metrics)
+            self.assertIn("metrics.noise_sources_at_5.inactive_lifecycle", failed_metrics)
 
     def test_required_shadow_report_requires_privacy_shape(self):
         with tempfile.TemporaryDirectory() as tmpdir:

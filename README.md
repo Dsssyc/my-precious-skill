@@ -419,10 +419,17 @@ Optional `--public-report` and
 `--shadow-report` inputs can add adapted public-benchmark and private
 real-archive aggregate evidence. Shadow reports must include the aggregate-only
 privacy shape from `shadow_eval_memory_archive.py`; passing metrics alone are
-not accepted as private shadow evidence. Optional `--answer-report` can add
-offline generated-answer grading evidence. Add `--require-public`,
-`--require-shadow`, or `--require-answer` when those optional dimensions should
-fail the gate if absent. When `--run-packaged --require-answer` is used without an
+not accepted as private shadow evidence. Required shadow reports must also meet
+the current real-archive quality floor: `memory_precision_at_5 >= 0.4`,
+`top_k_noise_at_5 <= 0.6`, `abstain_pass_rate == 1.0`,
+`active_memory_suppression == 1.0`,
+`noise_sources_at_5.scope_mixed <= 3`, and
+`noise_sources_at_5.inactive_lifecycle == 0`. This floor prevents recall-only
+greenwashing; it is not a claim that real retrieval noise is solved. Optional
+`--answer-report` can add offline generated-answer grading evidence. Add
+`--require-public`, `--require-shadow`, or `--require-answer` when those
+optional dimensions should fail the gate if absent. When
+`--run-packaged --require-answer` is used without an
 `--answer-report`, the gate runs the packaged synthetic generated-answer fixture
 and includes that aggregate report automatically. Public reports must be
 layered recall reports produced from converted

@@ -1283,6 +1283,12 @@ Extended readiness summary:
 | shadow_privacy.memory_ids_rendered | false |
 | shadow_privacy.source_refs_rendered | false |
 | shadow_privacy.raw_refs_rendered | false |
+| shadow_quality_floor.memory_precision_at_5 | >= 0.4 |
+| shadow_quality_floor.top_k_noise_at_5 | <= 0.6 |
+| shadow_quality_floor.abstain_pass_rate | >= 1.0 |
+| shadow_quality_floor.active_memory_suppression | >= 1.0 |
+| shadow_quality_floor.noise_sources_at_5.scope_mixed | <= 3 |
+| shadow_quality_floor.noise_sources_at_5.inactive_lifecycle | <= 0 |
 
 Private real-archive shadow metrics:
 
@@ -1316,8 +1322,13 @@ the private deployment archive must pass recall, abstention, active-memory
 suppression, privacy, provenance, lifecycle, and audit gates under
 `--require-shadow`, and the v1 gate now rejects private shadow reports whose
 report-level privacy shape does not explicitly rule out rendered probe cases,
-queries, memory IDs, source refs, and raw refs. The top-k profile still shows a
-real quality gap:
+queries, memory IDs, source refs, and raw refs. Current reruns must also satisfy
+a minimum real-archive retrieval quality floor:
+`memory_precision_at_5 >= 0.4`, `top_k_noise_at_5 <= 0.6`,
+`abstain_pass_rate >= 1.0`, `active_memory_suppression >= 1.0`,
+`noise_sources_at_5.scope_mixed <= 3`, and
+`noise_sources_at_5.inactive_lifecycle <= 0`. This prevents recall-only
+readiness claims. The top-k profile still shows a real quality gap:
 case-level recall is perfect on the private probe set, but precision is only
 0.424 and most remaining noise is broad lexical match fill. Public benchmark
 adapter evidence is not included in this shadow-only run; the current combined
