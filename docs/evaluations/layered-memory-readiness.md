@@ -1605,15 +1605,15 @@ Commands:
 python3 templates/agent-memory-repo/tools/generate_answer_records.py \
   --repo /tmp/my_precious_public_limit_20260629/archive_100_after_fix \
   --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
-  --output /tmp/my_precious_public_limit_20260629/generated_answer_records_100_fulltext.jsonl \
+  --output /tmp/my_precious_public_limit_20260629/generated_answer_records_100_query_support.jsonl \
   --limit 5 \
-  > /tmp/my_precious_public_limit_20260629/generated_answer_adapter_report_100_fulltext.json
+  > /tmp/my_precious_public_limit_20260629/generated_answer_adapter_report_100_query_support.json
 
 python3 benchmarks/generated_answer_benchmark.py \
   --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
-  --answers /tmp/my_precious_public_limit_20260629/generated_answer_records_100_fulltext.jsonl \
-  --details-jsonl /tmp/my_precious_public_limit_20260629/generated_answer_details_100_fulltext.jsonl \
-  > /tmp/my_precious_public_limit_20260629/generated_answer_report_100_fulltext.json
+  --answers /tmp/my_precious_public_limit_20260629/generated_answer_records_100_query_support.jsonl \
+  --details-jsonl /tmp/my_precious_public_limit_20260629/generated_answer_details_100_query_support.jsonl \
+  > /tmp/my_precious_public_limit_20260629/generated_answer_report_100_query_support.json
 ```
 
 Adapter aggregate report:
@@ -1622,9 +1622,11 @@ Adapter aggregate report:
 | --- | ---: |
 | cases | 100 |
 | answers_written | 100 |
-| memory_answer_count | 99 |
-| abstention_answer_count | 1 |
+| answerability_policy | query_token_support |
+| memory_answer_count | 94 |
+| abstention_answer_count | 6 |
 | no_hit_count | 1 |
+| unsupported_hit_count | 5 |
 | source_benchmarks.LongMemEval | 100 |
 | case_origins.public_benchmark_adapter | 100 |
 | privacy.aggregate_only | true |
@@ -1640,11 +1642,11 @@ Full 100-case generated-answer metrics:
 | --- | ---: |
 | reference_answer_cases | 89 |
 | positive_without_reference_answer | 11 |
-| case_pass_rate | 0.84 |
+| case_pass_rate | 0.89 |
 | answer_normalized_match_rate | 0.8829787234042553 |
 | answer_token_f1 | 0.8829787234042553 |
-| abstention_accuracy | 0.16666666666666666 |
-| failed_case_count | 16 |
+| abstention_accuracy | 1.0 |
+| failed_case_count | 11 |
 | missing_answer_count | 0 |
 | duplicate_answer_count | 0 |
 | unknown_answer_count | 0 |
@@ -1657,42 +1659,105 @@ Breakdown:
 | subset | cases | case_pass_rate | answer_normalized_match_rate | answer_token_f1 | abstention_accuracy | failed_case_count | privacy_leak_count |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | reference-positive | 83 | 1.0 | 1.0 | 1.0 | 0.0 | 0 | 0 |
-| reference-abstain | 6 | 0.16666666666666666 | 0.0 | 0.0 | 0.16666666666666666 | 5 | 0 |
-| all reference-answer cases | 89 | 0.9438202247191011 | 1.0 | 1.0 | 0.16666666666666666 | 5 | 0 |
-| all 100 adapted cases | 100 | 0.84 | 0.8829787234042553 | 0.8829787234042553 | 0.16666666666666666 | 16 | 0 |
+| reference-abstain | 6 | 1.0 | 0.0 | 0.0 | 1.0 | 0 | 0 |
+| all reference-answer cases | 89 | 1.0 | 1.0 | 1.0 | 1.0 | 0 | 0 |
+| all 100 adapted cases | 100 | 0.89 | 0.8829787234042553 | 0.8829787234042553 | 1.0 | 11 | 0 |
 
 `v1_readiness_gate.py --require-answer` correctly rejects the full public
-answer report:
+100-case answer report because eleven positive cases have no reference answer
+and therefore cannot prove answer correctness:
 
 | metric | value |
 | --- | ---: |
 | v1_readiness.overall_status | not_ready |
 | generated_answer_eval.status | failed |
-| generated_answer_eval.case_pass_rate | 0.84 |
+| generated_answer_eval.case_pass_rate | 0.89 |
 | generated_answer_eval.answer_normalized_match_rate | 0.8829787234042553 |
-| generated_answer_eval.abstention_accuracy | 0.16666666666666666 |
-| generated_answer_eval.failed_case_count | 16 |
+| generated_answer_eval.abstention_accuracy | 1.0 |
+| generated_answer_eval.failed_case_count | 11 |
 
-This closes a narrow positive-answer extraction gap: the adapter now reads full
-memory text from `index/memories.jsonl` instead of relying on clipped search
-display text, so the 83 reference-positive public cases pass exactly. It does
-not close full public generated-answer readiness. The remaining blocker is
-answer abstention: five of six public abstention cases still receive a memory
-answer from the extractive adapter, and eleven positive adapted cases do not
-carry reference answers for generated-answer scoring.
+The answer-scorable public subset keeps the same 83 reference-positive cases
+and 6 abstention cases, while excluding the 11 positive rows that carry no
+reference answer:
 
-Current combined public-plus-shadow v1 readiness summary:
+```bash
+python3 templates/agent-memory-repo/tools/generate_answer_records.py \
+  --repo /tmp/my_precious_public_limit_20260629/archive_100_after_fix \
+  --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100_answer_scorable.jsonl \
+  --output /tmp/my_precious_public_limit_20260629/generated_answer_records_89_query_support.jsonl \
+  --limit 5 \
+  > /tmp/my_precious_public_limit_20260629/generated_answer_adapter_report_89_query_support.json
+
+python3 benchmarks/generated_answer_benchmark.py \
+  --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100_answer_scorable.jsonl \
+  --answers /tmp/my_precious_public_limit_20260629/generated_answer_records_89_query_support.jsonl \
+  --details-jsonl /tmp/my_precious_public_limit_20260629/generated_answer_details_89_query_support.jsonl \
+  --fail-under case_pass_rate=1.0 \
+  --fail-under answer_normalized_match_rate=1.0 \
+  --fail-under abstention_accuracy=1.0 \
+  --fail-over privacy_leak_count=0 \
+  --fail-over failed_case_count=0 \
+  --fail-over missing_answer_count=0 \
+  --fail-over duplicate_answer_count=0 \
+  --fail-over unknown_answer_count=0 \
+  > /tmp/my_precious_public_limit_20260629/generated_answer_report_89_query_support.json
+```
+
+Answer-scorable subset metrics:
+
+| metric | value |
+| --- | ---: |
+| cases | 89 |
+| positive_cases | 83 |
+| abstain_cases | 6 |
+| adapter.memory_answer_count | 83 |
+| adapter.abstention_answer_count | 6 |
+| adapter.no_hit_count | 1 |
+| adapter.unsupported_hit_count | 5 |
+| case_pass_rate | 1.0 |
+| answer_normalized_match_rate | 1.0 |
+| answer_token_f1 | 1.0 |
+| abstention_accuracy | 1.0 |
+| failed_case_count | 0 |
+| missing_answer_count | 0 |
+| duplicate_answer_count | 0 |
+| unknown_answer_count | 0 |
+| privacy_leak_count | 0 |
+| source_benchmarks.LongMemEval | 89 |
+| case_origins.public_benchmark_adapter | 89 |
+
+The combined packaged-plus-public readiness run accepts that answer-scorable
+report:
 
 | metric | value |
 | --- | ---: |
 | v1_readiness.overall_status | extended_evidence_ready |
-| v1_readiness.scorecard.required_dimensions | 5 |
-| v1_readiness.scorecard.required_passed | 5 |
+| v1_readiness.scorecard.required_dimensions | 6 |
+| v1_readiness.scorecard.required_passed | 6 |
+| public_benchmark_adapter.status | passed |
+| generated_answer_eval.status | passed |
+
+This closes the public-adapter answer abstention gap without reading
+`expected_abstain` or `reference_answer` inside the answer-record adapter. The
+adapter now requires the selected memory hit to support the query through
+complete normalized query text or query-token coverage before extracting an
+answer; unsupported top hits become the standard abstention answer. It does not
+close full public generated-answer readiness because 11 positive adapted cases
+still lack reference answers for grading, and it does not claim live model
+answer quality or private real-archive generated-answer behavior.
+
+Current packaged-plus-public-answer v1 readiness summary:
+
+| metric | value |
+| --- | ---: |
+| v1_readiness.overall_status | extended_evidence_ready |
+| v1_readiness.scorecard.required_dimensions | 6 |
+| v1_readiness.scorecard.required_passed | 6 |
 | v1_readiness.scorecard.optional_dimensions | 1 |
 | v1_readiness.scorecard.optional_passed | 0 |
 | public_benchmark_adapter.status | passed |
-| real_archive_shadow_eval.status | passed |
-| generated_answer_eval.status | not_run_optional |
+| real_archive_shadow_eval.status | not_run_optional |
+| generated_answer_eval.status | passed for 89 answer-scorable public cases |
 | privacy.aggregate_only | true |
 | privacy.memory_text_rendered | false |
 | privacy.private_probe_cases_rendered | false |
@@ -1754,15 +1819,18 @@ accepts them. The deployment template can now produce extractive answer records
 from archive search hits for that grader, with aggregate-only stdout and no
 reference-answer input. A public LongMemEval 100-case generated-answer adapter
 probe now proves full positive reference-answer extraction on 83 reference
-positive cases, but the full 100-case answer report still fails because
-abstention accuracy is only 0.16666666666666666 and 11 positive cases lack
-reference answers. The explicit source-stream registry path now has a packaged
-synthetic benchmark and is required by the core v1 readiness gate. The current
-public/shadow readiness runs still cannot claim full public or private
-generated-answer behavior. The next valuable work is generated-answer
-abstention policy evidence, private/dogfood answer cases with references,
-remaining scope-mixed top-k noise reduction, and broader consolidation/decay
-evidence.
+positive cases and full abstention accuracy on 6 public abstention cases. The
+89-case answer-scorable public subset passes the generated-answer gate at 1.0
+for case pass rate, normalized answer match, token F1, abstention accuracy, and
+privacy. The full 100-case answer report still fails because 11 positive cases
+lack reference answers for scoring, so this is answer-scorable public-adapter
+evidence rather than full public generated-answer readiness. The explicit
+source-stream registry path now has a packaged synthetic benchmark and is
+required by the core v1 readiness gate. The current public/shadow readiness
+runs still cannot claim private real-archive generated-answer behavior or live
+model answer quality. The next valuable work is private/dogfood answer cases
+with references, remaining scope-mixed top-k noise reduction, and broader
+consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 

@@ -110,7 +110,8 @@ and JSONL indexes.
   deployment-repo helper that searches an existing archive and writes private
   generated-answer JSONL records for `generated_answer_benchmark.py`. Its report
   is aggregate-only and records memory-answer, abstention, source benchmark, and
-  case-origin counts. It does not call a model, consume reference answers, or
+  case-origin counts, plus the query-support answerability policy and
+  unsupported-hit count. It does not call a model, consume reference answers, or
   claim semantic answer quality.
 - `benchmarks/cases/generated_answer_synthetic*.jsonl`: packaged synthetic
   answer cases and answer records used when `v1_readiness_gate.py` runs with

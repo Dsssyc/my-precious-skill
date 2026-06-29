@@ -24,6 +24,7 @@ import search_memory  # noqa: E402
 
 
 ABSTENTION_ANSWER = "There is not enough information in memory to answer."
+ANSWERABILITY_POLICY = "query_token_support"
 REFERENCE_ANSWER_PREFIX_PATTERN = re.compile(r"\bReference answer:\s*", re.IGNORECASE)
 REFERENCE_SECTION_BOUNDARY_PATTERN = re.compile(
     r"\s+\b(?:Expected memory|Query|Reference evidence|Synthetic answer target):",
@@ -100,6 +101,26 @@ def full_hit_text(repo: Path, hit: search_memory.Hit) -> str:
     return text or hit.text or hit.title
 
 
+def query_support_tokens(text: str) -> list[str]:
+    return search_memory.coverage_query_tokens(
+        search_memory.meaningful_query_tokens(search_memory.unique_query_tokens(text))
+    )
+
+
+def hit_supports_query(repo: Path, hit: search_memory.Hit, query: str) -> bool:
+    full_text = search_memory.compact_whitespace(full_hit_text(repo, hit))
+    query_text = search_memory.compact_whitespace(query)
+    if not full_text or not query_text:
+        return False
+    if query_text.lower() in full_text.lower():
+        return True
+    required_tokens = query_support_tokens(query_text)
+    if not required_tokens:
+        return False
+    full_text_tokens = set(query_support_tokens(full_text))
+    return all(token in full_text_tokens for token in required_tokens)
+
+
 def trim_reference_answer_tail(answer: str, query: str) -> str:
     boundary = REFERENCE_SECTION_BOUNDARY_PATTERN.search(answer)
     if boundary:
@@ -129,6 +150,7 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
     memory_answer_count = 0
     abstention_answer_count = 0
     no_hit_count = 0
+    unsupported_hit_count = 0
 
     for case in cases:
         source_benchmark = optional_text(case, "source_benchmark")
@@ -140,7 +162,7 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
         case_id = str(case["case_id"])
         query = str(case["query"])
         hits = search_memory_hits(repo, query, limit)
-        if hits:
+        if hits and hit_supports_query(repo, hits[0], query):
             answer = extract_answer_from_hit(repo, hits[0], query)
             if answer == ABSTENTION_ANSWER:
                 abstention_answer_count += 1
@@ -149,18 +171,23 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
         else:
             answer = ABSTENTION_ANSWER
             abstention_answer_count += 1
-            no_hit_count += 1
+            if hits:
+                unsupported_hit_count += 1
+            else:
+                no_hit_count += 1
         records.append({"case_id": case_id, "generated_answer": answer})
 
     report = {
         "report_kind": "generated_answer_records_adapter",
         "report_version": 1,
         "claim_boundary": "extractive memory-answer records only; no model-generation or semantic equivalence claim",
+        "answerability_policy": ANSWERABILITY_POLICY,
         "cases": len(cases),
         "answers_written": len(records),
         "memory_answer_count": memory_answer_count,
         "abstention_answer_count": abstention_answer_count,
         "no_hit_count": no_hit_count,
+        "unsupported_hit_count": unsupported_hit_count,
         "source_benchmarks": dict(sorted(source_benchmarks.items())),
         "case_origins": dict(sorted(case_origins.items())),
         "privacy": {
