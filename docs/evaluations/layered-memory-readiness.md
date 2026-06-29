@@ -47,6 +47,13 @@ boundary:
   The report must remain aggregate-only. Use `--require-shadow` only when the
   local private probe set should be a required readiness gate for the run.
 
+The current strongest local gate also includes a private real-archive
+aggregate shadow report. That extended run reports
+`overall_status: extended_evidence_ready`, which means the packaged synthetic
+dimensions and the private aggregate shadow dimension passed. It still does
+not prove public benchmark parity, generated-answer correctness, or complete
+long-horizon governance.
+
 Run the packaged convergence gate locally with:
 
 ```bash
@@ -733,11 +740,12 @@ Current gaps:
   ontology.
 - Automatic induction is implemented as a conservative minimum slice. It can
   promote synthetic reusable facts into high-level memories and run a
-  dependency-light semantic lifecycle pass. A 2026-06-22 aggregate-only dry run
-  has now measured induction and review-queue behavior on a real deployment
-  archive without rendering private memory text or source paths, but this is
-  still not a broad natural-language consolidation engine, a real-history
-  organic distribution proof, or an end-to-end generated-answer evaluation.
+  dependency-light semantic lifecycle pass. Aggregate-only private deployment
+  archive runs have now measured induction, review-queue behavior, and the
+  2026-06-29 `--require-shadow` v1 readiness path without rendering private
+  memory text, probe cases, queries, source paths, or raw refs. This is still
+  not a broad natural-language consolidation engine, a public benchmark score,
+  or an end-to-end generated-answer evaluation.
 - Direct explicit-memory writes exist in the reusable updater, but runtime-level
   adapters and governing-prompt integration still need policy design.
 - The system has `global`, `domain`, and `project` memory files, and now has a
@@ -1172,6 +1180,82 @@ The change reduces broad lexical top-k fill without changing case-level recall,
 abstention, active-memory suppression, privacy, provenance, or lifecycle
 integrity gates. It intentionally favors a more diverse top-k set over listing
 multiple near-neighbor memories with the same layer, scope, and topic.
+
+## Real Archive Extended V1 Gate Snapshot
+
+Date: 2026-06-29
+
+This run used the current reusable `shadow_eval_memory_archive.py` and
+`v1_readiness_gate.py` against the private deployment archive's redacted v2
+probe cases. The shadow report was written only outside this repository and
+contained aggregate JSON. It did not render private probe cases, queries,
+memory text, source paths, source content, or raw refs.
+
+Commands:
+
+```bash
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v2.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  --fail-under-file /path/to/private-agent-memory/eval/shadow_eval_real_history_v2.fail-under.json \
+  --fail-over-file /path/to/private-agent-memory/eval/shadow_eval_real_history_v2.fail-over.json \
+  > /tmp/private-shadow-eval.json
+
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --shadow-report /tmp/private-shadow-eval.json \
+  --require-shadow \
+  > /tmp/private-v1-readiness-shadow.json
+```
+
+Extended readiness summary:
+
+| metric | value |
+| --- | ---: |
+| v1_readiness.overall_status | extended_evidence_ready |
+| v1_readiness.required_dimensions | 4 |
+| v1_readiness.required_passed | 4 |
+| v1_readiness.optional_dimensions | 1 |
+| v1_readiness.optional_passed | 0 |
+| public_benchmark_adapter.status | not_run_optional |
+| real_archive_shadow_eval.status | passed |
+| privacy.aggregate_only | true |
+
+Private real-archive shadow metrics:
+
+| metric | value |
+| --- | ---: |
+| archive.memory_records | 1402 |
+| archive.legacy_session_records | 275 |
+| probe_cases.cases | 27 |
+| probe_cases.positive_cases | 24 |
+| probe_cases.abstain_cases | 3 |
+| memory_recall_at_5 | 1.0 |
+| memory_precision_at_5 | 0.42424242424242425 |
+| top_k_noise_at_5 | 0.5757575757575757 |
+| noise_sources_at_5.broad_lexical_match | 35 |
+| noise_sources_at_5.scope_mixed | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 |
+| abstain_pass_rate | 1.0 |
+| active_memory_suppression | 1.0 |
+| privacy_boundary_pass_rate | 1.0 |
+| forbidden_output_violations | 0 |
+| provenance_coverage.score | 1.0 |
+| provenance_coverage.evidence_ref_coverage | 1.0 |
+| lifecycle_integrity.score | 1.0 |
+| lifecycle_integrity.broken_refs | 0 |
+| lifecycle_integrity.illegal_state_records | 0 |
+| audit_status | passed |
+
+This is stronger than the packaged-only `core_synthetic_ready` baseline because
+the private deployment archive must pass recall, abstention, active-memory
+suppression, privacy, provenance, lifecycle, and audit gates under
+`--require-shadow`. The top-k profile still shows a real quality gap:
+case-level recall is perfect on the private probe set, but precision is only
+0.424 and most remaining noise is broad lexical match fill. Public benchmark
+adapter evidence is still absent in this run.
 
 ## Recommendation
 
