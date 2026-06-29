@@ -113,6 +113,13 @@ and JSONL indexes.
   counts, and a case-file fingerprint without rendering case IDs, queries, or
   reference answers. This closes the dogfood case-set readiness tooling gap but
   does not generate or grade answers.
+- `templates/agent-memory-repo/tools/author_generated_answer_cases.py`:
+  aggregate-only deployment-repo helper that authors private generated-answer
+  case JSONL from active layered memory nodes. It writes private queries and
+  reference answers only inside the deployment archive while stdout reports
+  selected case counts, skip counts, source benchmark counts, case-origin
+  counts, and privacy flags. This creates an initial dogfood case-set path but
+  is still extractive from existing memories, not a human-written benchmark.
 - `templates/agent-memory-repo/tools/generate_answer_records.py`: extractive
   deployment-repo helper that searches an existing archive and writes private
   generated-answer JSONL records for `generated_answer_benchmark.py`. Its report

@@ -509,6 +509,26 @@ coverage, safe aggregate `source_benchmarks` and `case_origins`, and
 `cases_sha256`. It is a readiness check for the case set only; it does not
 produce answer records or prove answer correctness.
 
+Author an initial private dogfood generated-answer case set from an existing
+deployment archive's layered memories:
+
+```bash
+python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
+  --repo ~/repos/agent-memory \
+  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --dry-run
+python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
+  --repo ~/repos/agent-memory \
+  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --write
+```
+
+The authoring helper writes private cases only inside the deployment archive.
+Its stdout is aggregate-only and reports selected case counts, skip counts,
+source benchmark counts, case-origin counts, and privacy flags. The generated
+case file contains private queries and reference answers; keep it out of this
+development repository.
+
 Generate extractive answer records from an existing archive for that offline
 grader:
 

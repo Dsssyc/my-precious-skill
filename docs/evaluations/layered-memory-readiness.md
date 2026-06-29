@@ -1822,6 +1822,33 @@ answer report. They do not create private reference-answer cases, do not score
 live model generation, and do not turn the existing shadow probe fixtures into
 generated-answer fixtures.
 
+## Private Dogfood Case Authoring Dry Run
+
+Date: 2026-06-30
+
+`author_generated_answer_cases.py` was run against the private deployment
+archive in dry-run mode only. No private case file was written, and no private
+queries, reference answers, memory IDs, source paths, raw refs, or memory text
+were rendered or copied into this repository.
+
+Aggregate dry-run metrics:
+
+| metric | value |
+| --- | ---: |
+| candidate_memory_count | 1402 |
+| selected_case_count | 20 |
+| would_write_count | 20 |
+| written_count | 0 |
+| source_benchmarks.MyPreciousPrivateDogfood | 20 |
+| case_origins.private_dogfood | 20 |
+| skip_counts.insufficient_query_terms | 2 |
+
+This proves that the reusable deployment helper can find a bounded initial
+private dogfood case set from active layered memories with aggregate-only
+stdout. It does not prove generated-answer correctness, because the private
+case file was not written in this repository, answer records were not generated,
+and `generated_answer_benchmark.py` was not run against private answers.
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -1891,12 +1918,15 @@ sets before answer records exist. That audit can require source benchmark and
 case-origin counts such as `MyPreciousPrivateDogfood` and `private_dogfood`,
 and can gate `answer_scorable_case_rate`, `positive_without_reference_answer`,
 and `unsafe_aggregate_identifier_count` without rendering private case IDs,
-queries, or reference answers. This closes the reusable tooling gap for
-dogfood case-set readiness, but it still does not create the private dogfood
-case set, generate answers, or prove private real-archive answer quality. The
-next valuable work is a private/dogfood generated-answer case set with
-reference answers, remaining scope-mixed top-k noise reduction, and broader
-consolidation/decay evidence.
+queries, or reference answers. The deployment template now also has
+`author_generated_answer_cases.py`, which can author an initial private dogfood
+case JSONL from active layered memory nodes with aggregate-only stdout. This
+closes the reusable tooling gap for creating and auditing a private dogfood
+case set, but it still does not run that tool against the live private archive
+in this repository, generate answers, or prove private real-archive answer
+quality. The next valuable work is to run the private case-authoring and answer
+grading flow in the deployment archive, continue reducing remaining scope-mixed
+top-k noise, and broaden consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1933,9 +1963,9 @@ consolidation/decay evidence.
    local probe passes memory/source/answer reachability, privacy, and
    answer-level abstention gates at 1.0. The reusable suite now has offline
    generated-answer grading for provided answers plus aggregate-only case-set
-   scoreability audit before answers exist; the next step is a private dogfood
-   answer case set with reference answers, plus larger bounded public samples,
-   without committing private answer text.
+   scoreability audit and private case authoring before answers exist; the next
+   step is to run the private dogfood answer flow in the deployment archive,
+   plus larger bounded public samples, without committing private answer text.
 
 6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,
