@@ -2,9 +2,10 @@
 """Incrementally archive session/source records into an agent memory repository.
 
 The updater is intentionally conservative: it uses the current project path as
-the high-water-mark key and writes searchable summaries plus short redacted
-evidence snippets. Better source-specific summarizers can replace or refine
-these summaries later without changing the archive shape.
+the source-record partition, uses the archive scope as the memory-domain key,
+and writes searchable summaries plus short redacted evidence snippets. Better
+source-specific summarizers can replace or refine these summaries later without
+changing the archive shape.
 """
 
 from __future__ import annotations
@@ -703,6 +704,20 @@ def normalize_archive_scope(scope_arg: str | None, project_path: Path) -> str:
     return scope
 
 
+def normalize_project_partition(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    path = Path(value).expanduser()
+    return str(path.resolve()) if path.is_absolute() else path.as_posix()
+
+
+def row_matches_project_partition(row: dict, project_path: Path) -> bool:
+    row_project_path = normalize_project_partition(row.get("project_path"))
+    if not row_project_path:
+        return False
+    return row_project_path == str(project_path.resolve())
+
+
 def archived_project_state(
     memory_repo: Path,
     project_path: Path,
@@ -716,6 +731,8 @@ def archived_project_state(
     for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
         if archive_scope_for_row(record) != scope_key:
             continue
+        if not row_matches_project_partition(record, project_path):
+            continue
         for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
             parsed = parse_timestamp(record.get(key))
             if parsed and (latest is None or parsed > latest):
@@ -727,6 +744,8 @@ def archived_project_state(
         except (OSError, json.JSONDecodeError):
             continue
         if archive_scope_for_row(meta) != scope_key:
+            continue
+        if not row_matches_project_partition(meta, project_path):
             continue
         source_record = meta.get("source_record")
         source_key = ""
@@ -2170,7 +2189,11 @@ def remove_existing_entries_for_source(
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if archive_scope_for_row(meta) != scope_key or meta.get("source_record") != source_key:
+        if (
+            archive_scope_for_row(meta) != scope_key
+            or not row_matches_project_partition(meta, project_path)
+            or meta.get("source_record") != source_key
+        ):
             continue
         entry_dir = meta_path.parent
         if not is_safe_archive_entry_dir(memory_repo, entry_dir):

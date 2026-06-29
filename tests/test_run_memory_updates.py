@@ -411,6 +411,100 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             ]
             self.assertEqual(scope_rows[0]["archive_scope"], "domain:runner-scope")
 
+    def test_run_memory_updates_keeps_shared_archive_scope_project_partitions_independent(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_a = root / "project-a"
+            project_b = root / "project-b"
+            source_dir.mkdir(parents=True)
+            project_a.mkdir()
+            project_b.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (memory_repo / "config/projects.jsonl").write_text(
+                "\n".join(
+                    json.dumps(row, sort_keys=True)
+                    for row in (
+                        {
+                            "project_path": str(project_a.resolve()),
+                            "archive_scope": "domain:runner-shared",
+                            "source_dir": str(source_dir.resolve()),
+                            "enabled": True,
+                            "source": "manual",
+                        },
+                        {
+                            "project_path": str(project_b.resolve()),
+                            "archive_scope": "domain:runner-shared",
+                            "source_dir": str(source_dir.resolve()),
+                            "enabled": True,
+                            "source": "manual",
+                        },
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "a-newer.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T11:00:00Z",
+                        "cwd": str(project_a),
+                        "role": "user",
+                        "content": "Project alpha newer runner record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "b-older.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_b),
+                        "role": "user",
+                        "content": "Project beta older runner record must still be archived.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Projects updated: 2", result.stdout)
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 2)
+            self.assertEqual({row["project_path"] for row in session_rows}, {str(project_a.resolve()), str(project_b.resolve())})
+            self.assertEqual({row["archive_scope"] for row in session_rows}, {"domain:runner-shared"})
+
     def test_run_memory_updates_can_rewrite_existing_project_archives(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

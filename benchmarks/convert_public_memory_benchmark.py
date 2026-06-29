@@ -201,6 +201,7 @@ def positive_case(source: str, item_id: str, query: str, category: str, source_a
         "query": query,
         "category": category,
         "source_benchmark": SOURCE_LABELS[source],
+        "case_origin": "public_benchmark_adapter",
         "expected_memory_id": f"external_{source_slug}_{item_slug}",
         "expected_summary_path": summary_path,
         "expected_source_anchor": f"records/external/{source_slug}.json#{source_anchor}",
@@ -216,6 +217,7 @@ def abstention_case(source: str, item_id: str, query: str, category: str, extra:
         "query": query,
         "category": category,
         "source_benchmark": SOURCE_LABELS[source],
+        "case_origin": "public_benchmark_adapter",
         "expected_abstain": True,
     }
     case.update({key: value for key, value in extra.items() if value not in ("", [], None)})

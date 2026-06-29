@@ -2182,6 +2182,8 @@ def score_cases(
     memory_records = load_memory_records(repo)
     totals = new_totals()
     category_totals: dict[str, Totals] = {}
+    source_benchmarks: dict[str, int] = {}
+    case_origins: dict[str, int] = {}
     details: list[dict] = []
 
     for case in cases:
@@ -2191,12 +2193,22 @@ def score_cases(
         category = safe_category_name(case.data)
         category_totals.setdefault(category, new_totals())
         add_result(category_totals[category], result)
+        source_benchmark = optional_case_text(case.data, "source_benchmark")
+        if source_benchmark:
+            safe_source = safe_result_identifier(source_benchmark)
+            source_benchmarks[safe_source] = source_benchmarks.get(safe_source, 0) + 1
+        case_origin = optional_case_text(case.data, "case_origin")
+        if case_origin:
+            safe_origin = safe_result_identifier(case_origin)
+            case_origins[safe_origin] = case_origins.get(safe_origin, 0) + 1
 
     payload = finalize_totals(totals)
     payload["categories"] = {
         category: finalize_totals(category_total)
         for category, category_total in sorted(category_totals.items())
     }
+    payload["source_benchmarks"] = dict(sorted(source_benchmarks.items()))
+    payload["case_origins"] = dict(sorted(case_origins.items()))
     return payload, details
 
 

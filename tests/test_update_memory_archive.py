@@ -7475,6 +7475,108 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             project_paths = {row["project_path"] for row in rows}
             self.assertEqual(project_paths, {str(project_a.resolve()), str(project_b.resolve())})
 
+    def test_update_memory_archive_keeps_shared_archive_scope_source_partitions_separate(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_a = root / "project-a"
+            project_b = root / "project-b"
+            source_dir.mkdir()
+            project_a.mkdir()
+            project_b.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            source_a = source_dir / "a-newer.jsonl"
+            source_a.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T11:00:00Z",
+                        "cwd": str(project_a),
+                        "role": "user",
+                        "content": "Project alpha contributes to shared domain memory.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            source_b = source_dir / "b-older.jsonl"
+            source_b.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_b),
+                        "role": "user",
+                        "content": "Project beta older record must not be skipped by alpha high-water.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_a),
+                    "--project",
+                    "project-a",
+                    "--archive-scope",
+                    "domain:shared-memory",
+                    "--require-project-metadata",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_b),
+                    "--project",
+                    "project-b",
+                    "--archive-scope",
+                    "domain:shared-memory",
+                    "--require-project-metadata",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertIn("Latest archived timestamp: <none>", result.stdout)
+            self.assertIn("Records selected: 1", result.stdout)
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual({row["project_path"] for row in rows}, {str(project_a.resolve()), str(project_b.resolve())})
+            self.assertEqual({row["archive_scope"] for row in rows}, {"domain:shared-memory"})
+
     def test_update_memory_archive_sanitizes_worktree_path_titles(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()

@@ -29,7 +29,7 @@ Resolve or ask for:
    - This is the source-record filtering key and the default archive scope.
 
 3. `ARCHIVE_SCOPE`
-   - Optional stable high-water-mark key.
+   - Optional stable memory-domain key.
    - Default to the resolved `PROJECT_PATH` for compatibility.
    - Use this only when the archive should treat project as one source context
      rather than the storage boundary, for example `domain:agent-memory`.
@@ -41,17 +41,18 @@ Resolve or ask for:
 
 ## Update Rule
 
-Use `ARCHIVE_SCOPE` as the high-water-mark key and `PROJECT_PATH` as the
-source-record filtering context. When no explicit `ARCHIVE_SCOPE` is supplied,
-the updater uses the resolved `PROJECT_PATH`, preserving the original
-single-project behavior. Process records newer than the latest timestamp
-already archived for that same archive scope; also refresh a previously
-archived source record in that scope when its current source hash differs from
-the hash stored in the archive, even if that source record's timestamp is older
-than the scope latest timestamp.
+Use `ARCHIVE_SCOPE` as the memory-domain key and `PROJECT_PATH` as the
+source-record filtering and high-water partition. When no explicit
+`ARCHIVE_SCOPE` is supplied, the updater uses the resolved `PROJECT_PATH`,
+preserving the original single-project behavior. Process records newer than the
+latest timestamp already archived for the same archive scope plus project
+partition; also refresh a previously archived source record in that same
+partition when its current source hash differs from the hash stored in the
+archive, even if that source record's timestamp is older than the partition
+latest timestamp.
 Use `--rewrite-existing` only for deliberate backfill/repair runs; it rebuilds
 matching source records and replaces older archive entries for the same
-archive scope/source record.
+archive scope/project partition/source record.
 
 The updater should:
 
@@ -79,8 +80,8 @@ The updater should:
      --dry-run
    ```
 
-   Add `--archive-scope "$ARCHIVE_SCOPE"` when an explicit non-project scope
-   should own the high-water mark.
+   Add `--archive-scope "$ARCHIVE_SCOPE"` when an explicit non-project memory
+   domain should be used.
 
 4. If the dry run selects the expected records, run the update:
 

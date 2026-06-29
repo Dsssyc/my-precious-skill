@@ -37,12 +37,13 @@ exists. It must not run recurring jobs from this development repository.
 
 `update-my-precious` performs on-demand write-path actions against the private
 deployment repository. It scans a source record directory, uses the current
-project path as the source-record filtering context, uses an archive scope as
-the high-water-mark key, archives records newer than the latest timestamp
-already archived for that scope, refreshes a previously archived source record
-in that scope when its current source hash changes, and writes searchable
-summaries plus short redacted evidence snippets. The default archive scope is
-the resolved project path for compatibility.
+project path as the source-record filtering and high-water partition, uses an
+archive scope as the memory-domain key, archives records newer than the latest
+timestamp already archived for that scope plus source partition, refreshes a
+previously archived source record in that same partition when its current
+source hash changes, and writes searchable summaries plus short redacted
+evidence snippets. The default archive scope is the resolved project path for
+compatibility.
 
 ## Generality
 
@@ -77,12 +78,12 @@ and JSONL indexes.
 - `skills/update-my-precious/SKILL.md`: archives new source records for the
   current project into the deployment repository.
 - `skills/update-my-precious/scripts/update_memory_archive.py`: generic
-  incremental updater keyed by an archive scope and source-record timestamps,
-  with deterministic summary rendering, source maps, daily summaries, JSONL
-  indexes, and default refusal for source records that match secret patterns.
-  The default archive scope is `project_path`; deployments can set
-  `--archive-scope` or a registry `archive_scope` when project should be only a
-  source context.
+  incremental updater keyed by an archive scope, source project partition, and
+  source-record timestamps, with deterministic summary rendering, source maps,
+  daily summaries, JSONL indexes, and default refusal for source records that
+  match secret patterns. The default archive scope is `project_path`;
+  deployments can set `--archive-scope` or a registry `archive_scope` when
+  project should be only a source context.
 - `benchmarks/updater_induction_benchmark.py`: synthetic write-path benchmark
   that drives the real setup and updater scripts from temporary source records
   and reports aggregate induction, lifecycle, provenance, and privacy metrics.
@@ -129,8 +130,11 @@ scheduled work.
 and `index/scopes.jsonl` are generated archive indexes. Disabled projects in
 `config/projects.jsonl` must remain disabled even if source records still
 mention them. Registered rows may include `archive_scope` so scheduled updates
-can keep a non-project high-water key while still filtering source records by
-`project_path`.
+can write into a non-project memory domain while still filtering source records
+by `project_path`. Incremental high-water and source-hash freshness remain
+partitioned by project path inside that archive scope, so one registered
+project cannot hide older unarchived records from another project in the same
+domain stream.
 
 Agent-native automations should use exactly one working directory: the private
 deployment repository. Multiple working directories can create multiple
@@ -586,9 +590,13 @@ the failed metric name, actual value, comparison, and threshold.
 
 The public benchmark converter maps locally downloaded LongMemEval, LoCoMo, or
 Memora JSON/JSONL files into the same case schema. It generates deterministic
-external memory IDs, stable case IDs, and source anchors. Its stdout reports
-the converted case count plus input and output SHA-256 fingerprints so dry-run
-artifacts can be traced to exact files. It rejects duplicate converted
+external memory IDs, stable case IDs, source anchors, and
+`case_origin: public_benchmark_adapter` markers. Its stdout reports the
+converted case count plus input and output SHA-256 fingerprints so dry-run
+artifacts can be traced to exact files. Layered recall reports produced from
+converted cases include aggregate `source_benchmarks` and `case_origins`
+counts; the v1 readiness gate requires those fields before treating
+`--public-report` as adapted public benchmark evidence. It rejects duplicate converted
 `case_id` values, non-object question or evaluation rows, and empty converted
 case sets before writing output. Evidence lists must contain non-empty strings.
 The converter does not download benchmark data or commit external records to

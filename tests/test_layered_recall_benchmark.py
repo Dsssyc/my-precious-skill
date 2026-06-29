@@ -124,6 +124,8 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
 
             payload = json.loads(result.stdout)
             self.assertEqual(payload["cases"], 45)
+            self.assertGreater(payload["source_benchmarks"]["LongMemEval"], 0)
+            self.assertEqual(payload["case_origins"], {})
             self.assertEqual(payload["memory_recall_at_1"], 1.0)
             self.assertEqual(payload["memory_recall_at_5"], 1.0)
             self.assertEqual(payload["memory_precision_at_5"], 1.0)

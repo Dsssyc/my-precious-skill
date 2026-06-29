@@ -38,7 +38,11 @@ boundary:
 
 - `--public-report` accepts a layered recall aggregate report produced from
   converted public benchmark cases outside this repository. The result is an
-  adapted local score only, not an official public leaderboard claim.
+  adapted local score only, not an official public leaderboard claim. The gate
+  now requires aggregate `source_benchmarks` counts plus
+  `case_origins.public_benchmark_adapter`, so a generic layered report or the
+  packaged synthetic report cannot stand in for adapted public benchmark
+  evidence.
 - `--shadow-report` accepts a private real-archive shadow-eval aggregate report.
   The report must remain aggregate-only. Use `--require-shadow` only when the
   local private probe set should be a required readiness gate for the run.
@@ -719,9 +723,12 @@ Current gaps:
   global runner now support an explicit `archive_scope`, write it into
   `meta.json`, `source-map.json`, `index/sessions.jsonl`, and
   `index/scopes.jsonl`, and keep the resolved project path as the default scope
-  for compatibility. Project path still remains the source-record filtering
-  context and registry bootstrap signal, so project is not yet merely one scope
-  among a complete ontology.
+  for compatibility. Incremental high-water and source-hash freshness are
+  partitioned by source project inside that archive scope, so multiple projects
+  can feed the same domain stream without one project's newer timestamp hiding
+  another project's older unarchived records. Project path still remains the
+  source-record filtering context and registry bootstrap signal, so project is
+  not yet merely one scope among a complete ontology.
 - Automatic induction is implemented as a conservative minimum slice. It can
   promote synthetic reusable facts into high-level memories and run a
   dependency-light semantic lifecycle pass. A 2026-06-22 aggregate-only dry run
@@ -1215,10 +1222,11 @@ authorization, and public benchmark coverage.
    policy, and noisy multi-month evidence histories.
 
 3. Continue reducing project-boundary centrality.
-   The archive now has an opt-in `archive_scope` high-water key, but source
-   discovery and registry bootstrap still start from project metadata. The next
-   step is a broader scope registry or ontology that can discover and schedule
-   domain/global streams without first materializing project rows.
+   The archive now has an opt-in `archive_scope` memory-domain key and keeps
+   high-water state partitioned by source project inside that domain, but
+   source discovery and registry bootstrap still start from project metadata.
+   The next step is a broader scope registry or ontology that can discover and
+   schedule domain/global streams without first materializing project rows.
 
 4. Deepen source-depth governance.
    Keep raw source anchors private by default, add authorization checks for

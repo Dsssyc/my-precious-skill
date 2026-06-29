@@ -79,6 +79,7 @@ SHADOW_GATES = (
     MetricGate("metrics.provenance_coverage.score", "min", 1.0),
     MetricGate("metrics.lifecycle_integrity.score", "min", 1.0),
 )
+PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -202,6 +203,39 @@ def assess_public_report(payload: dict[str, Any] | None, *, required: bool) -> d
         evidence_level="public_adapter_local",
         required=required,
     )
+    if payload is not None:
+        source_benchmarks = payload.get("source_benchmarks")
+        public_source_count = 0
+        if isinstance(source_benchmarks, dict):
+            for name, count in source_benchmarks.items():
+                if name in PUBLIC_BENCHMARK_SOURCES and isinstance(count, int) and count > 0:
+                    public_source_count += count
+        if public_source_count <= 0:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "source_benchmarks",
+                    "expected": "one_or_more_public_benchmark_sources",
+                    "reason": "missing_public_benchmark_source_counts",
+                }
+            )
+            result["status"] = "failed"
+
+        case_origins = payload.get("case_origins")
+        adapter_case_count = 0
+        if isinstance(case_origins, dict):
+            count = case_origins.get("public_benchmark_adapter")
+            if isinstance(count, int) and count > 0:
+                adapter_case_count = count
+        if adapter_case_count <= 0:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "case_origins.public_benchmark_adapter",
+                    "comparison": "min",
+                    "threshold": 1.0,
+                    "reason": "missing_converted_public_case_origin",
+                }
+            )
+            result["status"] = "failed"
     result["claim_boundary"] = "adapted local score only; not a public leaderboard claim"
     return result
 

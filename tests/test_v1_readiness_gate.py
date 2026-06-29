@@ -17,6 +17,7 @@ class V1ReadinessGateTests(unittest.TestCase):
 
     def passing_layered_report(self) -> dict:
         return {
+            "report_kind": "layered_recall_benchmark",
             "cases": 45,
             "case_pass_rate": 1.0,
             "memory_recall_at_5": 1.0,
@@ -31,6 +32,18 @@ class V1ReadinessGateTests(unittest.TestCase):
             "privacy_leak_count": 0,
             "failed_case_count": 0,
         }
+
+    def passing_public_report(self) -> dict:
+        payload = self.passing_layered_report()
+        payload.update(
+            {
+                "source_benchmarks": {"LongMemEval": 2},
+                "case_origins": {"public_benchmark_adapter": 2},
+                "cases_sha256": "a" * 64,
+                "search_script_sha256": "b" * 64,
+            }
+        )
+        return payload
 
     def passing_updater_report(self) -> dict:
         return {
@@ -132,6 +145,73 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["overall_status"], "not_ready")
             self.assertEqual(payload["dimensions"]["public_benchmark_adapter"]["status"], "missing_required")
             self.assertIn("public_benchmark_adapter", result.stderr)
+
+    def test_required_public_report_rejects_generic_layered_report_without_public_provenance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            generic_public = self.write_json(root, "generic-public.json", self.passing_layered_report())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--public-report",
+                    str(generic_public),
+                    "--require-public",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["public_benchmark_adapter"]["status"], "failed")
+            failures = payload["dimensions"]["public_benchmark_adapter"]["failures"]
+            self.assertTrue(any(failure["metric"] == "source_benchmarks" for failure in failures))
+
+    def test_required_public_report_accepts_layered_report_with_public_provenance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            public = self.write_json(root, "public.json", self.passing_public_report())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--public-report",
+                    str(public),
+                    "--require-public",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["overall_status"], "extended_evidence_ready")
+            self.assertEqual(payload["dimensions"]["public_benchmark_adapter"]["status"], "passed")
 
 
 if __name__ == "__main__":
