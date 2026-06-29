@@ -1822,32 +1822,101 @@ answer report. They do not create private reference-answer cases, do not score
 live model generation, and do not turn the existing shadow probe fixtures into
 generated-answer fixtures.
 
-## Private Dogfood Case Authoring Dry Run
+## Private Dogfood Generated-Answer Run
 
 Date: 2026-06-30
 
-`author_generated_answer_cases.py` was run against the private deployment
-archive in dry-run mode only. No private case file was written, and no private
-queries, reference answers, memory IDs, source paths, raw refs, or memory text
-were rendered or copied into this repository.
+`author_generated_answer_cases.py`, `generate_answer_records.py`,
+`generated_answer_benchmark.py`, and `v1_readiness_gate.py` were run against
+the private deployment archive. The private case, answer, audit, benchmark, and
+gate files were written only under the private deployment archive's `eval/`
+directory. No private queries, case IDs, reference answers, generated answers,
+memory IDs, source paths, raw refs, or memory text were rendered or copied into
+this reusable skill repository.
 
-Aggregate dry-run metrics:
+The first private dogfood run authored only positive answer cases, so the answer
+benchmark passed positive matching but the v1 readiness gate rejected it because
+there were no expected-abstain cases and `abstention_accuracy` was therefore
+`0.0`. The follow-up run used `--abstain-limit 5` to add deterministic no-hit
+negative cases without rendering their query text.
+
+Aggregate authoring metrics:
 
 | metric | value |
 | --- | ---: |
 | candidate_memory_count | 1402 |
-| selected_case_count | 20 |
-| would_write_count | 20 |
-| written_count | 0 |
-| source_benchmarks.MyPreciousPrivateDogfood | 20 |
-| case_origins.private_dogfood | 20 |
+| selected_case_count | 25 |
+| positive_case_count | 20 |
+| abstain_case_count | 5 |
+| would_write_count | 25 |
+| written_count | 25 |
+| source_benchmarks.MyPreciousPrivateDogfood | 25 |
+| case_origins.private_dogfood | 25 |
 | skip_counts.insufficient_query_terms | 2 |
 
-This proves that the reusable deployment helper can find a bounded initial
-private dogfood case set from active layered memories with aggregate-only
-stdout. It does not prove generated-answer correctness, because the private
-case file was not written in this repository, answer records were not generated,
-and `generated_answer_benchmark.py` was not run against private answers.
+Aggregate case-audit metrics:
+
+| metric | value |
+| --- | ---: |
+| cases | 25 |
+| positive_cases | 20 |
+| abstain_cases | 5 |
+| reference_answer_cases | 20 |
+| answer_scorable_case_rate | 1.0 |
+| positive_without_reference_answer | 0 |
+| unsafe_aggregate_identifier_count | 0 |
+
+Aggregate answer-adapter metrics:
+
+| metric | value |
+| --- | ---: |
+| cases | 25 |
+| answers_written | 25 |
+| memory_answer_count | 20 |
+| abstention_answer_count | 5 |
+| no_hit_count | 5 |
+| unsupported_hit_count | 0 |
+
+Aggregate answer-benchmark metrics:
+
+| metric | value |
+| --- | ---: |
+| cases | 25 |
+| positive_cases | 20 |
+| abstain_cases | 5 |
+| answer_scorable_case_rate | 1.0 |
+| case_pass_rate | 1.0 |
+| answer_normalized_match_rate | 1.0 |
+| abstention_accuracy | 1.0 |
+| privacy_boundary_pass_rate | 1.0 |
+| privacy_leak_count | 0 |
+| failed_case_count | 0 |
+| missing_answer_count | 0 |
+| duplicate_answer_count | 0 |
+| unknown_answer_count | 0 |
+| positive_without_reference_answer | 0 |
+
+Private answer dogfood v1 readiness summary:
+
+| metric | value |
+| --- | ---: |
+| v1_readiness.overall_status | extended_evidence_ready |
+| v1_readiness.scorecard.required_dimensions | 5 |
+| v1_readiness.scorecard.required_passed | 5 |
+| v1_readiness.scorecard.optional_dimensions | 2 |
+| v1_readiness.scorecard.optional_passed | 0 |
+| generated_answer_eval.status | passed |
+| generated_answer_eval.abstention_accuracy | 1.0 |
+| generated_answer_eval.answer_normalized_match_rate | 1.0 |
+| generated_answer_eval.answer_scorable_case_rate | 1.0 |
+
+This proves the reusable deployment helper can author a bounded private dogfood
+case set from active layered memories, include expected-abstain negative cases,
+generate extractive answer records, and satisfy the generated-answer dimension
+of the v1 readiness gate with aggregate-only reports. The claim remains bounded:
+the positive answers are extractive from existing memories, the negative cases
+are deterministic no-hit probes, and this is not a live model answer-quality
+benchmark or proof of long-horizon human-authored memory behavior.
 
 ## Recommendation
 
@@ -1901,32 +1970,37 @@ that is wired into `--run-packaged --require-answer`; answer reports now also
 need aggregate source benchmark and case-origin counts before the readiness gate
 accepts them. The deployment template can now produce extractive answer records
 from archive search hits for that grader, with aggregate-only stdout and no
-reference-answer input. A public LongMemEval 100-case generated-answer adapter
-probe now proves full positive reference-answer extraction on 83 reference
-positive cases and full abstention accuracy on 6 public abstention cases. The
-89-case answer-scorable public subset passes the generated-answer gate at 1.0
-for case pass rate, normalized answer match, token F1, abstention accuracy, and
-privacy. The full 100-case answer report still fails because 11 positive cases
-lack reference answers for scoring, so this is answer-scorable public-adapter
-evidence rather than full public generated-answer readiness. The explicit
-source-stream registry path now has a packaged synthetic benchmark and is
-required by the core v1 readiness gate. The current public/shadow readiness
-runs still cannot claim private real-archive generated-answer behavior or live
-model answer quality. The suite now has a separate aggregate-only
+reference-answer input. A private dogfood answer run now proves the reusable
+case-authoring, extractive-answer, answer-benchmark, and v1 gate path on 20
+positive cases plus 5 expected-abstain no-hit cases without copying private
+case material into this repository. A public LongMemEval 100-case
+generated-answer adapter probe now proves full positive reference-answer
+extraction on 83 reference positive cases and full abstention accuracy on 6
+public abstention cases. The 89-case answer-scorable public subset passes the
+generated-answer gate at 1.0 for case pass rate, normalized answer match, token
+F1, abstention accuracy, and privacy. The full 100-case answer report still
+fails because 11 positive cases lack reference answers for scoring, so this is
+answer-scorable public-adapter evidence rather than full public
+generated-answer readiness. The explicit source-stream registry path now has a
+packaged synthetic benchmark and is required by the core v1 readiness gate. The
+current readiness runs still cannot claim live model answer quality or
+long-horizon human-authored memory behavior. The suite now has a separate
+aggregate-only
 `generated_answer_case_audit.py` preflight for private or public answer case
 sets before answer records exist. That audit can require source benchmark and
 case-origin counts such as `MyPreciousPrivateDogfood` and `private_dogfood`,
 and can gate `answer_scorable_case_rate`, `positive_without_reference_answer`,
 and `unsafe_aggregate_identifier_count` without rendering private case IDs,
 queries, or reference answers. The deployment template now also has
-`author_generated_answer_cases.py`, which can author an initial private dogfood
-case JSONL from active layered memory nodes with aggregate-only stdout. This
-closes the reusable tooling gap for creating and auditing a private dogfood
-case set, but it still does not run that tool against the live private archive
-in this repository, generate answers, or prove private real-archive answer
-quality. The next valuable work is to run the private case-authoring and answer
-grading flow in the deployment archive, continue reducing remaining scope-mixed
-top-k noise, and broaden consolidation/decay evidence.
+`author_generated_answer_cases.py`, which can author private dogfood case JSONL
+from active layered memory nodes with aggregate-only stdout and optional
+expected-abstain no-hit cases. This closes the reusable tooling gap for
+creating, auditing, and grading a private dogfood answer case set through the
+offline v1 gate. The remaining answer-quality gap is model-backed or
+human-authored evaluation, not the reusable plumbing for aggregate private
+dogfood evidence. The next valuable work is to broaden real-archive shadow
+coverage, continue reducing remaining scope-mixed top-k noise, and broaden
+consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 

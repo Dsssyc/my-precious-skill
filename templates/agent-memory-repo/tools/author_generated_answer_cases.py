@@ -28,6 +28,7 @@ DEFAULT_OUTPUT_RELATIVE_PATH = Path("eval/generated_answer_private_dogfood_cases
 DEFAULT_SOURCE_BENCHMARK = "MyPreciousPrivateDogfood"
 DEFAULT_CASE_ORIGIN = "private_dogfood"
 DEFAULT_CATEGORY = "private_dogfood_memory_answer"
+DEFAULT_ABSTAIN_CATEGORY = "private_dogfood_abstain"
 DEFAULT_LIMIT = 20
 MIN_QUERY_TERMS = 3
 MAX_QUERY_TERMS = 8
@@ -133,6 +134,22 @@ def case_id_for(memory_id: str, text: str) -> str:
     return f"private_dogfood_{digest}"
 
 
+def abstain_case_id_for(source_benchmark: str, case_origin: str, index: int) -> str:
+    digest = hashlib.sha256(f"{source_benchmark}\0{case_origin}\0{index}".encode("utf-8")).hexdigest()[:16]
+    return f"private_dogfood_abstain_{digest}"
+
+
+def abstain_query_for(source_benchmark: str, case_origin: str, index: int) -> str:
+    digest = hashlib.sha256(f"abstain\0{source_benchmark}\0{case_origin}\0{index}".encode("utf-8")).hexdigest()
+    return " ".join(
+        (
+            f"mpabsent{digest[:10]}",
+            f"mpvoid{digest[10:20]}",
+            f"mpunseen{digest[20:30]}",
+        )
+    )
+
+
 def case_row(
     record: dict[str, Any],
     *,
@@ -162,6 +179,23 @@ def case_row(
     }
 
 
+def abstain_case_row(
+    index: int,
+    *,
+    source_benchmark: str,
+    case_origin: str,
+    category: str,
+) -> dict[str, Any]:
+    return {
+        "case_id": abstain_case_id_for(source_benchmark, case_origin, index),
+        "query": abstain_query_for(source_benchmark, case_origin, index),
+        "category": category,
+        "source_benchmark": source_benchmark,
+        "case_origin": case_origin,
+        "expected_abstain": True,
+    }
+
+
 def load_memory_rows(repo: Path) -> list[dict[str, Any]]:
     index = repo / "index" / "memories.jsonl"
     if not index.exists():
@@ -173,9 +207,11 @@ def build_cases(
     rows: list[dict[str, Any]],
     *,
     limit: int,
+    abstain_limit: int,
     source_benchmark: str,
     case_origin: str,
     category: str,
+    abstain_category: str,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     cases: list[dict[str, Any]] = []
     skip_counts: Counter[str] = Counter()
@@ -212,6 +248,19 @@ def build_cases(
             continue
         seen_case_ids.add(case_id)
         cases.append(row)
+    for index in range(abstain_limit):
+        row = abstain_case_row(
+            index,
+            source_benchmark=source_benchmark,
+            case_origin=case_origin,
+            category=abstain_category,
+        )
+        case_id = str(row["case_id"])
+        if case_id in seen_case_ids:
+            skip_counts["duplicate_abstain_case_id"] += 1
+            continue
+        seen_case_ids.add(case_id)
+        cases.append(row)
     return cases, dict(sorted(skip_counts.items()))
 
 
@@ -227,9 +276,11 @@ def author_report(
     output: Path,
     *,
     limit: int,
+    abstain_limit: int,
     source_benchmark: str,
     case_origin: str,
     category: str,
+    abstain_category: str,
     write_enabled: bool,
     overwrite: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -237,10 +288,14 @@ def author_report(
     cases, skip_counts = build_cases(
         rows,
         limit=limit,
+        abstain_limit=abstain_limit,
         source_benchmark=source_benchmark,
         case_origin=case_origin,
         category=category,
+        abstain_category=abstain_category,
     )
+    positive_case_count = sum(1 for row in cases if row.get("expected_abstain") is not True)
+    abstain_case_count = sum(1 for row in cases if row.get("expected_abstain") is True)
     source_benchmarks = Counter(str(row["source_benchmark"]) for row in cases)
     case_origins = Counter(str(row["case_origin"]) for row in cases)
     report = {
@@ -252,6 +307,8 @@ def author_report(
         "output_relative_path": output_relative_path(repo, output),
         "candidate_memory_count": len(rows),
         "selected_case_count": len(cases),
+        "positive_case_count": positive_case_count,
+        "abstain_case_count": abstain_case_count,
         "would_write_count": len(cases),
         "written_count": 0,
         "skip_counts": skip_counts,
@@ -278,9 +335,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--write", action="store_true", help="Write the private generated-answer case JSONL")
     parser.add_argument("--overwrite", action="store_true", help="Allow replacing an existing output file")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="Maximum cases to author")
+    parser.add_argument("--abstain-limit", type=int, default=0, help="Additional expected-abstain cases to author")
     parser.add_argument("--source-benchmark", default=DEFAULT_SOURCE_BENCHMARK, help="Aggregate source benchmark key")
     parser.add_argument("--case-origin", default=DEFAULT_CASE_ORIGIN, help="Aggregate case origin key")
     parser.add_argument("--category", default=DEFAULT_CATEGORY, help="Category value for authored cases")
+    parser.add_argument(
+        "--abstain-category",
+        default=DEFAULT_ABSTAIN_CATEGORY,
+        help="Category value for authored expected-abstain cases",
+    )
     return parser.parse_args(argv)
 
 
@@ -292,18 +355,23 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("Choose --dry-run or --write")
     if args.limit <= 0:
         raise SystemExit("--limit must be greater than 0")
+    if args.abstain_limit < 0:
+        raise SystemExit("--abstain-limit must be greater than or equal to 0")
     repo = Path(args.repo).expanduser().resolve()
     output = resolve_output_path(repo, args.output)
     source_benchmark = validate_aggregate_key(args.source_benchmark, "--source-benchmark")
     case_origin = validate_aggregate_key(args.case_origin, "--case-origin")
     category = validate_aggregate_key(args.category, "--category")
+    abstain_category = validate_aggregate_key(args.abstain_category, "--abstain-category")
     report, cases = author_report(
         repo,
         output,
         limit=args.limit,
+        abstain_limit=args.abstain_limit,
         source_benchmark=source_benchmark,
         case_origin=case_origin,
         category=category,
+        abstain_category=abstain_category,
         write_enabled=bool(args.write),
         overwrite=bool(args.overwrite),
     )

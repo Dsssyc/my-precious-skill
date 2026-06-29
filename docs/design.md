@@ -117,9 +117,12 @@ and JSONL indexes.
   aggregate-only deployment-repo helper that authors private generated-answer
   case JSONL from active layered memory nodes. It writes private queries and
   reference answers only inside the deployment archive while stdout reports
-  selected case counts, skip counts, source benchmark counts, case-origin
-  counts, and privacy flags. This creates an initial dogfood case-set path but
-  is still extractive from existing memories, not a human-written benchmark.
+  selected, positive, abstain, and written case counts, skip counts, source
+  benchmark counts, case-origin counts, and privacy flags. `--abstain-limit`
+  adds deterministic no-hit `expected_abstain` cases so private dogfood reports
+  can score abstention as well as positive extraction. This creates an initial
+  dogfood case-set path but is still extractive from existing memories, not a
+  human-written benchmark.
 - `templates/agent-memory-repo/tools/generate_answer_records.py`: extractive
   deployment-repo helper that searches an existing archive and writes private
   generated-answer JSONL records for `generated_answer_benchmark.py`. Its report
@@ -727,6 +730,9 @@ deterministic extractive adapter that turns memory search hits into private
 answer-record JSONL for the offline grader. Its aggregate report can prove that
 the answer-record production path is wired and privacy-shaped, but it is not a
 substitute for a model-backed public or private generated-answer evaluation.
+When paired with `author_generated_answer_cases.py --abstain-limit`, it can
+exercise deterministic private dogfood no-hit cases for the v1 answer gate
+without rendering private queries or answers.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive

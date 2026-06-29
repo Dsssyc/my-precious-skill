@@ -403,13 +403,16 @@ python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
 python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
   --repo ~/repos/agent-memory \
   --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --abstain-limit 5 \
   --write
 ```
 
 这个 authoring helper 只在私有部署 archive 内写 case 文件；stdout 只输出
 aggregate 统计，包括 selected case、skip counts、source benchmark、
 case-origin 和 privacy flags。生成的 case 文件包含私有 query 与 reference
-answer，不能放进本开发仓库。
+answer，不能放进本开发仓库。`--abstain-limit` 会额外生成确定性的 no-hit
+`expected_abstain` case，让私有 dogfood answer report 同时证明正向回答和拒答
+行为。
 
 不用 agent，也可以直接运行搜索脚本：
 

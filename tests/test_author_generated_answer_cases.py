@@ -241,6 +241,107 @@ class AuthorGeneratedAnswerCasesTests(unittest.TestCase):
             self.assertNotIn("mem_private_answer", rendered)
             self.assertNotIn(str(repo), rendered)
 
+    def test_authored_cases_can_include_abstain_cases_for_v1_answer_gate(self):
+        private_answer = "Use source anchors for provenance without printing raw transcript content."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            cases = repo / "eval" / "private_cases.jsonl"
+            answers = root / "answers.jsonl"
+            self.write_memory_index(repo, [self.memory_row("mem_private_answer", private_answer)])
+
+            author = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--output",
+                    str(cases),
+                    "--write",
+                    "--limit",
+                    "1",
+                    "--abstain-limit",
+                    "1",
+                    "--source-benchmark",
+                    "MyPreciousPrivateDogfood",
+                    "--case-origin",
+                    "private_dogfood",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            author_report = json.loads(author.stdout)
+            self.assertEqual(author_report["selected_case_count"], 2)
+            self.assertEqual(author_report["positive_case_count"], 1)
+            self.assertEqual(author_report["abstain_case_count"], 1)
+            self.assertEqual(author_report["written_count"], 2)
+
+            case_rows = [json.loads(line) for line in cases.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(case_rows), 2)
+            self.assertEqual(sum(1 for row in case_rows if row.get("expected_abstain") is True), 1)
+            self.assertEqual(sum(1 for row in case_rows if row.get("reference_answer")), 1)
+
+            adapter = subprocess.run(
+                [
+                    sys.executable,
+                    str(GENERATE_ANSWERS),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--output",
+                    str(answers),
+                    "--limit",
+                    "3",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            adapter_report = json.loads(adapter.stdout)
+            self.assertEqual(adapter_report["memory_answer_count"], 1)
+            self.assertEqual(adapter_report["abstention_answer_count"], 1)
+
+            benchmark = subprocess.run(
+                [
+                    sys.executable,
+                    str(ANSWER_BENCHMARK),
+                    "--cases",
+                    str(cases),
+                    "--answers",
+                    str(answers),
+                    "--fail-under",
+                    "case_pass_rate=1.0",
+                    "--fail-under",
+                    "answer_normalized_match_rate=1.0",
+                    "--fail-under",
+                    "abstention_accuracy=1.0",
+                    "--fail-under",
+                    "answer_scorable_case_rate=1.0",
+                    "--fail-over",
+                    "failed_case_count=0",
+                    "--fail-over",
+                    "positive_without_reference_answer=0",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            benchmark_report = json.loads(benchmark.stdout)
+            self.assertEqual(benchmark_report["positive_cases"], 1)
+            self.assertEqual(benchmark_report["abstain_cases"], 1)
+            self.assertEqual(benchmark_report["abstention_accuracy"], 1.0)
+
+            rendered = author.stdout + author.stderr + adapter.stdout + adapter.stderr + benchmark.stdout + benchmark.stderr
+            self.assertNotIn(private_answer, rendered)
+            self.assertNotIn("mem_private_answer", rendered)
+            self.assertNotIn(str(repo), rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

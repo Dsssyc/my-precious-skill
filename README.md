@@ -520,6 +520,7 @@ python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
 python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
   --repo ~/repos/agent-memory \
   --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --abstain-limit 5 \
   --write
 ```
 
@@ -527,7 +528,9 @@ The authoring helper writes private cases only inside the deployment archive.
 Its stdout is aggregate-only and reports selected case counts, skip counts,
 source benchmark counts, case-origin counts, and privacy flags. The generated
 case file contains private queries and reference answers; keep it out of this
-development repository.
+development repository. `--abstain-limit` adds deterministic no-hit
+`expected_abstain` cases so private dogfood answer reports can prove both
+positive answering and abstention behavior.
 
 Generate extractive answer records from an existing archive for that offline
 grader:
