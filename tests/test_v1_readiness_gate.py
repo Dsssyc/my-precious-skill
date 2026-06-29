@@ -26,6 +26,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             "source_ref_reachability": 1.0,
             "source_depth_policy_pass_rate": 1.0,
             "raw_preview_redaction_pass_rate": 1.0,
+            "raw_preview_authorization_pass_rate": 1.0,
             "source_drilldown_privacy_pass_rate": 1.0,
             "memory_graph_drilldown_rate": 1.0,
             "memory_graph_invalid_edge_suppression_rate": 1.0,
@@ -114,6 +115,41 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["scorecard"]["required_dimensions"], 3)
             self.assertEqual(payload["scorecard"]["required_passed"], 3)
             self.assertEqual(payload["scorecard"]["optional_passed"], 0)
+
+    def test_layered_report_requires_raw_preview_authorization_gate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered_payload = self.passing_layered_report()
+            layered_payload["raw_preview_authorization_pass_rate"] = 0.0
+            layered = self.write_json(root, "layered.json", layered_payload)
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            self.assertEqual(payload["dimensions"]["layered_recall"]["status"], "failed")
+            self.assertEqual(
+                payload["dimensions"]["layered_recall"]["failures"][0]["metric"],
+                "raw_preview_authorization_pass_rate",
+            )
 
     def test_required_optional_public_report_makes_missing_public_eval_fail(self):
         with tempfile.TemporaryDirectory() as tmpdir:

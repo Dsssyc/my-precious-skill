@@ -504,7 +504,8 @@ stress tests:
   `memory_rank_median`, and `memory_rank_histogram`
 - `session_drilldown_at_5`, `drilldown_success_rate`, `source_reachability`,
   `source_ref_reachability`, `source_depth_policy_pass_rate`,
-  `raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
+  `raw_preview_redaction_pass_rate`, `raw_preview_authorization_pass_rate`,
+  `source_drilldown_privacy_pass_rate`,
   `evidence_reachability`, and `evidence_text_reachability` with
   `evidence_text_cases`
 - `answer_reachability`, `answer_normalized_reachability`, and
@@ -553,9 +554,10 @@ path references.
 At source depth, search output reports source refs as stable
 `source_ref_id`, `status`, and `reason` fields. It does not print raw source
 content by default. A short redacted raw-source snippet is only requested
-explicitly with `--raw-source-preview <source_ref_id|all>`, and the benchmark
-checks that preview output stays redacted and source-drilldown output remains
-inside the privacy boundary.
+explicitly with both `--raw-source-preview <source_ref_id|all>` and
+`--authorize-raw-source-preview`, and the benchmark checks that the authorized
+preview path is used, preview output stays redacted, and source-drilldown output
+remains inside the privacy boundary.
 
 Locally downloaded public benchmark files can be converted into this case
 schema without committing the source data:

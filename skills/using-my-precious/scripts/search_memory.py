@@ -95,6 +95,7 @@ class SourceRefStatus:
     reason: str
     unsafe_ref: bool = False
     preview: str = ""
+    preview_blocked_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -1098,12 +1099,18 @@ def should_preview_source_ref(source_ref_id: str, preview_targets: tuple[str, ..
     return "all" in preview_targets or source_ref_id in preview_targets
 
 
-def source_ref_status(repo: Path, raw_ref: str, preview_targets: tuple[str, ...]) -> SourceRefStatus:
+def source_ref_status(
+    repo: Path,
+    raw_ref: str,
+    preview_targets: tuple[str, ...],
+    preview_authorized: bool = False,
+) -> SourceRefStatus:
     parsed = parse_sanitized_source_ref(raw_ref)
     if parsed is None:
         return SourceRefStatus("src_unsafe", "blocked", "unsafe_source_ref", unsafe_ref=True)
     path_text, anchor_text = parsed
     source_ref_id = stable_source_ref_id(path_text, anchor_text)
+    preview_requested = should_preview_source_ref(source_ref_id, preview_targets)
     safe_path = safe_repo_relative_path(repo, path_text)
     if not safe_path or safe_path != path_text:
         return SourceRefStatus(source_ref_id, "blocked", "unsafe_source_ref", unsafe_ref=True)
@@ -1114,23 +1121,46 @@ def source_ref_status(repo: Path, raw_ref: str, preview_targets: tuple[str, ...]
         if not source_map_is_reachable(repo, safe_path, anchor_text):
             return SourceRefStatus(source_ref_id, "unavailable", "source_map_unreachable")
         preview = ""
-        if should_preview_source_ref(source_ref_id, preview_targets):
+        preview_blocked_reason = ""
+        if preview_requested and not preview_authorized:
+            preview_blocked_reason = "authorization_required"
+        elif preview_requested:
             preview = "blocked: source_map_contains_no_raw_content"
-        return SourceRefStatus(source_ref_id, "available", "source_map_reachable", preview=preview)
+        return SourceRefStatus(
+            source_ref_id,
+            "available",
+            "source_map_reachable",
+            preview=preview,
+            preview_blocked_reason=preview_blocked_reason,
+        )
     text = read_text_if_safe(path)
     line = anchor_line(text, anchor_text)
     if not line:
         return SourceRefStatus(source_ref_id, "unavailable", "source_anchor_missing")
     preview = ""
-    if should_preview_source_ref(source_ref_id, preview_targets):
+    preview_blocked_reason = ""
+    if preview_requested and not preview_authorized:
+        preview_blocked_reason = "authorization_required"
+    elif preview_requested:
         preview = redact_source_preview_text(line)
         if not preview:
             preview = "blocked: empty_source_preview"
-    return SourceRefStatus(source_ref_id, "available", "archive_source_anchor_reachable", preview=preview)
+    return SourceRefStatus(
+        source_ref_id,
+        "available",
+        "archive_source_anchor_reachable",
+        preview=preview,
+        preview_blocked_reason=preview_blocked_reason,
+    )
 
 
-def source_ref_statuses(repo: Path, raw_refs: tuple[str, ...], preview_targets: tuple[str, ...]) -> tuple[SourceRefStatus, ...]:
-    return tuple(source_ref_status(repo, raw_ref, preview_targets) for raw_ref in raw_refs)
+def source_ref_statuses(
+    repo: Path,
+    raw_refs: tuple[str, ...],
+    preview_targets: tuple[str, ...],
+    preview_authorized: bool = False,
+) -> tuple[SourceRefStatus, ...]:
+    return tuple(source_ref_status(repo, raw_ref, preview_targets, preview_authorized) for raw_ref in raw_refs)
 
 
 def sanitize_raw_ref(repo: Path, value: object) -> str:
@@ -1677,7 +1707,14 @@ def drill_path_limited_hits(repo: Path, hits: list[Hit], memory_hits: list[Hit],
     return [hit for hit in hits if safe_repo_relative_path(repo, str(hit.path)) in allowed]
 
 
-def format_memory_hit(repo: Path, hit: Hit, idx: int, depth: str, raw_source_preview: tuple[str, ...] = ()) -> str:
+def format_memory_hit(
+    repo: Path,
+    hit: Hit,
+    idx: int,
+    depth: str,
+    raw_source_preview: tuple[str, ...] = (),
+    raw_source_preview_authorized: bool = False,
+) -> str:
     layer = hit.layer or "memory"
     title = safe_display_text(hit.text or hit.title or "Untitled memory", 160)
     why = "; ".join(hit.why)
@@ -1700,12 +1737,19 @@ def format_memory_hit(repo: Path, hit: Hit, idx: int, depth: str, raw_source_pre
         lines.extend(f"     - {safe_display_path(ref)}" for ref in hit.evidence_refs)
     if depth == "source" and hit.raw_refs:
         lines.append("   source refs:")
-        for source_status in source_ref_statuses(repo, hit.raw_refs, raw_source_preview):
+        for source_status in source_ref_statuses(
+            repo,
+            hit.raw_refs,
+            raw_source_preview,
+            raw_source_preview_authorized,
+        ):
             lines.append(f"     - source_ref_id: {source_status.source_ref_id}")
             lines.append(f"       status: {source_status.status}")
             lines.append(f"       reason: {source_status.reason}")
             if source_status.unsafe_ref:
                 lines.append(f"       ref: {UNSAFE_SOURCE_REF}")
+            if source_status.preview_blocked_reason:
+                lines.append(f"       raw_preview_blocked: {source_status.preview_blocked_reason}")
             if source_status.preview:
                 lines.append(f"       raw_preview: {source_status.preview}")
     lines.append("   next: use drill paths for supporting sessions and evidence")
@@ -1718,9 +1762,10 @@ def format_hit(
     idx: int,
     depth: str = "memory",
     raw_source_preview: tuple[str, ...] = (),
+    raw_source_preview_authorized: bool = False,
 ) -> str:
     if hit.source == "memory":
-        return format_memory_hit(repo, hit, idx, depth, raw_source_preview)
+        return format_memory_hit(repo, hit, idx, depth, raw_source_preview, raw_source_preview_authorized)
     try:
         rel = hit.path.relative_to(repo)
     except ValueError:
@@ -1764,7 +1809,12 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="SOURCE_REF_ID|all",
-        help="Explicitly preview short redacted raw-source snippets for matching source refs at source depth",
+        help="Select source refs for short redacted raw-source preview at source depth",
+    )
+    parser.add_argument(
+        "--authorize-raw-source-preview",
+        action="store_true",
+        help="Confirm the caller is authorized to render selected redacted raw-source previews",
     )
     parser.add_argument(
         "--scope",
@@ -1829,7 +1879,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Archive: {safe_display_text(repo.name or 'archive', 80)}")
     print()
     for idx, hit in enumerate(hits[: args.limit], 1):
-        print(format_hit(repo, hit, idx, args.depth, tuple(args.raw_source_preview)))
+        print(
+            format_hit(
+                repo,
+                hit,
+                idx,
+                args.depth,
+                tuple(args.raw_source_preview),
+                args.authorize_raw_source_preview,
+            )
+        )
         print()
     return 0
 

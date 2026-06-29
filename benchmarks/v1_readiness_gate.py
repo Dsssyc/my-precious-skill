@@ -38,6 +38,7 @@ LAYERED_GATES = (
     MetricGate("source_ref_reachability", "min", 1.0),
     MetricGate("source_depth_policy_pass_rate", "min", 1.0),
     MetricGate("raw_preview_redaction_pass_rate", "min", 1.0),
+    MetricGate("raw_preview_authorization_pass_rate", "min", 1.0),
     MetricGate("source_drilldown_privacy_pass_rate", "min", 1.0),
     MetricGate("memory_graph_drilldown_rate", "min", 1.0),
     MetricGate("memory_graph_invalid_edge_suppression_rate", "min", 1.0),

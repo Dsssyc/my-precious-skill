@@ -766,14 +766,16 @@ Current gaps:
 - Raw/source reachability now has an initial gated drilldown workflow. Source
   depth reports stable `source_ref_id`, `status`, and `reason` fields by
   default, and short raw-source previews require explicit
-  `--raw-source-preview` opt-in with redaction. This is still not a full
-  multi-principal authorization system.
+  `--raw-source-preview` target selection plus `--authorize-raw-source-preview`
+  confirmation with redaction. This is still not a full multi-principal
+  authorization system.
 - The benchmark has thirteen `evidence_text` cases, including ten semantic
   lifecycle robustness cases for conflict, deprecation, false-merge guards, and
   evidence retention. It now also gates source-depth policy, source ref
-  reachability, raw-preview redaction, and source-drilldown privacy on the
-  packaged synthetic suite. This is still synthetic and too small to prove
-  source-depth robustness on real private histories.
+  reachability, raw-preview authorization, raw-preview redaction, and
+  source-drilldown privacy on the packaged synthetic suite. This is still
+  synthetic and too small to prove source-depth robustness on real private
+  histories.
 - The reusable template now includes a privacy-safe shadow evaluation runner
   that can report aggregate recall, active-memory suppression, lifecycle
   integrity, top-k noise, noise-source buckets, provenance coverage, and a
@@ -1051,6 +1053,7 @@ records, memory text, source paths, raw refs, queries, or evidence snippets.
 | source_ref_reachability | 1.0 |
 | source_depth_policy_pass_rate | 1.0 |
 | unsafe_source_ref_rejected_count | 0 |
+| raw_preview_authorization_pass_rate | 1.0 |
 | raw_preview_redaction_pass_rate | 1.0 |
 | source_drilldown_privacy_pass_rate | 1.0 |
 | available_source_ref_count | 2140 |
@@ -1346,6 +1349,7 @@ Combined public-plus-shadow v1 readiness summary:
 | v1_readiness.required_passed | 5 |
 | public_benchmark_adapter.status | passed |
 | real_archive_shadow_eval.status | passed |
+| layered_recall.raw_preview_authorization_pass_rate | 1.0 |
 | privacy.aggregate_only | true |
 
 ## Public Adapter Limited-Read Probe
@@ -1390,18 +1394,19 @@ python3 benchmarks/layered_recall_benchmark.py \
   --repo /tmp/my_precious_public_limit_20260629/archive_100_after_fix \
   --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
   --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/my_precious_public_limit_20260629/details_100_abstention_gate.jsonl \
+  --details-jsonl /tmp/my_precious_public_limit_20260629/details_100_raw_auth_gate.jsonl \
   --fail-under case_pass_rate=1.0 \
   --fail-under memory_recall_at_5=1.0 \
   --fail-under answer_reachability=1.0 \
   --fail-under abstention_accuracy=1.0 \
+  --fail-under raw_preview_authorization_pass_rate=1.0 \
   --fail-over privacy_leak_count=0 \
   --fail-over failed_case_count=0 \
-  > /tmp/my_precious_public_limit_20260629/layered_report_100_abstention_gate.json
+  > /tmp/my_precious_public_limit_20260629/layered_report_100_raw_auth_gate.json
 
 python3 benchmarks/v1_readiness_gate.py \
   --run-packaged \
-  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_abstention_gate.json \
+  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_raw_auth_gate.json \
   --require-public \
   > /tmp/my_precious_v1_public_100_abstention_gate_20260629.json
 
@@ -1414,11 +1419,11 @@ python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
 
 python3 benchmarks/v1_readiness_gate.py \
   --run-packaged \
-  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_abstention_gate.json \
+  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_raw_auth_gate.json \
   --shadow-report /tmp/my_precious_private_shadow_v2_current_20260629.json \
   --require-public \
   --require-shadow \
-  > /tmp/my_precious_v1_public100_shadow_current_20260629.json
+  > /tmp/my_precious_v1_public100_shadow_raw_auth_current_20260629.json
 ```
 
 Limited-read conversion metrics:
@@ -1449,6 +1454,9 @@ Strict 100-case probe metrics:
 | abstention_accuracy | 1.0 |
 | abstention_answer_cases | 6 |
 | abstention_answer_pass_rate | 1.0 |
+| raw_preview_authorization_pass_rate | 1.0 |
+| raw_preview_redaction_pass_rate | 1.0 |
+| source_drilldown_privacy_pass_rate | 1.0 |
 | privacy_leak_count | 0 |
 | top_k_noise_at_5 | 0.0 |
 | failed_case_count | 0 |
@@ -1516,8 +1524,10 @@ answer reachability can use verified local drilldown files rather than only
 clipped search titles. The 100-case LongMemEval cleaned probe now passes strict
 local public-adapter readiness with perfect positive-case retrieval, source and
 answer reachability, privacy, and answer-level public abstention metrics. The
-next valuable work is broader public-sample scaling, generated-answer grading,
-broader consolidation/decay evidence, and source-drilldown authorization.
+source-depth path now also requires an explicit raw-preview authorization flag
+before redacted raw snippets render. The next valuable work is broader
+public-sample scaling, generated-answer grading, and broader
+consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1541,9 +1551,11 @@ broader consolidation/decay evidence, and source-drilldown authorization.
    materializing project rows.
 
 4. Deepen source-depth governance.
-   Keep raw source anchors private by default, add authorization checks for
-   deeper drilldown, and extend real history source-depth robustness beyond
-   aggregate dry-runs.
+   Keep raw source anchors private by default. The current CLI now requires a
+   separate raw-preview authorization flag, but this is still a single-user
+   confirmation gate rather than a multi-principal ACL. The next source-depth
+   step is real-history robustness beyond aggregate dry-runs and, later, a
+   policy model for multi-principal access.
 
 5. Scale adapted public benchmarks locally.
    The converter can now run bounded larger-sample probes against downloaded

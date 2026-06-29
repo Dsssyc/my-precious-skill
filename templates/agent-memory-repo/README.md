@@ -23,10 +23,11 @@ Use `--depth source` only when source reachability is needed and the user has
 explicitly asked for it. The command reports safe source ref metadata
 (`source_ref_id`, `status`, and `reason`); it does not print raw source content
 or copy raw transcripts into the archive. A short redacted raw-source snippet
-requires an explicit preview request:
+requires both an explicit preview target and a separate authorization
+confirmation:
 
 ```bash
-python tools/search_memory.py "<query>" --depth source --raw-source-preview all
+python tools/search_memory.py "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
 ```
 Use `--preferred-scope global|domain|project` when the current task has an
 explicit memory layer but cross-layer fallback should remain possible.

@@ -344,6 +344,8 @@ def new_totals() -> Totals:
         "source_depth_policy_hits": 0,
         "raw_preview_redaction_cases": 0,
         "raw_preview_redaction_hits": 0,
+        "raw_preview_authorization_cases": 0,
+        "raw_preview_authorization_hits": 0,
         "source_drilldown_privacy_cases": 0,
         "source_drilldown_privacy_hits": 0,
         "memory_evidence_ref_cases": 0,
@@ -505,6 +507,10 @@ def finalize_totals(totals: Totals) -> dict:
             totals["raw_preview_redaction_hits"],
             totals["raw_preview_redaction_cases"],
         ),
+        "raw_preview_authorization_pass_rate": ratio(
+            totals["raw_preview_authorization_hits"],
+            totals["raw_preview_authorization_cases"],
+        ),
         "source_drilldown_privacy_pass_rate": ratio(
             totals["source_drilldown_privacy_hits"],
             totals["source_drilldown_privacy_cases"],
@@ -632,6 +638,8 @@ def add_result(totals: Totals, result: dict) -> None:
             totals["source_depth_policy_hits"] += int(result["source_depth_policy_pass"])
             totals["raw_preview_redaction_cases"] += 1
             totals["raw_preview_redaction_hits"] += int(result["raw_preview_redaction_pass"])
+            totals["raw_preview_authorization_cases"] += 1
+            totals["raw_preview_authorization_hits"] += int(result["raw_preview_authorization_pass"])
             totals["source_drilldown_privacy_cases"] += 1
             totals["source_drilldown_privacy_hits"] += int(result["source_drilldown_privacy_pass"])
         totals["evidence_cases"] += int(result["evidence_expected"])
@@ -770,6 +778,7 @@ def run_search(
     timeout_s: float,
     scope: str = "all",
     raw_source_preview: str = "",
+    authorize_raw_source_preview: bool = False,
 ) -> SearchOutput:
     display_query = safe_result_identifier(query)
     display_script = safe_diagnostic_path(search_script)
@@ -788,6 +797,8 @@ def run_search(
         command.extend(["--scope", scope])
     if raw_source_preview:
         command.extend(["--raw-source-preview", raw_source_preview])
+        if authorize_raw_source_preview:
+            command.append("--authorize-raw-source-preview")
     try:
         result = subprocess.run(
             command,
@@ -1684,6 +1695,8 @@ def failed_checks(result: dict) -> list[str]:
             checks.append("source_depth_policy_pass_rate")
         if result["source_expected"] and not result["raw_preview_redaction_pass"]:
             checks.append("raw_preview_redaction_pass_rate")
+        if result["source_expected"] and not result["raw_preview_authorization_pass"]:
+            checks.append("raw_preview_authorization_pass_rate")
         if result["source_expected"] and not result["source_drilldown_privacy_pass"]:
             checks.append("source_drilldown_privacy_pass_rate")
         if result["evidence_expected"] and not result["evidence_reachability_hit"]:
@@ -1780,6 +1793,7 @@ def case_detail(case: Case, result: dict) -> dict:
         "source_ref_reachability_hit": result["source_ref_reachability_hit"],
         "source_depth_policy_pass": result["source_depth_policy_pass"],
         "raw_preview_redaction_pass": result["raw_preview_redaction_pass"],
+        "raw_preview_authorization_pass": result["raw_preview_authorization_pass"],
         "source_drilldown_privacy_pass": result["source_drilldown_privacy_pass"],
         "memory_evidence_ref_reachability_hit": result["memory_evidence_ref_reachability_hit"],
         "memory_graph_drilldown_expected": result["memory_graph_drilldown_expected"],
@@ -1857,6 +1871,7 @@ def score_case(
             "source",
             search_timeout_s,
             raw_source_preview="all",
+            authorize_raw_source_preview=True,
         )
     scope_search = SearchOutput("", "")
     wrong_scope_searches: list[SearchOutput] = []
@@ -1937,6 +1952,9 @@ def score_case(
     unsafe_source_anchor_count = unsafe_source_anchor_count_at_5(source_blocks)
     source_policy_pass = source_depth_policy_pass(source_blocks) if expected_source_anchor else False
     raw_preview_pass = sensitive_output_free(source_preview_search.combined(), forbidden_patterns) if expected_source_anchor else False
+    raw_preview_authorization_pass = (
+        "raw_preview_blocked: authorization_required" not in source_preview_search.combined()
+    ) if expected_source_anchor else False
     source_drilldown_privacy = sensitive_output_free(
         "\n".join([source_search.combined(), source_preview_search.combined()]),
         forbidden_patterns,
@@ -2167,6 +2185,7 @@ def score_case(
         "source_ref_reachability_hit": source_hit,
         "source_depth_policy_pass": source_policy_pass,
         "raw_preview_redaction_pass": raw_preview_pass,
+        "raw_preview_authorization_pass": raw_preview_authorization_pass,
         "source_drilldown_privacy_pass": source_drilldown_privacy,
         "source_precision_at_5": source_precision.score,
         "source_result_count_at_5": source_precision.result_count,

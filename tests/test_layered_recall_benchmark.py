@@ -166,6 +166,7 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["source_ref_reachability"], 1.0)
             self.assertEqual(payload["source_depth_policy_pass_rate"], 1.0)
             self.assertEqual(payload["unsafe_source_ref_rejected_count"], 0)
+            self.assertEqual(payload["raw_preview_authorization_pass_rate"], 1.0)
             self.assertEqual(payload["raw_preview_redaction_pass_rate"], 1.0)
             self.assertEqual(payload["source_drilldown_privacy_pass_rate"], 1.0)
             self.assertEqual(payload["source_precision_at_5"], 1.0)
@@ -953,14 +954,15 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["latency_mean_ms"], payload["latency_ms"])
             self.assertEqual(payload["latency_max_ms"], payload["latency_ms"])
             self.assertEqual(payload["categories"]["uncategorized"]["latency_mean_ms"], payload["latency_ms"])
+            self.assertEqual(payload["raw_preview_authorization_pass_rate"], 1.0)
             calls = calls_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(
                 calls,
                 [
-                    "memory|all|permission prompts",
-                    "session|all|permission prompts",
-                    "source|all|permission prompts",
-                    "source|all|permission prompts",
+                    "memory|all|permission prompts|raw_preview=|raw_preview_authorized=no",
+                    "session|all|permission prompts|raw_preview=|raw_preview_authorized=no",
+                    "source|all|permission prompts|raw_preview=|raw_preview_authorized=no",
+                    "source|all|permission prompts|raw_preview=all|raw_preview_authorized=yes",
                 ],
             )
 
@@ -3822,8 +3824,21 @@ class LayeredRecallBenchmarkTests(unittest.TestCase):
                 query = sys.argv[1]
                 depth = arg_value("--depth")
                 scope = arg_value("--scope", "all")
+                raw_preview = arg_value("--raw-source-preview")
+                raw_preview_authorized = "yes" if "--authorize-raw-source-preview" in sys.argv else "no"
                 with CALLS.open("a", encoding="utf-8") as handle:
-                    handle.write(depth + "|" + scope + "|" + query + "\\n")
+                    handle.write(
+                        depth
+                        + "|"
+                        + scope
+                        + "|"
+                        + query
+                        + "|raw_preview="
+                        + raw_preview
+                        + "|raw_preview_authorized="
+                        + raw_preview_authorized
+                        + "\\n"
+                    )
 
                 if MODE == "nohit":
                     print(f"No memory hits for: {{query}}")

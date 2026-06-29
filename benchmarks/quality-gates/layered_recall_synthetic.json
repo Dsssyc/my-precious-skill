@@ -94,6 +94,7 @@
   "source_relevant_count_at_5": 40,
   "source_ref_reachability": 1.0,
   "source_reachability": 1.0,
+  "raw_preview_authorization_pass_rate": 1.0,
   "raw_preview_redaction_pass_rate": 1.0,
   "stale_cases": 9,
   "stale_memory_suppression": 1.0,

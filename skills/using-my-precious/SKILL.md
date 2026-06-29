@@ -64,10 +64,11 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
    This prints safe source ref status metadata (`source_ref_id`, `status`, and
    `reason`) rather than raw source content. If the user explicitly asks for a
-   raw-source check, request only a short redacted preview:
+   raw-source check, request only a short redacted preview and include the
+   separate authorization confirmation flag:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --raw-source-preview all
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
    ```
 
 5. If the deployment repo has no search tool, use the bundled script:

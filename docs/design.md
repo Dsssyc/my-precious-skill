@@ -236,7 +236,8 @@ summary session output. These metrics are reported as `memory_recall_at_1`,
 `session_drilldown_at_5`, `drilldown_success_rate`, `evidence_reachability`,
 `evidence_text_cases`, `evidence_text_reachability`, `source_reachability`,
 `source_ref_reachability`, `source_depth_policy_pass_rate`,
-`raw_preview_redaction_pass_rate`, `source_drilldown_privacy_pass_rate`,
+`raw_preview_redaction_pass_rate`, `raw_preview_authorization_pass_rate`,
+`source_drilldown_privacy_pass_rate`,
 `memory_graph_drilldown_cases`, `memory_graph_drilldown_rate`,
 `memory_graph_invalid_edge_cases`,
 `memory_graph_invalid_edge_suppression_rate`,
@@ -264,7 +265,9 @@ block are relevant. `source_ref_reachability` checks the stable source ref ID
 derived from `expected_source_anchor`; `source_depth_policy_pass_rate` checks
 that source-depth output uses `source_ref_id`, `status`, and `reason` fields
 instead of legacy raw anchor rendering; `raw_preview_redaction_pass_rate` checks
-explicit `--raw-source-preview all` output; and
+explicit authorized `--raw-source-preview all` output;
+`raw_preview_authorization_pass_rate` checks that raw-preview probes are not
+blocked by the authorization gate; and
 `source_drilldown_privacy_pass_rate` checks source-depth plus preview output
 against forbidden private or secret-like patterns.
 `layer_calibration` measures whether cases that declare `expected_layer` return

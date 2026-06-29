@@ -1855,7 +1855,7 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertNotIn("records/private.jsonl#message:42", result.stdout)
         self.assertNotIn("FAKE RAW PRIVATE CONTENT", result.stdout)
 
-    def test_search_memory_raw_source_preview_requires_explicit_opt_in_and_redacts(self):
+    def test_search_memory_raw_source_preview_requires_authorization_and_redacts(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1903,7 +1903,7 @@ class SearchMemoryTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            preview_result = subprocess.run(
+            unauthorized_preview_result = subprocess.run(
                 [
                     sys.executable,
                     str(script),
@@ -1920,13 +1920,33 @@ class SearchMemoryTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            authorized_preview_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source preview redaction",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                    "--raw-source-preview",
+                    "all",
+                    "--authorize-raw-source-preview",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
         self.assertNotIn("raw_preview:", default_result.stdout)
-        self.assertIn("raw_preview:", preview_result.stdout)
-        self.assertIn("Safe preview phrase for gated source drilldown", preview_result.stdout)
-        self.assertIn("[REDACTED_COOKIE]", preview_result.stdout)
-        self.assertNotIn("SHOULD_NOT_RENDER", preview_result.stdout)
-        self.assertNotIn("cookie=", preview_result.stdout)
+        self.assertIn("raw_preview_blocked: authorization_required", unauthorized_preview_result.stdout)
+        self.assertNotIn("Safe preview phrase for gated source drilldown", unauthorized_preview_result.stdout)
+        self.assertIn("raw_preview:", authorized_preview_result.stdout)
+        self.assertIn("Safe preview phrase for gated source drilldown", authorized_preview_result.stdout)
+        self.assertIn("[REDACTED_COOKIE]", authorized_preview_result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", authorized_preview_result.stdout)
+        self.assertNotIn("cookie=", authorized_preview_result.stdout)
 
     def test_search_memory_depth_source_reports_reachable_source_map_without_path_leak(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
