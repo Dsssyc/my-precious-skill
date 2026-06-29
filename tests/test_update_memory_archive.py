@@ -2835,6 +2835,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     memory_repo=memory_repo,
                     project_path=project_path,
                     archive_scope=str(project_path.resolve()),
+                    source_partition=str(project_path.resolve()),
                     project_name="project",
                     source_agent="agent",
                     record=record,
@@ -4851,6 +4852,118 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 if line.strip()
             ]
             self.assertEqual({row["archive_scope"] for row in scope_rows}, {"domain:alpha", "domain:beta"})
+
+    def test_update_memory_archive_source_partition_decouples_high_water_from_project_path(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            old_project_path = root / "project-old-path"
+            new_project_path = root / "project-new-path"
+            source_dir.mkdir()
+            old_project_path.mkdir()
+            new_project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            newer_source = source_dir / "logical-newer.jsonl"
+            newer_source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T12:00:00Z",
+                        "cwd": str(old_project_path),
+                        "role": "user",
+                        "content": "Decision: logical source partition keeps high-water across path migration.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(old_project_path),
+                    "--project",
+                    "project",
+                    "--require-project-metadata",
+                    "--archive-scope",
+                    "domain:logical",
+                    "--source-partition",
+                    "source:logical",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            older_source = source_dir / "logical-older-migrated-path.jsonl"
+            older_source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(new_project_path),
+                        "role": "user",
+                        "content": "Older migrated-path source should be skipped by logical partition high-water.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/update_memory_archive.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(new_project_path),
+                    "--project",
+                    "project",
+                    "--require-project-metadata",
+                    "--archive-scope",
+                    "domain:logical",
+                    "--source-partition",
+                    "source:logical",
+                    "--dry-run",
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertIn("Latest archived timestamp: 2026-05-14T12:00:00Z", result.stdout)
+            self.assertIn("Records selected: 0", result.stdout)
+            rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["project_path"], str(old_project_path.resolve()))
+            self.assertEqual(rows[0]["source_partition"], "source:logical")
+            source_partition_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/source_partitions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(source_partition_rows[0]["archive_scope"], "domain:logical")
+            self.assertEqual(source_partition_rows[0]["source_partition"], "source:logical")
 
     def test_update_memory_archive_refreshes_changed_source_older_than_project_latest(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

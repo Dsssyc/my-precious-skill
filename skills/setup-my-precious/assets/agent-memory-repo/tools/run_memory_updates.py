@@ -321,6 +321,9 @@ def run_project_update(
     archive_scope = project.get("archive_scope")
     if isinstance(archive_scope, str) and archive_scope.strip():
         command.extend(["--archive-scope", archive_scope.strip()])
+    source_partition = project.get("source_partition")
+    if isinstance(source_partition, str) and source_partition.strip():
+        command.extend(["--source-partition", source_partition.strip()])
     if max_records is not None:
         command.extend(["--max-records", str(max_records)])
     for pattern in patterns:

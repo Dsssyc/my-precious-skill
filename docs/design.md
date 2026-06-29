@@ -37,13 +37,14 @@ exists. It must not run recurring jobs from this development repository.
 
 `update-my-precious` performs on-demand write-path actions against the private
 deployment repository. It scans a source record directory, uses the current
-project path as the source-record filtering and high-water partition, uses an
-archive scope as the memory-domain key, archives records newer than the latest
-timestamp already archived for that scope plus source partition, refreshes a
-previously archived source record in that same partition when its current
-source hash changes, and writes searchable summaries plus short redacted
-evidence snippets. The default archive scope is the resolved project path for
-compatibility.
+project path as the source-record filtering key, uses an archive scope as the
+memory-domain key, and uses a source partition as the high-water/source-hash
+freshness key. The updater archives records newer than the latest timestamp
+already archived for that scope plus source partition, refreshes a previously
+archived source record in that same partition when its current source hash
+changes, and writes searchable summaries plus short redacted evidence snippets.
+The default archive scope and source partition are both the resolved project
+path for compatibility.
 
 ## Generality
 
@@ -78,12 +79,14 @@ and JSONL indexes.
 - `skills/update-my-precious/SKILL.md`: archives new source records for the
   current project into the deployment repository.
 - `skills/update-my-precious/scripts/update_memory_archive.py`: generic
-  incremental updater keyed by an archive scope, source project partition, and
+  incremental updater keyed by an archive scope, explicit source partition, and
   source-record timestamps, with deterministic summary rendering, source maps,
   daily summaries, JSONL indexes, and default refusal for source records that
-  match secret patterns. The default archive scope is `project_path`;
-  deployments can set `--archive-scope` or a registry `archive_scope` when
-  project should be only a source context.
+  match secret patterns. The default archive scope and source partition are
+  `project_path`; deployments can set `--archive-scope` or a registry
+  `archive_scope` when project should be only a source context, and
+  `--source-partition` or registry `source_partition` when source freshness
+  should survive project path migration.
 - `benchmarks/updater_induction_benchmark.py`: synthetic write-path benchmark
   that drives the real setup and updater scripts from temporary source records
   and reports aggregate induction, lifecycle, provenance, and privacy metrics.
@@ -131,10 +134,11 @@ and `index/scopes.jsonl` are generated archive indexes. Disabled projects in
 `config/projects.jsonl` must remain disabled even if source records still
 mention them. Registered rows may include `archive_scope` so scheduled updates
 can write into a non-project memory domain while still filtering source records
-by `project_path`. Incremental high-water and source-hash freshness remain
-partitioned by project path inside that archive scope, so one registered
-project cannot hide older unarchived records from another project in the same
-domain stream.
+by `project_path`. Registered rows may include `source_partition` so
+incremental high-water and source-hash freshness follow a stable source stream
+that is independent from `project_path`. When omitted, source partition defaults
+to the resolved project path, so one registered path cannot hide older
+unarchived records from another path in the same domain stream.
 
 Agent-native automations should use exactly one working directory: the private
 deployment repository. Multiple working directories can create multiple
@@ -185,8 +189,8 @@ If none are set, tools may try `~/repos/agent-memory`.
 - The search script works against a synthetic archive.
 - The setup script creates a synthetic local archive.
 - The update script archives source records newer than the latest timestamp for
-  the same archive scope and refreshes previously archived source records in
-  that scope whose source hash changed.
+  the same archive scope plus source partition and refreshes previously
+  archived source records in that partition whose source hash changed.
 - The update script generates searchable summaries and refuses likely-secret
   source records by default.
 - The update script can require explicit project metadata when scanning shared

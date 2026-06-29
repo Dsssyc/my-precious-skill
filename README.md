@@ -30,12 +30,15 @@ the agent can use `$using-my-precious` to search a private session memory archiv
 `setup-my-precious` is the setup-path skill. It asks how the archive should be stored, scaffolds a local archive folder, and can connect it to a private hosted Git repository when requested.
 
 `update-my-precious` is the write-path skill. It scans a source record
-directory, uses the current project path as the source-record partition, writes
-records newer than the latest archived timestamp for the selected archive
-scope plus source partition, and refreshes a previously archived source record
-in that same partition when its source hash changes. The default archive scope
-is the resolved project path for compatibility, but deployments can opt into a
-stable non-project memory domain with `--archive-scope`.
+directory, uses the current project path to filter source records, writes into
+a selected archive memory domain, and tracks freshness by a source partition.
+The default archive scope and source partition are both the resolved project
+path for compatibility. Deployments can opt into a stable non-project memory
+domain with `--archive-scope` and a stable non-path source stream with
+`--source-partition`. The updater archives records newer than the latest
+timestamp for the same archive scope plus source partition, and refreshes a
+previously archived source record in that same partition when its source hash
+changes.
 
 `using-my-precious` is the read-path skill. It only requires a deployment repository with stable Markdown summaries and JSONL indexes.
 
@@ -221,10 +224,12 @@ If `config/projects.jsonl` is empty, the runner scans source records for project
 metadata such as `cwd` or `project_path`, registers discovered projects, and
 then updates each enabled project.
 Registered project rows may include `archive_scope` to make scheduled updates
-write into a stable memory domain that is not the project path. Incremental
-high-water and source-hash freshness are still tracked per source project
-partition inside that archive scope, so one project cannot hide older
-unarchived records from another project in the same domain stream.
+write into a stable memory domain that is not the project path. They may also
+include `source_partition` to make high-water and source-hash freshness follow
+a stable source stream that is independent from `project_path`. When omitted,
+the source partition defaults to the resolved project path, so one project path
+cannot hide older unarchived records from another path in the same domain
+stream.
 
 For a deliberate historical repair pass, add `--rewrite-existing`. That mode
 rebuilds matching source records and replaces older archive entries for the
@@ -832,8 +837,8 @@ A compatible deployment repository should expose:
 - `INDEX.md`: overview for humans and agents.
 - `config/projects.jsonl`: optional project registry used by the global runner.
   Rows may include `archive_scope` for a memory domain independent from
-  `project_path`; incremental high-water remains partitioned by source project
-  inside that domain.
+  `project_path` and `source_partition` for a high-water/source-hash stream
+  independent from `project_path`.
 - `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
   and `memories/explicit.jsonl`: layered memory nodes.
 - `reviews/memory_lifecycle_decisions.jsonl`: private reviewer decisions for
@@ -853,6 +858,8 @@ A compatible deployment repository should expose:
 - `index/memory_consolidation_trace.jsonl`: explainable merge, supersede,
   contradict, deprecate, and skip decisions from the updater.
 - `index/sessions.jsonl`: one row per session.
+- `index/source_partitions.jsonl`: one generated row per archive scope plus
+  source partition.
 - `index/decisions.jsonl`: one row per reusable decision.
 - `index/unresolved.jsonl`: one row per follow-up task.
 - `sessions/YYYY/MM/DD/.../summary.md`: structured per-session summary.
@@ -898,8 +905,9 @@ skills/using-my-precious/references/archive-format.md
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
   optional preferred-scope ranking, and explainable result reasons.
-- Incremental update script keyed by archive scope, source project partition,
-  and source/session timestamp, defaulting to project path for compatibility.
+- Incremental update script keyed by archive scope, explicit source partition,
+  and source/session timestamp, defaulting both archive scope and source
+  partition to project path for compatibility.
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.
 - Optional project-metadata requirement for shared source record directories.

@@ -22,6 +22,7 @@ from update_memory_archive import (
     is_safe_archive_entry_dir,
     prune_empty_session_dirs,
     sha256_file,
+    source_partition_for_row,
     source_timestamp,
     write_record,
 )
@@ -33,6 +34,7 @@ from audit_memory_archive import NOISE_PATTERNS
 class BackfillGroup:
     project_path: Path
     archive_scope: str
+    source_partition: str
     project_name: str
     source_agent: str
     source_record: Path
@@ -66,7 +68,7 @@ def load_meta(path: Path) -> dict[str, object] | None:
 
 
 def collect_groups(memory_repo: Path, project_path: Path | None, source_record: Path | None) -> list[BackfillGroup]:
-    grouped: dict[tuple[str, str], BackfillGroup] = {}
+    grouped: dict[tuple[str, str, str], BackfillGroup] = {}
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
         meta = load_meta(meta_path)
         if not meta:
@@ -84,7 +86,8 @@ def collect_groups(memory_repo: Path, project_path: Path | None, source_record: 
         if not resolved_source.exists() or not resolved_source.is_file():
             continue
         archive_scope = archive_scope_for_row(meta) or str(resolved_project)
-        key = (archive_scope, str(resolved_source))
+        source_partition = source_partition_for_row(meta) or str(resolved_project)
+        key = (archive_scope, source_partition, str(resolved_source))
         group = grouped.get(key)
         if group is None:
             project_name = str(meta.get("project") or "") or project_name_from_path(resolved_project)
@@ -92,6 +95,7 @@ def collect_groups(memory_repo: Path, project_path: Path | None, source_record: 
             group = BackfillGroup(
                 project_path=resolved_project,
                 archive_scope=archive_scope,
+                source_partition=source_partition,
                 project_name=project_name,
                 source_agent=source_agent,
                 source_record=resolved_source,
@@ -99,7 +103,7 @@ def collect_groups(memory_repo: Path, project_path: Path | None, source_record: 
             )
             grouped[key] = group
         group.entries.append(meta_path.parent)
-    return sorted(grouped.values(), key=lambda item: (item.archive_scope, item.source_record.as_posix()))
+    return sorted(grouped.values(), key=lambda item: (item.archive_scope, item.source_partition, item.source_record.as_posix()))
 
 
 def entry_has_noise(entry_dir: Path) -> bool:
@@ -248,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             memory_repo=memory_repo,
             project_path=group.project_path,
             archive_scope=group.archive_scope,
+            source_partition=group.source_partition,
             project_name=args.project or group.project_name,
             source_agent=args.source_agent or group.source_agent,
             record=record,

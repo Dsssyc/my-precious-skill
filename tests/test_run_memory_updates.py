@@ -359,6 +359,7 @@ class RunMemoryUpdatesTests(unittest.TestCase):
                     {
                         "project_path": str(project_path.resolve()),
                         "archive_scope": "domain:runner-scope",
+                        "source_partition": "source:runner-scope",
                         "source_dir": str(source_dir.resolve()),
                         "enabled": True,
                         "source": "manual",
@@ -404,6 +405,7 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             ]
             self.assertEqual(len(session_rows), 1)
             self.assertEqual(session_rows[0]["archive_scope"], "domain:runner-scope")
+            self.assertEqual(session_rows[0]["source_partition"], "source:runner-scope")
             scope_rows = [
                 json.loads(line)
                 for line in (memory_repo / "index/scopes.jsonl").read_text(encoding="utf-8").splitlines()

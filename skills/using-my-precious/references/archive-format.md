@@ -19,6 +19,7 @@ agent-memory/
   index/
     memories.jsonl
     sessions.jsonl
+    source_partitions.jsonl
     decisions.jsonl
     unresolved.jsonl
     projects.jsonl
@@ -41,7 +42,10 @@ agent-memory/
 ```
 
 `config/projects.jsonl` is runtime configuration for broad scheduled updates.
-It is distinct from generated read indexes under `index/`.
+It is distinct from generated read indexes under `index/`. Rows may include
+`archive_scope` for the memory domain and `source_partition` for the
+high-water/source-hash freshness stream; both default to the resolved project
+path for compatibility.
 
 `memories/*.jsonl` contains generated or explicit layered memory nodes.
 `index/memories.jsonl` is the combined read index searched before session-level
@@ -52,7 +56,14 @@ indexes when it exists.
 `index/sessions.jsonl` should contain one JSON object per session:
 
 ```json
-{"date":"2026-05-14","session_id":"...","source_agent":"agent","project":"...","title":"...","tags":["..."],"summary_path":"sessions/.../summary.md","evidence_path":"sessions/.../evidence.md","unresolved_count":0}
+{"date":"2026-05-14","session_id":"...","source_agent":"agent","project":"...","project_path":"...","archive_scope":"domain:...","source_partition":"source:...","title":"...","tags":["..."],"summary_path":"sessions/.../summary.md","evidence_path":"sessions/.../evidence.md","unresolved_count":0}
+```
+
+`index/source_partitions.jsonl` should contain one generated row per archive
+scope plus source partition:
+
+```json
+{"archive_scope":"domain:...","source_partition":"source:...","project":"...","project_path":"...","latest_source_updated_at":"2026-05-14T12:00:00Z","latest_summary_path":"sessions/.../summary.md"}
 ```
 
 `index/decisions.jsonl` should contain one JSON object per decision:

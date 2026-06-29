@@ -693,6 +693,16 @@ def archive_scope_for_row(row: dict) -> str:
     return ""
 
 
+def source_partition_for_row(row: dict) -> str:
+    partition = row.get("source_partition")
+    if isinstance(partition, str) and partition.strip():
+        return normalize_partition_value(partition)
+    project_path = row.get("project_path")
+    if isinstance(project_path, str) and project_path.strip():
+        return normalize_partition_value(project_path)
+    return ""
+
+
 def normalize_archive_scope(scope_arg: str | None, project_path: Path) -> str:
     if scope_arg is None:
         return str(project_path.resolve())
@@ -704,26 +714,37 @@ def normalize_archive_scope(scope_arg: str | None, project_path: Path) -> str:
     return scope
 
 
-def normalize_project_partition(value: object) -> str:
+def normalize_partition_value(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         return ""
     path = Path(value).expanduser()
     return str(path.resolve()) if path.is_absolute() else path.as_posix()
 
 
-def row_matches_project_partition(row: dict, project_path: Path) -> bool:
-    row_project_path = normalize_project_partition(row.get("project_path"))
-    if not row_project_path:
-        return False
-    return row_project_path == str(project_path.resolve())
+def normalize_source_partition(partition_arg: str | None, project_path: Path) -> str:
+    if partition_arg is None:
+        return str(project_path.resolve())
+    partition = partition_arg.strip()
+    if not partition:
+        raise SystemExit("--source-partition must be non-empty")
+    if any(ord(char) < 32 or ord(char) == 127 for char in partition) or has_sensitive_identifier_token(partition):
+        raise SystemExit("--source-partition is unsafe")
+    return normalize_partition_value(partition)
+
+
+def row_matches_source_partition(row: dict, source_partition: str) -> bool:
+    row_source_partition = source_partition_for_row(row)
+    return bool(row_source_partition and row_source_partition == source_partition)
 
 
 def archived_project_state(
     memory_repo: Path,
     project_path: Path,
     archive_scope: str | None = None,
+    source_partition: str | None = None,
 ) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
     scope_key = archive_scope or str(project_path.resolve())
+    partition_key = source_partition or str(project_path.resolve())
     latest: datetime | None = None
     archived_hashes: set[str] = set()
     archived_source_hashes: dict[str, set[str]] = {}
@@ -731,7 +752,7 @@ def archived_project_state(
     for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
         if archive_scope_for_row(record) != scope_key:
             continue
-        if not row_matches_project_partition(record, project_path):
+        if not row_matches_source_partition(record, partition_key):
             continue
         for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
             parsed = parse_timestamp(record.get(key))
@@ -745,7 +766,7 @@ def archived_project_state(
             continue
         if archive_scope_for_row(meta) != scope_key:
             continue
-        if not row_matches_project_partition(meta, project_path):
+        if not row_matches_source_partition(meta, partition_key):
             continue
         source_record = meta.get("source_record")
         source_key = ""
@@ -764,8 +785,13 @@ def archived_project_state(
     return latest, archived_hashes, archived_source_hashes
 
 
-def latest_archived_timestamp(memory_repo: Path, project_path: Path, archive_scope: str | None = None) -> datetime | None:
-    latest, _, _ = archived_project_state(memory_repo, project_path, archive_scope)
+def latest_archived_timestamp(
+    memory_repo: Path,
+    project_path: Path,
+    archive_scope: str | None = None,
+    source_partition: str | None = None,
+) -> datetime | None:
+    latest, _, _ = archived_project_state(memory_repo, project_path, archive_scope, source_partition)
     return latest
 
 
@@ -2180,8 +2206,10 @@ def remove_existing_entries_for_source(
     project_path: Path,
     source_record: Path,
     archive_scope: str | None = None,
+    source_partition: str | None = None,
 ) -> int:
     scope_key = archive_scope or str(project_path.resolve())
+    partition_key = source_partition or str(project_path.resolve())
     source_key = str(source_record.resolve())
     removed = 0
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
@@ -2191,7 +2219,7 @@ def remove_existing_entries_for_source(
             continue
         if (
             archive_scope_for_row(meta) != scope_key
-            or not row_matches_project_partition(meta, project_path)
+            or not row_matches_source_partition(meta, partition_key)
             or meta.get("source_record") != source_key
         ):
             continue
@@ -2242,6 +2270,7 @@ def write_record(
     memory_repo: Path,
     project_path: Path,
     archive_scope: str,
+    source_partition: str,
     project_name: str,
     source_agent: str,
     record: SourceRecord,
@@ -2277,6 +2306,7 @@ def write_record(
 - project: {project_name}
 - project_path: {project_path}
 - archive_scope: {archive_scope}
+- source_partition: {source_partition}
 - source_record: {record.path}
 - source_updated_at: {isoformat(record.updated_at)}
 - source_sha256: {record.sha256}
@@ -2323,6 +2353,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "project": project_name,
         "project_path": str(project_path),
         "archive_scope": archive_scope,
+        "source_partition": source_partition,
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
         "source_updated_at": isoformat(record.updated_at),
@@ -2351,6 +2382,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_updated_at": isoformat(record.updated_at),
         "project_path": str(project_path),
         "archive_scope": archive_scope,
+        "source_partition": source_partition,
         "archive_entry": str(destination.relative_to(memory_repo)),
         "summary_path": str(rel_summary),
         "evidence_path": str(rel_evidence),
@@ -3683,8 +3715,10 @@ def rebuild_indexes(memory_repo: Path) -> None:
     sessions_lines: list[str] = []
     project_latest: dict[str, dict] = {}
     scope_latest: dict[str, dict] = {}
+    source_partition_latest: dict[tuple[str, str], dict] = {}
     for row in rows:
         archive_scope = archive_scope_for_row(row)
+        source_partition = source_partition_for_row(row)
         session_row = {
             "date": str(row.get("source_updated_at", ""))[:10],
             "session_id": row.get("session_id", ""),
@@ -3692,6 +3726,7 @@ def rebuild_indexes(memory_repo: Path) -> None:
             "project": row.get("project", ""),
             "project_path": row.get("project_path", ""),
             "archive_scope": archive_scope,
+            "source_partition": source_partition,
             "title": index_title_from_meta(row),
             "source_record": row.get("source_record", ""),
             "user_intent": row.get("user_intent", ""),
@@ -3711,6 +3746,16 @@ def rebuild_indexes(memory_repo: Path) -> None:
             project_latest[project_key] = {
                 "project": row.get("project", ""),
                 "project_path": project_key,
+                "latest_source_updated_at": row.get("source_updated_at", ""),
+                "latest_summary_path": row.get("summary_path", ""),
+            }
+        partition_key = (archive_scope, source_partition)
+        if archive_scope and source_partition and partition_key not in source_partition_latest:
+            source_partition_latest[partition_key] = {
+                "archive_scope": archive_scope,
+                "source_partition": source_partition,
+                "project": row.get("project", ""),
+                "project_path": row.get("project_path", ""),
                 "latest_source_updated_at": row.get("source_updated_at", ""),
                 "latest_summary_path": row.get("summary_path", ""),
             }
@@ -3739,6 +3784,13 @@ def rebuild_indexes(memory_repo: Path) -> None:
         memory_repo,
         index_dir / "scopes.jsonl",
         "\n".join(json.dumps(row, sort_keys=True) for row in scope_latest.values()) + ("\n" if scope_latest else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "source_partitions.jsonl",
+        "\n".join(json.dumps(row, sort_keys=True) for row in source_partition_latest.values())
+        + ("\n" if source_partition_latest else ""),
         "index file",
     )
     decision_lines: list[str] = []
@@ -3908,7 +3960,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project-path", default=os.getcwd(), help="Project path used for source-record filtering and legacy scope defaults")
     parser.add_argument(
         "--archive-scope",
-        help="Optional stable archive/high-water scope key; defaults to the resolved project path for compatibility",
+        help="Optional stable archive memory-domain key; defaults to the resolved project path for compatibility",
+    )
+    parser.add_argument(
+        "--source-partition",
+        help="Optional stable source high-water partition key; defaults to the resolved project path for compatibility",
     )
     parser.add_argument("--project", help="Human-readable project name")
     parser.add_argument("--source-agent", default="agent", help="Source agent/runtime label")
@@ -3957,6 +4013,7 @@ def main(argv: list[str] | None = None) -> int:
     source_dir = Path(args.source_dir).expanduser().resolve()
     project_path = Path(args.project_path).expanduser().resolve()
     archive_scope = normalize_archive_scope(args.archive_scope, project_path)
+    source_partition = normalize_source_partition(args.source_partition, project_path)
     project_name = args.project or project_name_from_path(project_path)
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
 
@@ -4006,7 +4063,12 @@ def main(argv: list[str] | None = None) -> int:
         rebuild_indexes(memory_repo)
         return 0
 
-    latest, archived_hashes, archived_source_hashes = archived_project_state(memory_repo, project_path, archive_scope)
+    latest, archived_hashes, archived_source_hashes = archived_project_state(
+        memory_repo,
+        project_path,
+        archive_scope,
+        source_partition,
+    )
     records = discover_records(
         source_dir,
         patterns,
@@ -4023,6 +4085,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Project path: {safe_diagnostic_path(project_path)}")
     if args.archive_scope is not None:
         print("Archive scope: configured")
+    if args.source_partition is not None:
+        print("Source partition: configured")
     print(f"Source dir: {safe_diagnostic_path(source_dir)}")
     print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
     print(f"Records selected: {len(records)}")
@@ -4050,11 +4114,18 @@ def main(argv: list[str] | None = None) -> int:
     skipped_records = 0
     for record in records:
         if args.rewrite_existing or str(record.path.resolve()) in archived_source_hashes:
-            removed_entries += remove_existing_entries_for_source(memory_repo, project_path, record.path, archive_scope)
+            removed_entries += remove_existing_entries_for_source(
+                memory_repo,
+                project_path,
+                record.path,
+                archive_scope,
+                source_partition,
+            )
         written = write_record(
             memory_repo=memory_repo,
             project_path=project_path,
             archive_scope=archive_scope,
+            source_partition=source_partition,
             project_name=project_name,
             source_agent=args.source_agent,
             record=record,

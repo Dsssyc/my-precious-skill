@@ -30,6 +30,7 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
             group = backfill.BackfillGroup(
                 project_path=project_path,
                 archive_scope=str(project_path.resolve()),
+                source_partition=str(project_path.resolve()),
                 project_name="project",
                 source_agent="agent",
                 source_record=source_record,
@@ -96,6 +97,7 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
                             "project": "project",
                             "project_path": str(project_path.resolve()),
                             "archive_scope": "domain:backfill",
+                            "source_partition": "source:backfill",
                             "source_record": str(source.resolve()),
                             "source_record_sha256": name,
                             "source_updated_at": stamp,
@@ -147,6 +149,7 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
             ]
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["archive_scope"], "domain:backfill")
+            self.assertEqual(rows[0]["source_partition"], "source:backfill")
             self.assertIn("Backfill the stale memory", rows[0]["user_intent"])
             self.assertNotIn("session_meta", json.dumps(rows[0]))
 
