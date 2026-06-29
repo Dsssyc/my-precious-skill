@@ -218,6 +218,24 @@ still produce a structural report, but memory top-k metrics remain `null` until
 layered memory nodes exist. Invalid `forbidden_output_patterns` regular
 expressions fail the run without rendering the pattern text.
 
+Generate extractive answer records for offline generated-answer grading:
+
+```bash
+python tools/generate_answer_records.py \
+  --repo . \
+  --cases /path/to/generated-answer-cases.jsonl \
+  --output /tmp/generated-answer-records.jsonl \
+  --limit 5
+```
+
+The adapter searches this archive and writes private answer-record JSONL for
+`generated_answer_benchmark.py`. Its stdout is aggregate-only: it reports case
+counts, answer records written, memory-answer counts, abstention counts, no-hit
+counts, source benchmark counts, case-origin counts, and privacy flags without
+printing queries, generated answers, reference answers, source paths, or raw
+refs. It is extractive and deterministic; it does not call a model or prove
+semantic generated-answer quality.
+
 ## Render Scheduler Config
 
 Generate reviewable scheduler configuration without installing it:

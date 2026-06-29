@@ -104,6 +104,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
+  templates/agent-memory-repo/tools/generate_answer_records.py \
   templates/agent-memory-repo/tools/induction_consolidation_audit.py \
   templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
   templates/agent-memory-repo/tools/render_scheduler.py \

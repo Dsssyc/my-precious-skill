@@ -106,6 +106,12 @@ and JSONL indexes.
   rendering queries, generated answers, or reference answers. Reports include
   aggregate `source_benchmarks` and `case_origins` counts so the readiness gate
   can reject source-less answer evidence.
+- `templates/agent-memory-repo/tools/generate_answer_records.py`: extractive
+  deployment-repo helper that searches an existing archive and writes private
+  generated-answer JSONL records for `generated_answer_benchmark.py`. Its report
+  is aggregate-only and records memory-answer, abstention, source benchmark, and
+  case-origin counts. It does not call a model, consume reference answers, or
+  claim semantic answer quality.
 - `benchmarks/cases/generated_answer_synthetic*.jsonl`: packaged synthetic
   answer cases and answer records used when `v1_readiness_gate.py` runs with
   `--run-packaged --require-answer` and no external `--answer-report`.
@@ -688,6 +694,12 @@ aggregate `source_benchmarks` and `case_origins`, so source-less answer metrics
 cannot stand in for dogfood or public answer evidence. This remains synthetic
 dogfood evidence; it does not evaluate a live model or private real-history
 generated answers.
+
+The deployment template also includes `tools/generate_answer_records.py`, a
+deterministic extractive adapter that turns memory search hits into private
+answer-record JSONL for the offline grader. Its aggregate report can prove that
+the answer-record production path is wired and privacy-shaped, but it is not a
+substitute for a model-backed public or private generated-answer evaluation.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive

@@ -83,6 +83,16 @@ cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
 provenance gate without rendering queries, generated answers, or reference
 answers.
 
+The deployment template also includes an extractive
+`tools/generate_answer_records.py` adapter for producing answer-record JSONL
+from memory search hits. Its own report is aggregate-only: it includes case
+count, answer records written, memory-answer count, abstention count, no-hit
+count, source benchmark counts, case-origin counts, and privacy flags without
+rendering queries, generated answers, reference answers, source paths, or raw
+refs. This proves the answer-record production path can be wired into the
+offline grader, but it remains extractive evidence rather than live model
+answer quality.
+
 The current packaged source-stream registry fixture has 1 case and 1
 metadata-free source record. It reports `source_stream_update_rate: 1.0`,
 `project_registry_independence_rate: 1.0`,
@@ -1647,12 +1657,15 @@ reusable benchmark suite now also has an offline generated-answer grading gate
 for provided answer records plus a packaged synthetic generated-answer fixture
 that is wired into `--run-packaged --require-answer`; answer reports now also
 need aggregate source benchmark and case-origin counts before the readiness gate
-accepts them. The explicit source-stream registry path now has a packaged
-synthetic benchmark and is required by the core v1 readiness gate. The current
-public/shadow readiness runs did not include generated answer records and
-therefore still cannot claim real generated-answer behavior. The next valuable
-work is broader public-sample scaling, generated-answer real/dogfood adapter
-evidence, and broader consolidation/decay evidence.
+accepts them. The deployment template can now produce extractive answer records
+from archive search hits for that grader, with aggregate-only stdout and no
+reference-answer input. The explicit source-stream registry path now has a
+packaged synthetic benchmark and is required by the core v1 readiness gate. The
+current public/shadow readiness runs still did not include live or private
+real-history generated answer records and therefore cannot claim real
+generated-answer behavior. The next valuable work is generated-answer
+real/dogfood adapter evidence, real-history top-k noise reduction, and broader
+consolidation/decay evidence.
 
 ## Next Roadmap After The Minimum Slice
 

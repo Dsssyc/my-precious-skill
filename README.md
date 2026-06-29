@@ -89,6 +89,7 @@ my-precious-skill/
       schemas/memory_node.schema.json
       schemas/session_summary.schema.json
       tools/search_memory.py
+      tools/generate_answer_records.py
       tools/update_memory_archive.py
       tools/induction_consolidation_audit.py
       tools/run_memory_updates.py
@@ -470,6 +471,24 @@ counts. It also reports aggregate `source_benchmarks` and `case_origins` so
 is narrow: it grades provided answer records against reference answers; it does
 not call a model, generate answers, or claim semantic equivalence beyond exact,
 normalized, and token-overlap checks.
+
+Generate extractive answer records from an existing archive for that offline
+grader:
+
+```bash
+python ~/repos/agent-memory/tools/generate_answer_records.py \
+  --repo ~/repos/agent-memory \
+  --cases /path/to/generated-answer-cases.jsonl \
+  --output /tmp/generated-answer-records.jsonl \
+  --limit 5
+```
+
+This adapter searches memory and writes private answer-record JSONL for later
+grading. Its stdout is aggregate-only and reports case counts, memory-answer
+counts, abstention counts, source benchmark counts, case-origin counts, and
+privacy flags. It is deliberately extractive: it does not call a model, does
+not read benchmark reference answers as inputs, and does not prove live
+generated-answer quality by itself.
 
 Search without invoking an agent:
 
