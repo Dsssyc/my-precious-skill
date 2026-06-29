@@ -300,6 +300,94 @@ class ConvertPublicMemoryBenchmarkTests(unittest.TestCase):
             self.assertIn("converted case set is empty", result.stderr)
             self.assertFalse(output.exists())
 
+    def test_limit_streams_json_array_without_parsing_trailing_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.json"
+            output = root / "cases.jsonl"
+            source.write_text(
+                "\n[\n"
+                + json.dumps(
+                    {
+                        "question_id": "lme_q1",
+                        "question": "Which project adopted layered recall?",
+                        "answer": "The memory skill project.",
+                    },
+                    sort_keys=True,
+                )
+                + ',\n{"question_id": "lme_q2", "question": ',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--limit",
+                    "1",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            rows = self.read_rows(output)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["case_id"], "longmemeval:lme_q1")
+
+    def test_limit_streams_jsonl_without_parsing_trailing_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source = root / "longmemeval.jsonl"
+            output = root / "cases.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "question_id": "lme_q1",
+                        "question": "Which project adopted layered recall?",
+                        "answer": "The memory skill project.",
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+                + '{"question_id": "lme_q2", "question": ',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source",
+                    "longmemeval",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--limit",
+                    "1",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            rows = self.read_rows(output)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["cases"], 1)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["case_id"], "longmemeval:lme_q1")
+
     def test_missing_input_file_reports_controlled_sanitized_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

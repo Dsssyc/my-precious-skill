@@ -605,6 +605,10 @@ counts; the v1 readiness gate requires those fields before treating
 case sets before writing output. Evidence lists must contain non-empty strings.
 The converter does not download benchmark data or commit external records to
 this reusable skill repository.
+For bounded public-adapter probes, `--limit` stops reading early for JSONL files
+and top-level JSON arrays once enough input records have been collected; object
+schemas such as nested `data` arrays may still require full local parsing before
+the converted-case limit is applied.
 For adapter dry-runs,
 the converter can also build a temporary synthetic archive from the converted
 cases with `--build-synthetic-archive`; that archive is then scored by the same

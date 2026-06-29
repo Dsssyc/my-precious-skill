@@ -1340,6 +1340,87 @@ Combined public-plus-shadow v1 readiness summary:
 | real_archive_shadow_eval.status | passed |
 | privacy.aggregate_only | true |
 
+## Public Adapter Limited-Read Probe
+
+Date: 2026-06-29
+
+After the five-object smoke gate, the converter was extended so `--limit` can
+stop early for JSONL files and top-level JSON arrays. This makes bounded probes
+against large public benchmark downloads practical without committing public
+records or requiring the local file to contain the complete upstream JSON array.
+
+This probe used the first 80 MiB of the public LongMemEval cleaned
+`longmemeval_s_cleaned` split, written only under `/tmp` from:
+`https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned`. The converter
+read the first 100 top-level records with `--limit 100`, wrote converted cases
+and a synthetic archive under `/tmp`, then scored that archive with the layered
+recall benchmark.
+
+This is a failed strict public-adapter probe, not a passing v1 readiness gate
+and not a LongMemEval leaderboard result. It proves the adapter can process a
+larger bounded public sample, and it exposes the next real gap: public
+abstention and a small number of answer/source reachability cases are not yet
+modeled strongly enough to pass the same 1.0 gate used by the five-object
+smoke test.
+
+Commands:
+
+```bash
+curl -L --fail --range 0-83886079 \
+  -o /tmp/my_precious_public_limit_20260629/longmemeval_s_head80m.json \
+  https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json
+
+python3 benchmarks/convert_public_memory_benchmark.py \
+  --source longmemeval \
+  --input /tmp/my_precious_public_limit_20260629/longmemeval_s_head80m.json \
+  --output /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
+  --limit 100 \
+  --build-synthetic-archive /tmp/my_precious_public_limit_20260629/archive_100
+
+python3 benchmarks/layered_recall_benchmark.py \
+  --repo /tmp/my_precious_public_limit_20260629/archive_100 \
+  --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
+  --search-script templates/agent-memory-repo/tools/search_memory.py \
+  --details-jsonl /tmp/my_precious_public_limit_20260629/details_100.jsonl \
+  --fail-under case_pass_rate=1.0 \
+  --fail-under memory_recall_at_5=1.0 \
+  --fail-under answer_reachability=1.0 \
+  --fail-over privacy_leak_count=0 \
+  --fail-over failed_case_count=0 \
+  > /tmp/my_precious_public_limit_20260629/layered_report_100.json
+```
+
+Limited-read conversion metrics:
+
+| metric | value |
+| --- | ---: |
+| head_bytes | 83,886,080 |
+| head_sha256 | 9e8b4180467c348d6d553c9e1c5dcd2764ae825291a789e96e2f87a128cb0f61 |
+| converted_case_count | 100 |
+| converted_cases_sha256 | daa6294cbd6b857d1d8e4149cc3f5ffd0c06fb5b4a5ae1f522a9f4340a6b5596 |
+
+Strict 100-case probe metrics:
+
+| metric | value |
+| --- | ---: |
+| source_benchmarks.LongMemEval | 100 |
+| case_origins.public_benchmark_adapter | 100 |
+| positive_cases | 94 |
+| abstain_cases | 6 |
+| case_pass_rate | 0.9 |
+| memory_recall_at_5 | 0.9893617021276596 |
+| memory_precision_at_5 | 0.9893617021276596 |
+| answer_reachability | 0.9397590361445783 |
+| answer_normalized_reachability | 0.9397590361445783 |
+| answer_token_f1 | 0.9664298612661768 |
+| abstention_accuracy | 0.16666666666666666 |
+| privacy_leak_count | 0 |
+| failed_case_count | 10 |
+| failed_checks.abstention_accuracy | 5 |
+| failed_checks.answer_reachability | 5 |
+| failed_checks.source_reachability | 1 |
+| public_adapter.claim_boundary | failed strict larger-sample probe |
+
 ## Recommendation
 
 Proceed from the minimum verifiable lifecycle slice to deeper consolidation
@@ -1373,9 +1454,13 @@ links, ignored non-mutating decisions, stale search suppression, audit pass, and
 v2 shadow gate pass. It also has an aggregate-derived candidate-quality rule
 that removes low-overlap ambiguous scope review noise while preserving current
 shadow-eval gates. Same topic/scope result diversification now reduces
-real-history top-k noise while preserving recall and privacy gates. The next
-valuable work is broadening consolidation, decay, source-drilldown
-authorization, and public benchmark coverage.
+real-history top-k noise while preserving recall and privacy gates. The public
+adapter now has bounded-read support for larger samples, and the 100-case
+LongMemEval cleaned probe shows the next public-evidence gap: stronger
+abstention and answer/source reachability modeling are needed before the
+public-adapter dimension should be promoted beyond smoke evidence. The next
+valuable work is public benchmark hardening, broadening consolidation, decay,
+and source-drilldown authorization.
 
 ## Next Roadmap After The Minimum Slice
 
@@ -1403,10 +1488,12 @@ authorization, and public benchmark coverage.
    deeper drilldown, and extend real history source-depth robustness beyond
    aggregate dry-runs.
 
-5. Run adapted public benchmarks locally.
-   Use the existing converter against downloaded public records outside the
-   repository. Record dataset version, conversion fingerprints, archive build
-   rules, and score JSON.
+5. Harden adapted public benchmarks locally.
+   The converter can now run bounded larger-sample probes against downloaded
+   public records outside the repository. The next step is to close the
+   abstention and answer/source reachability failures surfaced by the 100-case
+   LongMemEval cleaned probe before treating the public-adapter dimension as
+   more than smoke evidence.
 
 6. Continue v2 hard-negative and no-hit quality.
    Keep probe cases in the deployment repository or another private local path,

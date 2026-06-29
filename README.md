@@ -578,6 +578,10 @@ The converter supports schema shapes used by the official
 [Memora](https://github.com/geniesinc/Memora) releases. It creates deterministic
 external memory IDs and protected source anchors for local evaluation; it does
 not download, vendor, or commit public benchmark records.
+Use `--limit N` for bounded adapter probes. For JSONL files and top-level JSON
+arrays, the converter stops reading once enough input records are available;
+for other JSON shapes it may still need to parse the full local file before
+applying the converted-case limit.
 `--build-synthetic-archive` is optional. It creates a temporary synthetic
 archive from the converted case targets, which lets you dry-run the adapter
 through the real search benchmark before evaluating a real memory archive.

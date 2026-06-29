@@ -75,7 +75,77 @@ def safe_case_id_for_diagnostic(value: object) -> str:
     return safe_diagnostic_text(text)
 
 
-def load_payload(path: Path) -> object:
+def load_limited_json_array(path: Path, *, limit: int) -> list[object] | None:
+    """Return up to limit items from a top-level JSON array, or None if not an array."""
+    try:
+        handle = path.open("r", encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(
+            f"unable to read input benchmark file {safe_diagnostic_path(path)}: {safe_diagnostic_text(exc)}"
+        ) from exc
+
+    decoder = json.JSONDecoder()
+    buffer = ""
+    eof = False
+
+    def fill() -> bool:
+        nonlocal buffer, eof
+        chunk = handle.read(64 * 1024)
+        if chunk == "":
+            eof = True
+            return False
+        buffer += chunk
+        return True
+
+    def skip_ws(pos: int) -> int:
+        while True:
+            while pos < len(buffer) and buffer[pos].isspace():
+                pos += 1
+            if pos < len(buffer) or eof:
+                return pos
+            fill()
+
+    with handle:
+        fill()
+        pos = skip_ws(0)
+        if pos >= len(buffer):
+            return None
+        if buffer[pos] != "[":
+            return None
+        pos += 1
+        if limit <= 0:
+            return []
+
+        rows: list[object] = []
+        while True:
+            pos = skip_ws(pos)
+            if pos >= len(buffer):
+                raise SystemExit(f"invalid JSON at {safe_diagnostic_path(path)}: unterminated JSON array")
+            if buffer[pos] == "]":
+                return rows
+            if rows:
+                if buffer[pos] != ",":
+                    raise SystemExit(f"invalid JSON at {safe_diagnostic_path(path)}: expected ',' or ']'")
+                pos = skip_ws(pos + 1)
+
+            while True:
+                try:
+                    value, end = decoder.raw_decode(buffer, pos)
+                except json.JSONDecodeError as exc:
+                    if eof:
+                        raise SystemExit(f"invalid JSON at {safe_diagnostic_path(path)}: {exc}") from exc
+                    fill()
+                    continue
+                break
+
+            rows.append(value)
+            if len(rows) >= limit:
+                return rows
+            buffer = buffer[end:]
+            pos = 0
+
+
+def load_payload(path: Path, *, limit: int | None = None) -> object:
     if path.suffix == ".jsonl":
         rows = []
         try:
@@ -86,6 +156,8 @@ def load_payload(path: Path) -> object:
             ) from exc
         with handle:
             for line_no, line in enumerate(handle, 1):
+                if limit is not None and len(rows) >= max(0, limit):
+                    break
                 line = line.strip()
                 if not line:
                     continue
@@ -94,6 +166,10 @@ def load_payload(path: Path) -> object:
                 except json.JSONDecodeError as exc:
                     raise SystemExit(f"invalid JSON at {safe_diagnostic_path(path)}:{line_no}: {exc}") from exc
         return rows
+    if limit is not None:
+        limited_rows = load_limited_json_array(path, limit=max(0, limit))
+        if limited_rows is not None:
+            return limited_rows
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -412,7 +488,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", required=True, choices=sorted(SOURCE_LABELS), help="Input benchmark schema")
     parser.add_argument("--input", required=True, help="Downloaded public benchmark JSON or JSONL file")
     parser.add_argument("--output", required=True, help="Output My Precious benchmark cases JSONL")
-    parser.add_argument("--limit", type=int, help="Limit converted cases after schema conversion")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help=(
+            "Limit converted cases after schema conversion; JSONL and top-level JSON arrays "
+            "may stop reading once enough input records are available"
+        ),
+    )
     parser.add_argument("--build-synthetic-archive", help="Optional output repo path for a synthetic dry-run archive")
     parser.add_argument(
         "--include-superseded-distractors",
@@ -425,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--include-superseded-distractors requires --build-synthetic-archive")
 
     input_path = Path(args.input).expanduser().resolve()
-    payload = load_payload(input_path)
+    payload = load_payload(input_path, limit=args.limit)
     if args.source == "longmemeval":
         cases = convert_longmemeval(payload)
     elif args.source == "locomo":
