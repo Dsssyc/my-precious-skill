@@ -47,14 +47,14 @@ boundary:
   The report must remain aggregate-only. Use `--require-shadow` only when the
   local private probe set should be a required readiness gate for the run.
 
-The current strongest local evidence includes both private real-archive
-aggregate shadow reports and converted LongMemEval public-adapter reports. The
-100-case public-adapter run reports `overall_status: extended_evidence_ready`
-with `--require-public`, which means the packaged synthetic dimensions and the
-adapted public dimension passed. Earlier combined public-plus-shadow runs also
-passed with a smaller public smoke sample. These runs still do not prove full
-public benchmark parity, generated-answer correctness, or complete long-horizon
-governance.
+The current strongest local gate combines a private real-archive aggregate
+shadow report with the 100-case converted LongMemEval public-adapter report.
+That run reports `overall_status: extended_evidence_ready` with
+`--require-public` and `--require-shadow`, meaning all five required dimensions
+passed: packaged layered recall, packaged automatic induction, packaged
+end-to-end induction-to-recall, adapted public benchmark evidence, and private
+real-archive shadow evidence. This still does not prove full public benchmark
+parity, generated-answer correctness, or complete long-horizon governance.
 
 Run the packaged convergence gate locally with:
 
@@ -664,10 +664,12 @@ MemPalace comparability should be stated especially carefully:
   a headline public-benchmark score.
 
 The repository has a converter for locally downloaded LongMemEval, LoCoMo, and
-Memora-style records, but this audit did not run public benchmark datasets. A
-public benchmark score would require exact dataset versions, conversion logs,
-case fingerprints, archive construction rules, answer-grading protocol, and
-repeated runs against a real or synthetic archive built from those records.
+Memora-style records. This audit includes bounded adapted local LongMemEval
+probes, including a 100-case cleaned-split run with case fingerprints and
+aggregate gates. That is still not a public benchmark score. A public benchmark
+score would require exact dataset versions, full conversion logs, archive
+construction rules, the upstream answer-grading protocol, and repeated runs
+against a real or benchmark-faithful archive built from those records.
 
 ## Verified Capabilities
 
@@ -1262,9 +1264,9 @@ suppression, privacy, provenance, lifecycle, and audit gates under
 `--require-shadow`. The top-k profile still shows a real quality gap:
 case-level recall is perfect on the private probe set, but precision is only
 0.424 and most remaining noise is broad lexical match fill. Public benchmark
-adapter evidence is not included in this run; the separate smoke snapshot below
-adds adapter-plumbing evidence but still does not replace a full public
-benchmark evaluation.
+adapter evidence is not included in this shadow-only run; the current combined
+gate below adds 100-case adapted public evidence, but still does not replace a
+full public benchmark evaluation.
 
 ## Public Adapter Smoke Snapshot
 
@@ -1402,6 +1404,21 @@ python3 benchmarks/v1_readiness_gate.py \
   --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_abstention_gate.json \
   --require-public \
   > /tmp/my_precious_v1_public_100_abstention_gate_20260629.json
+
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v2.jsonl \
+  --fail-under-file /path/to/private-agent-memory/eval/shadow_eval_real_history_v2.fail-under.json \
+  --fail-over-file /path/to/private-agent-memory/eval/shadow_eval_real_history_v2.fail-over.json \
+  > /tmp/my_precious_private_shadow_v2_current_20260629.json
+
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_abstention_gate.json \
+  --shadow-report /tmp/my_precious_private_shadow_v2_current_20260629.json \
+  --require-public \
+  --require-shadow \
+  > /tmp/my_precious_v1_public100_shadow_current_20260629.json
 ```
 
 Limited-read conversion metrics:
@@ -1440,6 +1457,24 @@ Strict 100-case probe metrics:
 | v1_readiness.required_passed | 4 |
 | v1_readiness.public_benchmark_adapter.status | passed |
 | public_adapter.claim_boundary | adapted local score only |
+
+Current combined public-plus-shadow v1 readiness summary:
+
+| metric | value |
+| --- | ---: |
+| v1_readiness.overall_status | extended_evidence_ready |
+| v1_readiness.required_dimensions | 5 |
+| v1_readiness.required_passed | 5 |
+| v1_readiness.optional_dimensions | 0 |
+| v1_readiness.optional_passed | 0 |
+| public_benchmark_adapter.status | passed |
+| real_archive_shadow_eval.status | passed |
+| privacy.aggregate_only | true |
+| privacy.memory_text_rendered | false |
+| privacy.private_probe_cases_rendered | false |
+| privacy.queries_rendered | false |
+| privacy.source_paths_rendered | false |
+| privacy.raw_refs_rendered | false |
 
 ## Recommendation
 
