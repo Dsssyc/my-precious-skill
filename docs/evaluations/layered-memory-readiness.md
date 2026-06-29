@@ -1235,6 +1235,42 @@ abstention, active-memory suppression, privacy, provenance, or lifecycle
 integrity gates. It intentionally favors a more diverse top-k set over listing
 multiple near-neighbor memories with the same layer, scope, and topic.
 
+## Real Archive Relative Memory Score Floor Snapshot
+
+Date: 2026-06-29
+
+This run tightened memory result pruning after memory scoring and same
+topic/scope diversification: retained memory hits must now score at least 95%
+of the top memory hit for the query, instead of the previous 85%. The run used
+the private deployment archive's redacted v2 shadow cases and emitted aggregate
+JSON only under `/tmp`. It did not render private memory text, source paths,
+raw refs, shadow case content, queries, or memory ids.
+
+| metric | 85% floor | 95% floor |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.42424242424242425 | 0.5 |
+| top_k_noise_at_5 | 0.5757575757575757 | 0.5 |
+| noise_sources_at_5.broad_lexical_match | 35 | 25 |
+| noise_sources_at_5.scope_mixed | 3 | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| audit_status | passed | passed |
+| shadow_eval_v2_gate_status | passed | passed |
+
+The change removes another slice of broad lexical top-k fill without changing
+case-level recall, abstention, active-memory suppression, privacy, provenance,
+or lifecycle integrity gates. It does not solve real retrieval quality: the
+remaining top-k noise is still 0.5, and scope-mixed noise is unchanged. The v1
+readiness gate keeps the lower 0.4 precision and 0.6 noise thresholds as
+regression floors rather than raising them to this latest local result.
+
 ## Real Archive Extended V1 Gate Snapshot
 
 Date: 2026-06-29
@@ -1270,10 +1306,10 @@ Extended readiness summary:
 | metric | value |
 | --- | ---: |
 | v1_readiness.overall_status | extended_evidence_ready |
-| v1_readiness.required_dimensions | 5 |
-| v1_readiness.required_passed | 5 |
-| v1_readiness.optional_dimensions | 2 |
-| v1_readiness.optional_passed | 0 |
+| v1_readiness.scorecard.required_dimensions | 5 |
+| v1_readiness.scorecard.required_passed | 5 |
+| v1_readiness.scorecard.optional_dimensions | 2 |
+| v1_readiness.scorecard.optional_passed | 0 |
 | public_benchmark_adapter.status | not_run_optional |
 | real_archive_shadow_eval.status | passed |
 | generated_answer_eval.status | not_run_optional |
@@ -1300,9 +1336,9 @@ Private real-archive shadow metrics:
 | probe_cases.positive_cases | 24 |
 | probe_cases.abstain_cases | 3 |
 | memory_recall_at_5 | 1.0 |
-| memory_precision_at_5 | 0.42424242424242425 |
-| top_k_noise_at_5 | 0.5757575757575757 |
-| noise_sources_at_5.broad_lexical_match | 35 |
+| memory_precision_at_5 | 0.5 |
+| top_k_noise_at_5 | 0.5 |
+| noise_sources_at_5.broad_lexical_match | 25 |
 | noise_sources_at_5.scope_mixed | 3 |
 | noise_sources_at_5.inactive_lifecycle | 0 |
 | noise_sources_at_5.low_signal_memory_node | 0 |
@@ -1330,7 +1366,7 @@ a minimum real-archive retrieval quality floor:
 `noise_sources_at_5.inactive_lifecycle <= 0`. This prevents recall-only
 readiness claims. The top-k profile still shows a real quality gap:
 case-level recall is perfect on the private probe set, but precision is only
-0.424 and most remaining noise is broad lexical match fill. Public benchmark
+0.5 and most remaining noise is broad lexical match fill. Public benchmark
 adapter evidence is not included in this shadow-only run; the current combined
 gate below adds 100-case adapted public evidence, but still does not replace a
 full public benchmark evaluation.
@@ -1409,10 +1445,10 @@ Combined public-plus-shadow v1 readiness summary:
 | metric | value |
 | --- | ---: |
 | v1_readiness.overall_status | extended_evidence_ready |
-| v1_readiness.required_dimensions | 5 |
-| v1_readiness.required_passed | 5 |
-| v1_readiness.optional_dimensions | 1 |
-| v1_readiness.optional_passed | 0 |
+| v1_readiness.scorecard.required_dimensions | 5 |
+| v1_readiness.scorecard.required_passed | 5 |
+| v1_readiness.scorecard.optional_dimensions | 1 |
+| v1_readiness.scorecard.optional_passed | 0 |
 | public_benchmark_adapter.status | passed |
 | real_archive_shadow_eval.status | passed |
 | generated_answer_eval.status | not_run_optional |
@@ -1528,10 +1564,10 @@ Strict 100-case probe metrics:
 | top_k_noise_at_5 | 0.0 |
 | failed_case_count | 0 |
 | v1_readiness.overall_status | extended_evidence_ready |
-| v1_readiness.required_dimensions | 4 |
-| v1_readiness.required_passed | 4 |
-| v1_readiness.optional_dimensions | 2 |
-| v1_readiness.optional_passed | 0 |
+| v1_readiness.scorecard.required_dimensions | 4 |
+| v1_readiness.scorecard.required_passed | 4 |
+| v1_readiness.scorecard.optional_dimensions | 2 |
+| v1_readiness.scorecard.optional_passed | 0 |
 | v1_readiness.public_benchmark_adapter.status | passed |
 | generated_answer_eval.status | not_run_optional |
 | public_adapter.claim_boundary | adapted local score only |
@@ -1541,10 +1577,10 @@ Current combined public-plus-shadow v1 readiness summary:
 | metric | value |
 | --- | ---: |
 | v1_readiness.overall_status | extended_evidence_ready |
-| v1_readiness.required_dimensions | 5 |
-| v1_readiness.required_passed | 5 |
-| v1_readiness.optional_dimensions | 1 |
-| v1_readiness.optional_passed | 0 |
+| v1_readiness.scorecard.required_dimensions | 5 |
+| v1_readiness.scorecard.required_passed | 5 |
+| v1_readiness.scorecard.optional_dimensions | 1 |
+| v1_readiness.scorecard.optional_passed | 0 |
 | public_benchmark_adapter.status | passed |
 | real_archive_shadow_eval.status | passed |
 | generated_answer_eval.status | not_run_optional |
@@ -1589,22 +1625,27 @@ v2 shadow gate pass. It also has an aggregate-derived candidate-quality rule
 that removes low-overlap ambiguous scope review noise while preserving current
 shadow-eval gates. Same topic/scope result diversification now reduces
 real-history top-k noise while preserving recall and privacy gates. The public
-adapter now has bounded-read support for larger samples, short-query ranking
-does not let low-signal short phrases outrank full-coverage entity matches, and
-answer reachability can use verified local drilldown files rather than only
-clipped search titles. The 100-case LongMemEval cleaned probe now passes strict
-local public-adapter readiness with perfect positive-case retrieval, source and
-answer reachability, privacy, and answer-level public abstention metrics. The
-source-depth path now also requires an explicit raw-preview authorization flag
-before redacted raw snippets render. The reusable benchmark suite now also has
-an offline generated-answer grading gate for provided answer records plus a
-packaged synthetic generated-answer fixture that is wired into
-`--run-packaged --require-answer`. The explicit source-stream registry path now
-has a packaged synthetic benchmark and is required by the core v1 readiness
-gate. The current public/shadow readiness runs did not include generated answer
-records and therefore still cannot claim real generated-answer behavior. The
-next valuable work is broader public-sample scaling, generated-answer
-real/dogfood adapter evidence, and broader consolidation/decay evidence.
+real-history top-k noise while preserving recall and privacy gates. A stricter
+95% relative memory-score floor now removes another aggregate slice of broad
+lexical real-history top-k fill while preserving recall, abstention, privacy,
+provenance, and lifecycle gates; remaining top-k noise is still 0.5 and is not
+solved. The public adapter now has bounded-read support for larger samples,
+short-query ranking does not let low-signal short phrases outrank full-coverage
+entity matches, and answer reachability can use verified local drilldown files
+rather than only clipped search titles. The 100-case LongMemEval cleaned probe
+now passes strict local public-adapter readiness with perfect positive-case
+retrieval, source and answer reachability, privacy, and answer-level public
+abstention metrics. The source-depth path now also requires an explicit
+raw-preview authorization flag before redacted raw snippets render. The
+reusable benchmark suite now also has an offline generated-answer grading gate
+for provided answer records plus a packaged synthetic generated-answer fixture
+that is wired into `--run-packaged --require-answer`. The explicit source-stream
+registry path now has a packaged synthetic benchmark and is required by the
+core v1 readiness gate. The current public/shadow readiness runs did not include
+generated answer records and therefore still cannot claim real generated-answer
+behavior. The next valuable work is broader public-sample scaling,
+generated-answer real/dogfood adapter evidence, and broader consolidation/decay
+evidence.
 
 ## Next Roadmap After The Minimum Slice
 

@@ -633,7 +633,7 @@ def prune_low_relative_memory_hits(hits: list[Hit]) -> list[Hit]:
     if len(hits) <= 1:
         return hits
     top_score = max(hit.score for hit in hits)
-    threshold = int(top_score * 0.85)
+    threshold = int(top_score * 0.95)
     return [hit for hit in hits if hit.score >= threshold]
 
 

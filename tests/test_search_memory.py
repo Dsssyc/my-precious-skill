@@ -4820,6 +4820,48 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("mem_retrieval_policy_target", result.stdout)
         self.assertNotIn("mem_retrieval_policy_tail_noise", result.stdout)
 
+    def test_search_memory_prunes_broad_lexical_neighbor_below_strict_relative_floor(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_retrieval_policy_exact_target",
+                        "retrieval policy archive recall exact durable rule",
+                        topic="retrieval-policy-exact",
+                        scope="project:retrieval-exact",
+                    ),
+                    synthetic_memory_row(
+                        "mem_retrieval_policy_broad_neighbor",
+                        "retrieval policy archive recall durable guidance",
+                        topic="retrieval-policy-neighbor",
+                        scope="project:retrieval-neighbor",
+                        derived_from=["sessions/2026/06/20/search-quality-alt/summary.md"],
+                    ),
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "retrieval policy archive recall exact durable rule",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("mem_retrieval_policy_exact_target", result.stdout)
+        self.assertNotIn("mem_retrieval_policy_broad_neighbor", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
