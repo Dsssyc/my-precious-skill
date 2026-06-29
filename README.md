@@ -29,7 +29,13 @@ the agent can use `$using-my-precious` to search a private session memory archiv
 
 `setup-my-precious` is the setup-path skill. It asks how the archive should be stored, scaffolds a local archive folder, and can connect it to a private hosted Git repository when requested.
 
-`update-my-precious` is the write-path skill. It scans a source record directory, uses the current project path as the project scope, writes records newer than the latest archived timestamp for that project, and refreshes a previously archived source record when its source hash changes.
+`update-my-precious` is the write-path skill. It scans a source record
+directory, uses the current project path for source-record filtering, writes
+records newer than the latest archived timestamp for the selected archive
+scope, and refreshes a previously archived source record in that scope when its
+source hash changes. The default archive scope is the resolved project path for
+compatibility, but deployments can opt into a stable non-project scope with
+`--archive-scope`.
 
 `using-my-precious` is the read-path skill. It only requires a deployment repository with stable Markdown summaries and JSONL indexes.
 
@@ -214,6 +220,9 @@ python ~/repos/agent-memory/tools/run_memory_updates.py \
 If `config/projects.jsonl` is empty, the runner scans source records for project
 metadata such as `cwd` or `project_path`, registers discovered projects, and
 then updates each enabled project.
+Registered project rows may include `archive_scope` to make scheduled updates
+use a stable high-water key that is not the project path. This is useful when
+project is only one source context for a broader domain memory stream.
 
 For a deliberate historical repair pass, add `--rewrite-existing`. That mode
 rebuilds matching source records and replaces older archive entries for the
@@ -239,6 +248,16 @@ python ~/repos/agent-memory/tools/update_memory_archive.py \
   --memory-repo ~/repos/agent-memory \
   --source-dir /path/to/session-records \
   --project-path /path/to/project
+```
+
+Use an explicit non-project high-water scope when needed:
+
+```bash
+python ~/repos/agent-memory/tools/update_memory_archive.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records \
+  --project-path /path/to/project \
+  --archive-scope domain:agent-memory
 ```
 
 For shared source directories that contain records from multiple projects,
@@ -806,6 +825,8 @@ A compatible deployment repository should expose:
 
 - `INDEX.md`: overview for humans and agents.
 - `config/projects.jsonl`: optional project registry used by the global runner.
+  Rows may include `archive_scope` for a high-water key independent from
+  `project_path`.
 - `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
   and `memories/explicit.jsonl`: layered memory nodes.
 - `reviews/memory_lifecycle_decisions.jsonl`: private reviewer decisions for
@@ -870,7 +891,8 @@ skills/using-my-precious/references/archive-format.md
 - Dependency-free hybrid lexical search script with field weighting, phrase
   coverage, optional project-context boost, low-signal memory-node filtering,
   optional preferred-scope ranking, and explainable result reasons.
-- Incremental update script keyed by project path and source/session timestamp.
+- Incremental update script keyed by archive scope and source/session timestamp,
+  defaulting to project path for compatibility.
 - Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
 - Secret-pattern detection that refuses risky source records by default.
 - Optional project-metadata requirement for shared source record directories.
@@ -909,7 +931,7 @@ This repository should provide reusable, non-private building blocks:
 The private deployment repository should contain user-specific state and operations:
 
 - generated `sessions/`, `daily/`, and `index/` data
-- project-specific high-water marks and source-record hash freshness state
+- archive-scope high-water marks and source-record hash freshness state
 - local config and logs
 - configured remotes
 - active scheduled jobs or scheduler config

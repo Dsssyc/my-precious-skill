@@ -715,8 +715,13 @@ than the current implementation.
 
 Current gaps:
 
-- Project path still remains central to update configuration and scheduled
-  ingestion. Project is not yet merely one scope among many.
+- Project path is no longer the only high-water-mark key. The updater and
+  global runner now support an explicit `archive_scope`, write it into
+  `meta.json`, `source-map.json`, `index/sessions.jsonl`, and
+  `index/scopes.jsonl`, and keep the resolved project path as the default scope
+  for compatibility. Project path still remains the source-record filtering
+  context and registry bootstrap signal, so project is not yet merely one scope
+  among a complete ontology.
 - Automatic induction is implemented as a conservative minimum slice. It can
   promote synthetic reusable facts into high-level memories and run a
   dependency-light semantic lifecycle pass. A 2026-06-22 aggregate-only dry run
@@ -1209,9 +1214,11 @@ authorization, and public benchmark coverage.
    queue and trace v1 to handle richer confidence revision, decay, deletion
    policy, and noisy multi-month evidence histories.
 
-3. Reduce project-boundary centrality.
-   Treat project as one retrieval scope rather than the primary storage and
-   scheduling boundary.
+3. Continue reducing project-boundary centrality.
+   The archive now has an opt-in `archive_scope` high-water key, but source
+   discovery and registry bootstrap still start from project metadata. The next
+   step is a broader scope registry or ontology that can discover and schedule
+   domain/global streams without first materializing project rows.
 
 4. Deepen source-depth governance.
    Keep raw source anchors private by default, add authorization checks for

@@ -335,6 +335,82 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             self.assertEqual(len(session_rows), 1)
             self.assertEqual(session_rows[0]["project_path"], str(project_path.resolve()))
 
+    def test_run_memory_updates_passes_registered_archive_scope_to_updater(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_path = root / "project-scoped"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (memory_repo / "config/projects.jsonl").write_text(
+                json.dumps(
+                    {
+                        "project_path": str(project_path.resolve()),
+                        "archive_scope": "domain:runner-scope",
+                        "source_dir": str(source_dir.resolve()),
+                        "enabled": True,
+                        "source": "manual",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "runner-scope.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: registered archive scope should pass through the runner.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Projects updated: 1", result.stdout)
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 1)
+            self.assertEqual(session_rows[0]["archive_scope"], "domain:runner-scope")
+            scope_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/scopes.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(scope_rows[0]["archive_scope"], "domain:runner-scope")
+
     def test_run_memory_updates_can_rewrite_existing_project_archives(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

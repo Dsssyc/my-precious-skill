@@ -212,6 +212,9 @@ python ~/repos/agent-memory/tools/run_memory_updates.py \
 如果 `config/projects.jsonl` 是空的，runner 会扫描 source records，读取
 `cwd`、`project_path` 等项目元数据，自动注册发现到的项目，然后更新每个
 enabled project。
+注册项目行可以包含 `archive_scope`，让 scheduled update 使用不等同于
+project path 的稳定 high-water key。这样 project 可以只是 source context，而不必
+总是成为存储边界。
 
 如果需要有意修复历史摘要，给 runner 加 `--rewrite-existing`。这个模式会重建
 匹配的 source records，并替换同一 project/source record 的旧归档条目；它不是
@@ -236,6 +239,16 @@ python ~/repos/agent-memory/tools/update_memory_archive.py \
   --memory-repo ~/repos/agent-memory \
   --source-dir /path/to/session-records \
   --project-path /path/to/project
+```
+
+需要非项目 high-water scope 时可以显式指定：
+
+```bash
+python ~/repos/agent-memory/tools/update_memory_archive.py \
+  --memory-repo ~/repos/agent-memory \
+  --source-dir /path/to/session-records \
+  --project-path /path/to/project \
+  --archive-scope domain:agent-memory
 ```
 
 如果 source record 目录混有多个项目的记录，要求记录显式带有项目元数据：
@@ -682,7 +695,8 @@ whitespace 错误。
 部署仓库应提供：
 
 - `INDEX.md`：人类和 agent 可读的总览。
-- `config/projects.jsonl`：全域 runner 使用的可选项目注册表。
+- `config/projects.jsonl`：全域 runner 使用的可选项目注册表；row 可包含
+  `archive_scope`，让 high-water key 独立于 `project_path`。
 - `memories/global.jsonl`、`memories/domains.jsonl`、
   `memories/projects.jsonl` 和 `memories/explicit.jsonl`：分层 memory nodes。
 - `reviews/memory_lifecycle_decisions.jsonl`：针对模糊 lifecycle candidates 的
@@ -787,7 +801,7 @@ skills/using-my-precious/references/archive-format.md
 
 - 生成的 `sessions/`、`daily/` 和 `index/` 数据。
 - `config/projects.jsonl` 中的项目注册状态。
-- 项目级 high-water marks 和 source-record hash freshness 状态。
+- archive-scope high-water marks 和 source-record hash freshness 状态。
 - 本地配置和日志。
 - 配置好的 remotes。
 - 已启用的定时任务或 scheduler config。

@@ -318,6 +318,9 @@ def run_project_update(
     project_name = project.get("project")
     if isinstance(project_name, str) and project_name.strip():
         command.extend(["--project", project_name])
+    archive_scope = project.get("archive_scope")
+    if isinstance(archive_scope, str) and archive_scope.strip():
+        command.extend(["--archive-scope", archive_scope.strip()])
     if max_records is not None:
         command.extend(["--max-records", str(max_records)])
     for pattern in patterns:

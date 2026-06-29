@@ -26,23 +26,32 @@ Resolve or ask for:
 
 2. `PROJECT_PATH`
    - Default to the current working directory.
-   - This is the high-water-mark key.
+   - This is the source-record filtering key and the default archive scope.
 
-3. `SOURCE_RECORD_DIR`
+3. `ARCHIVE_SCOPE`
+   - Optional stable high-water-mark key.
+   - Default to the resolved `PROJECT_PATH` for compatibility.
+   - Use this only when the archive should treat project as one source context
+     rather than the storage boundary, for example `domain:agent-memory`.
+
+4. `SOURCE_RECORD_DIR`
    - The folder containing session/source records for the current project.
    - Do not blindly scan the whole project root unless the user explicitly says the records are stored there.
    - If this folder is shared by multiple projects, add `--require-project-metadata` so unscoped records are skipped.
 
 ## Update Rule
 
-Use `PROJECT_PATH` as the project scope and high-water-mark key. Process
-records newer than the latest timestamp already archived for that same
-`PROJECT_PATH`; also refresh a previously archived source record when its
-current source hash differs from the hash stored in the archive, even if that
-source record's timestamp is older than the project latest timestamp.
+Use `ARCHIVE_SCOPE` as the high-water-mark key and `PROJECT_PATH` as the
+source-record filtering context. When no explicit `ARCHIVE_SCOPE` is supplied,
+the updater uses the resolved `PROJECT_PATH`, preserving the original
+single-project behavior. Process records newer than the latest timestamp
+already archived for that same archive scope; also refresh a previously
+archived source record in that scope when its current source hash differs from
+the hash stored in the archive, even if that source record's timestamp is older
+than the scope latest timestamp.
 Use `--rewrite-existing` only for deliberate backfill/repair runs; it rebuilds
 matching source records and replaces older archive entries for the same
-project/source record.
+archive scope/source record.
 
 The updater should:
 
@@ -69,6 +78,9 @@ The updater should:
      --project-path "$PROJECT_PATH" \
      --dry-run
    ```
+
+   Add `--archive-scope "$ARCHIVE_SCOPE"` when an explicit non-project scope
+   should own the high-water mark.
 
 4. If the dry run selects the expected records, run the update:
 

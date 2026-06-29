@@ -50,6 +50,8 @@ for project metadata, registers newly discovered projects, and then runs the
 per-project updater for each enabled project. An empty project registry is
 valid; the first run bootstraps it from source records that contain project
 paths such as `cwd` or `project_path`.
+Registered rows may include `archive_scope` to make scheduled updates use a
+stable high-water key that is not the project path.
 
 Archive new source records for a project:
 
@@ -59,12 +61,15 @@ python tools/update_memory_archive.py \
   --project-path /path/to/project
 ```
 
-The updater uses `project-path` as the project scope and high-water-mark key. It
-archives source records newer than the latest timestamp already archived for
-that project, and also refreshes a previously archived source record when its
-current source hash differs from the hash stored in the archive. It prefers
-timestamps embedded in source records, then timestamps in file names, and
-finally file modification time.
+The updater uses `project-path` to filter source records. By default it also
+uses the resolved project path as the archive high-water key for compatibility.
+Use `--archive-scope domain:agent-memory` when a stable non-project scope should
+own the high-water mark. The updater archives source records newer than the
+latest timestamp already archived for that archive scope, and also refreshes a
+previously archived source record in that scope when its current source hash
+differs from the hash stored in the archive. It prefers timestamps embedded in
+source records, then timestamps in file names, and finally file modification
+time.
 
 Records with no durable content after filtering are skipped instead of being
 archived as placeholder summaries such as `Archive source record for ...`.

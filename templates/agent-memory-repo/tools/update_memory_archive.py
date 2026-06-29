@@ -682,14 +682,39 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
                 yield value
 
 
-def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
-    project_key = str(project_path.resolve())
+def archive_scope_for_row(row: dict) -> str:
+    scope = row.get("archive_scope")
+    if isinstance(scope, str) and scope.strip():
+        return scope.strip()
+    project_path = row.get("project_path")
+    if isinstance(project_path, str) and project_path.strip():
+        return project_path.strip()
+    return ""
+
+
+def normalize_archive_scope(scope_arg: str | None, project_path: Path) -> str:
+    if scope_arg is None:
+        return str(project_path.resolve())
+    scope = scope_arg.strip()
+    if not scope:
+        raise SystemExit("--archive-scope must be non-empty")
+    if any(ord(char) < 32 or ord(char) == 127 for char in scope) or has_sensitive_identifier_token(scope):
+        raise SystemExit("--archive-scope is unsafe")
+    return scope
+
+
+def archived_project_state(
+    memory_repo: Path,
+    project_path: Path,
+    archive_scope: str | None = None,
+) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
+    scope_key = archive_scope or str(project_path.resolve())
     latest: datetime | None = None
     archived_hashes: set[str] = set()
     archived_source_hashes: dict[str, set[str]] = {}
 
     for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
-        if record.get("project_path") != project_key:
+        if archive_scope_for_row(record) != scope_key:
             continue
         for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
             parsed = parse_timestamp(record.get(key))
@@ -701,7 +726,7 @@ def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datet
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if meta.get("project_path") != project_key:
+        if archive_scope_for_row(meta) != scope_key:
             continue
         source_record = meta.get("source_record")
         source_key = ""
@@ -720,8 +745,8 @@ def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datet
     return latest, archived_hashes, archived_source_hashes
 
 
-def latest_archived_timestamp(memory_repo: Path, project_path: Path) -> datetime | None:
-    latest, _, _ = archived_project_state(memory_repo, project_path)
+def latest_archived_timestamp(memory_repo: Path, project_path: Path, archive_scope: str | None = None) -> datetime | None:
+    latest, _, _ = archived_project_state(memory_repo, project_path, archive_scope)
     return latest
 
 
@@ -2131,8 +2156,13 @@ def record_dir(memory_repo: Path, project_slug: str, record: SourceRecord) -> Pa
     return memory_repo / "sessions" / day / f"{stamp}_{project_slug}_{record.sha256[:10]}"
 
 
-def remove_existing_entries_for_source(memory_repo: Path, project_path: Path, source_record: Path) -> int:
-    project_key = str(project_path.resolve())
+def remove_existing_entries_for_source(
+    memory_repo: Path,
+    project_path: Path,
+    source_record: Path,
+    archive_scope: str | None = None,
+) -> int:
+    scope_key = archive_scope or str(project_path.resolve())
     source_key = str(source_record.resolve())
     removed = 0
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
@@ -2140,7 +2170,7 @@ def remove_existing_entries_for_source(memory_repo: Path, project_path: Path, so
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if meta.get("project_path") != project_key or meta.get("source_record") != source_key:
+        if archive_scope_for_row(meta) != scope_key or meta.get("source_record") != source_key:
             continue
         entry_dir = meta_path.parent
         if not is_safe_archive_entry_dir(memory_repo, entry_dir):
@@ -2188,6 +2218,7 @@ def prune_empty_session_dirs(root: Path) -> None:
 def write_record(
     memory_repo: Path,
     project_path: Path,
+    archive_scope: str,
     project_name: str,
     source_agent: str,
     record: SourceRecord,
@@ -2222,6 +2253,7 @@ def write_record(
 - source_agent: {source_agent}
 - project: {project_name}
 - project_path: {project_path}
+- archive_scope: {archive_scope}
 - source_record: {record.path}
 - source_updated_at: {isoformat(record.updated_at)}
 - source_sha256: {record.sha256}
@@ -2267,6 +2299,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_agent": source_agent,
         "project": project_name,
         "project_path": str(project_path),
+        "archive_scope": archive_scope,
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
         "source_updated_at": isoformat(record.updated_at),
@@ -2294,6 +2327,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_record_sha256": record.sha256,
         "source_updated_at": isoformat(record.updated_at),
         "project_path": str(project_path),
+        "archive_scope": archive_scope,
         "archive_entry": str(destination.relative_to(memory_repo)),
         "summary_path": str(rel_summary),
         "evidence_path": str(rel_evidence),
@@ -3625,13 +3659,16 @@ def rebuild_indexes(memory_repo: Path) -> None:
 
     sessions_lines: list[str] = []
     project_latest: dict[str, dict] = {}
+    scope_latest: dict[str, dict] = {}
     for row in rows:
+        archive_scope = archive_scope_for_row(row)
         session_row = {
             "date": str(row.get("source_updated_at", ""))[:10],
             "session_id": row.get("session_id", ""),
             "source_agent": row.get("source_agent", ""),
             "project": row.get("project", ""),
             "project_path": row.get("project_path", ""),
+            "archive_scope": archive_scope,
             "title": index_title_from_meta(row),
             "source_record": row.get("source_record", ""),
             "user_intent": row.get("user_intent", ""),
@@ -3654,6 +3691,14 @@ def rebuild_indexes(memory_repo: Path) -> None:
                 "latest_source_updated_at": row.get("source_updated_at", ""),
                 "latest_summary_path": row.get("summary_path", ""),
             }
+        if archive_scope and archive_scope not in scope_latest:
+            scope_latest[archive_scope] = {
+                "archive_scope": archive_scope,
+                "project": row.get("project", ""),
+                "project_path": row.get("project_path", ""),
+                "latest_source_updated_at": row.get("source_updated_at", ""),
+                "latest_summary_path": row.get("summary_path", ""),
+            }
 
     write_safe_archive_text(
         memory_repo,
@@ -3665,6 +3710,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
         memory_repo,
         index_dir / "projects.jsonl",
         "\n".join(json.dumps(row, sort_keys=True) for row in project_latest.values()) + ("\n" if project_latest else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "scopes.jsonl",
+        "\n".join(json.dumps(row, sort_keys=True) for row in scope_latest.values()) + ("\n" if scope_latest else ""),
         "index file",
     )
     decision_lines: list[str] = []
@@ -3831,7 +3882,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--memory-repo", help="Path to the private memory repository")
     parser.add_argument("--source-dir", required=True, help="Directory containing source records to scan")
-    parser.add_argument("--project-path", default=os.getcwd(), help="Project path used as the high-water-mark key")
+    parser.add_argument("--project-path", default=os.getcwd(), help="Project path used for source-record filtering and legacy scope defaults")
+    parser.add_argument(
+        "--archive-scope",
+        help="Optional stable archive/high-water scope key; defaults to the resolved project path for compatibility",
+    )
     parser.add_argument("--project", help="Human-readable project name")
     parser.add_argument("--source-agent", default="agent", help="Source agent/runtime label")
     parser.add_argument("--pattern", action="append", help="Glob pattern to scan; may be repeated")
@@ -3878,6 +3933,7 @@ def main(argv: list[str] | None = None) -> int:
     memory_repo = resolve_memory_repo(args.memory_repo)
     source_dir = Path(args.source_dir).expanduser().resolve()
     project_path = Path(args.project_path).expanduser().resolve()
+    archive_scope = normalize_archive_scope(args.archive_scope, project_path)
     project_name = args.project or project_name_from_path(project_path)
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
 
@@ -3927,7 +3983,7 @@ def main(argv: list[str] | None = None) -> int:
         rebuild_indexes(memory_repo)
         return 0
 
-    latest, archived_hashes, archived_source_hashes = archived_project_state(memory_repo, project_path)
+    latest, archived_hashes, archived_source_hashes = archived_project_state(memory_repo, project_path, archive_scope)
     records = discover_records(
         source_dir,
         patterns,
@@ -3942,6 +3998,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
     print(f"Project path: {safe_diagnostic_path(project_path)}")
+    if args.archive_scope is not None:
+        print("Archive scope: configured")
     print(f"Source dir: {safe_diagnostic_path(source_dir)}")
     print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
     print(f"Records selected: {len(records)}")
@@ -3969,10 +4027,11 @@ def main(argv: list[str] | None = None) -> int:
     skipped_records = 0
     for record in records:
         if args.rewrite_existing or str(record.path.resolve()) in archived_source_hashes:
-            removed_entries += remove_existing_entries_for_source(memory_repo, project_path, record.path)
+            removed_entries += remove_existing_entries_for_source(memory_repo, project_path, record.path, archive_scope)
         written = write_record(
             memory_repo=memory_repo,
             project_path=project_path,
+            archive_scope=archive_scope,
             project_name=project_name,
             source_agent=args.source_agent,
             record=record,
