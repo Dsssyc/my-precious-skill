@@ -140,6 +140,172 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertEqual(payload["source_benchmarks"], {"MyPreciousAnswerAdapterSynthetic": 2})
             self.assertEqual(payload["case_origins"], {"extractive_answer_adapter_fixture": 2})
 
+    def test_extracts_multi_sentence_memory_answer(self):
+        answer_text = "Use source anchors. Do not print raw transcript content."
+        rows = [
+            {
+                "case_id": "answer-adapter:multi-sentence",
+                "query": "What is the multi sentence answer for source anchors?",
+                "category": "generated_answer_positive",
+                "source_benchmark": "MyPreciousAnswerAdapterSynthetic",
+                "case_origin": "extractive_answer_adapter_fixture",
+                "reference_answer": answer_text,
+                "expected_memory_id": "answer_adapter_multi_sentence",
+                "expected_summary_path": "sessions/synthetic/answer-adapter/multi-sentence/summary.md",
+                "expected_source_anchor": "records/synthetic-answer-adapter.jsonl#message:2",
+                "required_evidence_paths": ["sessions/synthetic/answer-adapter/multi-sentence/evidence.md"],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            cases = root / "answer_cases.jsonl"
+            answers = root / "answers.jsonl"
+            self.write_jsonl(cases, rows)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--output",
+                    str(answers),
+                    "--limit",
+                    "3",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            benchmark = subprocess.run(
+                [
+                    sys.executable,
+                    str(GENERATED_ANSWER_BENCHMARK),
+                    "--cases",
+                    str(cases),
+                    "--answers",
+                    str(answers),
+                    "--fail-under",
+                    "case_pass_rate=1.0",
+                    "--fail-under",
+                    "answer_normalized_match_rate=1.0",
+                    "--fail-over",
+                    "failed_case_count=0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(benchmark.returncode, 0, benchmark.stderr)
+
+    def test_extracts_answer_longer_than_search_display_clip(self):
+        answer_text = (
+            "Use source anchors with durable evidence references, preserve provenance status, "
+            "avoid printing raw transcript content, keep redacted snippets short, and state "
+            "when the archive lacks enough information."
+        )
+        rows = [
+            {
+                "case_id": "answer-adapter:long-answer",
+                "query": "What is the long answer about source anchors and provenance status?",
+                "category": "generated_answer_positive",
+                "source_benchmark": "MyPreciousAnswerAdapterSynthetic",
+                "case_origin": "extractive_answer_adapter_fixture",
+                "reference_answer": answer_text,
+                "expected_memory_id": "answer_adapter_long_answer",
+                "expected_summary_path": "sessions/synthetic/answer-adapter/long-answer/summary.md",
+                "expected_source_anchor": "records/synthetic-answer-adapter.jsonl#message:3",
+                "required_evidence_paths": ["sessions/synthetic/answer-adapter/long-answer/evidence.md"],
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            cases = root / "answer_cases.jsonl"
+            answers = root / "answers.jsonl"
+            self.write_jsonl(cases, rows)
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SYNTHETIC_ARCHIVE_BUILDER),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--output",
+                    str(answers),
+                    "--limit",
+                    "3",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            benchmark = subprocess.run(
+                [
+                    sys.executable,
+                    str(GENERATED_ANSWER_BENCHMARK),
+                    "--cases",
+                    str(cases),
+                    "--answers",
+                    str(answers),
+                    "--fail-under",
+                    "case_pass_rate=1.0",
+                    "--fail-under",
+                    "answer_normalized_match_rate=1.0",
+                    "--fail-over",
+                    "failed_case_count=0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(benchmark.returncode, 0, benchmark.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

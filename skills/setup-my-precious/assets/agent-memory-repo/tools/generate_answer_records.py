@@ -24,7 +24,11 @@ import search_memory  # noqa: E402
 
 
 ABSTENTION_ANSWER = "There is not enough information in memory to answer."
-REFERENCE_ANSWER_PATTERN = re.compile(r"\bReference answer:\s*(.+?)(?:\.\s|$)", re.IGNORECASE)
+REFERENCE_ANSWER_PREFIX_PATTERN = re.compile(r"\bReference answer:\s*", re.IGNORECASE)
+REFERENCE_SECTION_BOUNDARY_PATTERN = re.compile(
+    r"\s+\b(?:Expected memory|Query|Reference evidence|Synthetic answer target):",
+    re.IGNORECASE,
+)
 
 
 def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
@@ -80,10 +84,38 @@ def search_memory_hits(repo: Path, query: str, limit: int) -> list[search_memory
     return search_memory.merge_hits(repo, hits)[:limit]
 
 
-def extract_answer_from_hit(hit: search_memory.Hit) -> str:
-    text = search_memory.compact_whitespace(hit.text or hit.title)
-    match = REFERENCE_ANSWER_PATTERN.search(text)
-    answer = match.group(1).strip() if match else text
+def memory_text_by_id(repo: Path, memory_id: str) -> str:
+    if not memory_id:
+        return ""
+    for record in search_memory.iter_jsonl(repo / "index" / "memories.jsonl"):
+        if str(record.get("memory_id") or "") != memory_id:
+            continue
+        text = record.get("text")
+        return text if isinstance(text, str) else ""
+    return ""
+
+
+def full_hit_text(repo: Path, hit: search_memory.Hit) -> str:
+    text = memory_text_by_id(repo, hit.memory_id)
+    return text or hit.text or hit.title
+
+
+def trim_reference_answer_tail(answer: str, query: str) -> str:
+    boundary = REFERENCE_SECTION_BOUNDARY_PATTERN.search(answer)
+    if boundary:
+        answer = answer[: boundary.start()]
+    query_text = search_memory.compact_whitespace(query)
+    if query_text:
+        index = answer.lower().find(query_text.lower())
+        if index > 0:
+            answer = answer[:index]
+    return answer.strip(" .")
+
+
+def extract_answer_from_hit(repo: Path, hit: search_memory.Hit, query: str = "") -> str:
+    text = search_memory.compact_whitespace(full_hit_text(repo, hit))
+    match = REFERENCE_ANSWER_PREFIX_PATTERN.search(text)
+    answer = trim_reference_answer_tail(text[match.end() :], query) if match else text
     answer = search_memory.compact_whitespace(answer)
     if not answer or search_memory.has_sensitive_display_text(answer):
         return ABSTENTION_ANSWER
@@ -109,7 +141,7 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
         query = str(case["query"])
         hits = search_memory_hits(repo, query, limit)
         if hits:
-            answer = extract_answer_from_hit(hits[0])
+            answer = extract_answer_from_hit(repo, hits[0], query)
             if answer == ABSTENTION_ANSWER:
                 abstention_answer_count += 1
             else:

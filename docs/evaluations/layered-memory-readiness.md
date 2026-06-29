@@ -1589,6 +1589,98 @@ Strict 100-case probe metrics:
 | generated_answer_eval.status | not_run_optional |
 | public_adapter.claim_boundary | adapted local score only |
 
+## Public Generated-Answer Adapter Probe
+
+Date: 2026-06-29
+
+This probe used the same local 100-case LongMemEval adapted archive under
+`/tmp`. It ran `tools/generate_answer_records.py` to create answer records, then
+scored those records with `benchmarks/generated_answer_benchmark.py`. The
+generated answer records, details file, converted public cases, and synthetic
+archive remained outside this repository.
+
+Commands:
+
+```bash
+python3 templates/agent-memory-repo/tools/generate_answer_records.py \
+  --repo /tmp/my_precious_public_limit_20260629/archive_100_after_fix \
+  --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
+  --output /tmp/my_precious_public_limit_20260629/generated_answer_records_100_fulltext.jsonl \
+  --limit 5 \
+  > /tmp/my_precious_public_limit_20260629/generated_answer_adapter_report_100_fulltext.json
+
+python3 benchmarks/generated_answer_benchmark.py \
+  --cases /tmp/my_precious_public_limit_20260629/longmemeval_cases_100.jsonl \
+  --answers /tmp/my_precious_public_limit_20260629/generated_answer_records_100_fulltext.jsonl \
+  --details-jsonl /tmp/my_precious_public_limit_20260629/generated_answer_details_100_fulltext.jsonl \
+  > /tmp/my_precious_public_limit_20260629/generated_answer_report_100_fulltext.json
+```
+
+Adapter aggregate report:
+
+| metric | value |
+| --- | ---: |
+| cases | 100 |
+| answers_written | 100 |
+| memory_answer_count | 99 |
+| abstention_answer_count | 1 |
+| no_hit_count | 1 |
+| source_benchmarks.LongMemEval | 100 |
+| case_origins.public_benchmark_adapter | 100 |
+| privacy.aggregate_only | true |
+| privacy.queries_rendered | false |
+| privacy.generated_answers_rendered | false |
+| privacy.reference_answers_rendered | false |
+| privacy.source_paths_rendered | false |
+| privacy.raw_refs_rendered | false |
+
+Full 100-case generated-answer metrics:
+
+| metric | value |
+| --- | ---: |
+| reference_answer_cases | 89 |
+| positive_without_reference_answer | 11 |
+| case_pass_rate | 0.84 |
+| answer_normalized_match_rate | 0.8829787234042553 |
+| answer_token_f1 | 0.8829787234042553 |
+| abstention_accuracy | 0.16666666666666666 |
+| failed_case_count | 16 |
+| missing_answer_count | 0 |
+| duplicate_answer_count | 0 |
+| unknown_answer_count | 0 |
+| privacy_leak_count | 0 |
+| source_benchmarks.LongMemEval | 100 |
+| case_origins.public_benchmark_adapter | 100 |
+
+Breakdown:
+
+| subset | cases | case_pass_rate | answer_normalized_match_rate | answer_token_f1 | abstention_accuracy | failed_case_count | privacy_leak_count |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| reference-positive | 83 | 1.0 | 1.0 | 1.0 | 0.0 | 0 | 0 |
+| reference-abstain | 6 | 0.16666666666666666 | 0.0 | 0.0 | 0.16666666666666666 | 5 | 0 |
+| all reference-answer cases | 89 | 0.9438202247191011 | 1.0 | 1.0 | 0.16666666666666666 | 5 | 0 |
+| all 100 adapted cases | 100 | 0.84 | 0.8829787234042553 | 0.8829787234042553 | 0.16666666666666666 | 16 | 0 |
+
+`v1_readiness_gate.py --require-answer` correctly rejects the full public
+answer report:
+
+| metric | value |
+| --- | ---: |
+| v1_readiness.overall_status | not_ready |
+| generated_answer_eval.status | failed |
+| generated_answer_eval.case_pass_rate | 0.84 |
+| generated_answer_eval.answer_normalized_match_rate | 0.8829787234042553 |
+| generated_answer_eval.abstention_accuracy | 0.16666666666666666 |
+| generated_answer_eval.failed_case_count | 16 |
+
+This closes a narrow positive-answer extraction gap: the adapter now reads full
+memory text from `index/memories.jsonl` instead of relying on clipped search
+display text, so the 83 reference-positive public cases pass exactly. It does
+not close full public generated-answer readiness. The remaining blocker is
+answer abstention: five of six public abstention cases still receive a memory
+answer from the extractive adapter, and eleven positive adapted cases do not
+carry reference answers for generated-answer scoring.
+
 Current combined public-plus-shadow v1 readiness summary:
 
 | metric | value |
@@ -1660,13 +1752,17 @@ that is wired into `--run-packaged --require-answer`; answer reports now also
 need aggregate source benchmark and case-origin counts before the readiness gate
 accepts them. The deployment template can now produce extractive answer records
 from archive search hits for that grader, with aggregate-only stdout and no
-reference-answer input. The explicit source-stream registry path now has a
-packaged synthetic benchmark and is required by the core v1 readiness gate. The
-current public/shadow readiness runs still did not include live or private
-real-history generated answer records and therefore cannot claim real
+reference-answer input. A public LongMemEval 100-case generated-answer adapter
+probe now proves full positive reference-answer extraction on 83 reference
+positive cases, but the full 100-case answer report still fails because
+abstention accuracy is only 0.16666666666666666 and 11 positive cases lack
+reference answers. The explicit source-stream registry path now has a packaged
+synthetic benchmark and is required by the core v1 readiness gate. The current
+public/shadow readiness runs still cannot claim full public or private
 generated-answer behavior. The next valuable work is generated-answer
-real/dogfood adapter evidence, real-history top-k noise reduction, and broader
-consolidation/decay evidence.
+abstention policy evidence, private/dogfood answer cases with references,
+remaining scope-mixed top-k noise reduction, and broader consolidation/decay
+evidence.
 
 ## Next Roadmap After The Minimum Slice
 
