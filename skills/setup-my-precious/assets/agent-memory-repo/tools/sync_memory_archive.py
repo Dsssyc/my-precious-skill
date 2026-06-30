@@ -15,13 +15,17 @@ from pathlib import Path, PurePosixPath
 ALLOWED_ROOTS = (
     "INDEX.md",
     "config/projects.jsonl",
+    "config/source_streams.jsonl",
     "index",
+    "memories",
+    "reviews",
     "daily",
     "sessions",
 )
 SECRET_PATTERNS = {
     "openai_key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     "github_token": re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b"),
+    "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 }
 
 

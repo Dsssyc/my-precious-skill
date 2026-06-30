@@ -2,9 +2,10 @@
 """Incrementally archive session/source records into an agent memory repository.
 
 The updater is intentionally conservative: it uses the current project path as
-the high-water-mark key and writes searchable summaries plus short redacted
-evidence snippets. Better source-specific summarizers can replace or refine
-these summaries later without changing the archive shape.
+the source-record partition, uses the archive scope as the memory-domain key,
+and writes searchable summaries plus short redacted evidence snippets. Better
+source-specific summarizers can replace or refine these summaries later without
+changing the archive shape.
 """
 
 from __future__ import annotations
@@ -20,6 +21,30 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
+
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from memory_consolidation import (
+    add_contradiction_link,
+    add_deprecation_link,
+    add_supersession_link,
+    apply_memory_id_contradiction_links,
+    apply_memory_id_deprecation_links,
+    apply_memory_id_supersession_links,
+    apply_semantic_lifecycle_links,
+    apply_text_deprecation_links,
+    apply_text_supersession_links,
+    memory_consolidation_key,
+    memory_text_key,
+    merge_memory_node_provenance,
+    node_last_seen_key,
+    normalize_memory_text,
+    parse_memory_deprecation_text,
+    parse_memory_refresh_text,
+    semantic_relation_detail,
+)
 
 
 DEFAULT_PATTERNS = ("*.jsonl", "*.json", "*.md", "*.txt", "*.log")
@@ -39,6 +64,65 @@ CONFIG_CANDIDATES = (
     "AGENT_SESSION_MEMORY_CONFIG",
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
+MEMORY_REVIEW_DECISION_REL_PATH = Path("reviews/memory_lifecycle_decisions.jsonl")
+INDUCTION_REVIEW_DECISION_REL_PATH = Path("reviews/induction_review_decisions.jsonl")
+SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
+SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
+MEMORY_REVIEW_APPROVAL_ACTIONS = {
+    "approve_supersedes",
+    "approve_contradicts",
+    "approve_deprecates",
+}
+MEMORY_REVIEW_IGNORE_ACTIONS = {"reject", "noop"}
+MEMORY_REVIEW_ACTIONS = MEMORY_REVIEW_APPROVAL_ACTIONS | MEMORY_REVIEW_IGNORE_ACTIONS
+INDUCTION_REVIEW_APPROVAL_ACTIONS = {"approve_promote"}
+INDUCTION_REVIEW_IGNORE_ACTIONS = {"reject", "noop"}
+INDUCTION_REVIEW_ACTIONS = INDUCTION_REVIEW_APPROVAL_ACTIONS | INDUCTION_REVIEW_IGNORE_ACTIONS
+INDUCTION_REVIEW_DECISION_SET_ERROR_KEYS = (
+    "duplicate_decision_id",
+    "exact_duplicate",
+    "conflicting_candidate_action",
+    "conflicting_fingerprint_action",
+    "stale",
+    "unknown",
+    "unsafe",
+)
+MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
+    "candidate_type",
+    "current_memory_id",
+    "older_memory_id",
+    "reason",
+    "recommended_action",
+    "current_last_seen",
+    "older_last_seen",
+    "overlap_token_count",
+    "overlap_ratio",
+    "compressed_candidate_count",
+    "compressed_older_memory_ids",
+    "compression_reason",
+)
+INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
+    "candidate_id",
+    "candidate_type",
+    "candidate_text_sha256",
+    "candidate_source",
+    "reason",
+    "recommended_action",
+    "topic",
+    "support_count",
+    "source_updated_at",
+    "related_candidate_text_sha256",
+    "related_source_updated_at",
+    "overlap_token_count",
+    "overlap_ratio",
+)
+MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
+NATURAL_FACT_SOURCE_LABELS = frozenset({"natural_user", "natural_assistant", "natural_record"})
+LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN = re.compile(
+    r"(?i)\b(?:review\s+candidate|reviewable|reviewer\s+confirmation|before\s+(?:automatic\s+)?promotion|"
+    r"wait\s+for\s+repeated\s+support|until\s+supporting\s+evidence\s+repeats|provisional|unconfirmed)\b"
+)
 REDACTION_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
     "bearer_token": re.compile(r"(?i)(Authorization:\s*Bearer\s+)[A-Za-z0-9._~+/=-]+"),
@@ -47,7 +131,110 @@ REDACTION_PATTERNS = {
     "openai_key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
 }
+UNSAFE_PATH = "[unsafe-path]"
 REDACTION_CATEGORY_LABELS = frozenset(REDACTION_PATTERNS)
+MEMORY_LAYER_FILES = {
+    "global": "global.jsonl",
+    "domain": "domains.jsonl",
+    "project": "projects.jsonl",
+}
+MEMORY_TOPIC_HINTS = (
+    ("memory-retrieval", ("memory", "recall", "retrieval", "search", "index", "archive")),
+    ("agent-workflow", ("agent", "codex", "skill", "permission", "authorization", "workflow")),
+    ("python-packaging", ("python", "pip", "package", "venv", "wheel", "import")),
+    ("frontend-qa", ("frontend", "browser", "playwright", "viewport", "layout", "css")),
+    ("git-workflow", ("git", "commit", "branch", "worktree", "merge", "sync")),
+)
+GLOBAL_MEMORY_HINTS = (
+    "user prefers",
+    "user wants",
+    "the user prefers",
+    "the user wants",
+    "用户希望",
+    "用户偏好",
+    "不要反复",
+    "强制记忆",
+)
+EXPLICIT_MEMORY_PATTERNS = (
+    re.compile(r"(?i)^\s*remember this\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"(?i)^\s*please remember\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"(?i)^\s*(?:please\s+)?remember(?:\s+this)?\s+that\s+(?P<text>.+)$"),
+    re.compile(r"^\s*记住这个\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"^\s*记住\s*[:：]\s*(?P<text>.+)$"),
+    re.compile(r"^\s*强制记忆\s*[:：]\s*(?P<text>.+)$"),
+)
+NEGATED_EXPLICIT_MEMORY_PATTERNS = (
+    re.compile(
+        r"(?i)^\s*(?:please\s+)?(?:do\s+not|don't|dont|never)\s+"
+        r"(?:please\s+)?remember(?:\s+this)?(?:\s*[:：]|\b)"
+    ),
+    re.compile(r"^\s*(?:不要|别)\s*(?:记住(?:这个)?|强制记忆)(?:\s*[:：]|$)"),
+)
+EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY = re.compile(
+    r"(?i)[,;.!?，；。！？]\s*(?=(?:now|then|next|review|fix|run|check|implement|create|update)\b|"
+    r"(?:现在|然后|接下来|顺便|再|请|帮我))"
+)
+REUSABLE_FACT_PREFIX = re.compile(r"(?i)^\s*reusable fact\s*[:\uFF1A]\s*(?P<text>.+)$")
+NATURAL_USER_MEMORY_PATTERNS = (
+    (re.compile(r"(?i)^\s*i\s+prefer\s+(?P<text>.+)$"), "The user prefers {text}"),
+    (re.compile(r"(?i)^\s*my\s+preference\s+is\s+(?:that\s+)?(?P<text>.+)$"), "The user prefers {text}"),
+    (re.compile(r"(?i)^\s*i\s+want\s+(?P<text>.+)$"), "The user wants {text}"),
+)
+ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
+    r"(?i)^\s*(?:understood|got it|noted|sure|okay|ok)[,;:.! ]+"
+    r".{0,120}\b(?:i\s+will|i'll|i’ll|keep\s+it\s+in\s+mind|this\s+edit|next\s+step)\b"
+)
+HYPOTHETICAL_MEMORY_PATTERN = re.compile(
+    r"(?i)\b(?:we|i|it|this)\s+(?:could|might|may)\b|\bmaybe\b|\bif\s+[^.?!]{0,120}\b(?:becomes|became|were|was|is)\b"
+)
+TEMPORARY_LOCAL_MEMORY_PATTERN = re.compile(
+    r"(?i)\b(?:for|in)\s+this\s+(?:local|temporary|scratch|dry[- ]?run)\b|"
+    r"\btemporary\s+(?:update|fixture|induction|choice|decision)\b|"
+    r"\bscratch\s+workspace\b|\bcurrent\s+(?:run|test|gate|status)\b"
+)
+TEST_STATUS_MEMORY_PATTERN = re.compile(
+    r"(?i)\b(?:benchmark|test|tests?|gate)\s+(?:gate\s+)?should\s+pass\b|"
+    r"\b(?:test|gate|benchmark)\s+status\b|\bafter\s+rerun\b|\bcurrent\s+test\b"
+)
+PROMPT_LIKE_QUOTED_MEMORY_PATTERN = re.compile(
+    r"(?i)^\s*(?:quoted|raw)\s+(?:prompt|instruction|text)\b|"
+    r'"[^"]*\b(?:assistant|system|user)\s+must\b[^"]*"'
+)
+BROAD_GENERIC_MEMORY_WORDS = {
+    "a",
+    "and",
+    "agent",
+    "agents",
+    "archive",
+    "archives",
+    "be",
+    "better",
+    "clear",
+    "good",
+    "helpful",
+    "memory",
+    "memories",
+    "reliable",
+    "safe",
+    "should",
+    "system",
+    "systems",
+    "the",
+    "tool",
+    "tools",
+    "useful",
+    "well",
+    "work",
+    "workflow",
+    "workflows",
+}
+SENSITIVE_EXPLICIT_MEMORY_MARKERS = (
+    "[redacted_",
+    "authorization:",
+    "bearer",
+    "cookie:",
+    "private key",
+)
 
 
 @dataclass
@@ -61,6 +248,25 @@ class SourceRecord:
 class MemoryEvent:
     kind: str
     text: str
+
+
+@dataclass(frozen=True)
+class MemoryCandidate:
+    text: str
+    rationale: str
+    source: str
+    topic: str
+    project: str
+    project_path: str
+    summary_path: str
+    evidence_path: str
+    source_record: str
+    source_map_path: str
+    source_updated_at: str
+    tags: tuple[str, ...]
+    provenance: str = ""
+    supersedes_texts: tuple[str, ...] = ()
+    deprecates_texts: tuple[str, ...] = ()
 
 
 NOISE_MARKERS = (
@@ -477,14 +683,76 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
                 yield value
 
 
-def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
-    project_key = str(project_path.resolve())
+def archive_scope_for_row(row: dict) -> str:
+    scope = row.get("archive_scope")
+    if isinstance(scope, str) and scope.strip():
+        return scope.strip()
+    project_path = row.get("project_path")
+    if isinstance(project_path, str) and project_path.strip():
+        return project_path.strip()
+    return ""
+
+
+def source_partition_for_row(row: dict) -> str:
+    partition = row.get("source_partition")
+    if isinstance(partition, str) and partition.strip():
+        return normalize_partition_value(partition)
+    project_path = row.get("project_path")
+    if isinstance(project_path, str) and project_path.strip():
+        return normalize_partition_value(project_path)
+    return ""
+
+
+def normalize_archive_scope(scope_arg: str | None, project_path: Path) -> str:
+    if scope_arg is None:
+        return str(project_path.resolve())
+    scope = scope_arg.strip()
+    if not scope:
+        raise SystemExit("--archive-scope must be non-empty")
+    if any(ord(char) < 32 or ord(char) == 127 for char in scope) or has_sensitive_identifier_token(scope):
+        raise SystemExit("--archive-scope is unsafe")
+    return scope
+
+
+def normalize_partition_value(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    path = Path(value).expanduser()
+    return str(path.resolve()) if path.is_absolute() else path.as_posix()
+
+
+def normalize_source_partition(partition_arg: str | None, project_path: Path) -> str:
+    if partition_arg is None:
+        return str(project_path.resolve())
+    partition = partition_arg.strip()
+    if not partition:
+        raise SystemExit("--source-partition must be non-empty")
+    if any(ord(char) < 32 or ord(char) == 127 for char in partition) or has_sensitive_identifier_token(partition):
+        raise SystemExit("--source-partition is unsafe")
+    return normalize_partition_value(partition)
+
+
+def row_matches_source_partition(row: dict, source_partition: str) -> bool:
+    row_source_partition = source_partition_for_row(row)
+    return bool(row_source_partition and row_source_partition == source_partition)
+
+
+def archived_project_state(
+    memory_repo: Path,
+    project_path: Path,
+    archive_scope: str | None = None,
+    source_partition: str | None = None,
+) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
+    scope_key = archive_scope or str(project_path.resolve())
+    partition_key = source_partition or str(project_path.resolve())
     latest: datetime | None = None
     archived_hashes: set[str] = set()
     archived_source_hashes: dict[str, set[str]] = {}
 
     for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
-        if record.get("project_path") != project_key:
+        if archive_scope_for_row(record) != scope_key:
+            continue
+        if not row_matches_source_partition(record, partition_key):
             continue
         for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
             parsed = parse_timestamp(record.get(key))
@@ -496,7 +764,9 @@ def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datet
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if meta.get("project_path") != project_key:
+        if archive_scope_for_row(meta) != scope_key:
+            continue
+        if not row_matches_source_partition(meta, partition_key):
             continue
         source_record = meta.get("source_record")
         source_key = ""
@@ -515,8 +785,13 @@ def archived_project_state(memory_repo: Path, project_path: Path) -> tuple[datet
     return latest, archived_hashes, archived_source_hashes
 
 
-def latest_archived_timestamp(memory_repo: Path, project_path: Path) -> datetime | None:
-    latest, _, _ = archived_project_state(memory_repo, project_path)
+def latest_archived_timestamp(
+    memory_repo: Path,
+    project_path: Path,
+    archive_scope: str | None = None,
+    source_partition: str | None = None,
+) -> datetime | None:
+    latest, _, _ = archived_project_state(memory_repo, project_path, archive_scope, source_partition)
     return latest
 
 
@@ -683,6 +958,42 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
     return redacted, counts
 
 
+def safe_diagnostic_path(path: Path) -> str:
+    display = path.name or "<path>"
+    if has_sensitive_identifier_token(display):
+        return UNSAFE_PATH
+    redacted, _ = redact_text(display)
+    return redacted
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
+
+
 def read_record_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8", errors="replace")
 
@@ -779,6 +1090,33 @@ def split_memory_text(text: str, limit: int = 32) -> list[str]:
     return sentences[:limit] if sentences else [clip(text)]
 
 
+def is_broad_generic_memory_rule(text: str) -> bool:
+    compacted = compact_whitespace(text).lower().strip(" .!?;:")
+    if not re.search(r"\b(?:should|must)\b", compacted):
+        return False
+    tokens = re.findall(r"[a-z][a-z-]+", compacted)
+    if not tokens or len(tokens) > 8:
+        return False
+    return all(token in BROAD_GENERIC_MEMORY_WORDS for token in tokens)
+
+
+def is_non_durable_natural_memory_text(text: str) -> bool:
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return False
+    if ACKNOWLEDGEMENT_ONLY_PATTERN.search(compacted):
+        return True
+    if HYPOTHETICAL_MEMORY_PATTERN.search(compacted):
+        return True
+    if TEMPORARY_LOCAL_MEMORY_PATTERN.search(compacted):
+        return True
+    if TEST_STATUS_MEMORY_PATTERN.search(compacted):
+        return True
+    if PROMPT_LIKE_QUOTED_MEMORY_PATTERN.search(compacted):
+        return True
+    return is_broad_generic_memory_rule(compacted)
+
+
 def is_low_signal_memory_text(text: str) -> bool:
     compacted = compact_whitespace(text)
     if not compacted:
@@ -794,6 +1132,8 @@ def is_low_signal_memory_text(text: str) -> bool:
     if ARCHIVE_EVALUATION_STATUS_PATTERN.search(compacted):
         return True
     if LOW_SIGNAL_HEADING_PATTERN.search(compacted):
+        return True
+    if is_non_durable_natural_memory_text(compacted):
         return True
     return bool(RUN_STATUS_PATTERN.search(compacted))
 
@@ -1045,6 +1385,7 @@ def durable_memory_text(text: str) -> str:
     if is_process_update(text):
         return ""
     candidate = strip_skill_invocation_prefix(text)
+    candidate = strip_reusable_fact_prefix(candidate)
     cleaned = clean_title_candidate(candidate) if is_raw_prompt_text(candidate) else clip(candidate)
     if (
         not cleaned
@@ -1055,6 +1396,11 @@ def durable_memory_text(text: str) -> str:
     ):
         return ""
     return cleaned
+
+
+def strip_reusable_fact_prefix(text: str) -> str:
+    match = REUSABLE_FACT_PREFIX.match(text)
+    return match.group("text").strip() if match else text
 
 
 def durable_user_memory_text(text: str) -> str:
@@ -1068,6 +1414,48 @@ def durable_user_memory_text(text: str) -> str:
     ):
         return ""
     return cleaned
+
+
+def event_has_reusable_fact_text(events: list[MemoryEvent], fact: str) -> bool:
+    fact_key = normalize_memory_text(fact).lower()
+    if not fact_key:
+        return False
+    for event in events:
+        if event.kind not in {"assistant", "record"}:
+            continue
+        for part in split_memory_text(event.text):
+            match = REUSABLE_FACT_PREFIX.match(part)
+            if not match:
+                continue
+            text = normalize_memory_text(match.group("text"))
+            if text.lower() == fact_key:
+                return True
+    return False
+
+
+def fact_source_entries(
+    facts: list[str],
+    events: list[MemoryEvent],
+    natural_user_facts: list[str],
+    retrieval_literals: list[str],
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    natural_user_keys = {normalize_memory_text(text).lower() for text in natural_user_facts}
+    retrieval_literal_keys = {normalize_memory_text(text).lower() for text in retrieval_literals}
+    for fact in facts:
+        fact_key = normalize_memory_text(fact).lower()
+        if not fact_key:
+            continue
+        if fact_key in natural_user_keys:
+            source = "natural_user"
+        elif fact_key in retrieval_literal_keys:
+            source = "retrieval_literal"
+        elif event_has_reusable_fact_text(events, fact):
+            source = "explicit_reusable_fact"
+        else:
+            source = "natural_assistant"
+        entries.append({"text": fact, "source": source})
+    return entries
 
 
 def clean_command_output(text: str) -> str:
@@ -1164,7 +1552,7 @@ def events_from_value(value: object) -> list[MemoryEvent]:
     if role in {"user", "human"}:
         return [MemoryEvent("user", text)]
     if role == "assistant":
-        if str(body.get("phase") or "").lower() == "commentary":
+        if str(body.get("phase") or body.get("channel") or "").lower() == "commentary":
             return []
         return [MemoryEvent("assistant", text)]
     return [MemoryEvent("record", text)]
@@ -1214,6 +1602,18 @@ def markdown_text_section(title: str, value: object) -> str:
 
 def strip_trailing_whitespace_lines(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+
+
+def render_evidence_body(evidence_lines: list[str], explicit_memories: list[str]) -> str:
+    lines: list[str] = []
+    for idx, line in enumerate(evidence_lines, 1):
+        lines.append(f"ev_{idx:03d}: {line}")
+        lines.append(f"- {line}")
+    for idx, text in enumerate(explicit_memories, 1):
+        if text not in evidence_lines:
+            lines.append(f"ev_explicit_{idx:03d}: {text}")
+            lines.append(f"- {text}")
+    return "\n".join(lines)
 
 
 def is_process_update(text: str) -> bool:
@@ -1353,6 +1753,41 @@ def retrieval_literal_priority(text: str) -> tuple[int, str]:
     if "127.0.0.1" in lowered:
         return (3, lowered)
     return (4, lowered)
+
+
+def sentence_case_tail(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    if len(stripped) == 1:
+        return stripped.lower()
+    return stripped[:1].lower() + stripped[1:]
+
+
+def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5) -> list[str]:
+    facts: list[str] = []
+    for text in event_texts(events, {"user"}):
+        if is_process_update(text):
+            continue
+        compacted = compact_whitespace(strip_process_clauses(text))
+        if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
+            continue
+        for pattern, template in NATURAL_USER_MEMORY_PATTERNS:
+            match = pattern.match(compacted)
+            if not match:
+                continue
+            tail = clean_explicit_memory_text(normalize_memory_text(match.group("text")))
+            tail = re.sub(r"(?i)^\s*that\s+", "", tail).strip()
+            if not tail or is_sensitive_explicit_memory_text(tail):
+                continue
+            fact = template.format(text=sentence_case_tail(tail))
+            durable = durable_memory_text(fact)
+            if durable and durable not in facts:
+                facts.append(durable)
+            break
+        if len(facts) >= limit:
+            break
+    return facts
 
 
 def extract_tags(project_name: str, texts: list[str]) -> list[str]:
@@ -1561,6 +1996,7 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         if durable:
             durable_user_lines.append(durable)
     assistant_lines = event_texts(events, {"assistant", "record"})
+    natural_user_facts = extract_natural_user_memory_facts(events)
     decisions = select_event_texts(
         events,
         r"\b(decision|decide|decided|chosen|selected|root cause)\b|原因|根因|决定|选择",
@@ -1585,6 +2021,9 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         kinds={"assistant", "record"},
         limit=12,
     )
+    for line in reversed(natural_user_facts):
+        if line not in facts:
+            facts.insert(0, line)
     retrieval_literals = select_retrieval_literal_texts(events, kinds={"assistant", "record"}, limit=8)
     for line in retrieval_literals:
         if line not in facts:
@@ -1637,6 +2076,7 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         "summary": summary,
         "context": context[:5],
         "facts": facts,
+        "fact_sources": fact_source_entries(facts, events, natural_user_facts, retrieval_literals),
         "decisions": decisions,
         "problems": problems,
         "unresolved": unresolved,
@@ -1761,8 +2201,15 @@ def record_dir(memory_repo: Path, project_slug: str, record: SourceRecord) -> Pa
     return memory_repo / "sessions" / day / f"{stamp}_{project_slug}_{record.sha256[:10]}"
 
 
-def remove_existing_entries_for_source(memory_repo: Path, project_path: Path, source_record: Path) -> int:
-    project_key = str(project_path.resolve())
+def remove_existing_entries_for_source(
+    memory_repo: Path,
+    project_path: Path,
+    source_record: Path,
+    archive_scope: str | None = None,
+    source_partition: str | None = None,
+) -> int:
+    scope_key = archive_scope or str(project_path.resolve())
+    partition_key = source_partition or str(project_path.resolve())
     source_key = str(source_record.resolve())
     removed = 0
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
@@ -1770,11 +2217,15 @@ def remove_existing_entries_for_source(memory_repo: Path, project_path: Path, so
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if meta.get("project_path") != project_key or meta.get("source_record") != source_key:
+        if (
+            archive_scope_for_row(meta) != scope_key
+            or not row_matches_source_partition(meta, partition_key)
+            or meta.get("source_record") != source_key
+        ):
             continue
         entry_dir = meta_path.parent
         if not is_safe_archive_entry_dir(memory_repo, entry_dir):
-            raise SystemExit(f"Refusing to remove unsafe archive entry path: {entry_dir}")
+            raise SystemExit(f"Refusing to remove unsafe archive entry path: {safe_diagnostic_path(entry_dir)}")
         shutil.rmtree(entry_dir)
         removed += 1
     prune_empty_session_dirs(memory_repo / "sessions")
@@ -1787,6 +2238,20 @@ def is_safe_archive_entry_dir(memory_repo: Path, entry_dir: Path) -> bool:
     except (OSError, ValueError):
         return False
     return len(relative.parts) >= 4 and entry_dir.name
+
+
+def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(memory_repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def write_safe_archive_text(memory_repo: Path, path: Path, text: str, label: str) -> None:
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit(f"Refusing to write unsafe archive {label} path: {safe_diagnostic_path(path)}")
+    path.write_text(text, encoding="utf-8")
 
 
 def prune_empty_session_dirs(root: Path) -> None:
@@ -1804,24 +2269,30 @@ def prune_empty_session_dirs(root: Path) -> None:
 def write_record(
     memory_repo: Path,
     project_path: Path,
+    archive_scope: str,
+    source_partition: str,
     project_name: str,
     source_agent: str,
     record: SourceRecord,
 ) -> Path | None:
     project_slug = slugify(project_name)
     destination = record_dir(memory_repo, project_slug, record)
+    if not is_safe_archive_entry_dir(memory_repo, destination):
+        raise SystemExit(f"Refusing to write unsafe archive entry path: {safe_diagnostic_path(destination)}")
     destination.mkdir(parents=True, exist_ok=True)
 
     source_text = read_record_text(record.path)
     redacted_text, redaction_counts = redact_text(source_text)
     source_events = extract_source_events(record.path, redacted_text)
     summary_data = summarize_events(source_events, project_name)
+    explicit_memories = extract_explicit_memory_texts(source_events)
     if not has_durable_summary_content(summary_data):
         shutil.rmtree(destination)
         return None
     archived_at = utc_now()
     rel_summary = destination.relative_to(memory_repo) / "summary.md"
     rel_evidence = destination.relative_to(memory_repo) / "evidence.md"
+    rel_source_map = destination.relative_to(memory_repo) / "source-map.json"
 
     source_title = f"{project_name}: {record.path.name}"
     title = memory_title(summary_data, source_title)
@@ -1834,6 +2305,8 @@ def write_record(
 - source_agent: {source_agent}
 - project: {project_name}
 - project_path: {project_path}
+- archive_scope: {archive_scope}
+- source_partition: {source_partition}
 - source_record: {record.path}
 - source_updated_at: {isoformat(record.updated_at)}
 - source_sha256: {record.sha256}
@@ -1862,10 +2335,7 @@ See `evidence.md` for short redacted snippets that support the summary.
     summary = strip_trailing_whitespace_lines(summary)
 
     evidence_lines = summary_data["evidence"]
-    if evidence_lines:
-        evidence_body = "\n".join(f"- {line}" for line in evidence_lines)
-    else:
-        evidence_body = ""
+    evidence_body = render_evidence_body(evidence_lines, explicit_memories)
     evidence = (
         f"# Evidence: {title}\n\n"
         f"Source record: `{record.path}`\n"
@@ -1882,12 +2352,15 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_agent": source_agent,
         "project": project_name,
         "project_path": str(project_path),
+        "archive_scope": archive_scope,
+        "source_partition": source_partition,
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
         "source_updated_at": isoformat(record.updated_at),
         "archived_at": isoformat(archived_at),
         "summary_path": str(rel_summary),
         "evidence_path": str(rel_evidence),
+        "source_map_path": str(rel_source_map),
         "archive_status": archive_status,
         "redaction_status": redaction_status,
         "contains_raw_transcript": False,
@@ -1896,8 +2369,10 @@ See `evidence.md` for short redacted snippets that support the summary.
         "user_intent": summary_data["user_intent"],
         "summary": summary_data["summary"],
         "reusable_facts": summary_data["facts"],
+        "reusable_fact_sources": summary_data["fact_sources"],
         "tags": summary_data["tags"],
         "decisions": summary_data["decisions"],
+        "explicit_memories": explicit_memories,
         "unresolved_tasks": summary_data["unresolved"],
         "redaction_counts": redaction_counts,
     }
@@ -1906,9 +2381,12 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_record_sha256": record.sha256,
         "source_updated_at": isoformat(record.updated_at),
         "project_path": str(project_path),
+        "archive_scope": archive_scope,
+        "source_partition": source_partition,
         "archive_entry": str(destination.relative_to(memory_repo)),
         "summary_path": str(rel_summary),
         "evidence_path": str(rel_evidence),
+        "source_map_path": str(rel_source_map),
         "contains_raw_transcript": False,
         "evidence_policy": "short_redacted_snippets",
     }
@@ -1921,41 +2399,1334 @@ See `evidence.md` for short redacted snippets that support the summary.
         redactions += "- No redactions were applied to the source content.\n"
     redactions = strip_trailing_whitespace_lines(redactions)
 
-    (destination / "summary.md").write_text(summary, encoding="utf-8")
-    (destination / "evidence.md").write_text(evidence, encoding="utf-8")
-    (destination / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (destination / "redactions.md").write_text(redactions, encoding="utf-8")
-    (destination / "source-map.json").write_text(json.dumps(source_map, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_safe_archive_text(memory_repo, destination / "summary.md", summary, "record file")
+    write_safe_archive_text(memory_repo, destination / "evidence.md", evidence, "record file")
+    write_safe_archive_text(
+        memory_repo,
+        destination / "meta.json",
+        json.dumps(meta, indent=2, sort_keys=True) + "\n",
+        "record file",
+    )
+    write_safe_archive_text(memory_repo, destination / "redactions.md", redactions, "record file")
+    write_safe_archive_text(
+        memory_repo,
+        destination / "source-map.json",
+        json.dumps(source_map, indent=2, sort_keys=True) + "\n",
+        "record file",
+    )
     return destination
+
+
+def memory_topic(text: str, tags: Iterable[str]) -> str:
+    lowered = " ".join([text, *tags]).lower()
+    for topic, hints in MEMORY_TOPIC_HINTS:
+        if any(hint in lowered for hint in hints):
+            return topic
+    return "general"
+
+
+def automatic_memory_layer(candidate: MemoryCandidate, support_projects: set[str]) -> str:
+    lowered = candidate.text.lower()
+    if any(hint in lowered for hint in GLOBAL_MEMORY_HINTS):
+        return "global"
+    if len(support_projects) >= 2:
+        return "domain"
+    return "project"
+
+
+def memory_scope(layer: str, candidate: MemoryCandidate) -> str:
+    if layer == "global":
+        return "global"
+    if layer == "domain":
+        return f"domain:{candidate.topic}"
+    project_key = candidate.project_path or candidate.project
+    return f"project:{project_key}"
+
+
+def memory_id_for(layer: str, scope: str, text: str, source: str) -> str:
+    key = f"{layer}\n{scope}\n{source}\n{normalize_memory_text(text).lower()}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return f"mem_{digest[:16]}"
+
+
+def has_unsafe_raw_ref_path(text: str) -> bool:
+    if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", text))
+
+
+def has_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def raw_ref_for_source_record(path: str, anchor: str) -> dict[str, str] | None:
+    path = path.strip()
+    anchor = anchor.strip()
+    if not path or not anchor:
+        return None
+    if has_control_chars(path) or has_control_chars(anchor):
+        return None
+    if has_unsafe_raw_ref_path(path):
+        return None
+    if any(pattern.search(path) or pattern.search(anchor) for pattern in REDACTION_PATTERNS.values()):
+        return None
+    return {"path": path, "anchor": anchor}
+
+
+def raw_ref_for_source_fields(source_record: str, source_map_path: str, anchor: str) -> dict[str, str] | None:
+    return raw_ref_for_source_record(source_record, anchor) or raw_ref_for_source_record(source_map_path, anchor)
+
+
+def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, str]]:
+    fields = (
+        ("reusable_facts", "Reusable fact from archived session."),
+        ("decisions", "Decision captured in archived session."),
+        ("unresolved_tasks", "Unresolved task captured in archived session."),
+    )
+    for key, rationale in fields:
+        value = row.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            text = normalize_memory_text(strip_reusable_fact_prefix(str(item)))
+            if (
+                text
+                and not is_noisy_text(text)
+                and not is_raw_prompt_text(text)
+                and not is_process_update(text)
+                and not is_low_signal_memory_text(text)
+            ):
+                yield text, rationale
+
+
+def clean_explicit_memory_text(text: str) -> str:
+    match = EXPLICIT_MEMORY_TASK_TAIL_BOUNDARY.search(text)
+    if match:
+        text = text[: match.start()]
+    return normalize_memory_text(text)
+
+
+def is_sensitive_explicit_memory_text(text: str) -> bool:
+    lowered = text.lower()
+    if any(marker in lowered for marker in SENSITIVE_EXPLICIT_MEMORY_MARKERS):
+        return True
+    for label in REDACTION_CATEGORY_LABELS:
+        label_text = str(label).lower()
+        if label_text in lowered or label_text.replace("_", " ") in lowered:
+            return True
+    return False
+
+
+def is_negated_explicit_memory_directive(text: str) -> bool:
+    return any(pattern.match(text) for pattern in NEGATED_EXPLICIT_MEMORY_PATTERNS)
+
+
+def extract_explicit_memory_texts(events: list[MemoryEvent]) -> list[str]:
+    texts: list[str] = []
+    for event in events:
+        if event.kind != "user":
+            continue
+        compacted = compact_whitespace(event.text)
+        if is_negated_explicit_memory_directive(compacted):
+            continue
+        for pattern in EXPLICIT_MEMORY_PATTERNS:
+            match = pattern.match(compacted)
+            if not match:
+                continue
+            text = normalize_memory_text(match.group("text"))
+            text = clean_explicit_memory_text(text)
+            if (
+                text
+                and not is_noisy_text(text)
+                and not is_sensitive_explicit_memory_text(text)
+                and text not in texts
+            ):
+                texts.append(text)
+    return texts
+
+
+def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
+    tags = [str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float))]
+    topic = memory_topic(text, tags)
+    source_updated_at = str(row.get("source_updated_at", ""))
+    summary_path = str(row.get("summary_path", ""))
+    evidence_path = str(row.get("evidence_path", ""))
+    source_record = str(row.get("source_record", ""))
+    source_map_path = str(row.get("source_map_path", ""))
+    raw_ref = raw_ref_for_source_fields(source_record, source_map_path, "explicit_memory")
+    layer = "global"
+    scope = "global"
+    return {
+        "memory_id": memory_id_for(layer, scope, text, "explicit"),
+        "layer": layer,
+        "scope": scope,
+        "topic": topic,
+        "text": text,
+        "rationale": "Explicit memory requested by the user or governing prompt.",
+        "source": "explicit",
+        "confidence": "high",
+        "persistence": "sticky",
+        "support_count": 1,
+        "first_seen": source_updated_at,
+        "last_seen": source_updated_at,
+        "derived_from": [summary_path] if summary_path else [],
+        "evidence_refs": [{"path": evidence_path, "quote_id": "ev_explicit_001"}] if evidence_path else [],
+        "raw_refs": [raw_ref] if raw_ref else [],
+        "supersedes": [],
+        "superseded_by": None,
+        "tags": sorted(set([*tags, topic, "explicit-memory"])),
+    }
+
+
+def archive_ref_path(memory_repo: Path, path_text: str) -> Path | None:
+    path_text = path_text.strip()
+    if not path_text or has_unsafe_raw_ref_path(path_text):
+        return None
+    candidate = memory_repo / path_text
+    try:
+        repo_resolved = memory_repo.resolve()
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(repo_resolved)
+    except (OSError, ValueError):
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
+
+
+def existing_archive_ref(memory_repo: Path, path_text: str) -> bool:
+    return archive_ref_path(memory_repo, path_text) is not None
+
+
+def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
+    if not quote_id.strip():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
+
+
+def parse_archive_ref(value: str, option_name: str) -> tuple[str, str]:
+    if "#" not in value:
+        raise SystemExit(f"{option_name} must use PATH#ANCHOR")
+    path, anchor = value.split("#", 1)
+    path = path.strip()
+    anchor = anchor.strip()
+    if not path or not anchor:
+        raise SystemExit(f"{option_name} must use PATH#ANCHOR")
+    return path, anchor
+
+
+def is_safe_direct_raw_ref(ref: dict[str, str]) -> bool:
+    return raw_ref_for_source_record(ref["path"], ref["anchor"]) is not None
+
+
+def direct_explicit_memory_node(
+    text: str,
+    layer: str,
+    scope: str,
+    summary_path: str,
+    evidence_refs: list[dict],
+    raw_refs: list[dict],
+    now: str,
+) -> dict:
+    cleaned = clean_explicit_memory_text(text)
+    if not cleaned or is_sensitive_explicit_memory_text(cleaned) or is_noisy_text(cleaned):
+        raise SystemExit("explicit memory text is empty, noisy, or sensitive")
+    topic = memory_topic(cleaned, [])
+    return {
+        "memory_id": memory_id_for(layer, scope, cleaned, "explicit"),
+        "layer": layer,
+        "scope": scope,
+        "topic": topic,
+        "text": cleaned,
+        "rationale": "Explicit memory requested by the user or governing prompt.",
+        "source": "explicit",
+        "confidence": "high",
+        "persistence": "sticky",
+        "support_count": 1,
+        "first_seen": now,
+        "last_seen": now,
+        "derived_from": [summary_path],
+        "evidence_refs": evidence_refs,
+        "raw_refs": raw_refs,
+        "supersedes": [],
+        "superseded_by": None,
+        "tags": sorted({topic, "explicit-memory"}),
+    }
+
+
+def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
+    candidates: list[MemoryCandidate] = []
+    for row in rows:
+        tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
+        summary_path = str(row.get("summary_path", ""))
+        evidence_path = str(row.get("evidence_path", ""))
+        fact_sources = {}
+        for item in row.get("reusable_fact_sources") or []:
+            if not isinstance(item, dict):
+                continue
+            text = normalize_memory_text(str(item.get("text") or ""))
+            source = str(item.get("source") or "")
+            if text and source:
+                fact_sources[text.lower()] = source
+        if not summary_path or not evidence_path:
+            continue
+        for text, rationale in iter_memory_candidate_texts(row):
+            provenance = fact_sources.get(normalize_memory_text(text).lower(), "")
+            text, supersedes_texts = parse_memory_refresh_text(text, is_noisy_text)
+            text, deprecates_texts = parse_memory_deprecation_text(text, is_noisy_text)
+            if deprecates_texts:
+                rationale = "Memory deprecation captured in archived session."
+            elif supersedes_texts:
+                rationale = "Memory refresh captured in archived session."
+            candidates.append(
+                MemoryCandidate(
+                    text=text,
+                    rationale=rationale,
+                    source="automatic",
+                    topic=memory_topic(text, tags),
+                    project=str(row.get("project", "")),
+                    project_path=str(row.get("project_path", "")),
+                    summary_path=summary_path,
+                    evidence_path=evidence_path,
+                    source_record=str(row.get("source_record", "")),
+                    source_map_path=str(row.get("source_map_path", "")),
+                    source_updated_at=str(row.get("source_updated_at", "")),
+                    tags=tags,
+                    provenance=provenance,
+                    supersedes_texts=supersedes_texts,
+                    deprecates_texts=deprecates_texts,
+                )
+            )
+    return candidates
+
+
+def evidence_ref_for_path(memory_repo: Path | None, path: str) -> dict[str, str] | None:
+    if not path:
+        return None
+    quote_id = "ev_001"
+    if memory_repo is not None:
+        evidence_path = archive_ref_path(memory_repo, path)
+        if evidence_path is None or not evidence_quote_id_exists(evidence_path, quote_id):
+            return None
+    return {"path": path, "quote_id": quote_id}
+
+
+def is_natural_memory_candidate(candidate: MemoryCandidate) -> bool:
+    return candidate.provenance in NATURAL_FACT_SOURCE_LABELS
+
+
+def candidate_identity(candidate: MemoryCandidate) -> tuple[str, str, str, str]:
+    return (
+        normalize_memory_text(candidate.text).lower(),
+        candidate.summary_path,
+        candidate.evidence_path,
+        candidate.source_updated_at,
+    )
+
+
+def natural_candidate_text_sha256(text: str) -> str:
+    normalized = normalize_memory_text(text).lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def induction_review_candidate_id(candidate: MemoryCandidate, reason: str) -> str:
+    payload = "\n".join(
+        [
+            normalize_memory_text(candidate.text).lower(),
+            reason,
+            candidate.summary_path,
+            candidate.evidence_path,
+            candidate.source_updated_at,
+        ]
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"indrev_{digest[:16]}"
+
+
+def should_low_confidence_review_natural_candidate(candidate: MemoryCandidate) -> bool:
+    return bool(LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN.search(candidate.text))
+
+
+def induction_review_reason_from_relation(detail: dict) -> str:
+    relation = str(detail.get("relation") or "")
+    review_reason = str(detail.get("review_reason") or "")
+    if relation == "contradiction" or review_reason == "low_confidence_contradiction_requires_review":
+        return "conflicting_natural_induction_requires_review"
+    if review_reason == "ambiguous_scope_narrowing_requires_review":
+        return "scope_change_natural_induction_requires_review"
+    if review_reason == "low_confidence_semantic_overlap_requires_review":
+        return "low_confidence_natural_induction_requires_review"
+    return ""
+
+
+def archive_relative_ref_exists(memory_repo: Path | None, path: str) -> bool:
+    if not path:
+        return False
+    if memory_repo is None:
+        return True
+    return archive_ref_path(memory_repo, path) is not None
+
+
+def natural_induction_review_candidate_row(
+    candidate: MemoryCandidate,
+    reason: str,
+    memory_repo: Path | None,
+    related: MemoryCandidate | None = None,
+    detail: dict | None = None,
+) -> dict:
+    row = {
+        "candidate_id": induction_review_candidate_id(candidate, reason),
+        "candidate_type": "natural_induction_review",
+        "candidate_text_sha256": natural_candidate_text_sha256(candidate.text),
+        "candidate_source": candidate.provenance,
+        "reason": reason,
+        "recommended_action": "manual_review",
+        "topic": candidate.topic,
+        "support_count": 1,
+        "source_updated_at": candidate.source_updated_at,
+        "derived_from": [candidate.summary_path] if archive_relative_ref_exists(memory_repo, candidate.summary_path) else [],
+        "evidence_refs": [
+            ref
+            for ref in [evidence_ref_for_path(memory_repo, candidate.evidence_path)]
+            if ref is not None
+        ],
+        "raw_refs": [
+            ref
+            for ref in [raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, "source_record")]
+            if ref is not None
+        ],
+    }
+    if related is not None:
+        row["related_candidate_text_sha256"] = natural_candidate_text_sha256(related.text)
+        row["related_source_updated_at"] = related.source_updated_at
+    if detail:
+        row["overlap_token_count"] = int(detail.get("overlap_token_count") or 0)
+        row["overlap_ratio"] = round(float(detail.get("overlap_ratio") or 0.0), 6)
+    return row
+
+
+def add_induction_review_candidate(
+    rows_by_id: dict[str, dict],
+    withheld: set[tuple[str, str, str, str]],
+    identities_by_id: dict[str, tuple[str, str, str, str]],
+    candidate: MemoryCandidate,
+    reason: str,
+    memory_repo: Path | None,
+    related: MemoryCandidate | None = None,
+    detail: dict | None = None,
+) -> None:
+    row = natural_induction_review_candidate_row(candidate, reason, memory_repo, related, detail)
+    rows_by_id.setdefault(str(row["candidate_id"]), row)
+    identities_by_id.setdefault(str(row["candidate_id"]), candidate_identity(candidate))
+    withheld.add(candidate_identity(candidate))
+    if related is not None:
+        withheld.add(candidate_identity(related))
+
+
+def build_induction_review_candidates(
+    candidates: list[MemoryCandidate],
+    memory_repo: Path | None = None,
+) -> tuple[list[dict], set[tuple[str, str, str, str]], dict[str, tuple[str, str, str, str]]]:
+    rows_by_id: dict[str, dict] = {}
+    withheld: set[tuple[str, str, str, str]] = set()
+    identities_by_id: dict[str, tuple[str, str, str, str]] = {}
+    natural_candidates = [candidate for candidate in candidates if is_natural_memory_candidate(candidate)]
+    for candidate in natural_candidates:
+        if should_low_confidence_review_natural_candidate(candidate):
+            add_induction_review_candidate(
+                rows_by_id,
+                withheld,
+                identities_by_id,
+                candidate,
+                "low_confidence_natural_induction_requires_review",
+                memory_repo,
+            )
+
+    ordered = sorted(natural_candidates, key=lambda candidate: (candidate.source_updated_at, candidate.summary_path, candidate.text))
+    for index, current in enumerate(ordered):
+        for older in ordered[:index]:
+            if memory_text_key(current.text) == memory_text_key(older.text):
+                continue
+            detail = semantic_relation_detail(current.text, older.text)
+            reason = induction_review_reason_from_relation(detail)
+            if not reason:
+                continue
+            add_induction_review_candidate(rows_by_id, withheld, identities_by_id, current, reason, memory_repo, older, detail)
+
+    return (
+        sorted(
+            rows_by_id.values(),
+            key=lambda row: (
+                str(row.get("reason", "")),
+                str(row.get("source_updated_at", "")),
+                str(row.get("candidate_id", "")),
+            ),
+        ),
+        withheld,
+        identities_by_id,
+    )
+
+
+def build_memory_nodes_and_induction_review_candidates(
+    rows: list[dict],
+    memory_repo: Path | None = None,
+    induction_review_decisions: list[dict] | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    memory_candidates = memory_candidates_from_meta(rows)
+    induction_review_candidates, withheld_candidates, induction_candidate_identities = build_induction_review_candidates(memory_candidates, memory_repo)
+    induction_review_decision_results = apply_induction_review_decisions(
+        induction_review_candidates,
+        induction_review_decisions or [],
+    )
+    for result in induction_review_decision_results:
+        if result.get("status") != "applied" or result.get("action") != "approve_promote":
+            continue
+        candidate_id = str(result.get("candidate_id") or "")
+        identity = induction_candidate_identities.get(candidate_id)
+        if identity is not None:
+            withheld_candidates.discard(identity)
+    active_induction_review_candidates = filter_reviewed_induction_candidates(
+        induction_review_candidates,
+        induction_review_decision_results,
+    )
+    grouped: dict[str, list[MemoryCandidate]] = {}
+    for candidate in memory_candidates:
+        if candidate_identity(candidate) in withheld_candidates:
+            continue
+        key = memory_consolidation_key(candidate.text)
+        grouped.setdefault(key, []).append(candidate)
+
+    nodes: list[dict] = []
+    refresh_targets_by_text: dict[str, set[str]] = {}
+    deprecation_targets_by_text: dict[str, set[str]] = {}
+    for consolidation_key in sorted(grouped):
+        candidates = grouped[consolidation_key]
+        first = candidates[0]
+        refresh_targets = {
+            superseded_text
+            for candidate in candidates
+            for superseded_text in candidate.supersedes_texts
+        }
+        deprecation_targets = {
+            deprecated_text
+            for candidate in candidates
+            for deprecated_text in candidate.deprecates_texts
+        }
+        text = first.text
+        if refresh_targets:
+            refresh_targets_by_text.setdefault(memory_text_key(text), set()).update(refresh_targets)
+        if deprecation_targets:
+            deprecation_targets_by_text.setdefault(memory_text_key(text), set()).update(deprecation_targets)
+        support_projects = {
+            candidate.project_path or candidate.project
+            for candidate in candidates
+            if candidate.project_path or candidate.project
+        }
+        layer = automatic_memory_layer(first, support_projects)
+        scope = memory_scope(layer, first)
+        seen_times = sorted(candidate.source_updated_at for candidate in candidates if candidate.source_updated_at)
+        derived_from = sorted({candidate.summary_path for candidate in candidates if candidate.summary_path})
+        evidence_refs = [
+            ref
+            for path in sorted({candidate.evidence_path for candidate in candidates if candidate.evidence_path})
+            if (ref := evidence_ref_for_path(memory_repo, path)) is not None
+        ]
+        raw_refs = [
+            raw_ref
+            for source_record, source_map_path in sorted(
+                {
+                    (candidate.source_record, candidate.source_map_path)
+                    for candidate in candidates
+                    if candidate.source_record or candidate.source_map_path
+                }
+            )
+            if (raw_ref := raw_ref_for_source_fields(source_record, source_map_path, "source_record")) is not None
+        ]
+        confidence = "high" if len(candidates) >= 2 or layer == "global" else "medium"
+        tags = sorted({tag for candidate in candidates for tag in candidate.tags if tag} | {first.topic})
+        nodes.append(
+            {
+                "memory_id": memory_id_for(layer, scope, text, first.source),
+                "layer": layer,
+                "scope": scope,
+                "topic": first.topic,
+                "text": text,
+                "rationale": first.rationale,
+                "source": first.source,
+                "confidence": confidence,
+                "persistence": "normal",
+                "support_count": len(candidates),
+                "first_seen": seen_times[0] if seen_times else "",
+                "last_seen": seen_times[-1] if seen_times else "",
+                "derived_from": derived_from,
+                "evidence_refs": evidence_refs,
+                "raw_refs": raw_refs,
+                "supersedes": [],
+                "superseded_by": None,
+                "tags": tags,
+            }
+        )
+    apply_text_supersession_links(nodes, refresh_targets_by_text)
+    apply_semantic_lifecycle_links(nodes)
+    apply_text_deprecation_links(nodes, deprecation_targets_by_text)
+    existing_ids = {str(node["memory_id"]) for node in nodes}
+    for row in rows:
+        explicit_texts = row.get("explicit_memories", [])
+        if not isinstance(explicit_texts, list):
+            continue
+        for text_value in explicit_texts:
+            text = normalize_memory_text(str(text_value))
+            if not text:
+                continue
+            node = explicit_memory_node(text, row)
+            if node["memory_id"] in existing_ids:
+                continue
+            nodes.append(node)
+            existing_ids.add(str(node["memory_id"]))
+    nodes.sort(key=lambda node: (str(node.get("layer", "")), str(node.get("memory_id", ""))))
+    return nodes, active_induction_review_candidates, induction_review_decision_results
+
+
+def build_memory_nodes(rows: list[dict], memory_repo: Path | None = None) -> list[dict]:
+    nodes, _, _ = build_memory_nodes_and_induction_review_candidates(rows, memory_repo)
+    return nodes
 
 
 def collect_meta(memory_repo: Path) -> list[dict]:
     rows: list[dict] = []
     for meta_path in sorted((memory_repo / "sessions").glob("**/meta.json")):
+        if meta_path.is_symlink() or not is_safe_repo_path(memory_repo, meta_path):
+            continue
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         if isinstance(meta, dict):
+            source_map_path = meta_path.parent / "source-map.json"
+            if (
+                not meta.get("source_map_path")
+                and source_map_path.is_file()
+                and is_safe_repo_path(memory_repo, source_map_path)
+            ):
+                meta["source_map_path"] = source_map_path.relative_to(memory_repo).as_posix()
             rows.append(meta)
     rows.sort(key=lambda row: row.get("source_updated_at", ""), reverse=True)
     return rows
 
 
+def repair_legacy_source_map_paths(memory_repo: Path, rows: list[dict]) -> None:
+    for row in rows:
+        source_map_path = row.get("source_map_path")
+        summary_path = row.get("summary_path")
+        evidence_path = row.get("evidence_path")
+        if not (
+            isinstance(source_map_path, str)
+            and isinstance(summary_path, str)
+            and isinstance(evidence_path, str)
+        ):
+            continue
+        source_map_file = archive_ref_path(memory_repo, source_map_path)
+        if source_map_file is None or not source_map_file.is_file():
+            continue
+        try:
+            source_map = json.loads(source_map_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(source_map, dict):
+            continue
+        expected = {
+            "summary_path": summary_path,
+            "evidence_path": evidence_path,
+            "source_map_path": source_map_path,
+        }
+        if all(source_map.get(key) == value for key, value in expected.items()):
+            continue
+        source_map.update(expected)
+        write_safe_archive_text(
+            memory_repo,
+            source_map_file,
+            json.dumps(source_map, indent=2, sort_keys=True) + "\n",
+            "source-map file",
+        )
+
+
+def load_existing_explicit_memory_nodes(memory_repo: Path) -> list[dict]:
+    nodes: list[dict] = []
+    for node in iter_jsonl(memory_repo / "memories" / "explicit.jsonl"):
+        memory_id = node.get("memory_id")
+        if node.get("source") == "explicit" and isinstance(memory_id, str) and memory_id:
+            nodes.append(node)
+    return nodes
+
+
+def memory_node_sort_key(node: dict) -> tuple[bool, str, str, str, str]:
+    return (
+        node.get("source") != "automatic",
+        str(node.get("layer", "")),
+        str(node.get("scope", "")),
+        str(node.get("topic", "")),
+        str(node.get("memory_id", "")),
+    )
+
+
+def explicit_memory_content_key(node: dict) -> tuple[str, str, str, str] | None:
+    if node.get("source") != "explicit":
+        return None
+    text = normalize_memory_text(str(node.get("text", ""))).lower()
+    if not text:
+        return None
+    return (
+        str(node.get("source", "")),
+        str(node.get("layer", "")),
+        str(node.get("scope", "")),
+        text,
+    )
+
+
+def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
+    by_id: dict[str, dict] = {}
+    by_content: dict[tuple[str, str, str, str], dict] = {}
+
+    def add_node(node: dict, *, prefer_same_content: bool) -> None:
+        memory_id = node.get("memory_id")
+        if not isinstance(memory_id, str) or not memory_id:
+            return
+        content_key = explicit_memory_content_key(node)
+        if content_key is not None:
+            existing = by_content.get(content_key)
+            if existing is not None:
+                if not prefer_same_content:
+                    return
+                node = merge_memory_node_provenance(existing, node)
+                existing_id = existing.get("memory_id")
+                if isinstance(existing_id, str):
+                    by_id.pop(existing_id, None)
+            by_content[content_key] = node
+        existing_by_id = by_id.get(memory_id)
+        if existing_by_id is not None:
+            node = merge_memory_node_provenance(existing_by_id, node)
+        by_id[memory_id] = node
+
+    for node in load_existing_explicit_memory_nodes(memory_repo):
+        add_node(node, prefer_same_content=False)
+    for node in nodes:
+        add_node(node, prefer_same_content=True)
+    return sorted(by_id.values(), key=memory_node_sort_key)
+
+
+def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
+    nodes = merge_existing_explicit_memory_nodes(memory_repo, nodes)
+    apply_memory_id_supersession_links(nodes)
+    apply_memory_id_contradiction_links(nodes)
+    apply_memory_id_deprecation_links(nodes)
+    memories_dir = memory_repo / "memories"
+    if not is_safe_repo_path(memory_repo, memories_dir):
+        raise SystemExit(f"Refusing to write unsafe archive memories path: {safe_diagnostic_path(memories_dir)}")
+    memories_dir.mkdir(parents=True, exist_ok=True)
+    by_layer: dict[str, list[dict]] = {"global": [], "domain": [], "project": []}
+    explicit_nodes: list[dict] = []
+    for node in nodes:
+        layer = str(node.get("layer", "project"))
+        if node.get("source") == "explicit":
+            explicit_nodes.append(node)
+            continue
+        if layer in by_layer:
+            by_layer[layer].append(node)
+
+    for layer, file_name in MEMORY_LAYER_FILES.items():
+        lines = [json.dumps(node, sort_keys=True) for node in by_layer[layer]]
+        write_safe_archive_text(
+            memory_repo,
+            memories_dir / file_name,
+            "\n".join(lines) + ("\n" if lines else ""),
+            "memory node file",
+        )
+
+    explicit_lines = [json.dumps(node, sort_keys=True) for node in explicit_nodes]
+    write_safe_archive_text(
+        memory_repo,
+        memories_dir / "explicit.jsonl",
+        "\n".join(explicit_lines) + ("\n" if explicit_lines else ""),
+        "memory node file",
+    )
+    return nodes
+
+
+def safe_node_memory_id(node: dict) -> str:
+    memory_id = node.get("memory_id")
+    return memory_id if isinstance(memory_id, str) and memory_id else ""
+
+
+def is_safe_memory_review_id(value: object) -> bool:
+    return isinstance(value, str) and SAFE_MEMORY_REVIEW_ID_PATTERN.fullmatch(value) is not None
+
+
+def safe_memory_review_scalar(value: object, limit: int = 120) -> str:
+    text = str(value or "")
+    if not SAFE_MEMORY_REVIEW_ID_PATTERN.fullmatch(text):
+        return ""
+    return text[:limit]
+
+
+def review_candidate_fingerprint(candidate: dict) -> str:
+    payload = {
+        field: candidate.get(field)
+        for field in MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS
+        if field in candidate
+    }
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
+
+
+def is_safe_induction_review_candidate_id(value: object) -> bool:
+    return isinstance(value, str) and INDUCTION_REVIEW_CANDIDATE_ID_PATTERN.fullmatch(value) is not None
+
+
+def is_safe_sha256_hex(value: object) -> bool:
+    return isinstance(value, str) and SHA256_HEX_PATTERN.fullmatch(value) is not None
+
+
+def induction_review_candidate_fingerprint(candidate: dict) -> str:
+    payload = {
+        field: candidate.get(field)
+        for field in INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS
+        if field in candidate
+    }
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
+
+
+def build_induction_review_candidate_index(candidates: list[dict]) -> dict[str, dict]:
+    index: dict[str, dict] = {}
+    for candidate in candidates:
+        candidate_id = candidate.get("candidate_id")
+        if is_safe_induction_review_candidate_id(candidate_id):
+            index.setdefault(str(candidate_id), candidate)
+    return index
+
+
+def increment_induction_review_decision_error(counts: dict[str, int], key: str) -> None:
+    if key in INDUCTION_REVIEW_DECISION_SET_ERROR_KEYS:
+        counts[key] = counts.get(key, 0) + 1
+
+
+def induction_review_decision_error_counts(
+    induction_review_candidates: list[dict],
+    induction_review_decisions: list[dict],
+) -> dict[str, int]:
+    candidates_by_id = build_induction_review_candidate_index(induction_review_candidates)
+    counts: dict[str, int] = {}
+    seen_decision_ids: set[str] = set()
+    seen_exact_rows: set[str] = set()
+    actions_by_candidate_id: dict[str, set[str]] = {}
+    actions_by_fingerprint: dict[str, set[str]] = {}
+
+    for decision in induction_review_decisions:
+        row_fingerprint = json.dumps(decision, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if row_fingerprint in seen_exact_rows:
+            increment_induction_review_decision_error(counts, "exact_duplicate")
+        else:
+            seen_exact_rows.add(row_fingerprint)
+
+        action = decision.get("action")
+        decision_id = decision.get("decision_id")
+        candidate_id = decision.get("candidate_id")
+        candidate_text_sha256 = decision.get("candidate_text_sha256")
+        if (
+            not isinstance(action, str)
+            or action not in INDUCTION_REVIEW_ACTIONS
+            or not is_safe_memory_review_id(decision_id)
+            or not is_safe_induction_review_candidate_id(candidate_id)
+            or not is_safe_sha256_hex(candidate_text_sha256)
+        ):
+            increment_induction_review_decision_error(counts, "unsafe")
+            continue
+
+        safe_decision_id = str(decision_id)
+        if safe_decision_id in seen_decision_ids:
+            increment_induction_review_decision_error(counts, "duplicate_decision_id")
+        else:
+            seen_decision_ids.add(safe_decision_id)
+
+        safe_candidate_id = str(candidate_id)
+        candidate = candidates_by_id.get(safe_candidate_id)
+        if candidate is None:
+            increment_induction_review_decision_error(counts, "unknown")
+            continue
+
+        candidate_fingerprint = decision.get("candidate_fingerprint")
+        if (
+            candidate.get("candidate_text_sha256") != candidate_text_sha256
+            or not isinstance(candidate_fingerprint, str)
+            or candidate_fingerprint != induction_review_candidate_fingerprint(candidate)
+        ):
+            increment_induction_review_decision_error(counts, "stale")
+            continue
+
+        candidate_actions = actions_by_candidate_id.setdefault(safe_candidate_id, set())
+        if candidate_actions and action not in candidate_actions:
+            increment_induction_review_decision_error(counts, "conflicting_candidate_action")
+        candidate_actions.add(action)
+
+        fingerprint_actions = actions_by_fingerprint.setdefault(candidate_fingerprint, set())
+        if fingerprint_actions and action not in fingerprint_actions:
+            increment_induction_review_decision_error(counts, "conflicting_fingerprint_action")
+        fingerprint_actions.add(action)
+
+    return dict(sorted(counts.items()))
+
+
+def raise_induction_review_decision_error(error_counts: dict[str, int]) -> None:
+    if not error_counts:
+        return
+    if set(error_counts) == {"unsafe"}:
+        raise SystemExit("unsafe induction review decision")
+    if set(error_counts) == {"unknown"}:
+        raise SystemExit("unknown induction review candidate")
+    if set(error_counts) == {"stale"}:
+        raise SystemExit("stale induction review decision")
+    raise SystemExit("invalid induction review decision set")
+
+
+def apply_induction_review_decisions(
+    induction_review_candidates: list[dict],
+    induction_review_decisions: list[dict],
+) -> list[dict]:
+    error_counts = induction_review_decision_error_counts(
+        induction_review_candidates,
+        induction_review_decisions,
+    )
+    raise_induction_review_decision_error(error_counts)
+    candidates_by_id = build_induction_review_candidate_index(induction_review_candidates)
+    results: list[dict] = []
+    for decision in induction_review_decisions:
+        action = decision.get("action")
+        decision_id = decision.get("decision_id")
+        candidate_id = decision.get("candidate_id")
+        candidate_text_sha256 = decision.get("candidate_text_sha256")
+        if (
+            not isinstance(action, str)
+            or action not in INDUCTION_REVIEW_ACTIONS
+            or not is_safe_memory_review_id(decision_id)
+            or not is_safe_induction_review_candidate_id(candidate_id)
+            or not is_safe_sha256_hex(candidate_text_sha256)
+        ):
+            raise SystemExit("unsafe induction review decision")
+        candidate = candidates_by_id.get(str(candidate_id))
+        if candidate is None:
+            raise SystemExit("unknown induction review candidate")
+        candidate_fingerprint = decision.get("candidate_fingerprint")
+        if (
+            candidate.get("candidate_text_sha256") != candidate_text_sha256
+            or not isinstance(candidate_fingerprint, str)
+            or candidate_fingerprint != induction_review_candidate_fingerprint(candidate)
+        ):
+            raise SystemExit("stale induction review decision")
+        result = {
+            "decision_id": safe_memory_review_scalar(decision_id, 120),
+            "action": action,
+            "candidate_id": str(candidate_id),
+            "candidate_text_sha256": str(candidate_text_sha256),
+            "candidate_fingerprint": candidate_fingerprint,
+        }
+        if action in INDUCTION_REVIEW_IGNORE_ACTIONS:
+            result["status"] = "ignored"
+            results.append(result)
+            continue
+        if action == "approve_promote":
+            result["status"] = "applied"
+            results.append(result)
+            continue
+        raise SystemExit("unsafe induction review decision")
+    return results
+
+
+def load_induction_review_decisions(memory_repo: Path) -> list[dict]:
+    path = memory_repo / INDUCTION_REVIEW_DECISION_REL_PATH
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit("Refusing to read unsafe induction review decision path")
+    return list(iter_jsonl(path))
+
+
+def filter_reviewed_induction_candidates(induction_review_candidates: list[dict], decision_results: list[dict]) -> list[dict]:
+    if not decision_results:
+        return induction_review_candidates
+    reviewed_ids = {
+        str(result.get("candidate_id") or "")
+        for result in decision_results
+        if result.get("status") in {"applied", "ignored"}
+    }
+    if not reviewed_ids:
+        return induction_review_candidates
+    return [
+        candidate
+        for candidate in induction_review_candidates
+        if str(candidate.get("candidate_id") or "") not in reviewed_ids
+    ]
+
+
+def review_candidate_pairs(candidate: dict) -> list[tuple[str, str]]:
+    current_id = candidate.get("current_memory_id")
+    older_id = candidate.get("older_memory_id")
+    if not is_safe_memory_review_id(current_id) or not is_safe_memory_review_id(older_id):
+        return []
+    older_ids = [older_id]
+    compressed_older_ids = candidate.get("compressed_older_memory_ids", [])
+    if isinstance(compressed_older_ids, list):
+        for item in compressed_older_ids:
+            if is_safe_memory_review_id(item) and item not in older_ids:
+                older_ids.append(item)
+    return [(str(current_id), str(item)) for item in older_ids]
+
+
+def build_memory_review_candidate_index(candidates: list[dict]) -> dict[tuple[str, str], dict]:
+    index: dict[tuple[str, str], dict] = {}
+    for candidate in candidates:
+        for pair in review_candidate_pairs(candidate):
+            index.setdefault(pair, candidate)
+    return index
+
+
+def apply_memory_review_decisions(
+    nodes: list[dict],
+    review_candidates: list[dict],
+    review_decisions: list[dict],
+) -> list[dict]:
+    nodes_by_id = {
+        memory_id: node
+        for node in nodes
+        if (memory_id := safe_node_memory_id(node))
+    }
+    candidates_by_pair = build_memory_review_candidate_index(review_candidates)
+    results: list[dict] = []
+    for decision in review_decisions:
+        action = decision.get("action")
+        current_id = decision.get("current_memory_id")
+        older_id = decision.get("older_memory_id")
+        if (
+            not isinstance(action, str)
+            or action not in MEMORY_REVIEW_ACTIONS
+            or not is_safe_memory_review_id(current_id)
+            or not is_safe_memory_review_id(older_id)
+            or current_id == older_id
+        ):
+            raise SystemExit("unsafe memory review decision")
+        candidate = candidates_by_pair.get((current_id, older_id))
+        if candidate is None:
+            raise SystemExit("unknown memory review candidate")
+        candidate_fingerprint = decision.get("candidate_fingerprint")
+        if (
+            not isinstance(candidate_fingerprint, str)
+            or candidate_fingerprint != review_candidate_fingerprint(candidate)
+        ):
+            raise SystemExit("stale memory review decision")
+        current = nodes_by_id.get(current_id)
+        old = nodes_by_id.get(older_id)
+        if current is None or old is None:
+            raise SystemExit("unknown memory review target")
+        result = {
+            "decision_id": safe_memory_review_scalar(decision.get("decision_id") or "", 120),
+            "action": action,
+            "current_memory_id": current_id,
+            "older_memory_id": older_id,
+            "candidate_fingerprint": candidate_fingerprint,
+        }
+        if action in MEMORY_REVIEW_IGNORE_ACTIONS:
+            result["status"] = "ignored"
+            results.append(result)
+            continue
+        if action == "approve_supersedes":
+            add_supersession_link(current, old)
+        elif action == "approve_contradicts":
+            add_contradiction_link(current, old)
+        elif action == "approve_deprecates":
+            add_deprecation_link(current, old)
+        result["status"] = "applied"
+        results.append(result)
+    return results
+
+
+def load_memory_review_decisions(memory_repo: Path) -> list[dict]:
+    path = memory_repo / MEMORY_REVIEW_DECISION_REL_PATH
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit("Refusing to read unsafe memory review decision path")
+    return list(iter_jsonl(path))
+
+
+def filter_reviewed_memory_candidates(review_candidates: list[dict], decision_results: list[dict]) -> list[dict]:
+    if not decision_results:
+        return review_candidates
+    reviewed_pairs = {
+        (str(result.get("current_memory_id") or ""), str(result.get("older_memory_id") or ""))
+        for result in decision_results
+        if result.get("status") in {"applied", "ignored"}
+    }
+    if not reviewed_pairs:
+        return review_candidates
+    out: list[dict] = []
+    for candidate in review_candidates:
+        pairs = review_candidate_pairs(candidate)
+        if pairs and all(pair in reviewed_pairs for pair in pairs):
+            continue
+        out.append(candidate)
+    return out
+
+
+def string_items(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]
+
+
+def has_lifecycle_link(current: dict, old: dict) -> bool:
+    current_id = safe_node_memory_id(current)
+    old_id = safe_node_memory_id(old)
+    if not current_id or not old_id:
+        return False
+    return (
+        old_id in set(string_items(current.get("supersedes")))
+        or old_id in set(string_items(current.get("contradicts")))
+        or old_id in set(string_items(current.get("deprecates")))
+        or old.get("superseded_by") == current_id
+        or old.get("deprecated_by") == current_id
+        or current_id in set(string_items(old.get("contradicted_by")))
+    )
+
+
+def should_queue_memory_review_candidate(reason: str, detail: dict) -> bool:
+    if reason == "ambiguous_scope_narrowing_requires_review":
+        try:
+            overlap_ratio = float(detail.get("overlap_ratio") or 0.0)
+        except (TypeError, ValueError):
+            return False
+        return overlap_ratio >= MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO
+    return True
+
+
+def is_same_scope_low_risk_review_candidate(candidate: dict, nodes_by_id: dict[str, dict]) -> bool:
+    if candidate.get("reason") != "low_confidence_semantic_overlap_requires_review":
+        return False
+    current = nodes_by_id.get(str(candidate.get("current_memory_id") or ""))
+    old = nodes_by_id.get(str(candidate.get("older_memory_id") or ""))
+    if current is None or old is None:
+        return False
+    current_layer = str(current.get("layer") or "")
+    old_layer = str(old.get("layer") or "")
+    current_scope = str(current.get("scope") or "")
+    old_scope = str(old.get("scope") or "")
+    return bool(current_layer and current_scope and current_layer == old_layer and current_scope == old_scope)
+
+
+def compress_low_risk_review_candidates(candidates: list[dict], nodes_by_id: dict[str, dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    passthrough: list[dict] = []
+    for candidate in candidates:
+        if not is_same_scope_low_risk_review_candidate(candidate, nodes_by_id):
+            passthrough.append(candidate)
+            continue
+        key = (
+            str(candidate.get("current_memory_id") or ""),
+            str(candidate.get("reason") or ""),
+        )
+        grouped.setdefault(key, []).append(candidate)
+
+    compressed: list[dict] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            compressed.extend(group)
+            continue
+        ordered = sorted(
+            group,
+            key=lambda item: (
+                str(item.get("older_memory_id") or ""),
+                str(item.get("current_memory_id") or ""),
+            ),
+        )
+        representative = dict(ordered[0])
+        older_ids = [
+            older_id
+            for candidate in ordered
+            if isinstance((older_id := candidate.get("older_memory_id")), str) and older_id
+        ]
+        representative["candidate_type"] = "compressed_low_risk_semantic_lifecycle"
+        representative["compressed_candidate_count"] = len(ordered)
+        representative["compressed_older_memory_ids"] = older_ids
+        representative["compression_reason"] = "same_scope_low_confidence_semantic_overlap"
+        representative["overlap_token_count"] = max(int(item.get("overlap_token_count") or 0) for item in ordered)
+        representative["overlap_ratio"] = round(max(float(item.get("overlap_ratio") or 0.0) for item in ordered), 6)
+        compressed.append(representative)
+    return [*passthrough, *compressed]
+
+
+def build_memory_review_candidates(nodes: list[dict]) -> list[dict]:
+    candidates: list[dict] = []
+    automatic_nodes = [node for node in nodes if node.get("source") == "automatic"]
+    nodes_by_id = {
+        memory_id: node
+        for node in automatic_nodes
+        if (memory_id := safe_node_memory_id(node))
+    }
+    seen: set[tuple[str, str, str]] = set()
+    for current in sorted(automatic_nodes, key=node_last_seen_key):
+        current_id = safe_node_memory_id(current)
+        if not current_id:
+            continue
+        for old in automatic_nodes:
+            old_id = safe_node_memory_id(old)
+            if not old_id or current is old:
+                continue
+            if node_last_seen_key(current) <= node_last_seen_key(old):
+                continue
+            if has_lifecycle_link(current, old):
+                continue
+            detail = semantic_relation_detail(str(current.get("text", "")), str(old.get("text", "")))
+            reason = str(detail.get("review_reason") or "")
+            if not reason or not should_queue_memory_review_candidate(reason, detail):
+                continue
+            key = (current_id, old_id, reason)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                {
+                    "candidate_type": "ambiguous_semantic_lifecycle",
+                    "current_memory_id": current_id,
+                    "older_memory_id": old_id,
+                    "reason": reason,
+                    "recommended_action": "manual_review",
+                    "current_last_seen": str(current.get("last_seen") or ""),
+                    "older_last_seen": str(old.get("last_seen") or ""),
+                    "overlap_token_count": int(detail.get("overlap_token_count") or 0),
+                    "overlap_ratio": round(float(detail.get("overlap_ratio") or 0.0), 6),
+                }
+            )
+    candidates = compress_low_risk_review_candidates(candidates, nodes_by_id)
+    return sorted(
+        candidates,
+        key=lambda item: (
+            str(item.get("current_memory_id", "")),
+            str(item.get("older_memory_id", "")),
+            str(item.get("reason", "")),
+        ),
+    )
+
+
+def build_memory_consolidation_traces(nodes: list[dict], review_candidates: list[dict]) -> list[dict]:
+    traces: list[dict] = []
+    for node in nodes:
+        memory_id = safe_node_memory_id(node)
+        if not memory_id:
+            continue
+        support_count = node.get("support_count")
+        if isinstance(support_count, int) and support_count > 1:
+            traces.append(
+                {
+                    "decision": "merge",
+                    "reason": "same_consolidation_key_support_merge",
+                    "memory_id": memory_id,
+                    "support_count": support_count,
+                }
+            )
+        for target_id in sorted(string_items(node.get("supersedes"))):
+            traces.append(
+                {
+                    "decision": "supersede",
+                    "reason": "confirmed_supersession_link",
+                    "current_memory_id": memory_id,
+                    "target_memory_id": target_id,
+                }
+            )
+        for target_id in sorted(string_items(node.get("contradicts"))):
+            traces.append(
+                {
+                    "decision": "contradict",
+                    "reason": "confirmed_contradiction_link",
+                    "current_memory_id": memory_id,
+                    "target_memory_id": target_id,
+                }
+            )
+        for target_id in sorted(string_items(node.get("deprecates"))):
+            traces.append(
+                {
+                    "decision": "deprecate",
+                    "reason": "confirmed_deprecation_link",
+                    "current_memory_id": memory_id,
+                    "target_memory_id": target_id,
+                }
+            )
+    for candidate in review_candidates:
+        trace = {
+            "decision": "skip",
+            "reason": candidate.get("reason", ""),
+            "current_memory_id": candidate.get("current_memory_id", ""),
+            "target_memory_id": candidate.get("older_memory_id", ""),
+            "review_candidate": True,
+        }
+        for key in ("compressed_candidate_count", "compressed_older_memory_ids", "compression_reason"):
+            if key in candidate:
+                trace[key] = candidate[key]
+        traces.append(trace)
+    return sorted(
+        traces,
+        key=lambda item: (
+            str(item.get("decision", "")),
+            str(item.get("memory_id", "")),
+            str(item.get("current_memory_id", "")),
+            str(item.get("target_memory_id", "")),
+            str(item.get("reason", "")),
+        ),
+    )
+
+
+def write_jsonl_index(memory_repo: Path, path: Path, rows: list[dict], label: str) -> None:
+    lines = [json.dumps(row, sort_keys=True) for row in rows]
+    write_safe_archive_text(memory_repo, path, "\n".join(lines) + ("\n" if lines else ""), label)
+
+
 def rebuild_indexes(memory_repo: Path) -> None:
     index_dir = memory_repo / "index"
+    if not is_safe_repo_path(memory_repo, index_dir):
+        raise SystemExit(f"Refusing to write unsafe archive index path: {safe_diagnostic_path(index_dir)}")
     index_dir.mkdir(parents=True, exist_ok=True)
     rows = collect_meta(memory_repo)
+    repair_legacy_source_map_paths(memory_repo, rows)
+    induction_review_decisions = load_induction_review_decisions(memory_repo)
+    memory_nodes, induction_review_candidates, induction_review_decision_results = build_memory_nodes_and_induction_review_candidates(
+        rows,
+        memory_repo,
+        induction_review_decisions,
+    )
+    review_decisions = load_memory_review_decisions(memory_repo)
+    initial_review_candidates = build_memory_review_candidates(memory_nodes)
+    review_decision_results = apply_memory_review_decisions(
+        memory_nodes,
+        initial_review_candidates,
+        review_decisions,
+    )
+    memory_nodes = write_memory_nodes(memory_repo, memory_nodes)
+    review_candidates = build_memory_review_candidates(memory_nodes)
+    review_candidates = filter_reviewed_memory_candidates(review_candidates, review_decision_results)
+    consolidation_traces = build_memory_consolidation_traces(memory_nodes, review_candidates)
 
     sessions_lines: list[str] = []
     project_latest: dict[str, dict] = {}
+    scope_latest: dict[str, dict] = {}
+    source_partition_latest: dict[tuple[str, str], dict] = {}
     for row in rows:
+        archive_scope = archive_scope_for_row(row)
+        source_partition = source_partition_for_row(row)
         session_row = {
             "date": str(row.get("source_updated_at", ""))[:10],
             "session_id": row.get("session_id", ""),
             "source_agent": row.get("source_agent", ""),
             "project": row.get("project", ""),
             "project_path": row.get("project_path", ""),
+            "archive_scope": archive_scope,
+            "source_partition": source_partition,
             "title": index_title_from_meta(row),
             "source_record": row.get("source_record", ""),
             "user_intent": row.get("user_intent", ""),
@@ -1963,6 +3734,7 @@ def rebuild_indexes(memory_repo: Path) -> None:
             "reusable_facts": row.get("reusable_facts", []),
             "summary_path": row.get("summary_path", ""),
             "evidence_path": row.get("evidence_path", ""),
+            "source_map_path": row.get("source_map_path", ""),
             "source_updated_at": row.get("source_updated_at", ""),
             "archive_status": row.get("archive_status", ""),
             "unresolved_count": len(row.get("unresolved_tasks", [])) if isinstance(row.get("unresolved_tasks"), list) else 0,
@@ -1977,11 +3749,49 @@ def rebuild_indexes(memory_repo: Path) -> None:
                 "latest_source_updated_at": row.get("source_updated_at", ""),
                 "latest_summary_path": row.get("summary_path", ""),
             }
+        partition_key = (archive_scope, source_partition)
+        if archive_scope and source_partition and partition_key not in source_partition_latest:
+            source_partition_latest[partition_key] = {
+                "archive_scope": archive_scope,
+                "source_partition": source_partition,
+                "project": row.get("project", ""),
+                "project_path": row.get("project_path", ""),
+                "latest_source_updated_at": row.get("source_updated_at", ""),
+                "latest_summary_path": row.get("summary_path", ""),
+            }
+        if archive_scope and archive_scope not in scope_latest:
+            scope_latest[archive_scope] = {
+                "archive_scope": archive_scope,
+                "project": row.get("project", ""),
+                "project_path": row.get("project_path", ""),
+                "latest_source_updated_at": row.get("source_updated_at", ""),
+                "latest_summary_path": row.get("summary_path", ""),
+            }
 
-    (index_dir / "sessions.jsonl").write_text("\n".join(sessions_lines) + ("\n" if sessions_lines else ""), encoding="utf-8")
-    (index_dir / "projects.jsonl").write_text(
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "sessions.jsonl",
+        "\n".join(sessions_lines) + ("\n" if sessions_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "projects.jsonl",
         "\n".join(json.dumps(row, sort_keys=True) for row in project_latest.values()) + ("\n" if project_latest else ""),
-        encoding="utf-8",
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "scopes.jsonl",
+        "\n".join(json.dumps(row, sort_keys=True) for row in scope_latest.values()) + ("\n" if scope_latest else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "source_partitions.jsonl",
+        "\n".join(json.dumps(row, sort_keys=True) for row in source_partition_latest.values())
+        + ("\n" if source_partition_latest else ""),
+        "index file",
     )
     decision_lines: list[str] = []
     unresolved_lines: list[str] = []
@@ -2013,10 +3823,57 @@ def rebuild_indexes(memory_repo: Path) -> None:
             if is_noisy_text(tag):
                 continue
             tag_lines.append(json.dumps({**common, "tag": tag}, sort_keys=True))
-    (index_dir / "decisions.jsonl").write_text("\n".join(decision_lines) + ("\n" if decision_lines else ""), encoding="utf-8")
-    (index_dir / "unresolved.jsonl").write_text("\n".join(unresolved_lines) + ("\n" if unresolved_lines else ""), encoding="utf-8")
-    (index_dir / "files.jsonl").write_text("\n".join(file_lines) + ("\n" if file_lines else ""), encoding="utf-8")
-    (index_dir / "tags.jsonl").write_text("\n".join(tag_lines) + ("\n" if tag_lines else ""), encoding="utf-8")
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "decisions.jsonl",
+        "\n".join(decision_lines) + ("\n" if decision_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "unresolved.jsonl",
+        "\n".join(unresolved_lines) + ("\n" if unresolved_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "files.jsonl",
+        "\n".join(file_lines) + ("\n" if file_lines else ""),
+        "index file",
+    )
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "tags.jsonl",
+        "\n".join(tag_lines) + ("\n" if tag_lines else ""),
+        "index file",
+    )
+    memory_lines = [json.dumps(node, sort_keys=True) for node in memory_nodes]
+    write_safe_archive_text(
+        memory_repo,
+        index_dir / "memories.jsonl",
+        "\n".join(memory_lines) + ("\n" if memory_lines else ""),
+        "index file",
+    )
+    write_jsonl_index(memory_repo, index_dir / "memory_review_candidates.jsonl", review_candidates, "memory review index")
+    write_jsonl_index(
+        memory_repo,
+        index_dir / "induction_review_candidates.jsonl",
+        induction_review_candidates,
+        "induction review index",
+    )
+    write_jsonl_index(
+        memory_repo,
+        index_dir / "induction_review_decision_results.jsonl",
+        induction_review_decision_results,
+        "induction review decision index",
+    )
+    write_jsonl_index(
+        memory_repo,
+        index_dir / "memory_review_decision_results.jsonl",
+        review_decision_results,
+        "memory review decision index",
+    )
+    write_jsonl_index(memory_repo, index_dir / "memory_consolidation_trace.jsonl", consolidation_traces, "memory trace index")
 
     recent = rows[:10]
     index_md = "# Agent Memory Index\n\n## How To Search\n\n```bash\npython tools/search_memory.py \"<query>\"\n```\n\n## Recent Sessions\n\n"
@@ -2039,7 +3896,12 @@ def rebuild_indexes(memory_repo: Path) -> None:
             index_md += f"- {decision.get('project', '')}: {decision.get('decision', '')}\n"
     else:
         index_md += "No decisions indexed yet.\n"
-    (memory_repo / "INDEX.md").write_text(index_md, encoding="utf-8")
+    index_overview_path = memory_repo / "INDEX.md"
+    if not is_safe_repo_path(memory_repo, index_overview_path):
+        raise SystemExit(
+            f"Refusing to write unsafe archive index overview path: {safe_diagnostic_path(index_overview_path)}"
+        )
+    index_overview_path.write_text(index_md, encoding="utf-8")
     render_daily_summaries(memory_repo, rows)
 
 
@@ -2049,8 +3911,10 @@ def render_daily_summaries(memory_repo: Path, rows: list[dict]) -> None:
         day = str(row.get("source_updated_at", ""))[:10]
         if day:
             grouped.setdefault(day, []).append(row)
-    expected_paths = {memory_repo / "daily" / day[:4] / f"{day}.md" for day in grouped}
     daily_root = memory_repo / "daily"
+    if not is_safe_repo_path(memory_repo, daily_root):
+        raise SystemExit(f"Refusing to write unsafe archive daily path: {safe_diagnostic_path(daily_root)}")
+    expected_paths = {memory_repo / "daily" / day[:4] / f"{day}.md" for day in grouped}
     if daily_root.exists():
         for path in sorted(daily_root.glob("**/*.md")):
             if path not in expected_paths:
@@ -2086,14 +3950,22 @@ def render_daily_summaries(memory_repo: Path, rows: list[dict]) -> None:
             daily_md += "".join(f"- {task}\n" for task in unresolved)
         else:
             daily_md += "No unresolved tasks indexed for this day.\n"
-        (daily_dir / f"{day}.md").write_text(daily_md, encoding="utf-8")
+        write_safe_archive_text(memory_repo, daily_dir / f"{day}.md", daily_md, "daily file")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--memory-repo", help="Path to the private memory repository")
     parser.add_argument("--source-dir", required=True, help="Directory containing source records to scan")
-    parser.add_argument("--project-path", default=os.getcwd(), help="Project path used as the high-water-mark key")
+    parser.add_argument("--project-path", default=os.getcwd(), help="Project path used for source-record filtering and legacy scope defaults")
+    parser.add_argument(
+        "--archive-scope",
+        help="Optional stable archive memory-domain key; defaults to the resolved project path for compatibility",
+    )
+    parser.add_argument(
+        "--source-partition",
+        help="Optional stable source high-water partition key; defaults to the resolved project path for compatibility",
+    )
     parser.add_argument("--project", help="Human-readable project name")
     parser.add_argument("--source-agent", default="agent", help="Source agent/runtime label")
     parser.add_argument("--pattern", action="append", help="Glob pattern to scan; may be repeated")
@@ -2110,6 +3982,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Only archive source records that explicitly identify the current project path",
     )
+    parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
+    parser.add_argument(
+        "--explicit-layer",
+        choices=("global", "domain", "project"),
+        default="global",
+        help="Layer for --explicit-memory",
+    )
+    parser.add_argument("--explicit-scope", default="global", help="Scope for --explicit-memory")
+    parser.add_argument("--explicit-summary-path", help="Archive-relative summary path supporting --explicit-memory")
+    parser.add_argument(
+        "--explicit-evidence-ref",
+        action="append",
+        default=[],
+        help="Archive evidence ref PATH#QUOTE_ID for --explicit-memory",
+    )
+    parser.add_argument(
+        "--explicit-raw-ref",
+        action="append",
+        default=[],
+        help="Optional raw/source ref PATH#ANCHOR for --explicit-memory",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show records that would be archived")
     return parser.parse_args(argv)
 
@@ -2119,15 +4012,63 @@ def main(argv: list[str] | None = None) -> int:
     memory_repo = resolve_memory_repo(args.memory_repo)
     source_dir = Path(args.source_dir).expanduser().resolve()
     project_path = Path(args.project_path).expanduser().resolve()
+    archive_scope = normalize_archive_scope(args.archive_scope, project_path)
+    source_partition = normalize_source_partition(args.source_partition, project_path)
     project_name = args.project or project_name_from_path(project_path)
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
 
     if not source_dir.exists() or not source_dir.is_dir():
-        raise SystemExit(f"source directory not found: {source_dir}")
+        raise SystemExit(f"source directory not found: {safe_diagnostic_path(source_dir)}")
     if source_dir == project_path:
         print("warning: source-dir equals project-path; ensure this directory contains session records, not general source files", file=sys.stderr)
 
-    latest, archived_hashes, archived_source_hashes = archived_project_state(memory_repo, project_path)
+    if args.explicit_memory:
+        if not args.explicit_summary_path:
+            raise SystemExit("--explicit-summary-path is required with --explicit-memory")
+        if not args.explicit_evidence_ref:
+            raise SystemExit("--explicit-evidence-ref is required with --explicit-memory")
+        summary_path = args.explicit_summary_path.strip()
+        if not existing_archive_ref(memory_repo, summary_path):
+            raise SystemExit("--explicit-summary-path must point to an existing archive file")
+        evidence_refs = []
+        for value in args.explicit_evidence_ref:
+            path, quote_id = parse_archive_ref(value, "--explicit-evidence-ref")
+            evidence_path = archive_ref_path(memory_repo, path)
+            if evidence_path is None or not evidence_quote_id_exists(evidence_path, quote_id):
+                raise SystemExit("--explicit-evidence-ref must point to an existing evidence quote")
+            evidence_refs.append({"path": path, "quote_id": quote_id})
+        raw_refs = []
+        for value in args.explicit_raw_ref:
+            path, anchor = parse_archive_ref(value, "--explicit-raw-ref")
+            ref = {"path": path, "anchor": anchor}
+            if not is_safe_direct_raw_ref(ref):
+                raise SystemExit("--explicit-raw-ref is unsafe")
+            raw_refs.append(ref)
+        now = isoformat(datetime.now(UTC))
+        direct_nodes = [
+            direct_explicit_memory_node(
+                text,
+                args.explicit_layer,
+                args.explicit_scope,
+                summary_path,
+                evidence_refs,
+                raw_refs,
+                now,
+            )
+            for text in args.explicit_memory
+        ]
+        existing_rows = collect_meta(memory_repo)
+        generated_nodes = build_memory_nodes(existing_rows)
+        write_memory_nodes(memory_repo, [*generated_nodes, *direct_nodes])
+        rebuild_indexes(memory_repo)
+        return 0
+
+    latest, archived_hashes, archived_source_hashes = archived_project_state(
+        memory_repo,
+        project_path,
+        archive_scope,
+        source_partition,
+    )
     records = discover_records(
         source_dir,
         patterns,
@@ -2140,14 +4081,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_records >= 0:
         records = records[: args.max_records]
 
-    print(f"Memory repo: {memory_repo}")
-    print(f"Project path: {project_path}")
-    print(f"Source dir: {source_dir}")
+    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
+    print(f"Project path: {safe_diagnostic_path(project_path)}")
+    if args.archive_scope is not None:
+        print("Archive scope: configured")
+    if args.source_partition is not None:
+        print("Source partition: configured")
+    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
     print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
     print(f"Records selected: {len(records)}")
 
     for record in records:
-        print(f"- {isoformat(record.updated_at)} {record.path}")
+        print(f"- {isoformat(record.updated_at)} {safe_diagnostic_path(record.path)}")
 
     if args.dry_run:
         return 0
@@ -2161,7 +4106,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
         for record, counts in sensitive_records:
             labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
-            print(f"- {record.path}: {labels}", file=sys.stderr)
+            print(f"- {safe_diagnostic_path(record.path)}: {labels}", file=sys.stderr)
         print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
         return 2
 
@@ -2169,10 +4114,18 @@ def main(argv: list[str] | None = None) -> int:
     skipped_records = 0
     for record in records:
         if args.rewrite_existing or str(record.path.resolve()) in archived_source_hashes:
-            removed_entries += remove_existing_entries_for_source(memory_repo, project_path, record.path)
+            removed_entries += remove_existing_entries_for_source(
+                memory_repo,
+                project_path,
+                record.path,
+                archive_scope,
+                source_partition,
+            )
         written = write_record(
             memory_repo=memory_repo,
             project_path=project_path,
+            archive_scope=archive_scope,
+            source_partition=source_partition,
             project_name=project_name,
             source_agent=args.source_agent,
             record=record,

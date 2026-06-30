@@ -1,0 +1,12 @@
+{
+  "archive_scope_assignment_rate": 1.0,
+  "case_pass_rate": 1.0,
+  "metadata_free_source_record_rate": 1.0,
+  "project_registry_independence_rate": 1.0,
+  "source_partition_assignment_rate": 1.0,
+  "source_stream_evidence_reachability_rate": 1.0,
+  "source_stream_memory_recall_at_5": 1.0,
+  "source_stream_session_drilldown_rate": 1.0,
+  "source_stream_source_policy_pass_rate": 1.0,
+  "source_stream_update_rate": 1.0
+}

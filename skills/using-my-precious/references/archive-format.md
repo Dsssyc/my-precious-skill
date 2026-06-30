@@ -11,8 +11,15 @@ agent-memory/
   INDEX.md
   config/
     projects.jsonl
+  memories/
+    global.jsonl
+    domains.jsonl
+    projects.jsonl
+    explicit.jsonl
   index/
+    memories.jsonl
     sessions.jsonl
+    source_partitions.jsonl
     decisions.jsonl
     unresolved.jsonl
     projects.jsonl
@@ -35,14 +42,28 @@ agent-memory/
 ```
 
 `config/projects.jsonl` is runtime configuration for broad scheduled updates.
-It is distinct from generated read indexes under `index/`.
+It is distinct from generated read indexes under `index/`. Rows may include
+`archive_scope` for the memory domain and `source_partition` for the
+high-water/source-hash freshness stream; both default to the resolved project
+path for compatibility.
+
+`memories/*.jsonl` contains generated or explicit layered memory nodes.
+`index/memories.jsonl` is the combined read index searched before session-level
+indexes when it exists.
 
 ## Stable Fields
 
 `index/sessions.jsonl` should contain one JSON object per session:
 
 ```json
-{"date":"2026-05-14","session_id":"...","source_agent":"agent","project":"...","title":"...","tags":["..."],"summary_path":"sessions/.../summary.md","evidence_path":"sessions/.../evidence.md","unresolved_count":0}
+{"date":"2026-05-14","session_id":"...","source_agent":"agent","project":"...","project_path":"...","archive_scope":"domain:...","source_partition":"source:...","title":"...","tags":["..."],"summary_path":"sessions/.../summary.md","evidence_path":"sessions/.../evidence.md","unresolved_count":0}
+```
+
+`index/source_partitions.jsonl` should contain one generated row per archive
+scope plus source partition:
+
+```json
+{"archive_scope":"domain:...","source_partition":"source:...","project":"...","project_path":"...","latest_source_updated_at":"2026-05-14T12:00:00Z","latest_summary_path":"sessions/.../summary.md"}
 ```
 
 `index/decisions.jsonl` should contain one JSON object per decision:
@@ -56,6 +77,100 @@ It is distinct from generated read indexes under `index/`.
 ```json
 {"date":"2026-05-14","source_agent":"agent","project":"...","task":"...","priority":"medium","summary_path":"sessions/.../summary.md"}
 ```
+
+## Memory Nodes
+
+Memory nodes are higher-level recall targets induced from session summaries or
+created from explicit memory requests. They make global, domain, and project
+memories searchable before drilling into event-level session evidence.
+
+Layer files:
+
+- `memories/global.jsonl`: cross-project memory nodes.
+- `memories/domains.jsonl`: topic or domain memory nodes.
+- `memories/projects.jsonl`: project-scoped memory nodes.
+- `memories/explicit.jsonl`: memory nodes created from explicit user requests.
+- `index/memories.jsonl`: combined search index for all memory nodes.
+
+Each memory node should contain:
+
+- `memory_id`: stable unique identifier for the memory node.
+- `layer`: `global`, `domain`, or `project`.
+- `scope`: scope label, such as a project path, repository, domain, or `global`.
+- `topic`: short searchable topic.
+- `text`: the durable memory statement to recall.
+- `rationale`: why the memory should persist.
+- `source`: `automatic` for induced nodes or `explicit` for requested memory.
+- `confidence`: `low`, `medium`, or `high`.
+- `persistence`: `normal` or `sticky`.
+- `support_count`: number of supporting sessions or evidence items.
+- `first_seen`: first known observation timestamp or date.
+- `last_seen`: latest known observation timestamp or date.
+- `derived_from`: non-empty archive-relative summary/evidence-support paths or
+  existing memory IDs used to derive the node. Memory ID references describe
+  high-level memory-to-memory induction chains; they must point to another
+  existing memory node and must not self-reference. Read-path tooling may
+  resolve active memory-id references with a bounded graph walk, but memory IDs
+  are metadata edges, not drilldown file paths.
+- `evidence_refs`: non-empty supporting evidence references, usually objects
+  with `path` and `quote_id`. High-level memory nodes must be evidence-bound;
+  nodes with only `derived_from` paths or memory IDs and no evidence reference
+  are invalid.
+- `raw_refs`: protected source anchors, usually objects with `path` and
+  `anchor`.
+- `supersedes`: older memory IDs this node replaces.
+- `superseded_by`: newer memory ID that replaces this node, or `null`.
+- `contradicts`: older memory IDs this node contradicts.
+- `contradicted_by`: newer memory IDs that contradict this node.
+- `deprecates`: older memory IDs this node retires without replacement.
+- `deprecated_by`: newer deprecation marker memory ID that retires this node.
+- `tags`: search and filtering tags.
+
+Updater diagnostics may also write internal index sidecars:
+
+- `index/memory_review_candidates.jsonl`: ambiguous semantic lifecycle pairs
+  that require manual review before one memory retires another.
+- `index/induction_review_candidates.jsonl`: natural induction candidates that
+  require manual review before promotion; rows keep aggregate metadata,
+  derived-session/evidence/source references, and candidate text hashes rather
+  than candidate text.
+- `reviews/induction_review_decisions.jsonl`: private reviewer decisions for
+  natural induction candidates, using candidate IDs, candidate text hashes, and
+  candidate fingerprints. The apply path rejects duplicate decision IDs,
+  repeated exact rows, and conflicting actions for the same candidate or
+  candidate fingerprint. The aggregate-safe authoring flow is to generate
+  pending skeletons with `tools/author_induction_review_decisions.py --dry-run`,
+  append missing skeletons with `--write`, fill reviewer `action` values in this
+  private file, then run `tools/apply_memory_review_decisions.py --dry-run` and
+  `--write`.
+- `index/induction_review_decision_results.jsonl`: aggregate applied/ignored
+  result rows for induction review decisions.
+- `index/memory_consolidation_trace.jsonl`: aggregate decision traces for
+  merge, supersede, contradict, deprecate, and skip decisions.
+
+These sidecars should reference memory IDs and decision metadata rather than
+raw source content or private natural-language candidate text.
+
+Sessions remain event-level evidence. A memory node should point to session
+summaries or evidence snippets for support instead of duplicating the full
+event narrative. When a lifecycle or consolidation step derives one high-level
+memory from another, `derived_from` may include the source memory ID as a
+memory-to-memory provenance link, but the node should still retain concrete
+`evidence_refs` and any available summary/evidence-support paths.
+Search should only render concrete summary/evidence paths and source-ref status
+metadata in drilldown output. Missing memory IDs, self-cycles, cyclic chains,
+over-depth chains, superseded nodes, deprecated nodes, and deprecation marker
+nodes should not contribute support paths through memory-id graph resolution.
+
+`raw_refs` may point to protected source anchors or source-map entries rather
+than committed raw files. Compatible archives should not commit raw transcripts
+by default. When a `raw_refs` path points at an archive-local `source-map.json`,
+the `anchor` must name a key present in that source map. The legacy
+`explicit_memory` source-map anchor is treated as a controlled alias for
+`source_record`. Search source depth renders stable `source_ref_id`, `status`,
+and `reason` fields by default; it does not print raw source content unless an
+agent explicitly requests a short redacted preview with
+`--raw-source-preview <source_ref_id|all>`.
 
 ## Summary Requirements
 

@@ -125,7 +125,9 @@ Ask only what is needed, one step at a time:
 - Ask for the scheduler backend: local timer system, cron-like scheduler, or a compatible agent-native recurring task when the runtime supports one.
 - Prefer global scheduling through `tools/run_memory_updates.py`; it can
   bootstrap an empty `config/projects.jsonl` by scanning source records for
-  project metadata.
+  project metadata, and it can run explicit non-project streams from
+  `config/source_streams.jsonl` when a deployment should schedule a stable
+  domain/global source stream.
 - Prefer generating a reviewable scheduler file or command before loading/enabling it.
 - Use `tools/render_scheduler.py` when the deployment repository includes it.
 - Use `tools/sync_memory_archive.py --push` for requested automatic Git upload
@@ -149,7 +151,7 @@ Ask only what is needed, one step at a time:
 A successful setup leaves the user with:
 
 - a local archive directory
-- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, and `tools/sync_memory_archive.py`
+- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/induction_consolidation_audit.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, and `tools/sync_memory_archive.py`
 - a Git repository when requested
 - an optional private remote when requested and supported
 - a local archive-location config at `~/.config/my-precious/config.json` unless skipped

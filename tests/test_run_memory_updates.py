@@ -7,6 +7,88 @@ from pathlib import Path
 
 
 class RunMemoryUpdatesTests(unittest.TestCase):
+    def test_run_memory_updates_runs_registered_source_stream_without_project_registry(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "agent-source-stream"
+            runner_source_dir = root / "empty-project-discovery"
+            source_dir.mkdir(parents=True)
+            runner_source_dir.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (memory_repo / "config/projects.jsonl").write_text("", encoding="utf-8")
+            (memory_repo / "config/source_streams.jsonl").write_text(
+                json.dumps(
+                    {
+                        "stream_id": "domain-agent-memory",
+                        "source_dir": str(source_dir.resolve()),
+                        "archive_scope": "domain:agent-memory",
+                        "source_partition": "source:agent-memory",
+                        "project": "agent-memory-domain",
+                        "enabled": True,
+                        "source": "manual",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "domain.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "role": "user",
+                        "content": "Decision: domain source streams should update without project metadata.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(runner_source_dir),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Enabled source streams: 1", result.stdout)
+            self.assertIn("Source streams updated: 1", result.stdout)
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 1)
+            self.assertEqual(session_rows[0]["archive_scope"], "domain:agent-memory")
+            self.assertEqual(session_rows[0]["source_partition"], "source:agent-memory")
+            self.assertEqual(session_rows[0]["project"], "agent-memory-domain")
+            self.assertEqual(session_rows[0]["project_path"], str(source_dir.resolve()))
+            scope_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/scopes.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(scope_rows[0]["archive_scope"], "domain:agent-memory")
+
     def test_run_memory_updates_bootstraps_empty_project_registry(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -170,6 +252,114 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             sessions_index = memory_repo / "index/sessions.jsonl"
             self.assertFalse(sessions_index.exists() and sessions_index.read_text(encoding="utf-8").strip())
 
+    def test_run_memory_updates_sanitizes_slugged_paths_in_status_output(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory-cookie_should_not_render"
+            source_dir = root / ".codex" / "sessions-cookie_should_not_render"
+            project_path = root / "project-cookie_should_not_render"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (source_dir / "sensitive-path.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Runner status output should not expose slugged sensitive path tokens.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--dry-run",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertIn("[unsafe-path]", combined)
+            self.assertNotIn("cookie_should_not_render", combined)
+            self.assertNotIn("cookie", combined.lower())
+
+    def test_run_memory_updates_refuses_symlinked_project_registry_outside_archive(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_path = root / "project-registry"
+            outside_registry = root / "outside-projects.jsonl"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+            outside_registry.write_text("unchanged\n", encoding="utf-8")
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            (memory_repo / "config/projects.jsonl").unlink()
+            (memory_repo / "config/projects.jsonl").symlink_to(outside_registry)
+
+            (source_dir / "registry.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Project registry writes must stay inside the archive.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to access unsafe project registry path:", output)
+            self.assertEqual(outside_registry.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_run_memory_updates_uses_custom_patterns_for_discovery_and_update(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -226,6 +416,178 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             ]
             self.assertEqual(len(session_rows), 1)
             self.assertEqual(session_rows[0]["project_path"], str(project_path.resolve()))
+
+    def test_run_memory_updates_passes_registered_archive_scope_to_updater(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_path = root / "project-scoped"
+            source_dir.mkdir(parents=True)
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (memory_repo / "config/projects.jsonl").write_text(
+                json.dumps(
+                    {
+                        "project_path": str(project_path.resolve()),
+                        "archive_scope": "domain:runner-scope",
+                        "source_partition": "source:runner-scope",
+                        "source_dir": str(source_dir.resolve()),
+                        "enabled": True,
+                        "source": "manual",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "runner-scope.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: registered archive scope should pass through the runner.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Projects updated: 1", result.stdout)
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 1)
+            self.assertEqual(session_rows[0]["archive_scope"], "domain:runner-scope")
+            self.assertEqual(session_rows[0]["source_partition"], "source:runner-scope")
+            scope_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/scopes.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(scope_rows[0]["archive_scope"], "domain:runner-scope")
+
+    def test_run_memory_updates_keeps_shared_archive_scope_project_partitions_independent(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            project_a = root / "project-a"
+            project_b = root / "project-b"
+            source_dir.mkdir(parents=True)
+            project_a.mkdir()
+            project_b.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            (memory_repo / "config/projects.jsonl").write_text(
+                "\n".join(
+                    json.dumps(row, sort_keys=True)
+                    for row in (
+                        {
+                            "project_path": str(project_a.resolve()),
+                            "archive_scope": "domain:runner-shared",
+                            "source_dir": str(source_dir.resolve()),
+                            "enabled": True,
+                            "source": "manual",
+                        },
+                        {
+                            "project_path": str(project_b.resolve()),
+                            "archive_scope": "domain:runner-shared",
+                            "source_dir": str(source_dir.resolve()),
+                            "enabled": True,
+                            "source": "manual",
+                        },
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "a-newer.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T11:00:00Z",
+                        "cwd": str(project_a),
+                        "role": "user",
+                        "content": "Project alpha newer runner record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / "b-older.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-14T10:00:00Z",
+                        "cwd": str(project_b),
+                        "role": "user",
+                        "content": "Project beta older runner record must still be archived.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Projects updated: 2", result.stdout)
+            session_rows = [
+                json.loads(line)
+                for line in (memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(session_rows), 2)
+            self.assertEqual({row["project_path"] for row in session_rows}, {str(project_a.resolve()), str(project_b.resolve())})
+            self.assertEqual({row["archive_scope"] for row in session_rows}, {"domain:runner-shared"})
 
     def test_run_memory_updates_can_rewrite_existing_project_archives(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

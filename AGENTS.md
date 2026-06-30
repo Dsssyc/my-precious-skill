@@ -8,6 +8,7 @@ memory archives. It is not the private archive itself.
 Keep this repository limited to reusable building blocks:
 
 - `skills/`: installable skill folders.
+- `benchmarks/`: synthetic benchmark runners, cases, and aggregate quality gates.
 - `templates/agent-memory-repo/`: deployment repository template.
 - `tests/`: synthetic tests only.
 - `docs/`: design notes for the reusable implementation.
@@ -38,6 +39,8 @@ When changing shared tools:
 
 - Copy `templates/agent-memory-repo/tools/update_memory_archive.py` to
   `skills/update-my-precious/scripts/update_memory_archive.py`.
+- Copy `templates/agent-memory-repo/tools/memory_consolidation.py` to
+  `skills/update-my-precious/scripts/memory_consolidation.py`.
 - Copy `templates/agent-memory-repo/tools/search_memory.py` to
   `skills/using-my-precious/scripts/search_memory.py`.
 - Copy all template changes into
@@ -48,6 +51,7 @@ Verify sync with:
 ```bash
 diff -qr templates/agent-memory-repo skills/setup-my-precious/assets/agent-memory-repo
 cmp -s templates/agent-memory-repo/tools/update_memory_archive.py skills/update-my-precious/scripts/update_memory_archive.py
+cmp -s templates/agent-memory-repo/tools/memory_consolidation.py skills/update-my-precious/scripts/memory_consolidation.py
 cmp -s templates/agent-memory-repo/tools/search_memory.py skills/using-my-precious/scripts/search_memory.py
 ```
 
@@ -81,14 +85,30 @@ Compile bundled scripts when implementation code changes:
 
 ```bash
 python3 -m py_compile \
+  benchmarks/e2e_induction_recall_benchmark.py \
+  benchmarks/updater_induction_benchmark.py \
+  benchmarks/layered_recall_benchmark.py \
+  benchmarks/build_synthetic_recall_archive.py \
+  benchmarks/convert_public_memory_benchmark.py \
+  benchmarks/generated_answer_case_audit.py \
+  benchmarks/generated_answer_benchmark.py \
+  benchmarks/source_stream_registry_benchmark.py \
+  benchmarks/v1_readiness_gate.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
+  skills/update-my-precious/scripts/memory_consolidation.py \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
+  templates/agent-memory-repo/tools/apply_memory_review_decisions.py \
+  templates/agent-memory-repo/tools/author_generated_answer_cases.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
+  templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
+  templates/agent-memory-repo/tools/generate_answer_records.py \
+  templates/agent-memory-repo/tools/induction_consolidation_audit.py \
+  templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
   templates/agent-memory-repo/tools/render_scheduler.py \
   templates/agent-memory-repo/tools/sync_memory_archive.py
 ```
@@ -96,7 +116,8 @@ python3 -m py_compile \
 Remove generated caches before committing:
 
 ```bash
-rm -rf .uv-cache tests/__pycache__ templates/agent-memory-repo/tools/__pycache__ \
+rm -rf .uv-cache tests/__pycache__ benchmarks/__pycache__ \
+  templates/agent-memory-repo/tools/__pycache__ \
   skills/setup-my-precious/scripts/__pycache__ \
   skills/setup-my-precious/assets/agent-memory-repo/tools/__pycache__ \
   skills/update-my-precious/scripts/__pycache__ \

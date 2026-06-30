@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -17,6 +18,7 @@ ALLOWED_ROOTS = (
     "INDEX.md",
     "config/projects.jsonl",
     "index",
+    "memories",
     "daily",
     "sessions",
 )
@@ -236,6 +238,7 @@ REDACTION_CATEGORY_LABELS = {
     "openai_key",
     "aws_access_key",
 }
+UNSAFE_PATH = "[unsafe-path]"
 SECRET_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.IGNORECASE),
     "bearer_token": re.compile(r"Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
@@ -243,6 +246,9 @@ SECRET_PATTERNS = {
     "github_token": re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b"),
     "openai_key": re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     "aws_access_key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+}
+SOURCE_MAP_ANCHOR_ALIASES = {
+    "explicit_memory": "source_record",
 }
 LOW_SIGNAL_PATTERN = re.compile(
     r"(?:"
@@ -327,6 +333,106 @@ class Finding:
     category: str
 
 
+@dataclass(frozen=True)
+class MemoryNodeLocation:
+    signature: str
+    path: str
+    line_number: int
+
+
+MEMORY_NODE_REQUIRED_FIELDS = {
+    "memory_id",
+    "layer",
+    "scope",
+    "topic",
+    "text",
+    "rationale",
+    "source",
+    "confidence",
+    "persistence",
+    "support_count",
+    "first_seen",
+    "last_seen",
+    "derived_from",
+    "evidence_refs",
+    "raw_refs",
+    "supersedes",
+    "superseded_by",
+    "tags",
+}
+MEMORY_NODE_OPTIONAL_FIELDS = {
+    "contradicts",
+    "contradicted_by",
+    "deprecates",
+    "deprecated_by",
+}
+MEMORY_NODE_STRING_FIELDS = {
+    "memory_id",
+    "layer",
+    "scope",
+    "topic",
+    "text",
+    "rationale",
+    "source",
+    "confidence",
+    "persistence",
+    "first_seen",
+    "last_seen",
+}
+MEMORY_NODE_ENUM_FIELDS = {
+    "layer": {"project", "domain", "global"},
+    "source": {"automatic", "explicit"},
+    "confidence": {"low", "medium", "high"},
+    "persistence": {"normal", "sticky"},
+}
+MEMORY_NODE_STRING_LIST_FIELDS = {"derived_from", "supersedes", "tags"}
+MEMORY_NODE_OPTIONAL_STRING_FIELDS = {"deprecated_by"}
+MEMORY_NODE_OPTIONAL_STRING_LIST_FIELDS = {"contradicts", "contradicted_by", "deprecates"}
+MEMORY_LAYER_ROOT_FILES = {
+    "global": "memories/global.jsonl",
+    "domain": "memories/domains.jsonl",
+    "project": "memories/projects.jsonl",
+}
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
+
+
+def has_control_chars(text: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in text)
+
+
+def safe_diagnostic_path(path_text: str) -> str:
+    if has_control_chars(path_text) or has_sensitive_identifier_token(path_text):
+        return UNSAFE_PATH
+    return path_text
+
+
 def resolve_memory_repo(repo_arg: str | None) -> Path:
     candidates: list[str] = []
     if repo_arg:
@@ -370,7 +476,7 @@ def iter_archive_files(repo: Path) -> Iterable[Path]:
 
 
 def extract_quality_text(relative: str, line: str) -> str:
-    if not relative.startswith("index/") or not relative.endswith(".jsonl"):
+    if not (relative.startswith("index/") or relative.startswith("memories/")) or not relative.endswith(".jsonl"):
         return line
     try:
         value = json.loads(line)
@@ -392,8 +498,11 @@ def extract_quality_text(relative: str, line: str) -> str:
         "index/decisions.jsonl": ("decision",),
         "index/unresolved.jsonl": ("task",),
         "index/tags.jsonl": ("tag",),
+        "index/memories.jsonl": ("text", "rationale", "topic", "scope", "tags"),
     }
     keys = keys_by_file.get(relative)
+    if keys is None and relative.startswith("memories/") and relative.endswith(".jsonl"):
+        keys = ("text", "rationale", "topic", "scope", "tags")
     if not keys:
         return line
 
@@ -405,6 +514,13 @@ def extract_quality_text(relative: str, line: str) -> str:
         elif isinstance(item, list):
             parts.extend(str(child) for child in item if isinstance(child, (str, int, float)))
     return "\n".join(parts)
+
+
+def quality_text_segments(text: str) -> tuple[str, ...]:
+    segments = [text]
+    if "\n" in text:
+        segments.extend(line for line in text.splitlines() if line.strip())
+    return tuple(segments)
 
 
 def is_redaction_category_text(text: str) -> bool:
@@ -470,6 +586,7 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
     lines = text.splitlines()
     for line_number, line in enumerate(lines, start=1):
         quality_line = extract_quality_text(relative, line)
+        quality_segments = quality_text_segments(quality_line)
         for category, pattern in SECRET_PATTERNS.items():
             if pattern.search(line):
                 findings.append(Finding(relative, line_number, category))
@@ -480,7 +597,7 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
             findings.append(Finding(relative, line_number, "placeholder"))
         if RAW_TITLE_PATTERN.search(line):
             findings.append(Finding(relative, line_number, "raw_title"))
-        if LOW_SIGNAL_PATTERN.search(quality_line) or is_incomplete_memory_fragment(quality_line):
+        if any(LOW_SIGNAL_PATTERN.search(segment) or is_incomplete_memory_fragment(segment) for segment in quality_segments):
             findings.append(Finding(relative, line_number, "low_signal"))
         if not relative.endswith("/redactions.md") and is_redaction_category_text(quality_line):
             findings.append(Finding(relative, line_number, "redaction_category"))
@@ -504,8 +621,598 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
             tags = [tag.strip().lower() for tag in re.split(r"[, ]+", line) if tag.strip()]
             if any(tag in NOISY_TAGS or tag.endswith(".py") for tag in tags):
                 findings.append(Finding(relative, line_number, "noisy_tag"))
-        if check_process_updates and PROCESS_UPDATE_PATTERN.search(quality_line):
+        if check_process_updates and any(PROCESS_UPDATE_PATTERN.search(segment) for segment in quality_segments):
             findings.append(Finding(relative, line_number, "process_update"))
+    return findings
+
+
+def iter_memory_row_files(repo: Path) -> Iterable[tuple[str, Path]]:
+    index_path = repo / "index" / "memories.jsonl"
+    if index_path.is_file() and is_allowed_path(index_path, repo):
+        yield "index/memories.jsonl", index_path
+    memories_dir = repo / "memories"
+    if memories_dir.is_dir():
+        for path in sorted(item for item in memories_dir.glob("*.jsonl") if item.is_file()):
+            if is_allowed_path(path, repo):
+                yield path.relative_to(repo).as_posix(), path
+
+
+def iter_memory_node_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
+    for relative, path in iter_memory_row_files(repo):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                yield relative, line_number, {"__invalid_json__": True}
+                continue
+            if isinstance(value, dict):
+                yield relative, line_number, value
+            else:
+                yield relative, line_number, {"__invalid_json__": True}
+
+
+def iter_session_meta_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
+    sessions_dir = repo / "sessions"
+    if not sessions_dir.is_dir():
+        return
+    for path in sorted(sessions_dir.glob("**/meta.json")):
+        if not path.is_file() or not is_allowed_path(path, repo):
+            continue
+        relative = path.relative_to(repo).as_posix()
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            yield relative, 1, {"__invalid_json__": True}
+            continue
+        if isinstance(value, dict):
+            yield relative, 1, value
+        else:
+            yield relative, 1, {"__invalid_json__": True}
+
+
+def iter_session_source_map_rows(repo: Path) -> Iterable[tuple[str, int, dict]]:
+    sessions_dir = repo / "sessions"
+    if not sessions_dir.is_dir():
+        return
+    for path in sorted(sessions_dir.glob("**/source-map.json")):
+        if not path.is_file() or not is_allowed_path(path, repo):
+            continue
+        relative = path.relative_to(repo).as_posix()
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            yield relative, 1, {"__invalid_json__": True}
+            continue
+        if isinstance(value, dict):
+            yield relative, 1, value
+        else:
+            yield relative, 1, {"__invalid_json__": True}
+
+
+def safe_archive_ref_path(repo: Path, path_text: str) -> Path | None:
+    if not path_text:
+        return None
+    raw_relative = PurePosixPath(path_text)
+    if raw_relative.is_absolute() or ".." in raw_relative.parts:
+        return None
+    candidate = repo / path_text
+    try:
+        candidate.resolve(strict=False).relative_to(repo.resolve())
+    except (OSError, ValueError):
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
+
+
+def safe_existing_archive_ref(repo: Path, path_text: str) -> bool:
+    return safe_archive_ref_path(repo, path_text) is not None
+
+
+def evidence_quote_id_exists(path: Path, quote_id: str) -> bool:
+    if not quote_id.strip():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(re.search(rf"(?m)^\s*{re.escape(quote_id)}\s*:", text))
+
+
+def source_map_anchor_exists(path: Path, anchor: str) -> bool:
+    if not anchor.strip():
+        return False
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    anchor_key = SOURCE_MAP_ANCHOR_ALIASES.get(anchor, anchor)
+    return isinstance(value, dict) and anchor_key in value
+
+
+def is_positive_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def has_unsafe_identifier_path_reference(text: str) -> bool:
+    if text.startswith(("/", "~")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return True
+    return any(part == ".." for part in re.split(r"[\\/]+", text))
+
+
+def is_safe_memory_identifier(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    return not (
+        has_control_chars(value)
+        or has_sensitive_identifier_token(value)
+        or has_unsafe_identifier_path_reference(value)
+    )
+
+
+def is_valid_evidence_ref_shape(ref: object) -> bool:
+    return (
+        isinstance(ref, dict)
+        and set(ref) == {"path", "quote_id"}
+        and isinstance(ref.get("path"), str)
+        and bool(ref.get("path", "").strip())
+        and isinstance(ref.get("quote_id"), str)
+        and bool(ref.get("quote_id", "").strip())
+    )
+
+
+def parse_memory_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def has_valid_memory_lifecycle(row: dict) -> bool:
+    first_seen = parse_memory_timestamp(row.get("first_seen"))
+    last_seen = parse_memory_timestamp(row.get("last_seen"))
+    return first_seen is not None and last_seen is not None and first_seen <= last_seen
+
+
+def is_valid_memory_node_shape(row: dict) -> bool:
+    row_fields = set(row)
+    if not MEMORY_NODE_REQUIRED_FIELDS.issubset(row_fields):
+        return False
+    if not row_fields.issubset(MEMORY_NODE_REQUIRED_FIELDS | MEMORY_NODE_OPTIONAL_FIELDS):
+        return False
+    if not is_safe_memory_identifier(row.get("memory_id")):
+        return False
+    for field in MEMORY_NODE_STRING_FIELDS:
+        if not isinstance(row.get(field), str):
+            return False
+    for field, allowed_values in MEMORY_NODE_ENUM_FIELDS.items():
+        if row.get(field) not in allowed_values:
+            return False
+    if not has_valid_memory_lifecycle(row):
+        return False
+    if not is_positive_int(row.get("support_count")):
+        return False
+    derived_from = row.get("derived_from")
+    if not is_string_list(derived_from) or not derived_from:
+        return False
+    for field in MEMORY_NODE_STRING_LIST_FIELDS - {"derived_from"}:
+        if not is_string_list(row.get(field)):
+            return False
+    if not all(is_safe_memory_identifier(target) for target in row.get("supersedes", [])):
+        return False
+    for field in MEMORY_NODE_OPTIONAL_STRING_LIST_FIELDS:
+        if field in row:
+            if not is_string_list(row.get(field)):
+                return False
+            if not all(is_safe_memory_identifier(target) for target in row.get(field, [])):
+                return False
+    for field in MEMORY_NODE_OPTIONAL_STRING_FIELDS:
+        if field in row:
+            value = row.get(field)
+            if value is not None and not is_safe_memory_identifier(value):
+                return False
+    evidence_refs = row.get("evidence_refs")
+    if (
+        not isinstance(evidence_refs, list)
+        or not evidence_refs
+        or not all(is_valid_evidence_ref_shape(ref) for ref in evidence_refs)
+    ):
+        return False
+    superseded_by = row.get("superseded_by")
+    return superseded_by is None or is_safe_memory_identifier(superseded_by)
+
+
+def existing_memory_ids(repo: Path) -> set[str]:
+    memory_ids: set[str] = set()
+    for _, _, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if isinstance(memory_id, str):
+            memory_ids.add(memory_id)
+    return memory_ids
+
+
+def is_valid_derived_from_ref(
+    repo: Path,
+    memory_ids: set[str],
+    current_memory_id: str,
+    ref_text: object,
+) -> bool:
+    if not isinstance(ref_text, str):
+        return False
+    if ref_text == current_memory_id:
+        return False
+    if safe_existing_archive_ref(repo, ref_text):
+        return True
+    if not is_safe_memory_identifier(ref_text):
+        return False
+    return ref_text in memory_ids
+
+
+def is_safe_raw_ref(ref: object) -> bool:
+    if not isinstance(ref, dict):
+        return False
+    if set(ref) != {"path", "anchor"}:
+        return False
+    path_text = ref.get("path")
+    anchor_text = ref.get("anchor")
+    if not isinstance(path_text, str) or not isinstance(anchor_text, str):
+        return False
+    if not path_text.strip() or not anchor_text.strip():
+        return False
+    if has_control_chars(path_text) or has_control_chars(anchor_text):
+        return False
+    if has_unsafe_identifier_path_reference(path_text):
+        return False
+    return not (has_sensitive_identifier_token(path_text) or has_sensitive_identifier_token(anchor_text))
+
+
+def is_archive_internal_ref_path(path_text: str) -> bool:
+    return any(path_text == root or path_text.startswith(f"{root}/") for root in ALLOWED_ROOTS)
+
+
+def memory_node_signature(row: dict) -> str:
+    return json.dumps(row, sort_keys=True, separators=(",", ":"))
+
+
+def audit_memory_id_uniqueness(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    index_ids: dict[str, MemoryNodeLocation] = {}
+    durable_ids: dict[str, MemoryNodeLocation] = {}
+
+    def add_id(target: dict[str, MemoryNodeLocation], relative: str, line_number: int, row: dict) -> None:
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str) or not is_valid_memory_node_shape(row):
+            return
+        location = MemoryNodeLocation(memory_node_signature(row), relative, line_number)
+        if memory_id in target:
+            findings.append(Finding(relative, line_number, "duplicate_memory_id"))
+            return
+        target[memory_id] = location
+
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__"):
+            continue
+        if relative == "index/memories.jsonl":
+            add_id(index_ids, relative, line_number, row)
+        else:
+            add_id(durable_ids, relative, line_number, row)
+    return findings
+
+
+def audit_memory_supersession_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    valid_rows: list[tuple[str, int, dict]] = []
+    rows_by_id: dict[str, list[dict]] = {}
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str):
+            continue
+        valid_rows.append((relative, line_number, row))
+        rows_by_id.setdefault(memory_id, []).append(row)
+
+    supersedes_by_id: dict[str, set[str]] = {}
+    for _, _, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        supersedes = row.get("supersedes", [])
+        supersedes_by_id.setdefault(memory_id, set()).update(
+            target for target in supersedes if target != memory_id and target in rows_by_id
+        )
+
+    def supersession_path_exists(start_id: str, target_id: str) -> bool:
+        visited: set[str] = set()
+        stack = list(supersedes_by_id.get(start_id, set()))
+        while stack:
+            current = stack.pop()
+            if current == target_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            stack.extend(supersedes_by_id.get(current, set()) - visited)
+        return False
+
+    for relative, line_number, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        supersedes = row.get("supersedes", [])
+        superseded_by = row.get("superseded_by")
+        broken_supersedes = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(target_row.get("superseded_by") == memory_id for target_row in rows_by_id[target])
+            for target in supersedes
+        )
+        broken_superseded_by = isinstance(superseded_by, str) and (
+            superseded_by == memory_id
+            or superseded_by not in rows_by_id
+            or not all(memory_id in target_row.get("supersedes", []) for target_row in rows_by_id[superseded_by])
+        )
+        cyclic_supersedes = any(
+            target in rows_by_id and supersession_path_exists(target, memory_id) for target in supersedes
+        )
+        if broken_supersedes or broken_superseded_by or cyclic_supersedes:
+            findings.append(Finding(relative, line_number, "broken_supersession_ref"))
+    return findings
+
+
+def audit_memory_contradiction_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    valid_rows: list[tuple[str, int, dict]] = []
+    rows_by_id: dict[str, list[dict]] = {}
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str):
+            continue
+        valid_rows.append((relative, line_number, row))
+        rows_by_id.setdefault(memory_id, []).append(row)
+
+    for relative, line_number, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        contradicts = row.get("contradicts", [])
+        contradicted_by = row.get("contradicted_by", [])
+        broken_contradicts = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(memory_id in target_row.get("contradicted_by", []) for target_row in rows_by_id[target])
+            for target in contradicts
+        )
+        broken_contradicted_by = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(memory_id in target_row.get("contradicts", []) for target_row in rows_by_id[target])
+            for target in contradicted_by
+        )
+        if broken_contradicts or broken_contradicted_by:
+            findings.append(Finding(relative, line_number, "broken_contradiction_ref"))
+    return findings
+
+
+def audit_memory_deprecation_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    valid_rows: list[tuple[str, int, dict]] = []
+    rows_by_id: dict[str, list[dict]] = {}
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str):
+            continue
+        valid_rows.append((relative, line_number, row))
+        rows_by_id.setdefault(memory_id, []).append(row)
+
+    for relative, line_number, row in valid_rows:
+        memory_id = str(row.get("memory_id"))
+        deprecates = row.get("deprecates", [])
+        deprecated_by = row.get("deprecated_by")
+        broken_deprecates = any(
+            target == memory_id
+            or target not in rows_by_id
+            or not all(target_row.get("deprecated_by") == memory_id for target_row in rows_by_id[target])
+            for target in deprecates
+        )
+        broken_deprecated_by = isinstance(deprecated_by, str) and (
+            deprecated_by == memory_id
+            or deprecated_by not in rows_by_id
+            or not all(memory_id in target_row.get("deprecates", []) for target_row in rows_by_id[deprecated_by])
+        )
+        if broken_deprecates or broken_deprecated_by:
+            findings.append(Finding(relative, line_number, "broken_deprecation_ref"))
+    return findings
+
+
+def audit_memory_lifecycle_states(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__") or not is_valid_memory_node_shape(row):
+            continue
+        supersedes = row.get("supersedes", [])
+        superseded_by = row.get("superseded_by")
+        deprecates = row.get("deprecates", [])
+        deprecated_by = row.get("deprecated_by")
+        if isinstance(superseded_by, str) and isinstance(deprecated_by, str):
+            findings.append(Finding(relative, line_number, "invalid_memory_lifecycle_state"))
+            continue
+        if isinstance(supersedes, list) and supersedes and isinstance(deprecates, list) and deprecates:
+            findings.append(Finding(relative, line_number, "invalid_memory_lifecycle_state"))
+    return findings
+
+
+def audit_memory_index_consistency(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    index_nodes: dict[str, MemoryNodeLocation] = {}
+    durable_nodes: dict[str, MemoryNodeLocation] = {}
+
+    def add_node(target: dict[str, MemoryNodeLocation], relative: str, line_number: int, row: dict) -> None:
+        memory_id = row.get("memory_id")
+        if not isinstance(memory_id, str) or not is_valid_memory_node_shape(row):
+            return
+        location = MemoryNodeLocation(memory_node_signature(row), relative, line_number)
+        existing = target.get(memory_id)
+        if existing and existing.signature != location.signature:
+            findings.append(Finding(relative, line_number, "memory_index_mismatch"))
+            return
+        target[memory_id] = existing or location
+
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__"):
+            continue
+        if relative == "index/memories.jsonl":
+            add_node(index_nodes, relative, line_number, row)
+        else:
+            add_node(durable_nodes, relative, line_number, row)
+
+    if not durable_nodes:
+        return findings
+    if not index_nodes:
+        return [
+            Finding(durable.path, durable.line_number, "memory_index_mismatch")
+            for durable in durable_nodes.values()
+        ]
+
+    for memory_id, durable in durable_nodes.items():
+        indexed = index_nodes.get(memory_id)
+        if indexed is None or indexed.signature != durable.signature:
+            findings.append(Finding(durable.path, durable.line_number, "memory_index_mismatch"))
+    for memory_id, indexed in index_nodes.items():
+        if memory_id not in durable_nodes:
+            findings.append(Finding(indexed.path, indexed.line_number, "memory_index_mismatch"))
+    return findings
+
+
+def audit_memory_references(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    memory_ids = existing_memory_ids(repo)
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if row.get("__invalid_json__"):
+            findings.append(Finding(relative, line_number, "invalid_json"))
+            continue
+        missing = MEMORY_NODE_REQUIRED_FIELDS.difference(row)
+        if missing:
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
+            continue
+        if not is_valid_memory_node_shape(row):
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
+        derived_from = row.get("derived_from", [])
+        if not isinstance(derived_from, list):
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
+        else:
+            current_memory_id = row.get("memory_id") if isinstance(row.get("memory_id"), str) else ""
+            for ref_text in derived_from:
+                if not is_valid_derived_from_ref(repo, memory_ids, current_memory_id, ref_text):
+                    findings.append(Finding(relative, line_number, "broken_memory_ref"))
+        evidence_refs = row.get("evidence_refs", [])
+        if not isinstance(evidence_refs, list):
+            findings.append(Finding(relative, line_number, "invalid_memory_node"))
+        else:
+            for ref in evidence_refs:
+                path_text = ref.get("path") if isinstance(ref, dict) else ""
+                quote_id = ref.get("quote_id") if isinstance(ref, dict) else ""
+                evidence_path = safe_archive_ref_path(repo, path_text) if isinstance(path_text, str) else None
+                if (
+                    evidence_path is None
+                    or not isinstance(quote_id, str)
+                    or not evidence_quote_id_exists(evidence_path, quote_id)
+                ):
+                    findings.append(Finding(relative, line_number, "broken_memory_ref"))
+        raw_refs = row.get("raw_refs", [])
+        if not isinstance(raw_refs, list):
+            findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+        else:
+            for ref in raw_refs:
+                if not is_safe_raw_ref(ref):
+                    findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+                    continue
+                path_text = str(ref.get("path", ""))
+                if is_archive_internal_ref_path(path_text):
+                    raw_path = safe_archive_ref_path(repo, path_text)
+                    if raw_path is None:
+                        findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+                    elif raw_path.name == "source-map.json" and not source_map_anchor_exists(
+                        raw_path,
+                        str(ref.get("anchor", "")),
+                    ):
+                        findings.append(Finding(relative, line_number, "unsafe_raw_ref"))
+    return findings
+
+
+def audit_memory_file_placement(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative, line_number, row in iter_memory_node_rows(repo):
+        if relative == "index/memories.jsonl" or row.get("__invalid_json__"):
+            continue
+        if not is_valid_memory_node_shape(row):
+            continue
+        if row.get("source") == "explicit" and relative != "memories/explicit.jsonl":
+            findings.append(Finding(relative, line_number, "memory_file_mismatch"))
+            continue
+        if relative == "memories/explicit.jsonl":
+            if row.get("source") != "explicit":
+                findings.append(Finding(relative, line_number, "memory_file_mismatch"))
+            continue
+        expected = MEMORY_LAYER_ROOT_FILES.get(str(row.get("layer", "")))
+        if expected is not None and relative != expected:
+            findings.append(Finding(relative, line_number, "memory_file_mismatch"))
+    return findings
+
+
+def audit_session_source_map_refs(repo: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative, line_number, row in iter_session_meta_rows(repo):
+        if row.get("__invalid_json__"):
+            findings.append(Finding(relative, line_number, "invalid_json"))
+            continue
+        source_map_path = row.get("source_map_path")
+        if source_map_path in (None, ""):
+            continue
+        expected_source_map = (PurePosixPath(relative).parent / "source-map.json").as_posix()
+        if (
+            not isinstance(source_map_path, str)
+            or source_map_path.strip() != expected_source_map
+            or safe_archive_ref_path(repo, source_map_path) is None
+        ):
+            findings.append(Finding(relative, line_number, "broken_source_map_ref"))
+    for relative, line_number, row in iter_session_source_map_rows(repo):
+        if row.get("__invalid_json__"):
+            findings.append(Finding(relative, line_number, "invalid_json"))
+            continue
+        entry_dir = PurePosixPath(relative).parent
+        expected_paths = {
+            "summary_path": (entry_dir / "summary.md").as_posix(),
+            "evidence_path": (entry_dir / "evidence.md").as_posix(),
+            "source_map_path": (entry_dir / "source-map.json").as_posix(),
+        }
+        for field, expected_path in expected_paths.items():
+            value = row.get(field)
+            if (
+                not isinstance(value, str)
+                or value.strip() != expected_path
+                or safe_archive_ref_path(repo, value) is None
+            ):
+                findings.append(Finding(relative, line_number, "broken_source_map_ref"))
+                break
     return findings
 
 
@@ -513,6 +1220,15 @@ def audit_repo(repo: Path, check_process_updates: bool) -> list[Finding]:
     findings: list[Finding] = []
     for path in sorted(iter_archive_files(repo)):
         findings.extend(scan_file(repo, path, check_process_updates))
+    findings.extend(audit_session_source_map_refs(repo))
+    findings.extend(audit_memory_references(repo))
+    findings.extend(audit_memory_file_placement(repo))
+    findings.extend(audit_memory_id_uniqueness(repo))
+    findings.extend(audit_memory_supersession_refs(repo))
+    findings.extend(audit_memory_contradiction_refs(repo))
+    findings.extend(audit_memory_deprecation_refs(repo))
+    findings.extend(audit_memory_lifecycle_states(repo))
+    findings.extend(audit_memory_index_consistency(repo))
     return sorted(set(findings), key=lambda item: (item.path, item.line_number, item.category))
 
 
@@ -538,7 +1254,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print("Archive audit failed:", file=sys.stderr)
     for finding in findings[: args.max_findings]:
-        print(f"- {finding.path}:{finding.line_number} category={finding.category}", file=sys.stderr)
+        print(
+            f"- {safe_diagnostic_path(finding.path)}:{finding.line_number} category={finding.category}",
+            file=sys.stderr,
+        )
     if len(findings) > args.max_findings:
         print(f"- ... and {len(findings) - args.max_findings} more", file=sys.stderr)
     return 1

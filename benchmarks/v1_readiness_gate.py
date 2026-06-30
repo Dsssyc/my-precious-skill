@@ -1,0 +1,815 @@
+#!/usr/bin/env python3
+"""Aggregate My Precious v1 readiness evidence without rendering private data.
+
+This gate is intentionally a convergence aid, not a public leaderboard score.
+It can either read existing aggregate JSON reports or run the packaged
+synthetic gates locally with ``--run-packaged``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+
+
+@dataclass(frozen=True)
+class MetricGate:
+    metric: str
+    comparison: str
+    threshold: float
+
+
+LAYERED_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("memory_recall_at_5", "min", 1.0),
+    MetricGate("layer_path_success_rate", "min", 1.0),
+    MetricGate("drilldown_success_rate", "min", 1.0),
+    MetricGate("source_ref_reachability", "min", 1.0),
+    MetricGate("source_depth_policy_pass_rate", "min", 1.0),
+    MetricGate("raw_preview_redaction_pass_rate", "min", 1.0),
+    MetricGate("raw_preview_authorization_pass_rate", "min", 1.0),
+    MetricGate("source_drilldown_privacy_pass_rate", "min", 1.0),
+    MetricGate("memory_graph_drilldown_rate", "min", 1.0),
+    MetricGate("memory_graph_invalid_edge_suppression_rate", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+)
+
+UPDATER_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("natural_induction_success_rate", "min", 1.0),
+    MetricGate("cross_project_generalization_rate", "min", 1.0),
+    MetricGate("project_scope_precision", "min", 1.0),
+    MetricGate("induction_review_routing_rate", "min", 1.0),
+    MetricGate("induction_review_decision_apply_rate", "min", 1.0),
+    MetricGate("forced_memory_capture_rate", "min", 1.0),
+    MetricGate("privacy_refusal_pass_rate", "min", 1.0),
+    MetricGate("privacy_redaction_pass_rate", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+)
+
+E2E_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("natural_induction_success_rate", "min", 1.0),
+    MetricGate("e2e_memory_recall_at_5", "min", 1.0),
+    MetricGate("e2e_layer_assignment_accuracy", "min", 1.0),
+    MetricGate("e2e_session_drilldown_rate", "min", 1.0),
+    MetricGate("e2e_evidence_reachability_rate", "min", 1.0),
+    MetricGate("e2e_source_policy_pass_rate", "min", 1.0),
+    MetricGate("e2e_forced_memory_recall_rate", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+)
+
+SOURCE_STREAM_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("source_stream_update_rate", "min", 1.0),
+    MetricGate("project_registry_independence_rate", "min", 1.0),
+    MetricGate("metadata_free_source_record_rate", "min", 1.0),
+    MetricGate("archive_scope_assignment_rate", "min", 1.0),
+    MetricGate("source_partition_assignment_rate", "min", 1.0),
+    MetricGate("source_stream_memory_recall_at_5", "min", 1.0),
+    MetricGate("source_stream_session_drilldown_rate", "min", 1.0),
+    MetricGate("source_stream_evidence_reachability_rate", "min", 1.0),
+    MetricGate("source_stream_source_policy_pass_rate", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+)
+
+SHADOW_GATES = (
+    MetricGate("metrics.memory_recall_at_5", "min", 1.0),
+    MetricGate("metrics.memory_precision_at_5", "min", 0.4),
+    MetricGate("metrics.top_k_noise_at_5", "max", 0.6),
+    MetricGate("metrics.abstain_pass_rate", "min", 1.0),
+    MetricGate("metrics.active_memory_suppression", "min", 1.0),
+    MetricGate("metrics.noise_sources_at_5.scope_mixed", "max", 3.0),
+    MetricGate("metrics.noise_sources_at_5.inactive_lifecycle", "max", 0.0),
+    MetricGate("metrics.privacy_boundary_pass_rate", "min", 1.0),
+    MetricGate("metrics.forbidden_output_violations", "max", 0.0),
+    MetricGate("metrics.provenance_coverage.score", "min", 1.0),
+    MetricGate("metrics.lifecycle_integrity.score", "min", 1.0),
+)
+
+GENERATED_ANSWER_GATES = (
+    MetricGate("case_pass_rate", "min", 1.0),
+    MetricGate("answer_normalized_match_rate", "min", 1.0),
+    MetricGate("abstention_accuracy", "min", 1.0),
+    MetricGate("privacy_leak_count", "max", 0.0),
+    MetricGate("failed_case_count", "max", 0.0),
+    MetricGate("missing_answer_count", "max", 0.0),
+    MetricGate("duplicate_answer_count", "max", 0.0),
+    MetricGate("unknown_answer_count", "max", 0.0),
+    MetricGate("positive_without_reference_answer", "max", 0.0),
+    MetricGate("answer_scorable_case_rate", "min", 1.0),
+)
+PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
+SAFE_REQUIRED_COUNT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+SECRET_LIKE_REQUIRED_COUNT_KEY = re.compile(
+    "|".join(
+        (
+            "AKIA" + r"[0-9A-Z]{16}",
+            "sk-" + r"[A-Za-z0-9_-]{20,}",
+            "github" + r"_pat_",
+            "gh[pousr]_" + r"[A-Za-z0-9_]{20,}",
+        )
+    )
+)
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise SystemExit(f"unable to read JSON report {path.name}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid JSON report {path.name}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"JSON report must be an object: {path.name}")
+    return payload
+
+
+def nested_value(payload: dict[str, Any], key: str) -> Any:
+    value: Any = payload
+    for part in key.split("."):
+        if not isinstance(value, dict) or part not in value:
+            raise KeyError(key)
+        value = value[part]
+    return value
+
+
+def numeric_value(payload: dict[str, Any], key: str) -> float | None:
+    try:
+        value = nested_value(payload, key)
+    except KeyError:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def gate_failures(payload: dict[str, Any], gates: tuple[MetricGate, ...]) -> list[dict[str, Any]]:
+    failures = []
+    for gate in gates:
+        value = numeric_value(payload, gate.metric)
+        if value is None:
+            failures.append(
+                {
+                    "metric": gate.metric,
+                    "comparison": gate.comparison,
+                    "threshold": gate.threshold,
+                    "reason": "missing_or_non_numeric",
+                }
+            )
+            continue
+        failed = value < gate.threshold if gate.comparison == "min" else value > gate.threshold
+        if failed:
+            failures.append(
+                {
+                    "metric": gate.metric,
+                    "comparison": gate.comparison,
+                    "threshold": gate.threshold,
+                    "value": value,
+                }
+            )
+    return failures
+
+
+def selected_metrics(payload: dict[str, Any], gates: tuple[MetricGate, ...]) -> dict[str, float]:
+    out = {}
+    for gate in gates:
+        value = numeric_value(payload, gate.metric)
+        if value is not None:
+            out[gate.metric] = value
+    return out
+
+
+def assess_report(
+    payload: dict[str, Any] | None,
+    *,
+    expected_kind: str,
+    gates: tuple[MetricGate, ...],
+    evidence_level: str,
+    required: bool,
+) -> dict[str, Any]:
+    if payload is None:
+        return {
+            "status": "missing_required" if required else "not_run_optional",
+            "evidence_level": evidence_level,
+            "required": required,
+            "metrics": {},
+        }
+    failures = []
+    kind = payload.get("report_kind")
+    if kind is not None and kind != expected_kind:
+        failures.append(
+            {
+                "metric": "report_kind",
+                "expected": expected_kind,
+                "actual": str(kind),
+                "reason": "unexpected_report_kind",
+            }
+        )
+    failures.extend(gate_failures(payload, gates))
+    return {
+        "status": "passed" if not failures else "failed",
+        "evidence_level": evidence_level,
+        "required": required,
+        "metrics": selected_metrics(payload, gates),
+        "failures": failures,
+    }
+
+
+def assess_source_stream_report(payload: dict[str, Any] | None) -> dict[str, Any]:
+    result = assess_report(
+        payload,
+        expected_kind="source_stream_registry_benchmark",
+        gates=SOURCE_STREAM_GATES,
+        evidence_level="packaged_synthetic",
+        required=True,
+    )
+    if payload is not None:
+        privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+        if privacy.get("aggregate_only") is not True:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "privacy.aggregate_only",
+                    "expected": True,
+                    "actual": privacy.get("aggregate_only"),
+                    "reason": "source_stream_report_not_aggregate_only",
+                }
+            )
+            result["status"] = "failed"
+        for metric in (
+            "case_details_rendered",
+            "memory_text_rendered",
+            "source_content_rendered",
+            "source_paths_rendered",
+            "raw_refs_rendered",
+        ):
+            if privacy.get(metric) is not False:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": False,
+                        "actual": privacy.get(metric),
+                        "reason": "source_stream_report_rendered_sensitive_evidence",
+                    }
+                )
+                result["status"] = "failed"
+    result["claim_boundary"] = "source-stream registry aggregate only; no automatic ontology discovery claim"
+    return result
+
+
+def assess_public_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
+    # A public-adapter score is a layered recall report produced from converted
+    # public cases. Converter-only output is not enough evidence for recall.
+    result = assess_report(
+        payload,
+        expected_kind="layered_recall_benchmark",
+        gates=(
+            MetricGate("case_pass_rate", "min", 1.0),
+            MetricGate("memory_recall_at_5", "min", 1.0),
+            MetricGate("privacy_leak_count", "max", 0.0),
+            MetricGate("failed_case_count", "max", 0.0),
+        ),
+        evidence_level="public_adapter_local",
+        required=required,
+    )
+    if payload is not None:
+        source_benchmarks = payload.get("source_benchmarks")
+        public_source_count = 0
+        if isinstance(source_benchmarks, dict):
+            for name, count in source_benchmarks.items():
+                if name in PUBLIC_BENCHMARK_SOURCES and isinstance(count, int) and count > 0:
+                    public_source_count += count
+        if public_source_count <= 0:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "source_benchmarks",
+                    "expected": "one_or_more_public_benchmark_sources",
+                    "reason": "missing_public_benchmark_source_counts",
+                }
+            )
+            result["status"] = "failed"
+
+        case_origins = payload.get("case_origins")
+        adapter_case_count = 0
+        if isinstance(case_origins, dict):
+            count = case_origins.get("public_benchmark_adapter")
+            if isinstance(count, int) and count > 0:
+                adapter_case_count = count
+        if adapter_case_count <= 0:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "case_origins.public_benchmark_adapter",
+                    "comparison": "min",
+                    "threshold": 1.0,
+                    "reason": "missing_converted_public_case_origin",
+                }
+            )
+            result["status"] = "failed"
+    result["claim_boundary"] = "adapted local score only; not a public leaderboard claim"
+    return result
+
+
+def assess_shadow_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
+    result = assess_report(
+        payload,
+        expected_kind="real_archive_shadow_evaluation",
+        gates=SHADOW_GATES,
+        evidence_level="private_real_archive_aggregate",
+        required=required,
+    )
+    if payload is not None:
+        privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+        if privacy.get("aggregate_only") is not True:
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "privacy.aggregate_only",
+                    "expected": True,
+                    "actual": privacy.get("aggregate_only"),
+                    "reason": "shadow_report_not_aggregate_only",
+                }
+            )
+            result["status"] = "failed"
+        for metric in (
+            "private_probe_cases_rendered",
+            "queries_rendered",
+            "memory_ids_rendered",
+            "memory_text_rendered",
+            "source_refs_rendered",
+            "source_content_rendered",
+            "source_paths_rendered",
+            "raw_refs_rendered",
+        ):
+            if privacy.get(metric) is not False:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": False,
+                        "actual": privacy.get(metric),
+                        "reason": "shadow_report_rendered_private_probe_material",
+                    }
+                )
+                result["status"] = "failed"
+    result["claim_boundary"] = "private real-archive aggregate only; no private probe material rendered"
+    return result
+
+
+def assess_answer_report(
+    payload: dict[str, Any] | None,
+    *,
+    required: bool,
+    required_source_benchmarks: tuple[str, ...] = (),
+    required_case_origins: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    result = assess_report(
+        payload,
+        expected_kind="generated_answer_benchmark",
+        gates=GENERATED_ANSWER_GATES,
+        evidence_level="offline_generated_answer_grading",
+        required=required,
+    )
+    if payload is not None:
+        privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+        for metric in ("aggregate_only",):
+            if privacy.get(metric) is not True:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": True,
+                        "actual": privacy.get(metric),
+                        "reason": "answer_report_not_aggregate_only",
+                    }
+                )
+                result["status"] = "failed"
+        for metric in ("queries_rendered", "generated_answers_rendered", "reference_answers_rendered"):
+            if privacy.get(metric) is not False:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"privacy.{metric}",
+                        "expected": False,
+                        "actual": privacy.get(metric),
+                        "reason": "answer_report_rendered_sensitive_text",
+                    }
+                )
+                result["status"] = "failed"
+        source_benchmarks = payload.get("source_benchmarks")
+        if not has_positive_count(source_benchmarks):
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "source_benchmarks",
+                    "expected": "one_or_more_source_benchmark_counts",
+                    "reason": "missing_generated_answer_source_counts",
+                }
+            )
+            result["status"] = "failed"
+        case_origins = payload.get("case_origins")
+        if not has_positive_count(case_origins):
+            result.setdefault("failures", []).append(
+                {
+                    "metric": "case_origins",
+                    "expected": "one_or_more_case_origin_counts",
+                    "reason": "missing_generated_answer_case_origin_counts",
+                }
+            )
+            result["status"] = "failed"
+        for source in required_source_benchmarks:
+            if positive_count_for_key(source_benchmarks, source) <= 0:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"source_benchmarks.{source}",
+                        "comparison": "min",
+                        "threshold": 1.0,
+                        "reason": "missing_required_generated_answer_source",
+                    }
+                )
+                result["status"] = "failed"
+        for origin in required_case_origins:
+            if positive_count_for_key(case_origins, origin) <= 0:
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": f"case_origins.{origin}",
+                        "comparison": "min",
+                        "threshold": 1.0,
+                        "reason": "missing_required_generated_answer_case_origin",
+                    }
+                )
+                result["status"] = "failed"
+    result["claim_boundary"] = "offline generated-answer grading only; no model-generation claim"
+    return result
+
+
+def positive_count_for_key(value: object, key: str) -> int:
+    if not isinstance(value, dict):
+        return 0
+    count = value.get(key)
+    if isinstance(count, bool):
+        return 0
+    if isinstance(count, int) and count > 0:
+        return count
+    return 0
+
+
+def has_positive_count(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for count in value.values():
+        if isinstance(count, bool):
+            continue
+        if isinstance(count, int) and count > 0:
+            return True
+    return False
+
+
+def run_command(command: list[str], *, cwd: Path) -> dict[str, Any]:
+    result = subprocess.run(
+        command,
+        cwd=str(cwd),
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "packaged readiness command failed: "
+            + " ".join(command)
+            + "\n"
+            + result.stderr.strip()
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit("packaged readiness command did not emit JSON") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit("packaged readiness command emitted non-object JSON")
+    return payload
+
+
+def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dict[str, dict[str, Any]]:
+    archive = work_dir / "layered-synthetic-archive"
+    details = work_dir / "layered-details.jsonl"
+    run_command(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "build_synthetic_recall_archive.py"),
+            "--repo",
+            str(archive),
+            "--cases",
+            str(SCRIPT_DIR / "cases/layered_recall_synthetic.jsonl"),
+            "--include-superseded-distractors",
+        ],
+        cwd=REPO_ROOT,
+    )
+    layered = run_command(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "layered_recall_benchmark.py"),
+            "--repo",
+            str(archive),
+            "--cases",
+            str(SCRIPT_DIR / "cases/layered_recall_synthetic.jsonl"),
+            "--search-script",
+            str(REPO_ROOT / "templates/agent-memory-repo/tools/search_memory.py"),
+            "--details-jsonl",
+            str(details),
+            "--fail-under-file",
+            str(SCRIPT_DIR / "quality-gates/layered_recall_synthetic.json"),
+            "--fail-over-file",
+            str(SCRIPT_DIR / "quality-gates/layered_recall_synthetic_max.json"),
+        ],
+        cwd=REPO_ROOT,
+    )
+    updater = run_command(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "updater_induction_benchmark.py"),
+            "--cases",
+            str(SCRIPT_DIR / "cases/updater_induction_synthetic.jsonl"),
+            "--fail-under-file",
+            str(SCRIPT_DIR / "quality-gates/updater_induction_synthetic.json"),
+            "--fail-over-file",
+            str(SCRIPT_DIR / "quality-gates/updater_induction_synthetic_max.json"),
+        ],
+        cwd=REPO_ROOT,
+    )
+    e2e = run_command(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "e2e_induction_recall_benchmark.py"),
+            "--cases",
+            str(SCRIPT_DIR / "cases/e2e_induction_recall_synthetic.jsonl"),
+            "--work-dir",
+            str(work_dir / "e2e"),
+            "--fail-under-file",
+            str(SCRIPT_DIR / "quality-gates/e2e_induction_recall_synthetic.json"),
+            "--fail-over-file",
+            str(SCRIPT_DIR / "quality-gates/e2e_induction_recall_synthetic_max.json"),
+        ],
+        cwd=REPO_ROOT,
+    )
+    source_stream = run_command(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "source_stream_registry_benchmark.py"),
+            "--cases",
+            str(SCRIPT_DIR / "cases/source_stream_registry_synthetic.jsonl"),
+            "--work-dir",
+            str(work_dir / "source-stream"),
+            "--fail-under-file",
+            str(SCRIPT_DIR / "quality-gates/source_stream_registry_synthetic.json"),
+            "--fail-over-file",
+            str(SCRIPT_DIR / "quality-gates/source_stream_registry_synthetic_max.json"),
+        ],
+        cwd=REPO_ROOT,
+    )
+    reports = {"layered": layered, "updater": updater, "e2e": e2e, "source_stream": source_stream}
+    if include_answer:
+        reports["answer"] = run_command(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "generated_answer_benchmark.py"),
+                "--cases",
+                str(SCRIPT_DIR / "cases/generated_answer_synthetic.jsonl"),
+                "--answers",
+                str(SCRIPT_DIR / "cases/generated_answer_synthetic_answers.jsonl"),
+                "--details-jsonl",
+                str(work_dir / "generated-answer-details.jsonl"),
+                "--fail-under",
+                "case_pass_rate=1.0",
+                "--fail-under",
+                "answer_normalized_match_rate=1.0",
+                "--fail-under",
+                "abstention_accuracy=1.0",
+                "--fail-under",
+                "answer_scorable_case_rate=1.0",
+                "--fail-over",
+                "privacy_leak_count=0",
+                "--fail-over",
+                "failed_case_count=0",
+                "--fail-over",
+                "missing_answer_count=0",
+                "--fail-over",
+                "duplicate_answer_count=0",
+                "--fail-over",
+                "unknown_answer_count=0",
+                "--fail-over",
+                "positive_without_reference_answer=0",
+            ],
+            cwd=REPO_ROOT,
+        )
+    return reports
+
+
+def build_report(
+    *,
+    layered: dict[str, Any] | None,
+    updater: dict[str, Any] | None,
+    e2e: dict[str, Any] | None,
+    source_stream: dict[str, Any] | None,
+    public: dict[str, Any] | None,
+    shadow: dict[str, Any] | None,
+    answer: dict[str, Any] | None,
+    require_public: bool,
+    require_shadow: bool,
+    require_answer: bool,
+    required_answer_source_benchmarks: tuple[str, ...] = (),
+    required_answer_case_origins: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    dimensions = {
+        "layered_recall": assess_report(
+            layered,
+            expected_kind="layered_recall_benchmark",
+            gates=LAYERED_GATES,
+            evidence_level="packaged_synthetic",
+            required=True,
+        ),
+        "automatic_induction": assess_report(
+            updater,
+            expected_kind="updater_induction_benchmark",
+            gates=UPDATER_GATES,
+            evidence_level="packaged_synthetic",
+            required=True,
+        ),
+        "e2e_induction_to_recall": assess_report(
+            e2e,
+            expected_kind="e2e_induction_recall_benchmark",
+            gates=E2E_GATES,
+            evidence_level="packaged_synthetic",
+            required=True,
+        ),
+        "source_stream_registry": assess_source_stream_report(source_stream),
+        "public_benchmark_adapter": assess_public_report(public, required=require_public),
+        "real_archive_shadow_eval": assess_shadow_report(shadow, required=require_shadow),
+        "generated_answer_eval": assess_answer_report(
+            answer,
+            required=require_answer,
+            required_source_benchmarks=required_answer_source_benchmarks,
+            required_case_origins=required_answer_case_origins,
+        ),
+    }
+    required = [dimension for dimension in dimensions.values() if dimension["required"]]
+    optional = [dimension for dimension in dimensions.values() if not dimension["required"]]
+    required_passed = sum(1 for dimension in required if dimension["status"] == "passed")
+    optional_passed = sum(1 for dimension in optional if dimension["status"] == "passed")
+    required_ready = required_passed == len(required)
+    if not required_ready:
+        overall_status = "not_ready"
+    elif require_public or require_shadow or require_answer:
+        overall_status = "extended_evidence_ready"
+    else:
+        overall_status = "core_synthetic_ready"
+    return {
+        "report_kind": "v1_layered_memory_readiness_gate",
+        "report_version": 1,
+        "overall_status": overall_status,
+        "claim_boundary": (
+            "core synthetic gates passed, including explicit source streams; full v1 target remains unproven"
+            if overall_status == "core_synthetic_ready"
+            else "extended evidence gates passed; generated-answer and long-horizon governance remain bounded claims"
+            if overall_status == "extended_evidence_ready"
+            else "one or more required readiness dimensions are missing or failed"
+        ),
+        "privacy": {
+            "aggregate_only": True,
+            "private_probe_cases_rendered": False,
+            "queries_rendered": False,
+            "memory_text_rendered": False,
+            "source_paths_rendered": False,
+            "raw_refs_rendered": False,
+            "generated_answers_rendered": False,
+            "reference_answers_rendered": False,
+        },
+        "scorecard": {
+            "required_dimensions": len(required),
+            "required_passed": required_passed,
+            "optional_dimensions": len(optional),
+            "optional_passed": optional_passed,
+        },
+        "dimensions": dimensions,
+    }
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--layered-report", help="Existing layered recall aggregate JSON report")
+    parser.add_argument("--updater-report", help="Existing updater induction aggregate JSON report")
+    parser.add_argument("--e2e-report", help="Existing e2e induction-to-recall aggregate JSON report")
+    parser.add_argument("--source-stream-report", help="Existing source stream registry aggregate JSON report")
+    parser.add_argument("--public-report", help="Optional adapted public benchmark layered recall aggregate JSON report")
+    parser.add_argument("--shadow-report", help="Optional private real-archive shadow aggregate JSON report")
+    parser.add_argument("--answer-report", help="Optional generated-answer aggregate JSON report")
+    parser.add_argument("--require-public", action="store_true", help="Fail when --public-report is absent or failed")
+    parser.add_argument("--require-shadow", action="store_true", help="Fail when --shadow-report is absent or failed")
+    parser.add_argument("--require-answer", action="store_true", help="Fail when --answer-report is absent or failed")
+    parser.add_argument(
+        "--require-answer-source-benchmark",
+        action="append",
+        default=[],
+        help="Require --answer-report source_benchmarks to include this aggregate key with a positive count",
+    )
+    parser.add_argument(
+        "--require-answer-case-origin",
+        action="append",
+        default=[],
+        help="Require --answer-report case_origins to include this aggregate key with a positive count",
+    )
+    parser.add_argument("--run-packaged", action="store_true", help="Run packaged synthetic gates instead of reading core reports")
+    parser.add_argument("--work-dir", help="Scratch directory for --run-packaged")
+    return parser.parse_args(argv)
+
+
+def validated_required_count_keys(values: list[str], option: str) -> tuple[str, ...]:
+    keys: list[str] = []
+    for value in values:
+        if not SAFE_REQUIRED_COUNT_KEY.fullmatch(value) or SECRET_LIKE_REQUIRED_COUNT_KEY.search(value):
+            raise SystemExit(f"{option} values must be safe aggregate identifiers")
+        keys.append(value)
+    return tuple(keys)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    required_answer_source_benchmarks = validated_required_count_keys(
+        args.require_answer_source_benchmark,
+        "--require-answer-source-benchmark",
+    )
+    required_answer_case_origins = validated_required_count_keys(
+        args.require_answer_case_origin,
+        "--require-answer-case-origin",
+    )
+    require_answer = args.require_answer or bool(required_answer_source_benchmarks or required_answer_case_origins)
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
+    try:
+        if args.run_packaged:
+            work_dir = Path(args.work_dir).expanduser().resolve() if args.work_dir else None
+            if work_dir is None:
+                temp_dir = tempfile.TemporaryDirectory(prefix="my-precious-v1-readiness-")
+                work_dir = Path(temp_dir.name)
+            work_dir.mkdir(parents=True, exist_ok=True)
+            if any(work_dir.iterdir()):
+                raise SystemExit("--work-dir must be empty when using --run-packaged")
+            core = run_packaged_reports(work_dir, include_answer=require_answer and not args.answer_report)
+            layered = core["layered"]
+            updater = core["updater"]
+            e2e = core["e2e"]
+            source_stream = core["source_stream"]
+            answer = core.get("answer")
+        else:
+            layered = read_json(Path(args.layered_report).expanduser()) if args.layered_report else None
+            updater = read_json(Path(args.updater_report).expanduser()) if args.updater_report else None
+            e2e = read_json(Path(args.e2e_report).expanduser()) if args.e2e_report else None
+            source_stream = read_json(Path(args.source_stream_report).expanduser()) if args.source_stream_report else None
+            answer = None
+        public = read_json(Path(args.public_report).expanduser()) if args.public_report else None
+        shadow = read_json(Path(args.shadow_report).expanduser()) if args.shadow_report else None
+        if args.answer_report:
+            answer = read_json(Path(args.answer_report).expanduser())
+        report = build_report(
+            layered=layered,
+            updater=updater,
+            e2e=e2e,
+            source_stream=source_stream,
+            public=public,
+            shadow=shadow,
+            answer=answer,
+            require_public=args.require_public,
+            require_shadow=args.require_shadow,
+            require_answer=require_answer,
+            required_answer_source_benchmarks=required_answer_source_benchmarks,
+            required_answer_case_origins=required_answer_case_origins,
+        )
+        print(json.dumps(report, sort_keys=True))
+        if report["overall_status"] == "not_ready":
+            failed = [
+                name
+                for name, dimension in report["dimensions"].items()
+                if dimension["required"] and dimension["status"] != "passed"
+            ]
+            print("readiness gate failed: " + ", ".join(failed), file=sys.stderr)
+            return 1
+        return 0
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

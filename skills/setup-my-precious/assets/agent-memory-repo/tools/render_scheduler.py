@@ -71,6 +71,19 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
     )
 
 
+def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(memory_repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def ensure_safe_scheduler_log_path(memory_repo: Path, path: Path) -> None:
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit(f"Refusing to access unsafe scheduler log path: {path}")
+
+
 def interval_seconds(schedule: str) -> int:
     if schedule == "hourly":
         return 60 * 60
@@ -298,7 +311,9 @@ def main(argv: list[str] | None = None) -> int:
     validate_archive_command(memory_repo, project_path)
     if args.backend == "agent-native":
         validate_sync_command(memory_repo)
-    (memory_repo / ".tmp" / "logs").mkdir(parents=True, exist_ok=True)
+    log_dir = memory_repo / ".tmp" / "logs"
+    ensure_safe_scheduler_log_path(memory_repo, log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     if args.backend == "launchd":
         content = launchd_plist(

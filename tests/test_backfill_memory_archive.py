@@ -29,6 +29,8 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
 
             group = backfill.BackfillGroup(
                 project_path=project_path,
+                archive_scope=str(project_path.resolve()),
+                source_partition=str(project_path.resolve()),
                 project_name="project",
                 source_agent="agent",
                 source_record=source_record,
@@ -94,6 +96,8 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
                             "source_agent": "agent",
                             "project": "project",
                             "project_path": str(project_path.resolve()),
+                            "archive_scope": "domain:backfill",
+                            "source_partition": "source:backfill",
                             "source_record": str(source.resolve()),
                             "source_record_sha256": name,
                             "source_updated_at": stamp,
@@ -144,6 +148,8 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
                 if line.strip()
             ]
             self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["archive_scope"], "domain:backfill")
+            self.assertEqual(rows[0]["source_partition"], "source:backfill")
             self.assertIn("Backfill the stale memory", rows[0]["user_intent"])
             self.assertNotIn("session_meta", json.dumps(rows[0]))
 
@@ -272,6 +278,79 @@ class BackfillMemoryArchiveTests(unittest.TestCase):
             self.assertTrue(live_dir.exists())
             sessions_index = memory_repo / "index/sessions.jsonl"
             self.assertTrue(sessions_index.exists() and sessions_index.read_text(encoding="utf-8").strip())
+
+    def test_backfill_memory_archive_does_not_read_symlinked_entry_files_outside_archive(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            project_path = root / "project"
+            missing_source = root / "missing" / "rollout.jsonl"
+            outside_file = root / "outside-noise.md"
+            project_path.mkdir()
+            outside_file.write_text("session_meta: outside archive noise\n", encoding="utf-8")
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            entry_dir = memory_repo / "sessions/2026/05/14/symlink-noise"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "session_id": entry_dir.name,
+                        "source_agent": "agent",
+                        "project": "project",
+                        "project_path": str(project_path.resolve()),
+                        "source_record": str(missing_source.resolve()),
+                        "source_record_sha256": "oldhash",
+                        "source_updated_at": "2026-05-14T09:00:00Z",
+                        "summary_path": "sessions/2026/05/14/symlink-noise/summary.md",
+                        "evidence_path": "sessions/2026/05/14/symlink-noise/evidence.md",
+                        "archive_status": "summarized",
+                        "redaction_status": "none",
+                        "contains_raw_transcript": False,
+                        "evidence_policy": "short_redacted_snippets",
+                        "user_intent": "Clean existing entry.",
+                        "summary": "Clean existing entry.",
+                        "reusable_facts": [],
+                        "tags": ["agent-memory"],
+                        "decisions": [],
+                        "unresolved_tasks": [],
+                        "redaction_counts": {},
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (entry_dir / "summary.md").write_text("Clean existing entry.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("Clean existing evidence.\n", encoding="utf-8")
+            (entry_dir / "external.md").symlink_to(outside_file)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(memory_repo / "tools/backfill_memory_archive.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--prune-missing-source-noise",
+                    "--prune-only",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertIn("Missing-source noisy entries pruned: 0", result.stdout)
+            self.assertTrue(entry_dir.exists())
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Run memory archive updates for registered and discovered projects.
+"""Run memory archive updates for registered projects and source streams.
 
 This runner bootstraps an empty deployment repository by scanning a shared
 source-record directory, discovering project paths from record metadata, and
-then invoking the per-project updater for each enabled project.
+then invoking the per-project updater for each enabled project. Deployments can
+also register stable source streams whose archive scope and source partition do
+not depend on a project registry row.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -35,6 +38,51 @@ PROJECT_PATH_KEYS = {
 }
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env"}
 PROJECT_REGISTRY = Path("config/projects.jsonl")
+SOURCE_STREAM_REGISTRY = Path("config/source_streams.jsonl")
+UNSAFE_PATH = "[unsafe-path]"
+UNSAFE_IDENTIFIER = "[unsafe-identifier]"
+
+
+def has_sensitive_identifier_token(text: str) -> bool:
+    tokens = re.split(r"[^a-z0-9]+", text.lower().replace("_", " "))
+    token_set = set(tokens)
+    token_pairs = set(zip(tokens, tokens[1:]))
+    return bool(
+        token_set.intersection(
+            {
+                "apikey",
+                "authorization",
+                "bearer",
+                "cookie",
+                "credential",
+                "password",
+            }
+        )
+        or token_pairs.intersection(
+            {
+                ("api", "key"),
+                ("auth", "token"),
+                ("bearer", "token"),
+                ("private", "key"),
+                ("secret", "key"),
+                ("session", "id"),
+            }
+        )
+    )
+
+
+def safe_diagnostic_path(path: Path) -> str:
+    text = str(path)
+    if any(ord(char) < 32 or ord(char) == 127 for char in text) or has_sensitive_identifier_token(text):
+        return UNSAFE_PATH
+    return text
+
+
+def safe_diagnostic_identifier(value: object) -> str:
+    text = str(value)
+    if any(ord(char) < 32 or ord(char) == 127 for char in text) or has_sensitive_identifier_token(text):
+        return UNSAFE_IDENTIFIER
+    return text
 
 
 def utc_now_text() -> str:
@@ -166,9 +214,33 @@ def registry_path(memory_repo: Path) -> Path:
     return memory_repo / PROJECT_REGISTRY
 
 
+def source_stream_registry_path(memory_repo: Path) -> Path:
+    return memory_repo / SOURCE_STREAM_REGISTRY
+
+
+def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(memory_repo.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def ensure_safe_project_registry_path(memory_repo: Path, path: Path) -> None:
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit(f"Refusing to access unsafe project registry path: {safe_diagnostic_path(path)}")
+
+
+def ensure_safe_source_stream_registry_path(memory_repo: Path, path: Path) -> None:
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit(f"Refusing to access unsafe source stream registry path: {safe_diagnostic_path(path)}")
+
+
 def load_registry(memory_repo: Path) -> dict[str, dict[str, object]]:
     projects: dict[str, dict[str, object]] = {}
     path = registry_path(memory_repo)
+    if path.exists() or path.is_symlink():
+        ensure_safe_project_registry_path(memory_repo, path)
     if not path.exists():
         return projects
     with path.open("r", encoding="utf-8") as handle:
@@ -194,6 +266,42 @@ def load_registry(memory_repo: Path) -> dict[str, dict[str, object]]:
             normalized["project_path"] = key
             projects[key] = normalized
     return projects
+
+
+def load_source_stream_registry(memory_repo: Path) -> dict[str, dict[str, object]]:
+    streams: dict[str, dict[str, object]] = {}
+    path = source_stream_registry_path(memory_repo)
+    if path.exists() or path.is_symlink():
+        ensure_safe_source_stream_registry_path(memory_repo, path)
+    if not path.exists():
+        return streams
+    with path.open("r", encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            stream_id = row.get("stream_id")
+            if not isinstance(stream_id, str) or not stream_id.strip():
+                continue
+            normalized = dict(row)
+            normalized["stream_id"] = stream_id.strip()
+            if normalized.get("enabled", True) is not False:
+                for key in ("archive_scope", "source_partition"):
+                    value = normalized.get(key)
+                    if not isinstance(value, str) or not value.strip():
+                        raise SystemExit(
+                            f"source stream {safe_diagnostic_identifier(stream_id)} line {line_no} "
+                            f"requires {key}"
+                        )
+                    normalized[key] = value.strip()
+            streams[stream_id.strip()] = normalized
+    return streams
 
 
 def merge_discovered_projects(
@@ -222,8 +330,9 @@ def merge_discovered_projects(
 def write_registry(memory_repo: Path, projects: dict[str, dict[str, object]], dry_run: bool) -> None:
     path = registry_path(memory_repo)
     if dry_run:
-        print(f"dry-run: write project registry {path}")
+        print(f"dry-run: write project registry {safe_diagnostic_path(path)}")
         return
+    ensure_safe_project_registry_path(memory_repo, path)
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(projects[key], sort_keys=True) for key in sorted(projects)]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
@@ -233,6 +342,16 @@ def enabled_projects(projects: dict[str, dict[str, object]]) -> list[dict[str, o
     rows: list[dict[str, object]] = []
     for key in sorted(projects):
         row = projects[key]
+        if row.get("enabled", True) is False:
+            continue
+        rows.append(row)
+    return rows
+
+
+def enabled_source_streams(streams: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for key in sorted(streams):
+        row = streams[key]
         if row.get("enabled", True) is False:
             continue
         rows.append(row)
@@ -265,6 +384,12 @@ def run_project_update(
     project_name = project.get("project")
     if isinstance(project_name, str) and project_name.strip():
         command.extend(["--project", project_name])
+    archive_scope = project.get("archive_scope")
+    if isinstance(archive_scope, str) and archive_scope.strip():
+        command.extend(["--archive-scope", archive_scope.strip()])
+    source_partition = project.get("source_partition")
+    if isinstance(source_partition, str) and source_partition.strip():
+        command.extend(["--source-partition", source_partition.strip()])
     if max_records is not None:
         command.extend(["--max-records", str(max_records)])
     for pattern in patterns:
@@ -276,7 +401,63 @@ def run_project_update(
     if dry_run:
         command.append("--dry-run")
 
-    print(f"Updating project: {project_path}")
+    print(f"Updating project: {safe_diagnostic_path(Path(project_path))}")
+    result = subprocess.run(command, cwd=memory_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    return result.returncode
+
+
+def run_source_stream_update(
+    memory_repo: Path,
+    stream: dict[str, object],
+    default_source_dir: Path,
+    dry_run: bool,
+    max_records: int | None,
+    patterns: tuple[str, ...],
+    allow_redacted_secrets: bool,
+    rewrite_existing: bool,
+) -> int:
+    stream_id = str(stream["stream_id"])
+    source_dir = Path(str(stream.get("source_dir") or default_source_dir)).expanduser().resolve()
+    project_path = Path(str(stream.get("project_path") or source_dir)).expanduser().resolve()
+    archive_scope = str(stream["archive_scope"]).strip()
+    source_partition = str(stream["source_partition"]).strip()
+    project_name = stream.get("project")
+    if not isinstance(project_name, str) or not project_name.strip():
+        project_name = stream_id
+    command = [
+        sys.executable,
+        str(memory_repo / "tools" / "update_memory_archive.py"),
+        "--memory-repo",
+        str(memory_repo),
+        "--source-dir",
+        str(source_dir),
+        "--project-path",
+        str(project_path),
+        "--archive-scope",
+        archive_scope,
+        "--source-partition",
+        source_partition,
+        "--project",
+        project_name.strip(),
+    ]
+    if stream.get("require_project_metadata") is True:
+        command.append("--require-project-metadata")
+    if max_records is not None:
+        command.extend(["--max-records", str(max_records)])
+    for pattern in patterns:
+        command.extend(["--pattern", pattern])
+    if allow_redacted_secrets:
+        command.append("--allow-redacted-secrets")
+    if rewrite_existing:
+        command.append("--rewrite-existing")
+    if dry_run:
+        command.append("--dry-run")
+
+    print(f"Updating source stream: {safe_diagnostic_identifier(stream_id)}")
     result = subprocess.run(command, cwd=memory_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.stdout:
         print(result.stdout, end="")
@@ -312,18 +493,21 @@ def main(argv: list[str] | None = None) -> int:
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
 
     registered = load_registry(memory_repo)
+    source_streams = load_source_stream_registry(memory_repo)
     discovered = discover_projects(source_dir, patterns)
     projects, added = merge_discovered_projects(registered, discovered, source_dir)
     write_registry(memory_repo, projects, args.dry_run)
 
     runnable = enabled_projects(projects)
-    print(f"Memory repo: {memory_repo}")
-    print(f"Source dir: {source_dir}")
+    runnable_streams = enabled_source_streams(source_streams)
+    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
+    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
     print(f"Discovered projects: {len(discovered)}")
     print(f"Registered new projects: {added}")
     print(f"Enabled projects: {len(runnable)}")
+    print(f"Enabled source streams: {len(runnable_streams)}")
 
-    if not runnable:
+    if not runnable and not runnable_streams:
         print("Projects updated: 0")
         if not discovered and not registered:
             print("No registered projects and no project paths discovered from source records.")
@@ -347,9 +531,31 @@ def main(argv: list[str] | None = None) -> int:
         else:
             updated += 1
 
+    stream_failures = 0
+    streams_updated = 0
+    for stream in runnable_streams:
+        returncode = run_source_stream_update(
+            memory_repo,
+            stream,
+            source_dir,
+            args.dry_run,
+            args.max_records,
+            patterns,
+            args.allow_redacted_secrets,
+            args.rewrite_existing,
+        )
+        if returncode:
+            stream_failures += 1
+        else:
+            streams_updated += 1
+
     print(f"Projects updated: {updated}")
+    print(f"Source streams updated: {streams_updated}")
     if failures:
         print(f"Projects failed: {failures}", file=sys.stderr)
+    if stream_failures:
+        print(f"Source streams failed: {stream_failures}", file=sys.stderr)
+    if failures or stream_failures:
         return 1
     return 0
 

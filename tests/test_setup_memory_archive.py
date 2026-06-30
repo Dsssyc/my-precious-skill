@@ -58,6 +58,30 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertEqual(config["memory_repo"], str(target.resolve()))
             self.assertEqual(config["version"], 1)
 
+    def test_setup_template_includes_layered_memory_shape(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertTrue((memory_repo / "schemas/memory_node.schema.json").exists())
+            self.assertTrue((memory_repo / "memories/global.jsonl").exists())
+            self.assertTrue((memory_repo / "memories/domains.jsonl").exists())
+            self.assertTrue((memory_repo / "memories/projects.jsonl").exists())
+            self.assertTrue((memory_repo / "memories/explicit.jsonl").exists())
+            self.assertEqual((memory_repo / "memories/global.jsonl").read_text(encoding="utf-8"), "")
+            self.assertEqual((memory_repo / "memories/domains.jsonl").read_text(encoding="utf-8"), "")
+            self.assertEqual((memory_repo / "memories/projects.jsonl").read_text(encoding="utf-8"), "")
+            self.assertEqual((memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8"), "")
+
     def test_write_config_uses_private_permissions(self):
         module = load_setup_module()
 
@@ -70,6 +94,26 @@ class SetupMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(config_path.parent.stat().st_mode), 0o700)
+
+    def test_write_config_refuses_symlinked_config_file(self):
+        module = load_setup_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            config_dir = root / "config"
+            outside_config = root / "outside-config.json"
+            config_path = config_dir / "my-precious.json"
+            target.mkdir()
+            config_dir.mkdir()
+            outside_config.write_text('{"memory_repo": "unchanged"}\n', encoding="utf-8")
+            config_path.symlink_to(outside_config)
+
+            with self.assertRaises(SystemExit) as caught:
+                module.write_config(target, config_path, dry_run=False)
+
+            self.assertIn("Refusing to write symlinked config path:", str(caught.exception))
+            self.assertEqual(outside_config.read_text(encoding="utf-8"), '{"memory_repo": "unchanged"}\n')
 
     def test_setup_memory_archive_refuses_non_empty_without_force(self):
         script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
@@ -88,6 +132,38 @@ class SetupMemoryArchiveTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("target is not empty", result.stderr)
+
+    def test_setup_memory_archive_refuses_symlinked_template_target_outside_archive(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            outside_readme = root / "outside-readme.md"
+            target.mkdir()
+            outside_readme.write_text("unchanged\n", encoding="utf-8")
+            (target / "README.md").symlink_to(outside_readme)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--mode",
+                    "local",
+                    "--force",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to write unsafe template path:", output)
+            self.assertEqual(outside_readme.read_text(encoding="utf-8"), "unchanged\n")
 
     def test_setup_memory_archive_github_mode_dry_run(self):
         script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
@@ -327,6 +403,47 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("--allow-redacted-secrets", payload["ProgramArguments"])
             self.assertNotIn("--project-path", payload["ProgramArguments"])
             self.assertNotIn(str((target / "tools/update_memory_archive.py").resolve()), payload["ProgramArguments"])
+
+    def test_render_scheduler_refuses_symlinked_log_dir_outside_archive(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            source_dir = root / ".codex" / "sessions"
+            outside_logs = root / "outside-logs"
+            source_dir.mkdir(parents=True)
+            outside_logs.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(target), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            (target / ".tmp").mkdir()
+            (target / ".tmp/logs").symlink_to(outside_logs, target_is_directory=True)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(target / "tools/render_scheduler.py"),
+                    "--source-dir",
+                    str(source_dir),
+                    "--backend",
+                    "launchd",
+                    "--schedule",
+                    "daily",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to access unsafe scheduler log path:", output)
 
     def test_render_scheduler_can_render_agent_native_prompt(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

@@ -37,19 +37,58 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    python "$MEMORY_REPO/tools/search_memory.py" "<query>"
    ```
 
-2. If the deployment repo has no search tool, use the bundled script:
+   This starts with high-level layered memory nodes when the archive contains
+   `index/memories.jsonl`.
+
+2. When the current task is tied to a local project, pass project context:
+
+   ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --project-path "$PWD"
+   ```
+
+   This boosts matching `project_path`, `cwd`, `repository`, or project
+   records without hiding cross-project hits.
+
+3. If high-level memory is insufficient, drill down:
+
+   ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth session
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth evidence
+   ```
+
+4. Use source depth only when the user explicitly asks for source reachability:
+
+   ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source
+   ```
+
+   This prints safe source ref status metadata (`source_ref_id`, `status`, and
+   `reason`) rather than raw source content. If the user explicitly asks for a
+   raw-source check, request only a short redacted preview and include the
+   separate authorization confirmation flag:
+
+   ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
+   ```
+
+5. If the deployment repo has no search tool, use the bundled script:
 
    ```bash
    python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO"
    ```
 
-3. Open the top matching `summary.md` files first.
+6. Read `why:` and `drill:` lines. Prefer high-level memories with strong
+   provenance, such as `confidence:high`, `support_count:<n>`,
+   `source:explicit`, high-signal `field:<name>` reasons,
+   `important-token-coverage`, or `project-context`.
 
-4. Open `evidence.md` only when the summary is insufficient or the user asks for stronger support.
+7. Open supporting summaries from `drill:` first. Open `evidence.md` only when
+   the summary is insufficient or the user asks for stronger support.
 
-5. Answer from the archive evidence, and mention the archive paths used.
+8. Answer from the archive evidence, and mention the archive paths used.
 
-6. If search returns no relevant result, say that explicitly instead of inferring historical facts.
+9. If search returns no relevant result, say that explicitly instead of
+   inferring historical facts.
 
 ## Privacy Rules
 
@@ -64,6 +103,9 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 Expected deployment repositories expose:
 
 - `INDEX.md` for human-readable recent sessions and unresolved work.
+- `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
+  and `memories/explicit.jsonl` for layered memory nodes.
+- `index/memories.jsonl` for the combined layered-memory search index.
 - `index/sessions.jsonl` for one row per archived session.
 - `index/decisions.jsonl` for durable decisions.
 - `index/unresolved.jsonl` for open follow-up tasks.

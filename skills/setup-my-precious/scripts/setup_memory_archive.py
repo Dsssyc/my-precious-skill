@@ -52,6 +52,7 @@ def copy_template(target: Path, force: bool, dry_run: bool) -> None:
         print(f"dry-run: copy {TEMPLATE_DIR} -> {target}")
         return
     target.mkdir(parents=True, exist_ok=True)
+    ensure_safe_template_destinations(target)
     shutil.copytree(
         TEMPLATE_DIR,
         target,
@@ -96,6 +97,21 @@ def template_files() -> list[str]:
         and not TEMPLATE_SKIP_DIRS.intersection(path.relative_to(TEMPLATE_DIR).parts)
         and path.suffix not in TEMPLATE_SKIP_SUFFIXES
     )
+
+
+def is_safe_target_path(target: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(target.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def ensure_safe_template_destinations(target: Path) -> None:
+    for relative in template_files():
+        destination = target / relative
+        if not is_safe_target_path(target, destination):
+            raise SystemExit(f"Refusing to write unsafe template path: {destination}")
 
 
 def stage_template_files(target: Path, dry_run: bool) -> None:
@@ -160,10 +176,13 @@ def create_github_repo(target: Path, repo: str, private: bool, dry_run: bool) ->
 
 
 def write_config(target: Path, config_path: Path, dry_run: bool) -> None:
-    config_path = config_path.expanduser().resolve()
+    config_path = config_path.expanduser()
     if dry_run:
         print(f"dry-run: write config {config_path} memory_repo={target}")
         return
+    if config_path.is_symlink():
+        raise SystemExit(f"Refusing to write symlinked config path: {config_path}")
+    config_path = config_path.resolve()
 
     payload: dict[str, object] = {}
     if config_path.exists():
