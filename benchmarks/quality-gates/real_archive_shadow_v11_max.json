@@ -1,9 +1,9 @@
 {
   "abstain_false_positive_results": 0,
   "forbidden_output_violations": 0,
-  "noise_sources_at_5.broad_lexical_match": 15,
+  "noise_sources_at_5.broad_lexical_match": 4,
   "noise_sources_at_5.inactive_lifecycle": 0,
   "noise_sources_at_5.low_signal_memory_node": 0,
-  "noise_sources_at_5.scope_mixed": 3,
-  "top_k_noise_at_5": 0.4
+  "noise_sources_at_5.scope_mixed": 2,
+  "top_k_noise_at_5": 0.2
 }

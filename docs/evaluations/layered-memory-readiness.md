@@ -2166,6 +2166,105 @@ retrieved durable policy memories about process-noise handling. The retained
 daily/automation cases therefore test positive recall of durable process
 policy rather than treating all process-related hits as false positives.
 
+## V1.1 Scope-Aware Real-Archive Ranking Reduction
+
+Date: 2026-06-30
+
+Base code point: `f470719 Merge pull request #4 from Dsssyc/codex/v1.1-shadow-coverage-expansion`
+
+This is a bounded ranking change, not a benchmark expansion. The search path now
+keeps the strongest memory anchor and prunes same-layer tail hits whose scope
+and topic both differ from that anchor after the existing relative-score floor.
+It also extends the existing process-memory demotion so automatic process
+records with repeated query wording are demoted even when their support count is
+above one. These rules are generic search-ranking rules; they do not inspect or
+encode private probe queries, memory IDs, memory text, source refs, source
+paths, or raw refs.
+
+The stricter v1.1 and expanded-coverage gate files were tightened to the new
+aggregate profile:
+
+- `benchmarks/quality-gates/real_archive_shadow_v11.json`
+- `benchmarks/quality-gates/real_archive_shadow_v11_max.json`
+- `benchmarks/quality-gates/real_archive_shadow_v11_coverage.json`
+- `benchmarks/quality-gates/real_archive_shadow_v11_coverage_max.json`
+
+Commands:
+
+```bash
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v2.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  --fail-under-file benchmarks/quality-gates/real_archive_shadow_v11.json \
+  --fail-over-file benchmarks/quality-gates/real_archive_shadow_v11_max.json \
+  > /tmp/my_precious_v11_shadow_strict_after_scope_ranking_20260630.json
+
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v3.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  --fail-under-file benchmarks/quality-gates/real_archive_shadow_v11_coverage.json \
+  --fail-over-file benchmarks/quality-gates/real_archive_shadow_v11_coverage_max.json \
+  > /tmp/my_precious_v11_shadow_coverage_after_scope_ranking_20260630.json
+```
+
+Both commands emitted aggregate-only JSON and returned success against the
+current private deployment archive.
+
+Strict v1.1 27-case gate before/after:
+
+| metric | before | after |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.6086956521739131 | 0.8064516129032258 |
+| top_k_noise_at_5 | 0.3913043478260869 | 0.19354838709677424 |
+| noise_sources_at_5.broad_lexical_match | 15 | 4 |
+| noise_sources_at_5.scope_mixed | 3 | 2 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| diagnostics.failure_types.top_k_noise | 8 | 5 |
+
+Expanded 34-case coverage gate before/after:
+
+| metric | before | after |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.5737704918032787 | 0.7804878048780488 |
+| top_k_noise_at_5 | 0.42622950819672134 | 0.2195121951219512 |
+| noise_sources_at_5.broad_lexical_match | 20 | 6 |
+| noise_sources_at_5.scope_mixed | 6 | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| diagnostics.failure_types.top_k_noise | 11 | 8 |
+
+Claim boundary: this is a ranking/noise reduction for near-tie memory-node
+results, not a new recall feature. It intentionally reduces same-layer
+cross-scope/cross-topic top-k fill after a stronger anchor exists. It preserves
+case-level recall, abstention, active suppression, privacy, provenance, and
+lifecycle gates, but it can reduce the number of relevant sibling memories
+returned for a case. The benchmark precision metric counts result-level
+relevance, while recall remains case-level.
+
+Privacy-safe aggregate diagnostics showed that the remaining expanded
+`scope_mixed=3` aligns with expected-layer versus expected-memory layer
+mismatch in the private probe/archive data. Treat that residual bucket as a
+case/archive-data boundary before adding more ranking rules for it. Further
+ranking changes should target the remaining `broad_lexical_match=6` only if
+they improve aggregate buckets without reducing the preserved gates above.
+
 ## Recommendation
 
 Freeze the required v1 readiness target and proceed only with v1.1 or research
