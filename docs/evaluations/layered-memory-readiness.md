@@ -2067,6 +2067,105 @@ should stop unless it can reduce those aggregate counts without reducing
 `memory_recall_at_5`, `abstain_pass_rate`, `active_memory_suppression`,
 `privacy_boundary_pass_rate`, provenance coverage, or lifecycle integrity.
 
+## V1.1 Real-Archive Shadow Coverage Expansion
+
+Date: 2026-06-30
+
+Code point: `db85196 Merge pull request #3 from Dsssyc/codex/v1.1-daily-record-content-contract`
+
+This expands the private redacted real-history shadow probe coverage without
+changing public benchmark logic or search-ranking behavior. It adds a separate
+coverage gate instead of weakening the stricter v1.1 baseline gate:
+
+- `benchmarks/quality-gates/real_archive_shadow_v11_coverage.json`
+- `benchmarks/quality-gates/real_archive_shadow_v11_coverage_max.json`
+
+The coverage gate files contain only numeric aggregate thresholds. They do not
+contain private probe rows, queries, memory IDs, memory text, source refs,
+source paths, raw refs, generated answers, or answer text.
+
+The private coverage probe extends the v2 redacted real-history set from 27 to
+34 cases: 31 positive cases and 3 expected-abstain cases. The seven added cases
+cover these aggregate categories:
+
+| added category | cases |
+| --- | ---: |
+| broad_lexical_top_k_noise_variant | 1 |
+| scope_mixed_top_k_noise_variant | 1 |
+| daily_automation_process_noise | 3 |
+| consolidation_lifecycle | 2 |
+
+Command:
+
+```bash
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v3.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  --fail-under-file benchmarks/quality-gates/real_archive_shadow_v11_coverage.json \
+  --fail-over-file benchmarks/quality-gates/real_archive_shadow_v11_coverage_max.json \
+  > /tmp/my_precious_v11_shadow_v3_coverage_20260630.json
+```
+
+The command emitted aggregate-only JSON and returned success against the
+current private deployment archive. The private probe file and report remain
+outside this repository.
+
+Coverage gate aggregate result:
+
+| metric | value |
+| --- | ---: |
+| archive.memory_records | 1402 |
+| archive.legacy_session_records | 275 |
+| probe_cases.cases | 34 |
+| probe_cases.positive_cases | 31 |
+| probe_cases.abstain_cases | 3 |
+| privacy_pattern_cases | 12 |
+| memory_recall_at_5 | 1.0 |
+| memory_precision_at_5 | 0.5737704918032787 |
+| top_k_noise_at_5 | 0.42622950819672134 |
+| noise_sources_at_5.broad_lexical_match | 20 |
+| noise_sources_at_5.scope_mixed | 6 |
+| noise_sources_at_5.inactive_lifecycle | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 |
+| abstain_pass_rate | 1.0 |
+| abstain_false_positive_results | 0 |
+| active_memory_suppression | 1.0 |
+| privacy_boundary_pass_rate | 1.0 |
+| forbidden_output_violations | 0 |
+| provenance_coverage.score | 1.0 |
+| provenance_coverage.evidence_ref_coverage | 1.0 |
+| lifecycle_integrity.score | 1.0 |
+| lifecycle_integrity.checked_refs | 4 |
+| lifecycle_integrity.broken_refs | 0 |
+| lifecycle_integrity.illegal_state_records | 0 |
+| diagnostics.failure_case_count | 11 |
+| diagnostics.failure_types.top_k_noise | 11 |
+| diagnostics.failure_types.recall_miss | 0 |
+| diagnostics.failure_types.abstain_false_positive | 0 |
+| diagnostics.failure_types.suppression_failure | 0 |
+| diagnostics.failure_types.privacy_failure | 0 |
+
+Claim boundary: this is a coverage expansion, not a ranking improvement.
+Compared with the stricter 27-case v1.1 baseline, the broader 34-case probe
+keeps recall, abstention, active-memory suppression, privacy, provenance, and
+lifecycle integrity at `1.0`, but exposes more top-k noise:
+
+| metric | strict v1.1 baseline | expanded coverage |
+| --- | ---: | ---: |
+| probe_cases.cases | 27 | 34 |
+| memory_precision_at_5 | 0.6086956521739131 | 0.5737704918032787 |
+| top_k_noise_at_5 | 0.3913043478260869 | 0.42622950819672134 |
+| noise_sources_at_5.broad_lexical_match | 15 | 20 |
+| noise_sources_at_5.scope_mixed | 3 | 6 |
+
+The regression bucket is search-quality noise under harder coverage, not a
+recall, privacy, provenance, or lifecycle failure. During case design, generic
+daily/process-noise no-hit probes were rejected because they legitimately
+retrieved durable policy memories about process-noise handling. The retained
+daily/automation cases therefore test positive recall of durable process
+policy rather than treating all process-related hits as false positives.
+
 ## Recommendation
 
 Freeze the required v1 readiness target and proceed only with v1.1 or research
