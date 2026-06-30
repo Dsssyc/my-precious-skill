@@ -266,8 +266,13 @@ If none are set, tools may try `~/repos/agent-memory`.
 - The template can render global-runner and single-project scheduler
   configuration without enabling recurring jobs.
 - The template can render agent-native automation prompts that use one working
-  directory, run the global updater, verify search, and call the safe Git sync
-  helper.
+  directory, run the global updater, verify search, call the safe Git sync
+  helper, and treat daily files as durable memory indexes rather than
+  automation run logs.
+- Daily summaries are rendered as durable sessions, durable decisions, and
+  durable unresolved tasks, with process narration, raw prompts, injected
+  policy/environment text, local source paths, raw refs, full queries, and
+  secret values filtered out before writing `daily/YYYY/YYYY-MM-DD.md`.
 - The safe Git sync helper refuses non-archive changes, unredacted key-like
   values, and whitespace errors before committing or pushing.
 - The template repository contains no real memory data.

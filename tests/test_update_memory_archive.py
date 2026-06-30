@@ -88,6 +88,52 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             "rationale": "Synthetic reviewer decision.",
         }
 
+    def test_render_daily_summaries_uses_durable_sections_and_filters_process_noise(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            memory_repo.mkdir()
+            rows = [
+                {
+                    "source_updated_at": "2026-06-30T01:00:00Z",
+                    "project": "automation",
+                    "session_id": "run-log",
+                    "summary_path": "sessions/2026/06/30/run-log/summary.md",
+                    "summary": "I will run the update command and report status.",
+                    "decisions": [
+                        "Decision: durable daily summaries should avoid process logs.",
+                        "I will inspect the result next.",
+                    ],
+                    "unresolved_tasks": [
+                        "I will rerun tests later.",
+                        "Review the daily content contract if archive audit fails.",
+                    ],
+                },
+                {
+                    "source_updated_at": "2026-06-30T02:00:00Z",
+                    "project": "memory",
+                    "session_id": "durable",
+                    "summary_path": "sessions/2026/06/30/durable/summary.md",
+                    "summary": "Daily summaries preserve durable memory decisions and unresolved tasks.",
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                },
+            ]
+
+            module.render_daily_summaries(memory_repo, rows)
+
+            daily_text = (memory_repo / "daily/2026/2026-06-30.md").read_text(encoding="utf-8")
+            self.assertIn("## Durable Sessions", daily_text)
+            self.assertIn("## Durable Decisions", daily_text)
+            self.assertIn("## Durable Unresolved Tasks", daily_text)
+            self.assertIn("Daily summaries preserve durable memory decisions", daily_text)
+            self.assertIn("Decision: durable daily summaries should avoid process logs.", daily_text)
+            self.assertIn("Review the daily content contract if archive audit fails.", daily_text)
+            self.assertNotIn("I will run the update command", daily_text)
+            self.assertNotIn("I will inspect the result next", daily_text)
+            self.assertNotIn("I will rerun tests later", daily_text)
+
     def write_natural_induction_meta(
         self,
         memory_repo: Path,
