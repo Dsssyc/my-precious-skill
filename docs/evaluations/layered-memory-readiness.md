@@ -1985,6 +1985,88 @@ is explicitly widened:
 - richer long-horizon lifecycle, decay, deletion, and multi-principal
   governance.
 
+## V1.1 Real-Archive Shadow Gate Baseline
+
+Date: 2026-06-30
+
+Code point: `bef93e3 Document v1 readiness completion audit`
+
+This starts v1.1 real-archive evidence hardening without adding new v1
+features. The reusable repository now carries stricter aggregate shadow-gate
+threshold files:
+
+- `benchmarks/quality-gates/real_archive_shadow_v11.json`
+- `benchmarks/quality-gates/real_archive_shadow_v11_max.json`
+
+The gate files contain only numeric aggregate thresholds. They do not contain
+private probe rows, queries, memory IDs, memory text, source refs, source paths,
+raw refs, generated answers, or answer text.
+
+Command:
+
+```bash
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v2.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  --fail-under-file benchmarks/quality-gates/real_archive_shadow_v11.json \
+  --fail-over-file benchmarks/quality-gates/real_archive_shadow_v11_max.json \
+  > /tmp/my_precious_v11_shadow_gate_20260630.json
+```
+
+The command emitted aggregate-only JSON and returned success against the
+current private deployment archive. The private archive was read-only for this
+run; the aggregate report was written under `/tmp`.
+
+V1.1 gate thresholds:
+
+| metric | v1 floor | v1.1 floor |
+| --- | ---: | ---: |
+| memory_precision_at_5 | 0.42424242424242425 | 0.6 |
+| top_k_noise_at_5 | <= 0.5757575757575757 | <= 0.4 |
+| noise_sources_at_5.broad_lexical_match | <= 35 | <= 15 |
+| noise_sources_at_5.scope_mixed | <= 3 | <= 3 |
+| noise_sources_at_5.inactive_lifecycle | <= 0 | <= 0 |
+| noise_sources_at_5.low_signal_memory_node | <= 0 | <= 0 |
+
+Current v1.1 aggregate result:
+
+| metric | value |
+| --- | ---: |
+| archive.memory_records | 1402 |
+| archive.legacy_session_records | 275 |
+| probe_cases.cases | 27 |
+| probe_cases.positive_cases | 24 |
+| probe_cases.abstain_cases | 3 |
+| memory_recall_at_5 | 1.0 |
+| memory_precision_at_5 | 0.6086956521739131 |
+| top_k_noise_at_5 | 0.3913043478260869 |
+| noise_sources_at_5.broad_lexical_match | 15 |
+| noise_sources_at_5.scope_mixed | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 |
+| abstain_pass_rate | 1.0 |
+| abstain_false_positive_results | 0 |
+| active_memory_suppression | 1.0 |
+| privacy_boundary_pass_rate | 1.0 |
+| forbidden_output_violations | 0 |
+| provenance_coverage.score | 1.0 |
+| lifecycle_integrity.score | 1.0 |
+| audit_status | passed |
+| diagnostics.failure_case_count | 8 |
+| diagnostics.failure_types.top_k_noise | 8 |
+| diagnostics.failure_types.recall_miss | 0 |
+| diagnostics.failure_types.abstain_false_positive | 0 |
+| diagnostics.failure_types.privacy_failure | 0 |
+
+This is a gate-hardening step, not a search-quality breakthrough. It raises the
+real-archive regression floor to the best known aggregate profile while keeping
+the remaining gap visible: eight private probe cases still have top-k noise,
+with `broad_lexical_match=15` and `scope_mixed=3`. A future v1.1 optimization
+should stop unless it can reduce those aggregate counts without reducing
+`memory_recall_at_5`, `abstain_pass_rate`, `active_memory_suppression`,
+`privacy_boundary_pass_rate`, provenance coverage, or lifecycle integrity.
+
 ## Recommendation
 
 Freeze the required v1 readiness target and proceed only with v1.1 or research
