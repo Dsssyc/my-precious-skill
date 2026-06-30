@@ -373,16 +373,19 @@ not counted as noise. The report includes recall, active-memory suppression,
 abstain pass rate, abstain false-positive result count, lifecycle integrity,
 top-k noise, provenance coverage, and aggregate hashed `case_details`
 count/status fields, plus `noise_sources_at_5` buckets for broad lexical, scope-mixed,
-inactive lifecycle, and low-signal memory-node results. `expected_abstain:
-true` cases pass only when no memory hits are returned. The runner can also
+inactive lifecycle, and low-signal memory-node results. It also includes
+`noise_relation_to_expected_at_5` aggregate buckets that classify noise hits by
+their layer/scope/topic relation to expected memory records without rendering
+the underlying values. `expected_abstain: true` cases pass only when no memory
+hits are returned. The runner can also
 report legacy archives that do not yet have `index/memories.jsonl`, but memory
 top-k metrics remain `null` until layered memory nodes exist.
 The JSON report also includes a privacy-safe `diagnostics` block that groups
 failure cases by `recall_miss`, `abstain_false_positive`,
 `suppression_failure`, `privacy_failure`, and `top_k_noise`. Diagnostic entries
-use only case ordinals, short case-label hashes, counts, and noise buckets; they
-do not render probe queries, memory IDs, source paths, raw refs, or forbidden
-patterns.
+use only case ordinals, short case-label hashes, counts, noise-source buckets,
+and noise-relation buckets; they do not render probe queries, memory IDs,
+source paths, raw refs, or forbidden patterns.
 The report-level `privacy` block declares that it is aggregate-only and that
 private probe cases, queries, memory IDs, memory text, source refs, source
 content, source paths, and raw refs were not rendered.

@@ -326,9 +326,11 @@ secret-like 正则。`expected_abstain: true` case 只有在没有返回 memory 
 result count。JSON report 还会输出 privacy-safe `diagnostics` block，按
 `recall_miss`、`abstain_false_positive`、`suppression_failure`、
 `privacy_failure` 和 `top_k_noise` 聚合失败 case。diagnostic entry 只包含
-case ordinal、短 case-label hash、计数和 noise bucket，不渲染 probe query、
-memory ID、source path、raw ref 或 forbidden pattern。`--fail-under`、
-`--fail-over`、`--fail-under-file` 和
+case ordinal、短 case-label hash、计数、noise-source bucket 和
+`noise_relation_to_expected_at_5` 关系 bucket；后者只按相对 expected memory
+的 layer/scope/topic 关系聚合计数，不渲染实际 layer/scope/topic 值。shadow
+eval 不渲染 probe query、memory ID、source path、raw ref 或 forbidden
+pattern。`--fail-under`、`--fail-over`、`--fail-under-file` 和
 `--fail-over-file` 可以约束数值聚合指标或 dotted metric path，例如
 `metrics.provenance_coverage.score`。threshold failure 只输出 metric 名称、
 实际值和阈值，不输出 JSON report。shadow eval 不渲染 memory text、evidence
