@@ -1194,6 +1194,128 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("strict-token-coverage", result.stdout)
         self.assertNotIn("memory_id: mem_agent_workflow_neighbor", result.stdout)
 
+    def test_search_memory_prunes_cross_scope_topic_repetition_from_top_k(self):
+        script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            (repo / "index").mkdir()
+            session_dir = repo / "sessions/2026/06/21/cross-scope-topic"
+            session_dir.mkdir(parents=True)
+            (session_dir / "summary.md").write_text(
+                "# Session: Cross scope topic ranking\n\n"
+                "Durable source anchor drilldown memory should not be crowded by unrelated repeated terms.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "memory_id": "mem_source_anchor_target",
+                    "layer": "domain",
+                    "scope": "domain:memory-retrieval",
+                    "topic": "source-depth",
+                    "text": "source anchor drilldown policy keeps raw refs gated and evidence reachable",
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 3,
+                    "derived_from": ["sessions/2026/06/21/cross-scope-topic/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "tags": ["source-anchor", "drilldown"],
+                },
+                {
+                    "memory_id": "mem_process_repetition_neighbor",
+                    "layer": "domain",
+                    "scope": "domain:automation-process",
+                    "topic": "process-noise",
+                    "text": (
+                        "source anchor drilldown policy source anchor drilldown policy "
+                        "source anchor drilldown policy repeated in an unrelated automation progress note"
+                    ),
+                    "source": "automatic",
+                    "confidence": "high",
+                    "support_count": 3,
+                    "derived_from": ["sessions/2026/06/21/cross-scope-topic/summary.md"],
+                    "evidence_refs": [],
+                    "raw_refs": [],
+                    "tags": ["automation", "progress"],
+                },
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source anchor drilldown policy",
+                    "--repo",
+                    str(repo),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertIn("memory_id: mem_source_anchor_target", result.stdout)
+        self.assertNotIn("memory_id: mem_process_repetition_neighbor", result.stdout)
+
+    def test_search_memory_prunes_same_layer_cross_scope_topic_tail_hits(self):
+        search_memory = load_search_memory_module()
+        hits = [
+            search_memory.Hit(
+                path=Path("anchor"),
+                score=1000,
+                source="memory",
+                why=[],
+                memory_id="mem_source_depth_anchor",
+                layer="domain",
+                scope="domain:memory-retrieval",
+                topic="source-depth",
+            ),
+            search_memory.Hit(
+                path=Path("same-scope"),
+                score=995,
+                source="memory",
+                why=[],
+                memory_id="mem_same_scope_related",
+                layer="domain",
+                scope="domain:memory-retrieval",
+                topic="evidence-policy",
+            ),
+            search_memory.Hit(
+                path=Path("same-topic"),
+                score=994,
+                source="memory",
+                why=[],
+                memory_id="mem_same_topic_related",
+                layer="domain",
+                scope="domain:archive-audit",
+                topic="source-depth",
+            ),
+            search_memory.Hit(
+                path=Path("tail"),
+                score=993,
+                source="memory",
+                why=[],
+                memory_id="mem_renderer_tail_fill",
+                layer="domain",
+                scope="domain:renderer",
+                topic="render-loop",
+            ),
+        ]
+
+        kept = search_memory.prune_cross_scope_topic_tail_memory_hits(hits)
+
+        self.assertEqual(
+            [hit.memory_id for hit in kept],
+            ["mem_source_depth_anchor", "mem_same_scope_related", "mem_same_topic_related"],
+        )
+
     def test_search_memory_skips_superseded_memory_nodes(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

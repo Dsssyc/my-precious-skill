@@ -601,11 +601,12 @@ def memory_rank_adjustment(record: dict, query_tokens: list[str], preferred_scop
             adjustment -= 900
             add_reason(reasons, f"scope-preference-demoted:{preferred_scope}")
 
-    if source == "automatic" and support_count <= 1:
-        if has_process_memory_signal(record):
+    if source == "automatic":
+        repeated_query_signal = has_repeated_query_signal(record, query_tokens)
+        if has_process_memory_signal(record) and (support_count <= 1 or repeated_query_signal):
             adjustment -= 900
             add_reason(reasons, "process-memory-demoted")
-        if confidence in ("", "low", "medium") and has_repeated_query_signal(record, query_tokens):
+        if support_count <= 1 and confidence in ("", "low", "medium") and repeated_query_signal:
             adjustment -= 350
             add_reason(reasons, "lexical-repetition-demoted")
 
@@ -635,6 +636,22 @@ def prune_low_relative_memory_hits(hits: list[Hit]) -> list[Hit]:
     top_score = max(hit.score for hit in hits)
     threshold = int(top_score * 0.99)
     return [hit for hit in hits if hit.score >= threshold]
+
+
+def prune_cross_scope_topic_tail_memory_hits(hits: list[Hit]) -> list[Hit]:
+    if len(hits) <= 1:
+        return hits
+    anchor = hits[0]
+    if not (anchor.layer and anchor.scope and anchor.topic):
+        return hits
+    kept = [anchor]
+    for hit in hits[1:]:
+        if not (hit.layer and hit.scope and hit.topic):
+            kept.append(hit)
+            continue
+        if hit.layer != anchor.layer or hit.scope == anchor.scope or hit.topic == anchor.topic:
+            kept.append(hit)
+    return kept
 
 
 def prune_nonpreferred_scope_hits(preferred_scope: str, hits: list[Hit]) -> list[Hit]:
@@ -1568,7 +1585,8 @@ def collect_memory_hits(
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
     hits = prune_redundant_topic_scope_memory_hits(hits)
-    return prune_low_relative_memory_hits(hits)
+    hits = prune_low_relative_memory_hits(hits)
+    return prune_cross_scope_topic_tail_memory_hits(hits)
 
 
 def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:
