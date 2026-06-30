@@ -757,6 +757,14 @@ python ~/repos/agent-memory/tools/render_scheduler.py \
 agent-native automation 应只使用部署仓库作为唯一工作目录。多个工作目录可能会
 创建多个并发 automation 对话。
 
+渲染出的 agent-native prompt 会包含 daily record 内容契约：
+`daily/YYYY/YYYY-MM-DD.md` 是 durable memory index，不是 automation 运行日志。
+它只应包含 durable session summary、durable decision 和真实 unresolved task；
+不应保留命令进度、dry-run/live-run 状态、权限或 sandbox 噪声、raw prompt、
+AGENTS/environment/policy block、raw source path、raw ref、完整 query、secret 原值
+或泛化过程叙述。生成的 daily summary 使用 `Durable Sessions`、
+`Durable Decisions` 和 `Durable Unresolved Tasks` 三个区段。
+
 安全提交并 push 生成的 archive 更新：
 
 ```bash

@@ -288,6 +288,16 @@ Agent-native automation should use the memory repository as its only working
 directory. Multiple working directories may create multiple concurrent
 automation conversations.
 
+The rendered prompt includes a daily record content contract:
+`daily/YYYY/YYYY-MM-DD.md` files are durable memory indexes, not automation run
+logs. Daily records should contain durable session summaries, durable
+decisions, and actual unresolved tasks, and should exclude command progress,
+dry-run/live-run status, permission or sandbox chatter, raw prompts,
+AGENTS/environment/policy blocks, raw source paths, raw refs, full queries,
+original secret values, and generic process narration. Generated daily files use
+`Durable Sessions`, `Durable Decisions`, and `Durable Unresolved Tasks`
+sections.
+
 ## Safe Git Sync
 
 After an update, commit and optionally push generated archive changes:

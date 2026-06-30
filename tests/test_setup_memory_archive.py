@@ -487,6 +487,11 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn(str(target.resolve()), prompt)
             self.assertIn("--allow-redacted-secrets", prompt)
             self.assertIn("tools/sync_memory_archive.py --push", prompt)
+            self.assertIn("Daily record content contract", prompt)
+            self.assertIn("daily/YYYY/YYYY-MM-DD.md", prompt)
+            self.assertIn("durable memory indexes, not automation run logs", prompt)
+            self.assertIn("AGENTS/environment/policy blocks", prompt)
+            self.assertIn("Do not hand-stage files", prompt)
 
     def test_render_scheduler_refuses_global_schedule_without_runner(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

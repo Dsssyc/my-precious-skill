@@ -3924,33 +3924,59 @@ def render_daily_summaries(memory_repo: Path, rows: list[dict]) -> None:
         year = day[:4]
         daily_dir = memory_repo / "daily" / year
         daily_dir.mkdir(parents=True, exist_ok=True)
-        daily_md = f"# Agent Memory Daily Summary: {day}\n\n## Sessions\n\n"
+        daily_md = f"# Agent Memory Daily Summary: {day}\n\n"
+        session_lines: list[str] = []
         for row in day_rows:
-            daily_md += f"- {row.get('project', '')}: [{row.get('session_id', '')}]({row.get('summary_path', '')})\n"
-            summary = row.get("summary")
-            if isinstance(summary, str) and summary.strip():
-                daily_md += f"  - {summary.strip()}\n"
-        daily_md += "\n## Decisions\n\n"
-        decisions = [
+            summary = durable_daily_text(row.get("summary"))
+            if not summary:
+                continue
+            session_lines.append(f"- {row.get('project', '')}: [{row.get('session_id', '')}]({row.get('summary_path', '')})\n")
+            session_lines.append(f"  - {summary}\n")
+        if session_lines:
+            daily_md += "## Durable Sessions\n\n"
+            daily_md += "".join(session_lines)
+        decisions = unique_durable_daily_items(
             decision
             for row in day_rows
             for decision in (row.get("decisions", []) if isinstance(row.get("decisions"), list) else [])
-        ]
+        )
         if decisions:
+            daily_md += "\n## Durable Decisions\n\n"
             daily_md += "".join(f"- {decision}\n" for decision in decisions)
-        else:
-            daily_md += "No decisions indexed for this day.\n"
-        daily_md += "\n## Unresolved Tasks\n\n"
-        unresolved = [
+        unresolved = unique_durable_daily_items(
             task
             for row in day_rows
             for task in (row.get("unresolved_tasks", []) if isinstance(row.get("unresolved_tasks"), list) else [])
-        ]
+        )
         if unresolved:
+            daily_md += "\n## Durable Unresolved Tasks\n\n"
             daily_md += "".join(f"- {task}\n" for task in unresolved)
-        else:
-            daily_md += "No unresolved tasks indexed for this day.\n"
         write_safe_archive_text(memory_repo, daily_dir / f"{day}.md", daily_md, "daily file")
+
+
+def durable_daily_text(text: object) -> str:
+    if not isinstance(text, str):
+        return ""
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return ""
+    if (
+        is_noisy_text(compacted)
+        or is_raw_prompt_text(compacted)
+        or is_injected_context_text(compacted)
+        or is_process_update(compacted)
+    ):
+        return ""
+    return clip(compacted)
+
+
+def unique_durable_daily_items(items: Iterable[object]) -> list[str]:
+    selected: list[str] = []
+    for item in items:
+        text = durable_daily_text(item)
+        if text and text not in selected:
+            selected.append(text)
+    return selected
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
