@@ -2439,6 +2439,132 @@ reruns must first restore `expected_record_missing=0`; only then should a
 bounded ranking change target the remaining same-layer/same-scope/different-topic
 residual noise.
 
+## V1 Evidence Convergence Snapshot
+
+Date: 2026-07-01
+
+Code point before this documentation update: `20c9380 fix: add archive search
+health check`
+
+This is the current evidence convergence snapshot for the v1 goal. It does not
+add new memory features. It records which evidence is currently green, which
+existing aggregate reports are safe to use with the readiness gate, and which
+claim boundaries remain.
+
+Repository baseline before this documentation update:
+
+| command | recorded result |
+| --- | --- |
+| `git status --short --branch` | `## main...origin/main [ahead 1]` |
+| `git log --oneline --decorate -5` | latest local commit before this snapshot `20c9380 fix: add archive search health check`; latest remote commit `f835543 Merge pull request #7 from Dsssyc/codex/v1.1-shadow-relation-gates` |
+
+Packaged core baseline:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+```
+
+Result:
+
+| metric | value |
+| --- | ---: |
+| overall_status | core_synthetic_ready |
+| scorecard.required_dimensions | 4 |
+| scorecard.required_passed | 4 |
+| scorecard.optional_dimensions | 3 |
+| scorecard.optional_passed | 0 |
+| layered_recall.status | passed |
+| automatic_induction.status | passed |
+| e2e_induction_to_recall.status | passed |
+| source_stream_registry.status | passed |
+
+Optional evidence inventory:
+
+| dimension | available aggregate evidence | privacy boundary | status | blocker |
+| --- | --- | --- | --- | --- |
+| packaged generated-answer eval | packaged synthetic fixture via `--run-packaged --require-answer` | aggregate-only; no queries, generated answers, or reference answers rendered | passed | none |
+| public benchmark adapter | 100-case LongMemEval adapted layered report under `/tmp` | public-adapter aggregate report; no public raw benchmark records committed | passed in full gate | not a public leaderboard claim |
+| private real-archive shadow eval | 2026-07-01 strict real-archive shadow aggregate under `/tmp` | aggregate-only; report declares no private probe cases, queries, memory IDs, memory text, source refs, source paths, raw refs, or source content rendered | passed in full gate | older 2026-06-29 `current` shadow report has passing metrics but lacks the stricter false privacy flags, so the current gate rejects that older report shape |
+| private dogfood generated-answer eval | private deployment aggregate generated-answer benchmark report outside this repository | aggregate-only; no private queries, case IDs, reference answers, generated answers, memory IDs, source paths, raw refs, or memory text committed | passed in full gate | none |
+
+Packaged generated-answer gate:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+```
+
+Result:
+
+| metric | value |
+| --- | ---: |
+| overall_status | extended_evidence_ready |
+| scorecard.required_dimensions | 5 |
+| scorecard.required_passed | 5 |
+| generated_answer_eval.status | passed |
+| generated_answer_eval.case_pass_rate | 1.0 |
+| generated_answer_eval.answer_normalized_match_rate | 1.0 |
+| generated_answer_eval.abstention_accuracy | 1.0 |
+| generated_answer_eval.answer_scorable_case_rate | 1.0 |
+| generated_answer_eval.privacy_leak_count | 0 |
+
+Full convergence gate:
+
+```bash
+python3 benchmarks/v1_readiness_gate.py \
+  --run-packaged \
+  --public-report /tmp/my_precious_public_limit_20260629/layered_report_100_raw_auth_gate.json \
+  --shadow-report /tmp/my_precious_shadow_relation_strict_case24_retarget_20260701.json \
+  --answer-report /path/to/private-agent-memory/.tmp/generated-answer-private-dogfood-20260630/generated_answer_private_dogfood_abstain_benchmark_20260630.json \
+  --require-public \
+  --require-shadow \
+  --require-answer \
+  --require-answer-source-benchmark MyPreciousPrivateDogfood \
+  --require-answer-case-origin private_dogfood
+```
+
+The local run used the private deployment archive's existing aggregate answer
+report at the placeholder path above. The report was not copied into this
+repository.
+
+Full convergence result:
+
+| dimension | status | key metrics |
+| --- | --- | --- |
+| layered_recall | passed | `memory_recall_at_5=1.0`, `layer_path_success_rate=1.0`, `drilldown_success_rate=1.0`, `source_ref_reachability=1.0`, `privacy_leak_count=0` |
+| automatic_induction | passed | `natural_induction_success_rate=1.0`, `cross_project_generalization_rate=1.0`, `forced_memory_capture_rate=1.0`, `induction_review_routing_rate=1.0`, `privacy_leak_count=0` |
+| e2e_induction_to_recall | passed | `e2e_memory_recall_at_5=1.0`, `e2e_layer_assignment_accuracy=1.0`, `e2e_session_drilldown_rate=1.0`, `e2e_source_policy_pass_rate=1.0`, `privacy_leak_count=0` |
+| source_stream_registry | passed | `source_stream_update_rate=1.0`, `project_registry_independence_rate=1.0`, `archive_scope_assignment_rate=1.0`, `source_stream_evidence_reachability_rate=1.0`, `privacy_leak_count=0` |
+| public_benchmark_adapter | passed | `case_pass_rate=1.0`, `memory_recall_at_5=1.0`, `failed_case_count=0`, `source_benchmarks.LongMemEval=100`, `case_origins.public_benchmark_adapter=100` |
+| real_archive_shadow_eval | passed | `memory_recall_at_5=1.0`, `memory_precision_at_5=0.8064516129032258`, `top_k_noise_at_5=0.19354838709677424`, `scope_mixed=2`, `inactive_lifecycle=0`, `privacy_boundary_pass_rate=1.0` |
+| generated_answer_eval | passed | `case_pass_rate=1.0`, `answer_normalized_match_rate=1.0`, `abstention_accuracy=1.0`, `answer_scorable_case_rate=1.0`, `privacy_leak_count=0`, `source_benchmarks.MyPreciousPrivateDogfood=25`, `case_origins.private_dogfood=25` |
+
+Full gate summary:
+
+| metric | value |
+| --- | ---: |
+| overall_status | extended_evidence_ready |
+| scorecard.required_dimensions | 7 |
+| scorecard.required_passed | 7 |
+| scorecard.optional_dimensions | 0 |
+| scorecard.optional_passed | 0 |
+| privacy.aggregate_only | true |
+| privacy.private_probe_cases_rendered | false |
+| privacy.queries_rendered | false |
+| privacy.generated_answers_rendered | false |
+| privacy.reference_answers_rendered | false |
+| privacy.memory_text_rendered | false |
+| privacy.source_paths_rendered | false |
+| privacy.raw_refs_rendered | false |
+
+This is the strongest current local v1 convergence state: packaged synthetic
+core gates, explicit non-project source streams, a bounded public benchmark
+adapter probe, private real-archive aggregate shadow evidence, and private
+dogfood generated-answer aggregate evidence all pass through the same
+readiness gate. The result still does not claim official public benchmark
+leaderboard parity, live model answer quality, automatic ontology/source
+discovery, multi-principal access governance, or solved long-horizon memory
+decay/deletion behavior.
+
 ## Next Roadmap After The Minimum Slice
 
 1. Strengthen automatic induction.
