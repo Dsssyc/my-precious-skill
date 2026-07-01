@@ -2349,6 +2349,96 @@ dogfood evidence. The next valuable work is to broaden real-archive shadow
 coverage, continue reducing remaining scope-mixed top-k noise, and broaden
 consolidation/decay evidence.
 
+## V1.1 Shadow Relation Gate Follow-Up
+
+Date: 2026-07-01
+
+Code point: `06b7266 Merge pull request #6 from Dsssyc/codex/v1.1-shadow-noise-relations`
+
+After adding `noise_relation_to_expected_at_5`, the strict and expanded
+private real-archive shadow evaluations were rerun with aggregate-only output
+written under `/tmp`. The private probe files, raw case rows, queries, memory
+IDs, memory text, source refs, source paths, raw refs, and full JSON reports
+were not copied into this repository.
+
+Commands:
+
+```bash
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v2.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  > /tmp/my_precious_shadow_relation_strict_nogate_20260701.json
+
+python3 templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \
+  --repo /path/to/private-agent-memory \
+  --cases /path/to/private-agent-memory/eval/redacted_real_history_probe_v3.jsonl \
+  --audit-script templates/agent-memory-repo/tools/audit_memory_archive.py \
+  > /tmp/my_precious_shadow_relation_expanded_nogate_20260701.json
+```
+
+Aggregate rerun results:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| archive.memory_records | 1409 | 1409 |
+| archive.legacy_session_records | 277 | 277 |
+| probe_cases.cases | 27 | 34 |
+| probe_cases.positive_cases | 24 | 31 |
+| probe_cases.abstain_cases | 3 | 3 |
+| memory_recall_at_5 | 0.9583333333333334 | 0.967741935483871 |
+| memory_precision_at_5 | 0.7741935483870968 | 0.7560975609756098 |
+| top_k_noise_at_5 | 0.22580645161290325 | 0.24390243902439024 |
+| noise_sources_at_5.broad_lexical_match | 5 | 7 |
+| noise_sources_at_5.scope_mixed | 2 | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| noise_relation_to_expected_at_5.expected_record_missing | 1 | 1 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 5 | 7 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 2 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer_same_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer | 0 | 0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| abstain_false_positive_results | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| diagnostics.failure_types.recall_miss | 1 | 1 |
+| diagnostics.failure_types.top_k_noise | 6 | 9 |
+
+The strict gate command with the current v1.1 thresholds failed with
+`memory_recall_at_5=0.9583333333333334`,
+`memory_precision_at_5=0.7741935483870968`,
+`top_k_noise_at_5=0.22580645161290325`, and
+`noise_sources_at_5.broad_lexical_match=5`. The new relation buckets show the
+dominant residual top-k noise shape is same-layer/same-scope/different-topic
+neighbors, but the run also has `expected_record_missing=1` and one recall
+miss. That is a probe/archive integrity blocker: a ranking change would mix
+search-quality tuning with stale expected-memory evidence.
+
+Decision: do not loosen the existing precision, recall, top-k noise, or
+noise-source thresholds, and do not tune ranking until the private
+expected-record drift is resolved. The public v1.1 strict and expanded
+fail-over gates now include relation ceilings:
+
+| metric | strict max | expanded max |
+| --- | ---: | ---: |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 |
+| noise_relation_to_expected_at_5.same_layer_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 5 | 7 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 2 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer_same_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer | 0 | 0 |
+
+This turns the new diagnostic into a gateable stop condition: future private
+reruns must first restore `expected_record_missing=0`; only then should a
+bounded ranking change target the remaining same-layer/same-scope/different-topic
+residual noise.
+
 ## Next Roadmap After The Minimum Slice
 
 1. Strengthen automatic induction.
