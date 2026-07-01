@@ -1589,6 +1589,56 @@ def collect_memory_hits(
     return prune_cross_scope_topic_tail_memory_hits(hits)
 
 
+def run_health_check(repo: Path) -> int:
+    index_path = repo / "index" / "memories.jsonl"
+    failures: list[str] = []
+    if not is_safe_repo_file(repo, index_path):
+        failures.append("index/memories.jsonl is missing or unsafe")
+    if not (repo / "sessions").is_dir():
+        failures.append("sessions directory is missing")
+    if failures:
+        print("Archive search health check failed.")
+        for failure in failures:
+            print(f"- {failure}")
+        return 1
+
+    records = list(iter_jsonl(index_path))
+    supersedes_by_memory_id = collect_supersedes_by_memory_id(records)
+    forward_superseded_ids = collect_forward_superseded_ids(supersedes_by_memory_id)
+    contradicts_by_memory_id = collect_contradicts_by_memory_id(records)
+    forward_contradicted_ids = collect_forward_contradicted_ids(contradicts_by_memory_id)
+    deprecates_by_memory_id = collect_deprecates_by_memory_id(records)
+    forward_deprecated_ids = collect_forward_deprecated_ids(deprecates_by_memory_id)
+    inactive_ids = collect_inactive_memory_ids(
+        records,
+        supersedes_by_memory_id,
+        forward_superseded_ids,
+        contradicts_by_memory_id,
+        forward_contradicted_ids,
+        deprecates_by_memory_id,
+        forward_deprecated_ids,
+    )
+    memory_records_by_id = active_memory_records_by_id(repo, records, inactive_ids)
+    active_records = list(memory_records_by_id.values())
+    active_drillable = sum(
+        1
+        for record in active_records
+        if memory_support_refs(repo, record, memory_records_by_id).drill_paths
+    )
+    if not active_records:
+        print("Archive search health check failed.")
+        print("- no active memory records")
+        print(f"memory_records: {len(records)}")
+        return 1
+
+    print("Archive search health check passed.")
+    print(f"Archive: {safe_display_text(repo.name or 'archive', 80)}")
+    print(f"memory_records: {len(records)}")
+    print(f"active_memory_records: {len(active_records)}")
+    print(f"active_drillable_memory_records: {active_drillable}")
+    return 0
+
+
 def collect_index_hits(repo: Path, query_tokens: list[str], context_terms: list[str] | None = None) -> list[Hit]:
     hits: list[Hit] = []
     for index_path in sorted((repo / "index").glob("*.jsonl")):
@@ -1808,9 +1858,14 @@ def format_hit(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("query", help="Search query")
+    parser.add_argument("query", nargs="?", help="Search query")
     parser.add_argument("--repo", help="Path to the agent memory archive")
     parser.add_argument("--limit", type=int, default=8, help="Maximum hits to print")
+    parser.add_argument(
+        "--health-check",
+        action="store_true",
+        help="Validate that the archive has searchable memory nodes without running a content query",
+    )
     parser.add_argument(
         "--include-evidence",
         action="store_true",
@@ -1860,11 +1915,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit <= 0:
         raise SystemExit("--limit must be greater than 0")
 
+    repo = resolve_repo(args.repo)
+    if args.health_check:
+        return run_health_check(repo)
+    if not args.query:
+        raise SystemExit("query is required unless --health-check is used")
+
     query_tokens = unique_query_tokens(args.query)
     if not query_tokens:
         raise SystemExit("query must contain at least one searchable token")
 
-    repo = resolve_repo(args.repo)
     context_terms = project_context_terms(args.project_path)
     include_evidence = args.include_evidence or args.depth in ("evidence", "source")
     session_hits = [

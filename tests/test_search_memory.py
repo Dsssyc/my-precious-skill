@@ -4809,6 +4809,39 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("No memory hits for: Which memory review source workflow?", result.stdout)
         self.assertNotIn("mem_generic_only_noise", result.stdout)
 
+    def test_search_memory_health_check_passes_without_generic_query_search(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_generic_health_record",
+                        "memory review source workflow project archive",
+                    )
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "--health-check",
+                    "--repo",
+                    str(repo),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Archive search health check passed.", result.stdout)
+        self.assertIn("active_memory_records: 1", result.stdout)
+        self.assertNotIn("mem_generic_health_record", result.stdout)
+
     def test_search_memory_requires_distinctive_token_when_broad_overlap_matches(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "agent-memory"

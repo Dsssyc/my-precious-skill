@@ -487,6 +487,8 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn(str(target.resolve()), prompt)
             self.assertIn("--allow-redacted-secrets", prompt)
             self.assertIn("tools/sync_memory_archive.py --push", prompt)
+            self.assertIn("python tools/search_memory.py --health-check", prompt)
+            self.assertNotIn("python tools/search_memory.py memory", prompt)
             self.assertIn("Daily record content contract", prompt)
             self.assertIn("daily/YYYY/YYYY-MM-DD.md", prompt)
             self.assertIn("durable memory indexes, not automation run logs", prompt)
