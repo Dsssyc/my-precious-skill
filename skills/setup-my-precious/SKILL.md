@@ -80,13 +80,14 @@ Ask only what is needed, one step at a time:
    Do not edit shell startup files or agent runtime config unless the user
    explicitly asks for persistent environment-variable configuration.
 
-6. Verify search works:
+6. Verify the search CLI is installed and runnable:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "memory"
+   python "$MEMORY_REPO/tools/search_memory.py" --help
    ```
 
-   A new empty archive may return no hits; that is acceptable if the command runs.
+   A new empty archive may not have searchable memory records yet; this step only
+   confirms the copied tool runs.
 
 7. If the user requests scheduling, first verify the archive command exists and runs manually.
    Then render reviewable scheduler configuration:

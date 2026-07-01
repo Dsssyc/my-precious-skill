@@ -201,7 +201,7 @@ def agent_native_prompt(
             "",
             "Run:",
             shlex.join(update_command),
-            "python tools/search_memory.py memory",
+            "python tools/search_memory.py --health-check",
             shlex.join(sync_command),
             "",
             "Daily record content contract:",
