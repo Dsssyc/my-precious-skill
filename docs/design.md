@@ -678,9 +678,11 @@ regression floors, not the final desired quality level. The shadow runner emits
 a privacy-safe `diagnostics` block that groups failures by
 `recall_miss`, `abstain_false_positive`, `suppression_failure`,
 `privacy_failure`, and `top_k_noise`. Diagnostics entries use case ordinals,
-short case-label hashes, counts, and noise buckets only; they do not render
-queries, memory IDs, memory text, source paths, raw refs, or forbidden-pattern
-text. The shadow runner can
+short case-label hashes, counts, noise-source buckets, and
+`noise_relation_to_expected_at_5` buckets only. The relation buckets classify
+noise hits by layer/scope/topic relation to expected memory records without
+rendering the underlying values. Diagnostics do not render queries, memory IDs,
+memory text, source paths, raw refs, or forbidden-pattern text. The shadow runner can
 enforce aggregate numeric gates with `--fail-under`, `--fail-over`,
 `--fail-under-file`, and `--fail-over-file`; metric keys may be top-level
 metric names such as `memory_recall_at_5` or dotted paths such as

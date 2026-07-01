@@ -245,6 +245,74 @@ def write_multi_relevant_archive(repo: Path) -> None:
     )
 
 
+RELATION_QUERY = "relationnoise271828 alpha271828 beta271828 gamma271828 delta271828 epsilon271828"
+
+
+def relation_memory_record(memory_id: str, layer: str, scope: str, topic: str) -> dict:
+    record = memory_record(
+        memory_id,
+        layer,
+        f"{RELATION_QUERY} durable relation diagnostic fixture",
+        topic=topic,
+    )
+    record["scope"] = scope
+    record["summary"] = f"{RELATION_QUERY} summary relation diagnostic fixture"
+    record["task"] = f"{RELATION_QUERY} task relation diagnostic fixture"
+    record["decision"] = f"{RELATION_QUERY} decision relation diagnostic fixture"
+    record["rationale"] = f"{RELATION_QUERY} rationale relation diagnostic fixture"
+    record["user_intent"] = f"{RELATION_QUERY} intent relation diagnostic fixture"
+    return record
+
+
+def write_relation_noise_archive(repo: Path) -> None:
+    (repo / "index").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted/summary.md").write_text(
+        "# Session: Relation diagnostic fixture\n\n"
+        "Synthetic public summary for relation-bucket shadow evaluation.\n",
+        encoding="utf-8",
+    )
+    (repo / "sessions/2026/06/21/redacted/evidence.md").write_text(
+        "# Evidence\n\nredacted_ev_001:\nSynthetic public evidence.\n",
+        encoding="utf-8",
+    )
+    write_jsonl(
+        repo / "index/memories.jsonl",
+        [
+            relation_memory_record(
+                "mem_zz_relation_target",
+                "global",
+                "scope:target",
+                "topic:target",
+            ),
+            relation_memory_record(
+                "mem_relation_same_scope_diff_topic",
+                "global",
+                "scope:target",
+                "topic:neighbor",
+            ),
+            relation_memory_record(
+                "mem_relation_same_layer_diff_scope_same_topic",
+                "global",
+                "scope:neighbor",
+                "topic:target",
+            ),
+            relation_memory_record(
+                "mem_relation_diff_layer_same_scope_topic",
+                "domain",
+                "scope:target",
+                "topic:target",
+            ),
+            relation_memory_record(
+                "mem_relation_diff_layer",
+                "domain",
+                "scope:neighbor",
+                "topic:neighbor",
+            ),
+        ],
+    )
+
+
 class ShadowEvalMemoryArchiveTests(unittest.TestCase):
     def test_shadow_eval_reports_legacy_archive_without_memory_index(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -818,6 +886,71 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         self.assertNotIn("mem_multi_secondary", serialized)
         self.assertNotIn("redacted:multi_relevant", serialized)
         self.assertNotIn("sessions/2026/06/21/redacted", serialized)
+
+    def test_shadow_eval_reports_noise_relation_to_expected_as_privacy_safe_aggregates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "relation-agent-memory"
+            cases = Path(tmpdir) / "relation_cases.jsonl"
+            write_relation_noise_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:relation_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": RELATION_QUERY,
+                        "expected_memory_id": "mem_zz_relation_target",
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        relation_counts = payload["metrics"]["noise_relation_to_expected_at_5"]
+        self.assertEqual(relation_counts["same_layer_scope_topic"], 0)
+        self.assertEqual(relation_counts["same_layer_scope_diff_topic"], 1)
+        self.assertEqual(relation_counts["same_layer_diff_scope_same_topic"], 1)
+        self.assertEqual(relation_counts["same_layer_diff_scope_topic"], 0)
+        self.assertEqual(relation_counts["diff_layer_same_scope_topic"], 1)
+        self.assertEqual(relation_counts["diff_layer"], 1)
+        self.assertEqual(relation_counts["expected_record_missing"], 0)
+
+        detail = payload["case_details"][0]
+        self.assertEqual(detail["noise_relation_to_expected_at_5"], relation_counts)
+        top_k_noise = payload["diagnostics"]["failure_types"]["top_k_noise"]
+        self.assertEqual(top_k_noise["cases"][0]["noise_relation_to_expected_at_5"], relation_counts)
+        self.assertTrue(payload["diagnostics"]["privacy"]["memory_ids_rendered"] is False)
+
+        serialized = json.dumps(payload, sort_keys=True)
+        for forbidden in (
+            "SECRET_CASE_SHOULD_NOT_RENDER",
+            RELATION_QUERY,
+            "mem_zz_relation_target",
+            "mem_relation_same_scope_diff_topic",
+            "mem_relation_same_layer_diff_scope_same_topic",
+            "mem_relation_diff_layer_same_scope_topic",
+            "mem_relation_diff_layer",
+            "scope:target",
+            "topic:target",
+            "scope:neighbor",
+            "topic:neighbor",
+        ):
+            self.assertNotIn(forbidden, serialized)
 
     def test_shadow_eval_rejects_invalid_forbidden_output_pattern(self):
         with tempfile.TemporaryDirectory() as tmpdir:

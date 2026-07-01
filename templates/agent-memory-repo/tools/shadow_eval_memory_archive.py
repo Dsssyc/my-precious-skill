@@ -180,6 +180,26 @@ def classify_noise_source(hit: search_memory.Hit, case: dict, inactive_ids: set[
     return "broad_lexical_match"
 
 
+def relation_value(value: object, limit: int = 120) -> str:
+    return search_memory.safe_display_scalar(value or "", limit)
+
+
+def record_relation(record: dict) -> tuple[str, str, str]:
+    return (
+        relation_value(record.get("layer"), 60),
+        relation_value(record.get("scope"), 120),
+        relation_value(record.get("topic"), 120),
+    )
+
+
+def hit_relation(hit: search_memory.Hit) -> tuple[str, str, str]:
+    return (
+        relation_value(hit.layer, 60),
+        relation_value(hit.scope, 120),
+        relation_value(hit.topic, 120),
+    )
+
+
 def new_noise_sources() -> dict[str, int]:
     return {
         "broad_lexical_match": 0,
@@ -187,6 +207,48 @@ def new_noise_sources() -> dict[str, int]:
         "inactive_lifecycle": 0,
         "low_signal_memory_node": 0,
     }
+
+
+def new_noise_relation_to_expected() -> dict[str, int]:
+    return {
+        "same_layer_scope_topic": 0,
+        "same_layer_scope_diff_topic": 0,
+        "same_layer_diff_scope_same_topic": 0,
+        "same_layer_diff_scope_topic": 0,
+        "diff_layer_same_scope_topic": 0,
+        "diff_layer": 0,
+        "expected_record_missing": 0,
+    }
+
+
+def classify_noise_relation_to_expected(hit: search_memory.Hit, expected_records: list[dict]) -> str:
+    expected_relations = [record_relation(record) for record in expected_records]
+    expected_relations = [relation for relation in expected_relations if any(relation)]
+    if not expected_relations:
+        return "expected_record_missing"
+
+    hit_layer, hit_scope, hit_topic = hit_relation(hit)
+
+    def same_layer(relation: tuple[str, str, str]) -> bool:
+        return bool(hit_layer and relation[0] and hit_layer == relation[0])
+
+    def same_scope(relation: tuple[str, str, str]) -> bool:
+        return bool(hit_scope and relation[1] and hit_scope == relation[1])
+
+    def same_topic(relation: tuple[str, str, str]) -> bool:
+        return bool(hit_topic and relation[2] and hit_topic == relation[2])
+
+    if any(same_layer(relation) and same_scope(relation) and same_topic(relation) for relation in expected_relations):
+        return "same_layer_scope_topic"
+    if any(same_layer(relation) and same_scope(relation) for relation in expected_relations):
+        return "same_layer_scope_diff_topic"
+    if any(same_layer(relation) and same_topic(relation) for relation in expected_relations):
+        return "same_layer_diff_scope_same_topic"
+    if any(same_layer(relation) for relation in expected_relations):
+        return "same_layer_diff_scope_topic"
+    if any(same_scope(relation) and same_topic(relation) for relation in expected_relations):
+        return "diff_layer_same_scope_topic"
+    return "diff_layer"
 
 
 def evaluate_cases(
@@ -212,8 +274,10 @@ def evaluate_cases(
         "forbidden_output_violations": 0,
     }
     noise_sources = new_noise_sources()
+    noise_relation_to_expected = new_noise_relation_to_expected()
     details: list[dict[str, Any]] = []
     inactive_ids = inactive_memory_ids(records)
+    records_by_id = record_id_map(records)
     for case in cases:
         query = str(case.get("query") or "").strip()
         if not query:
@@ -235,6 +299,7 @@ def evaluate_cases(
             else:
                 totals["forbidden_output_violations"] += 1
         case_noise_sources = new_noise_sources()
+        case_noise_relation_to_expected = new_noise_relation_to_expected()
         relevant_count = 0
         abstention_hit = None
         if case.get("expected_abstain") is True:
@@ -251,12 +316,16 @@ def evaluate_cases(
             totals["relevant_results"] += relevant_count
             if relevant_count:
                 totals["recall_hits"] += 1
+            expected_records = [records_by_id[memory_id] for memory_id in expected_ids if memory_id in records_by_id]
             for hit in hits:
                 hit_id = safe_memory_id(hit.memory_id)
                 if hit_id and hit_id not in expected_id_set:
                     source = classify_noise_source(hit, case, inactive_ids)
                     noise_sources[source] += 1
                     case_noise_sources[source] += 1
+                    relation = classify_noise_relation_to_expected(hit, expected_records)
+                    noise_relation_to_expected[relation] += 1
+                    case_noise_relation_to_expected[relation] += 1
         if expected_not_memory_ids:
             totals["suppression_cases"] += 1
             if all(memory_id not in result_ids for memory_id in expected_not_memory_ids):
@@ -281,6 +350,7 @@ def evaluate_cases(
                     else all(memory_id not in result_ids for memory_id in expected_not_memory_ids)
                 ),
                 "noise_sources_at_5": case_noise_sources,
+                "noise_relation_to_expected_at_5": case_noise_relation_to_expected,
                 "forbidden_output_patterns_count": len(patterns),
                 "forbidden_output_violation_count": violation_count,
                 "privacy_boundary_pass": violation_count == 0,
@@ -293,6 +363,7 @@ def evaluate_cases(
         "memory_precision_at_5": precision,
         "top_k_noise_at_5": None if precision is None else 1.0 - precision,
         "noise_sources_at_5": noise_sources,
+        "noise_relation_to_expected_at_5": noise_relation_to_expected,
         "abstain_pass_rate": ratio(totals["abstain_hits"], totals["abstain_cases"]),
         "abstain_false_positive_results": totals["abstain_false_positive_results"],
         "active_memory_suppression": ratio(totals["suppression_hits"], totals["suppression_cases"]),
@@ -313,6 +384,7 @@ def diagnostic_case_summary(detail: dict[str, Any]) -> dict[str, Any]:
         "forbidden_output_patterns_count": detail["forbidden_output_patterns_count"],
         "forbidden_output_violation_count": detail["forbidden_output_violation_count"],
         "noise_sources_at_5": detail["noise_sources_at_5"],
+        "noise_relation_to_expected_at_5": detail["noise_relation_to_expected_at_5"],
     }
 
 
@@ -646,6 +718,7 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "memory_precision_at_5": case_metrics["memory_precision_at_5"],
             "top_k_noise_at_5": case_metrics["top_k_noise_at_5"],
             "noise_sources_at_5": case_metrics["noise_sources_at_5"],
+            "noise_relation_to_expected_at_5": case_metrics["noise_relation_to_expected_at_5"],
             "abstain_pass_rate": case_metrics["abstain_pass_rate"],
             "abstain_false_positive_results": case_metrics["abstain_false_positive_results"],
             "active_memory_suppression": case_metrics["active_memory_suppression"],
