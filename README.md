@@ -430,8 +430,11 @@ the current real-archive quality floor: `memory_precision_at_5 >= 0.4`,
 `top_k_noise_at_5 <= 0.6`, `abstain_pass_rate == 1.0`,
 `active_memory_suppression == 1.0`,
 `noise_sources_at_5.scope_mixed <= 3`, and
-`noise_sources_at_5.inactive_lifecycle == 0`. This floor prevents recall-only
-greenwashing; it is not a claim that real retrieval noise is solved. Optional
+`noise_sources_at_5.inactive_lifecycle == 0`. Stricter v1.1 shadow gates also
+check `noise_relation_to_expected_at_5.expected_record_missing == 0` so stale
+private probe expectations are not mistaken for ranking defects. This floor
+prevents recall-only greenwashing; it is not a claim that real retrieval noise
+is solved. Optional
 `--answer-report` can add offline generated-answer grading evidence. Answer
 reports must include aggregate `source_benchmarks` and `case_origins` counts;
 passing answer metrics alone are not accepted as provenance-backed answer

@@ -673,8 +673,11 @@ private shadow report to carry a minimum real-archive quality floor:
 `memory_precision_at_5 >= 0.4`, `top_k_noise_at_5 <= 0.6`,
 `abstain_pass_rate == 1.0`, `active_memory_suppression == 1.0`,
 `noise_sources_at_5.scope_mixed <= 3`, and
-`noise_sources_at_5.inactive_lifecycle == 0`. Those thresholds are current
-regression floors, not the final desired quality level. The shadow runner emits
+`noise_sources_at_5.inactive_lifecycle == 0`. Stricter v1.1 shadow gates also
+track `noise_relation_to_expected_at_5` ceilings, with
+`expected_record_missing == 0` as a hard probe/archive integrity signal. Those
+thresholds are current regression floors, not the final desired quality level.
+The shadow runner emits
 a privacy-safe `diagnostics` block that groups failures by
 `recall_miss`, `abstain_false_positive`, `suppression_failure`,
 `privacy_failure`, and `top_k_noise`. Diagnostics entries use case ordinals,

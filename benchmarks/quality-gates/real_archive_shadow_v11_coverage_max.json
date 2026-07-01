@@ -1,6 +1,13 @@
 {
   "abstain_false_positive_results": 0,
   "forbidden_output_violations": 0,
+  "noise_relation_to_expected_at_5.diff_layer": 0,
+  "noise_relation_to_expected_at_5.diff_layer_same_scope_topic": 0,
+  "noise_relation_to_expected_at_5.expected_record_missing": 0,
+  "noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic": 2,
+  "noise_relation_to_expected_at_5.same_layer_diff_scope_topic": 0,
+  "noise_relation_to_expected_at_5.same_layer_scope_diff_topic": 7,
+  "noise_relation_to_expected_at_5.same_layer_scope_topic": 0,
   "noise_sources_at_5.broad_lexical_match": 6,
   "noise_sources_at_5.inactive_lifecycle": 0,
   "noise_sources_at_5.low_signal_memory_node": 0,
