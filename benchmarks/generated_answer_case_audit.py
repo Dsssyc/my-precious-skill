@@ -209,6 +209,7 @@ def audit(cases_path: Path) -> dict[str, Any]:
         "forbidden_output_pattern_cases": forbidden_output_pattern_cases,
         "forbidden_output_pattern_count": forbidden_output_pattern_count,
         "unsafe_aggregate_identifier_count": unsafe_aggregate_identifier_count,
+        "privacy_leak_count": 0,
         "cases_sha256": file_sha256(cases_path),
         "source_benchmarks": dict(sorted(source_benchmarks.items())),
         "case_origins": dict(sorted(case_origins.items())),
