@@ -2871,6 +2871,28 @@ def build_induction_review_candidates(
     )
 
 
+def release_supported_related_review_identities(
+    candidates: list[MemoryCandidate],
+    withheld: set[tuple[str, str, str, str]],
+    direct_review_identities: set[tuple[str, str, str, str]],
+) -> None:
+    grouped: dict[str, list[MemoryCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault(memory_consolidation_key(candidate.text), []).append(candidate)
+    for related_candidates in grouped.values():
+        support_projects = {
+            candidate.project_path or candidate.project
+            for candidate in related_candidates
+            if candidate.project_path or candidate.project
+        }
+        if len(support_projects) < 2:
+            continue
+        for candidate in related_candidates:
+            identity = candidate_identity(candidate)
+            if identity in withheld and identity not in direct_review_identities:
+                withheld.discard(identity)
+
+
 def build_memory_nodes_and_induction_review_candidates(
     rows: list[dict],
     memory_repo: Path | None = None,
@@ -2878,6 +2900,12 @@ def build_memory_nodes_and_induction_review_candidates(
 ) -> tuple[list[dict], list[dict], list[dict]]:
     memory_candidates = memory_candidates_from_meta(rows)
     induction_review_candidates, withheld_candidates, induction_candidate_identities = build_induction_review_candidates(memory_candidates, memory_repo)
+    direct_review_identities = set(induction_candidate_identities.values())
+    release_supported_related_review_identities(
+        memory_candidates,
+        withheld_candidates,
+        direct_review_identities,
+    )
     induction_review_decision_results = apply_induction_review_decisions(
         induction_review_candidates,
         induction_review_decisions or [],

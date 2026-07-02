@@ -595,6 +595,53 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 self.assertTrue(row["evidence_refs"])
                 self.assertTrue(row["raw_refs"])
 
+    def test_scope_change_review_does_not_withhold_related_stable_domain_memory(self):
+        module = load_update_module()
+        stable = (
+            "Synthetic induction review calibration should preserve evidence refs "
+            "for project-specific natural memories."
+        )
+        broader = "Synthetic induction review calibration should preserve evidence refs for natural memories."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            self.write_natural_induction_meta(
+                memory_repo,
+                "stable-alpha",
+                stable,
+                updated_at="2026-06-26T10:00:00Z",
+                project="stable-alpha",
+            )
+            self.write_natural_induction_meta(
+                memory_repo,
+                "stable-beta",
+                stable,
+                updated_at="2026-06-26T11:00:00Z",
+                project="stable-beta",
+            )
+            self.write_natural_induction_meta(
+                memory_repo,
+                "broader-gamma",
+                broader,
+                updated_at="2026-06-26T12:00:00Z",
+                project="broader-gamma",
+            )
+
+            module.rebuild_indexes(memory_repo)
+
+            memory_rows = self.load_index_jsonl(memory_repo, "index/memories.jsonl")
+            review_rows = self.load_index_jsonl(memory_repo, "index/induction_review_candidates.jsonl")
+
+        stable_node = next(row for row in memory_rows if row["text"] == stable)
+        self.assertEqual(stable_node["layer"], "domain")
+        self.assertEqual(stable_node["support_count"], 2)
+        self.assertNotIn(broader, {row["text"] for row in memory_rows})
+        scope_reviews = [
+            row for row in review_rows if row["reason"] == "scope_change_natural_induction_requires_review"
+        ]
+        self.assertTrue(scope_reviews)
+        self.assertTrue(any(row.get("related_candidate_text_sha256") for row in scope_reviews))
+
     def test_rebuild_indexes_applies_induction_review_approve_promote_decision(self):
         module = load_update_module()
         fact = "Synthetic induction approval candidate should wait for repeated support before promotion."
