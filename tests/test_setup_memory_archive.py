@@ -493,6 +493,15 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("daily/YYYY/YYYY-MM-DD.md", prompt)
             self.assertIn("durable memory indexes, not automation run logs", prompt)
             self.assertIn("AGENTS/environment/policy blocks", prompt)
+            self.assertIn("Automation run note contract", prompt)
+            self.assertIn("Date and run window", prompt)
+            self.assertIn("Automation run status", prompt)
+            self.assertIn("Source/session counts processed", prompt)
+            self.assertIn("Memory/index change summary by count only", prompt)
+            self.assertIn("Review queue summary by count/status", prompt)
+            self.assertIn("Privacy/audit gate summary", prompt)
+            self.assertIn("Errors or blockers with actionable next step", prompt)
+            self.assertIn("Keep automation run notes separate from generated daily archive files", prompt)
             self.assertIn("Do not hand-stage files", prompt)
 
     def test_render_scheduler_refuses_global_schedule_without_runner(self):
