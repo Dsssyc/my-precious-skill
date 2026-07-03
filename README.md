@@ -534,7 +534,10 @@ already has dirty `eval/` or `.tmp/` artifacts, cleans generated artifacts on
 success, and emits aggregate-only JSON. On failure it reports the failed step
 without rendering private queries, reference answers, generated answers,
 memory IDs, source paths, or raw refs; add `--cleanup-on-failure` when the
-failure artifacts are not needed for local diagnosis.
+failure artifacts are not needed for local diagnosis. Custom external
+`--work-dir` values must use a dogfood-specific directory name such as
+`my_precious_generated_answer_dogfood` so cleanup cannot target a generic
+temporary or repository directory.
 
 Author an initial private dogfood generated-answer case set from an existing
 deployment archive's layered memories:

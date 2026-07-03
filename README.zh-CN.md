@@ -410,7 +410,9 @@ answer gate 评分，运行 private shadow eval，然后把 packaged、shadow �
 产物，它会 fail closed；成功后会清理生成产物；stdout 只输出 aggregate JSON。
 失败时只报告失败步骤，不渲染私有 query、reference answer、generated answer、
 memory ID、source path 或 raw ref；如果不需要保留失败产物做本地诊断，可以加
-`--cleanup-on-failure`。
+`--cleanup-on-failure`。自定义外部 `--work-dir` 必须使用 dogfood 专用目录名，
+例如 `my_precious_generated_answer_dogfood`，避免 cleanup 指向泛用临时目录或
+仓库目录。
 
 也可以从私有部署 archive 的 layered memories 生成初始 private dogfood
 generated-answer case set：

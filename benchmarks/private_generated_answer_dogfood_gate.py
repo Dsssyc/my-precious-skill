@@ -25,6 +25,7 @@ DEFAULT_SHADOW_FAIL_UNDER = Path("eval/shadow_eval_real_history_v2.fail-under.js
 DEFAULT_SHADOW_FAIL_OVER = Path("eval/shadow_eval_real_history_v2.fail-over.json")
 SOURCE_BENCHMARK = "MyPreciousPrivateDogfood"
 CASE_ORIGIN = "private_dogfood"
+SAFE_EXTERNAL_WORK_DIR_MARKERS = ("generated_answer_dogfood", "generated-answer-dogfood")
 
 
 def privacy_block() -> dict[str, bool]:
@@ -57,6 +58,25 @@ def relative_posix(repo: Path, path: Path) -> str:
         return ""
 
 
+def unsafe_work_dir(repo: Path, work_dir: Path) -> bool:
+    work_dir_resolved = work_dir.resolve(strict=False)
+    repo_resolved = repo.resolve()
+    public_resolved = PUBLIC_REPO.resolve()
+    repo_tmp = repo_resolved / ".tmp"
+
+    if work_dir_resolved == repo_resolved or repo_resolved.is_relative_to(work_dir_resolved):
+        return True
+    if work_dir_resolved.is_relative_to(repo_resolved):
+        return work_dir_resolved == repo_tmp or not work_dir_resolved.is_relative_to(repo_tmp)
+    if work_dir_resolved == public_resolved or public_resolved.is_relative_to(work_dir_resolved):
+        return True
+    if work_dir_resolved.is_relative_to(public_resolved):
+        return True
+    if not any(marker in work_dir_resolved.name for marker in SAFE_EXTERNAL_WORK_DIR_MARKERS):
+        return True
+    return False
+
+
 def git_status_paths(repo: Path) -> list[str]:
     result = subprocess.run(
         ["git", "-C", str(repo), "status", "--porcelain=v1"],
@@ -79,10 +99,18 @@ def git_status_paths(repo: Path) -> list[str]:
     return paths
 
 
-def preflight_report(repo: Path) -> dict[str, Any]:
+def preflight_report(repo: Path, case_output: Path | None = None) -> dict[str, Any]:
     status_paths = git_status_paths(repo)
+    status_path_set = set(status_paths)
     eval_count = sum(1 for path in status_paths if path.startswith("eval/"))
     tmp_count = sum(1 for path in status_paths if path.startswith(".tmp/"))
+    if case_output is not None and case_output.exists():
+        case_output_rel = relative_posix(repo, case_output)
+        if case_output_rel and case_output_rel not in status_path_set:
+            if case_output_rel.startswith("eval/"):
+                eval_count += 1
+            elif case_output_rel.startswith(".tmp/"):
+                tmp_count += 1
     dirty_private_artifacts = eval_count + tmp_count
     failures = []
     status = "preflight_passed"
@@ -200,7 +228,10 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if not shadow_fail_over.is_absolute():
         shadow_fail_over = repo / shadow_fail_over
 
-    report = preflight_report(repo)
+    report = preflight_report(repo, case_output)
+    if unsafe_work_dir(repo, work_dir):
+        report["status"] = "failed"
+        report["failures"].append({"reason": "unsafe_work_dir"})
     if args.preflight_only or report["status"] == "failed":
         return report, 0 if report["status"] == "preflight_passed" else 1
 
@@ -361,7 +392,7 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return report, 1
 
     cleanup_success = cleanup_success_artifacts(repo, case_output, work_dir)
-    final_preflight = preflight_report(repo)
+    final_preflight = preflight_report(repo, case_output)
     report.update(
         {
             "status": "passed" if cleanup_success and final_preflight["dirty_private_artifact_count"] == 0 else "failed",

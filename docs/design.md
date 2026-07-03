@@ -757,7 +757,9 @@ the repeatable operational gate. Its defaults write private cases only to
 `.tmp/generated-answer-dogfood/cases.jsonl`, write answer records and aggregate
 reports under `/tmp`, require `MyPreciousPrivateDogfood` and `private_dogfood`
 aggregate provenance in the answer report, and run `v1_readiness_gate.py` with
-packaged, private shadow, and private generated-answer evidence.
+packaged, private shadow, and private generated-answer evidence. External
+work directories must use a dogfood-specific directory name so cleanup cannot
+target generic temporary directories or repository roots.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive
