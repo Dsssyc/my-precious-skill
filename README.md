@@ -59,6 +59,7 @@ my-precious-skill/
     layered_recall_benchmark.py
     generated_answer_case_audit.py
     generated_answer_benchmark.py
+    private_generated_answer_dogfood_gate.py
     cases/
     quality-gates/
   skills/
@@ -506,6 +507,7 @@ python benchmarks/generated_answer_case_audit.py \
   --require-case-origin private_dogfood \
   --fail-under answer_scorable_case_rate=1.0 \
   --fail-over positive_without_reference_answer=0 \
+  --fail-over privacy_leak_count=0 \
   --fail-over unsafe_aggregate_identifier_count=0
 ```
 
@@ -515,17 +517,39 @@ coverage, safe aggregate `source_benchmarks` and `case_origins`, and
 `cases_sha256`. It is a readiness check for the case set only; it does not
 produce answer records or prove answer correctness.
 
+Run the full private generated-answer dogfood readiness gate as a repeatable
+operational check:
+
+```bash
+python benchmarks/private_generated_answer_dogfood_gate.py \
+  --memory-repo ~/repos/agent-memory
+```
+
+The runner authors temporary private dogfood cases under
+`.tmp/generated-answer-dogfood/`, audits case scoreability, generates
+extractive answer records under `/tmp`, grades them with strict answer gates,
+runs private shadow eval, then combines packaged, shadow, and answer evidence
+through `v1_readiness_gate.py`. It fails closed when the private repository
+already has dirty `eval/` or `.tmp/` artifacts, cleans generated artifacts on
+success, and emits aggregate-only JSON. On failure it reports the failed step
+without rendering private queries, reference answers, generated answers,
+memory IDs, source paths, or raw refs; add `--cleanup-on-failure` when the
+failure artifacts are not needed for local diagnosis.
+
 Author an initial private dogfood generated-answer case set from an existing
 deployment archive's layered memories:
 
 ```bash
 python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
   --repo ~/repos/agent-memory \
-  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --output .tmp/generated-answer-dogfood/cases.jsonl \
+  --limit 25 \
+  --abstain-limit 5 \
   --dry-run
 python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
   --repo ~/repos/agent-memory \
-  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --output .tmp/generated-answer-dogfood/cases.jsonl \
+  --limit 25 \
   --abstain-limit 5 \
   --write
 ```
@@ -534,9 +558,10 @@ The authoring helper writes private cases only inside the deployment archive.
 Its stdout is aggregate-only and reports selected case counts, skip counts,
 source benchmark counts, case-origin counts, and privacy flags. The generated
 case file contains private queries and reference answers; keep it out of this
-development repository. `--abstain-limit` adds deterministic no-hit
-`expected_abstain` cases so private dogfood answer reports can prove both
-positive answering and abstention behavior.
+development repository and clean the `.tmp` output after the gate run.
+`--abstain-limit` adds deterministic no-hit `expected_abstain` cases so
+private dogfood answer reports can prove both positive answering and
+abstention behavior.
 
 Generate extractive answer records from an existing archive for that offline
 grader:

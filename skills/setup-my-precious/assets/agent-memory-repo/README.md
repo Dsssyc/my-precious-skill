@@ -228,11 +228,15 @@ layered memory nodes:
 ```bash
 python tools/author_generated_answer_cases.py \
   --repo . \
-  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --output .tmp/generated-answer-dogfood/cases.jsonl \
+  --limit 25 \
+  --abstain-limit 5 \
   --dry-run
 python tools/author_generated_answer_cases.py \
   --repo . \
-  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --output .tmp/generated-answer-dogfood/cases.jsonl \
+  --limit 25 \
+  --abstain-limit 5 \
   --write
 ```
 
@@ -242,7 +246,8 @@ selected case count, skip counts, source benchmark counts, case-origin counts,
 and privacy flags without printing memory text, generated queries, reference
 answers, memory IDs, source paths, or raw refs. Run the reusable
 `generated_answer_case_audit.py` from the skill-development repository against
-the resulting private case file before generating answer records.
+the resulting private case file before generating answer records, and clean
+the `.tmp` case output after the gate run.
 
 Generate extractive answer records for offline generated-answer grading:
 

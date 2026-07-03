@@ -113,6 +113,14 @@ and JSONL indexes.
   counts, and a case-file fingerprint without rendering case IDs, queries, or
   reference answers. This closes the dogfood case-set readiness tooling gap but
   does not generate or grade answers.
+- `benchmarks/private_generated_answer_dogfood_gate.py`: aggregate-only
+  operational runner for private dogfood readiness. It orchestrates private
+  case authoring under `.tmp`, case audit, extractive answer-record generation
+  under `/tmp`, generated-answer grading, private shadow eval, and combined v1
+  readiness without committing private cases or rendering private queries,
+  answers, memory IDs, source paths, or raw refs. It fails closed when dirty
+  private `eval/` or `.tmp/` artifacts are already present and cleans generated
+  artifacts on success.
 - `templates/agent-memory-repo/tools/author_generated_answer_cases.py`:
   aggregate-only deployment-repo helper that authors private generated-answer
   case JSONL from active layered memory nodes. It writes private queries and
@@ -743,6 +751,13 @@ substitute for a model-backed public or private generated-answer evaluation.
 When paired with `author_generated_answer_cases.py --abstain-limit`, it can
 exercise deterministic private dogfood no-hit cases for the v1 answer gate
 without rendering private queries or answers.
+
+`benchmarks/private_generated_answer_dogfood_gate.py` packages that sequence as
+the repeatable operational gate. Its defaults write private cases only to
+`.tmp/generated-answer-dogfood/cases.jsonl`, write answer records and aggregate
+reports under `/tmp`, require `MyPreciousPrivateDogfood` and `private_dogfood`
+aggregate provenance in the answer report, and run `v1_readiness_gate.py` with
+packaged, private shadow, and private generated-answer evidence.
 
 The packaged `benchmarks/cases/layered_recall_synthetic.jsonl` file contains
 synthetic cases only. External public benchmark downloads or private archive
