@@ -50,6 +50,7 @@ my-precious-skill/
     layered_recall_benchmark.py
     generated_answer_case_audit.py
     generated_answer_benchmark.py
+    private_generated_answer_dogfood_gate.py
     cases/
     quality-gates/
   skills/
@@ -386,6 +387,7 @@ python benchmarks/generated_answer_case_audit.py \
   --require-case-origin private_dogfood \
   --fail-under answer_scorable_case_rate=1.0 \
   --fail-over positive_without_reference_answer=0 \
+  --fail-over privacy_leak_count=0 \
   --fail-over unsafe_aggregate_identifier_count=0
 ```
 
@@ -394,17 +396,38 @@ reference-answer 覆盖、answer-scorable 覆盖、forbidden-pattern 覆盖、�
 aggregate `source_benchmarks` / `case_origins` 和 `cases_sha256`。它只能证明
 case set 已经适合后续评分；不生成答案，也不证明答案正确。
 
+可以用一个可重复的 operational gate 跑完整 private generated-answer dogfood：
+
+```bash
+python benchmarks/private_generated_answer_dogfood_gate.py \
+  --memory-repo ~/repos/agent-memory
+```
+
+这个 runner 会在 `.tmp/generated-answer-dogfood/` 下临时生成私有 dogfood
+cases，审计 case 可评分性，在 `/tmp` 下生成 extractive answer records，用严格
+answer gate 评分，运行 private shadow eval，然后把 packaged、shadow 和 answer
+证据合并进 `v1_readiness_gate.py`。如果私有仓库已经有脏 `eval/` 或 `.tmp/`
+产物，它会 fail closed；成功后会清理生成产物；stdout 只输出 aggregate JSON。
+失败时只报告失败步骤，不渲染私有 query、reference answer、generated answer、
+memory ID、source path 或 raw ref；如果不需要保留失败产物做本地诊断，可以加
+`--cleanup-on-failure`。自定义外部 `--work-dir` 必须使用 dogfood 专用目录名，
+例如 `my_precious_generated_answer_dogfood`，避免 cleanup 指向泛用临时目录或
+仓库目录。
+
 也可以从私有部署 archive 的 layered memories 生成初始 private dogfood
 generated-answer case set：
 
 ```bash
 python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
   --repo ~/repos/agent-memory \
-  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --output .tmp/generated-answer-dogfood/cases.jsonl \
+  --limit 25 \
+  --abstain-limit 5 \
   --dry-run
 python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
   --repo ~/repos/agent-memory \
-  --output eval/generated_answer_private_dogfood_cases.jsonl \
+  --output .tmp/generated-answer-dogfood/cases.jsonl \
+  --limit 25 \
   --abstain-limit 5 \
   --write
 ```
@@ -412,9 +435,9 @@ python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
 这个 authoring helper 只在私有部署 archive 内写 case 文件；stdout 只输出
 aggregate 统计，包括 selected case、skip counts、source benchmark、
 case-origin 和 privacy flags。生成的 case 文件包含私有 query 与 reference
-answer，不能放进本开发仓库。`--abstain-limit` 会额外生成确定性的 no-hit
-`expected_abstain` case，让私有 dogfood answer report 同时证明正向回答和拒答
-行为。
+answer，不能放进本开发仓库，并且 gate 结束后要清理 `.tmp` 输出。
+`--abstain-limit` 会额外生成确定性的 no-hit `expected_abstain` case，让私有
+dogfood answer report 同时证明正向回答和拒答行为。
 
 不用 agent，也可以直接运行搜索脚本：
 

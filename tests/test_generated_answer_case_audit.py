@@ -59,6 +59,8 @@ class GeneratedAnswerCaseAuditTests(unittest.TestCase):
                     "answer_scorable_case_rate=1.0",
                     "--fail-over",
                     "positive_without_reference_answer=0",
+                    "--fail-over",
+                    "privacy_leak_count=0",
                 ],
                 check=True,
                 text=True,
@@ -75,6 +77,7 @@ class GeneratedAnswerCaseAuditTests(unittest.TestCase):
             self.assertEqual(payload["answer_scorable_cases"], 2)
             self.assertEqual(payload["positive_without_reference_answer"], 0)
             self.assertEqual(payload["answer_scorable_case_rate"], 1.0)
+            self.assertEqual(payload["privacy_leak_count"], 0)
             self.assertEqual(payload["forbidden_output_pattern_cases"], 1)
             self.assertEqual(payload["source_benchmarks"], {"MyPreciousPrivateDogfood": 2})
             self.assertEqual(payload["case_origins"], {"private_dogfood": 2})

@@ -92,6 +92,7 @@ python3 -m py_compile \
   benchmarks/convert_public_memory_benchmark.py \
   benchmarks/generated_answer_case_audit.py \
   benchmarks/generated_answer_benchmark.py \
+  benchmarks/private_generated_answer_dogfood_gate.py \
   benchmarks/source_stream_registry_benchmark.py \
   benchmarks/v1_readiness_gate.py \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
