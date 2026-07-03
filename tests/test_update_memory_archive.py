@@ -103,10 +103,15 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     "summary": "I will run the update command and report status.",
                     "decisions": [
                         "Decision: durable daily summaries should avoid process logs.",
+                        "Decision: Codex sandbox permission approval chatter should not become daily memory.",
+                        "Dry-run completed and live-run status was green.",
                         "I will inspect the result next.",
                     ],
                     "unresolved_tasks": [
                         "I will rerun tests later.",
+                        "Investigate why the sandbox still asks for approval after full access.",
+                        "Review file permission model for shared cache writes.",
+                        "Review agent permission model for delegated cache writes.",
                         "Review the daily content contract if archive audit fails.",
                     ],
                 },
@@ -130,9 +135,15 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Daily summaries preserve durable memory decisions", daily_text)
             self.assertIn("Decision: durable daily summaries should avoid process logs.", daily_text)
             self.assertIn("Review the daily content contract if archive audit fails.", daily_text)
+            self.assertIn("Review file permission model for shared cache writes.", daily_text)
+            self.assertIn("Review agent permission model for delegated cache writes.", daily_text)
             self.assertNotIn("I will run the update command", daily_text)
             self.assertNotIn("I will inspect the result next", daily_text)
             self.assertNotIn("I will rerun tests later", daily_text)
+            self.assertNotIn("Dry-run completed", daily_text)
+            self.assertNotIn("live-run status", daily_text)
+            self.assertNotIn("sandbox permission approval chatter", daily_text)
+            self.assertNotIn("sandbox still asks for approval", daily_text)
 
     def write_natural_induction_meta(
         self,

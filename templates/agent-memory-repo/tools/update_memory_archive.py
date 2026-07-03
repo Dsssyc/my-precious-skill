@@ -200,6 +200,18 @@ PROMPT_LIKE_QUOTED_MEMORY_PATTERN = re.compile(
     r"(?i)^\s*(?:quoted|raw)\s+(?:prompt|instruction|text)\b|"
     r'"[^"]*\b(?:assistant|system|user)\s+must\b[^"]*"'
 )
+AUTOMATION_PERMISSION_CHATTER_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"\b(?:codex|sandbox|full\s+access|workspace\s+write)\b"
+    r"(?=.{0,120}\b(?:permission|permissions|approval|approve|sandbox|full\s+access|workspace\s+write)\b)"
+    r"|"
+    r"\b(?:approval|approve|permissions?)\b"
+    r"(?=.{0,120}\b(?:codex|sandbox|full\s+access|workspace\s+write)\b)"
+    r")"
+)
+DAILY_RUN_STATUS_PATTERN = re.compile(
+    r"(?i)\b(?:command\s+progress|dry[- ]?run|live[- ]?run|run\s+status)\b"
+)
 BROAD_GENERIC_MEMORY_WORDS = {
     "a",
     "and",
@@ -3993,9 +4005,25 @@ def durable_daily_text(text: object) -> str:
         or is_raw_prompt_text(compacted)
         or is_injected_context_text(compacted)
         or is_process_update(compacted)
+        or is_automation_permission_chatter(compacted)
+        or is_daily_run_status_text(compacted)
     ):
         return ""
     return clip(compacted)
+
+
+def is_automation_permission_chatter(text: str) -> bool:
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return False
+    return bool(AUTOMATION_PERMISSION_CHATTER_PATTERN.search(compacted))
+
+
+def is_daily_run_status_text(text: str) -> bool:
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return False
+    return bool(DAILY_RUN_STATUS_PATTERN.search(compacted))
 
 
 def unique_durable_daily_items(items: Iterable[object]) -> list[str]:
