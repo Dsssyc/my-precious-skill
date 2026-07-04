@@ -996,6 +996,65 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
 
+    def test_required_answer_source_and_origin_accepts_private_dogfood_gate_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            answer_payload["source_benchmarks"] = {"MyPreciousPrivateDogfood": 3}
+            answer_payload["case_origins"] = {"private_dogfood": 3}
+            answer_payload.pop("report_kind")
+            answer_payload.pop("privacy")
+            answer = self.write_json(
+                root,
+                "answer.json",
+                {
+                    "report_kind": "private_generated_answer_dogfood_gate",
+                    "status": "passed",
+                    "answer_benchmark": answer_payload,
+                    "privacy": {
+                        "aggregate_only": True,
+                        "queries_rendered": False,
+                        "generated_answers_rendered": False,
+                        "reference_answers_rendered": False,
+                    },
+                },
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                    "--require-answer-source-benchmark",
+                    "MyPreciousPrivateDogfood",
+                    "--require-answer-case-origin",
+                    "private_dogfood",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(payload["overall_status"], "extended_evidence_ready")
+            self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
+
     def test_run_packaged_require_answer_uses_packaged_answer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             work_dir = Path(tmpdir) / "work"

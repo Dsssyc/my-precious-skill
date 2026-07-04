@@ -372,6 +372,22 @@ def assess_shadow_report(payload: dict[str, Any] | None, *, required: bool) -> d
     return result
 
 
+def normalize_answer_report(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+    if payload.get("report_kind") != "private_generated_answer_dogfood_gate":
+        return payload
+    answer_benchmark = payload.get("answer_benchmark")
+    if not isinstance(answer_benchmark, dict):
+        return payload
+    normalized = dict(answer_benchmark)
+    normalized.setdefault("report_kind", "generated_answer_benchmark")
+    privacy = payload.get("privacy")
+    if isinstance(privacy, dict):
+        normalized.setdefault("privacy", privacy)
+    return normalized
+
+
 def assess_answer_report(
     payload: dict[str, Any] | None,
     *,
@@ -379,15 +395,27 @@ def assess_answer_report(
     required_source_benchmarks: tuple[str, ...] = (),
     required_case_origins: tuple[str, ...] = (),
 ) -> dict[str, Any]:
+    report_payload = normalize_answer_report(payload)
     result = assess_report(
-        payload,
+        report_payload,
         expected_kind="generated_answer_benchmark",
         gates=GENERATED_ANSWER_GATES,
         evidence_level="offline_generated_answer_grading",
         required=required,
     )
-    if payload is not None:
-        privacy = payload.get("privacy") if isinstance(payload.get("privacy"), dict) else {}
+    if report_payload is not None:
+        if payload is not None and payload.get("report_kind") == "private_generated_answer_dogfood_gate":
+            if payload.get("status") != "passed":
+                result.setdefault("failures", []).append(
+                    {
+                        "metric": "private_generated_answer_dogfood_gate.status",
+                        "expected": "passed",
+                        "actual": payload.get("status"),
+                        "reason": "dogfood_gate_not_passed",
+                    }
+                )
+                result["status"] = "failed"
+        privacy = report_payload.get("privacy") if isinstance(report_payload.get("privacy"), dict) else {}
         for metric in ("aggregate_only",):
             if privacy.get(metric) is not True:
                 result.setdefault("failures", []).append(
@@ -410,7 +438,7 @@ def assess_answer_report(
                     }
                 )
                 result["status"] = "failed"
-        source_benchmarks = payload.get("source_benchmarks")
+        source_benchmarks = report_payload.get("source_benchmarks")
         if not has_positive_count(source_benchmarks):
             result.setdefault("failures", []).append(
                 {
@@ -420,7 +448,7 @@ def assess_answer_report(
                 }
             )
             result["status"] = "failed"
-        case_origins = payload.get("case_origins")
+        case_origins = report_payload.get("case_origins")
         if not has_positive_count(case_origins):
             result.setdefault("failures", []).append(
                 {
