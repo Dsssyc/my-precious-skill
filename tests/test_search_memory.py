@@ -2155,12 +2155,54 @@ class SearchMemoryTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            unauthorized_preview_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source map reachability",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                    "--raw-source-preview",
+                    "all",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            authorized_preview_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "source map reachability",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                    "--raw-source-preview",
+                    "all",
+                    "--authorize-raw-source-preview",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
         self.assertIn("source refs:", result.stdout)
         self.assertIn("status: available", result.stdout)
         self.assertIn("reason: source_map_reachable", result.stdout)
         self.assertNotIn("source-map.json#explicit_memory", result.stdout)
         self.assertNotIn("/private/raw-transcript.jsonl", result.stdout)
+        self.assertIn("raw_preview_blocked: authorization_required", unauthorized_preview_result.stdout)
+        self.assertNotIn("/private/raw-transcript.jsonl", unauthorized_preview_result.stdout)
+        self.assertIn(
+            "raw_preview: blocked: source_map_contains_no_raw_content",
+            authorized_preview_result.stdout,
+        )
+        self.assertNotIn("/private/raw-transcript.jsonl", authorized_preview_result.stdout)
 
     def test_search_memory_depth_source_parses_string_source_refs_with_anchors(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()

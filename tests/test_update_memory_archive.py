@@ -3094,6 +3094,15 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Hybrid lexical search", (memory_repo / "memories/projects.jsonl").read_text(encoding="utf-8"))
             automatic_node = next(row for row in memory_rows if "Hybrid lexical search" in row["text"])
             expected_source_map = str(Path(automatic_node["derived_from"][0]).with_name("source-map.json"))
+            expected_evidence = str(Path(automatic_node["derived_from"][0]).with_name("evidence.md"))
+            self.assertEqual(
+                automatic_node["evidence_refs"],
+                [{"path": expected_evidence, "quote_id": "ev_001"}],
+            )
+            self.assertIn(
+                "ev_001:",
+                (memory_repo / expected_evidence).read_text(encoding="utf-8"),
+            )
             self.assertEqual(
                 automatic_node["raw_refs"],
                 [{"path": expected_source_map, "anchor": "source_record"}],
