@@ -15,10 +15,7 @@ from pathlib import Path, PurePosixPath
 ALLOWED_ROOTS = (
     "INDEX.md",
     "config/projects.jsonl",
-    "config/source_streams.jsonl",
     "index",
-    "memories",
-    "reviews",
     "daily",
     "sessions",
 )

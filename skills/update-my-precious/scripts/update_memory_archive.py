@@ -212,6 +212,13 @@ AUTOMATION_PERMISSION_CHATTER_PATTERN = re.compile(
 DAILY_RUN_STATUS_PATTERN = re.compile(
     r"(?i)\b(?:command\s+progress|dry[- ]?run|live[- ]?run|run\s+status)\b"
 )
+DAILY_CONTRACT_NOISE_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"^\s*(?:raw\s+prompt|full\s+quer(?:y|ies)|raw_refs?|raw\s+source\s+path|generic\s+process\s+narration)\s*[:=]|"
+    r"\braw_refs?\b\s*[:=]|"
+    r"\b(?:records|source-records|sessions)/[^\s`)]+#[A-Za-z0-9_.:-]+"
+    r")"
+)
 BROAD_GENERIC_MEMORY_WORDS = {
     "a",
     "and",
@@ -4007,6 +4014,7 @@ def durable_daily_text(text: object) -> str:
         or is_process_update(compacted)
         or is_automation_permission_chatter(compacted)
         or is_daily_run_status_text(compacted)
+        or is_daily_contract_noise_text(compacted)
     ):
         return ""
     return clip(compacted)
@@ -4024,6 +4032,13 @@ def is_daily_run_status_text(text: str) -> bool:
     if not compacted:
         return False
     return bool(DAILY_RUN_STATUS_PATTERN.search(compacted))
+
+
+def is_daily_contract_noise_text(text: str) -> bool:
+    compacted = compact_whitespace(text)
+    if not compacted:
+        return False
+    return bool(DAILY_CONTRACT_NOISE_PATTERN.search(compacted))
 
 
 def unique_durable_daily_items(items: Iterable[object]) -> list[str]:

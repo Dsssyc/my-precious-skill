@@ -61,6 +61,14 @@ RAW_TITLE_PATTERN = re.compile(
     r")",
     re.IGNORECASE,
 )
+DAILY_CONTRACT_NOISE_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"^\s*(?:[-*]\s*)?(?:raw\s+prompt|full\s+quer(?:y|ies)|raw_refs?|raw\s+source\s+path|generic\s+process\s+narration)\s*[:=]|"
+    r"\braw_refs?\b\s*[:=]|"
+    r"\b(?:records|source-records|sessions)/[^\s`)]+#[A-Za-z0-9_.:-]+|"
+    r"/(?:Users|var|private|tmp|opt|home|Volumes)/[^\s`)]+"
+    r")"
+)
 NOISY_TAGS = {
     "agent-memory",
     "my-precious",
@@ -597,6 +605,8 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
             findings.append(Finding(relative, line_number, "placeholder"))
         if RAW_TITLE_PATTERN.search(line):
             findings.append(Finding(relative, line_number, "raw_title"))
+        if relative.startswith("daily/") and DAILY_CONTRACT_NOISE_PATTERN.search(line):
+            findings.append(Finding(relative, line_number, "daily_contract_noise"))
         if any(LOW_SIGNAL_PATTERN.search(segment) or is_incomplete_memory_fragment(segment) for segment in quality_segments):
             findings.append(Finding(relative, line_number, "low_signal"))
         if not relative.endswith("/redactions.md") and is_redaction_category_text(quality_line):

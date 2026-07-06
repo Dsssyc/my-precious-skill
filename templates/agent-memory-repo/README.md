@@ -318,9 +318,10 @@ python tools/sync_memory_archive.py --push
 The sync helper refuses to proceed when non-archive paths changed, when
 generated archive files still contain recognized key-like values, when archive
 audit finds low-quality index text, or when `git diff --cached --check` fails.
-Expected archive paths are limited to
-`INDEX.md`, `config/projects.jsonl`, `config/source_streams.jsonl`, `index/`,
-`memories/`, `reviews/`, `daily/`, and `sessions/`.
+Expected publish-safe archive paths are limited to `INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, and `sessions/`. Private memory
+node files, review decisions, source-stream registries, tools, and docs must be
+handled outside automatic archive sync.
 
 ## Archive Data
 

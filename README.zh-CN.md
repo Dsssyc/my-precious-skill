@@ -798,10 +798,10 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
   --push
 ```
 
-sync helper 只 stage archive 路径（`INDEX.md`、`config/projects.jsonl`、
-`index/`、`memories/`、`reviews/`、`daily/` 和 `sessions/`）。提交前它会拒绝
-tool/script 改动、archive audit findings、未脱敏的 key-like value 和
-whitespace 错误。
+sync helper 只 stage publish-safe archive 路径（`INDEX.md`、
+`config/projects.jsonl`、`index/`、`daily/` 和 `sessions/`）。提交前它会拒绝
+tool/script 改动、私有 memory/review node 文件、archive audit findings、
+未脱敏的 key-like value 和 whitespace 错误。
 
 ## 归档格式约定
 

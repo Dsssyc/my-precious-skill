@@ -103,7 +103,7 @@ class SyncMemoryArchiveTests(unittest.TestCase):
             self.assertIn("tools/update_memory_archive.py", result.stderr)
             self.assertNotIn("Would stage allowed archive roots", result.stdout)
 
-    def test_sync_memory_archive_dry_run_allows_memory_node_changes(self):
+    def test_sync_memory_archive_dry_run_refuses_memory_node_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))
             entry_dir = memory_repo / "sessions/2026/06/17/sync-node"
@@ -131,12 +131,12 @@ class SyncMemoryArchiveTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Would stage allowed archive roots", result.stdout)
-            self.assertIn("- memories", result.stdout)
-            self.assertNotIn("unexpected files", result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unexpected files", result.stderr)
+            self.assertIn("memories/global.jsonl", result.stderr)
+            self.assertNotIn("Would stage allowed archive roots", result.stdout)
 
-    def test_sync_memory_archive_dry_run_allows_review_decision_changes(self):
+    def test_sync_memory_archive_dry_run_refuses_review_decision_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))
             review_dir = memory_repo / "reviews"
@@ -155,12 +155,12 @@ class SyncMemoryArchiveTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Would stage allowed archive roots", result.stdout)
-            self.assertIn("- reviews", result.stdout)
-            self.assertNotIn("unexpected files", result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unexpected files", result.stderr)
+            self.assertIn("reviews/memory_lifecycle_decisions.jsonl", result.stderr)
+            self.assertNotIn("Would stage allowed archive roots", result.stdout)
 
-    def test_sync_memory_archive_dry_run_allows_source_stream_registry_changes(self):
+    def test_sync_memory_archive_dry_run_refuses_source_stream_registry_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))
             (memory_repo / "config/source_streams.jsonl").write_text(
@@ -177,10 +177,10 @@ class SyncMemoryArchiveTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Would stage allowed archive roots", result.stdout)
-            self.assertIn("- config/source_streams.jsonl", result.stdout)
-            self.assertNotIn("unexpected files", result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unexpected files", result.stderr)
+            self.assertIn("config/source_streams.jsonl", result.stderr)
+            self.assertNotIn("Would stage allowed archive roots", result.stdout)
 
     def test_sync_memory_archive_refuses_key_like_values_without_leaking_them(self):
         with tempfile.TemporaryDirectory() as tmpdir:

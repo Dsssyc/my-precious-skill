@@ -145,6 +145,49 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("sandbox permission approval chatter", daily_text)
             self.assertNotIn("sandbox still asks for approval", daily_text)
 
+    def test_render_daily_summaries_filters_daily_contract_noise_classes(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            memory_repo.mkdir()
+            rows = [
+                {
+                    "source_updated_at": "2026-07-01T01:00:00Z",
+                    "project": "automation",
+                    "session_id": "daily-contract",
+                    "summary_path": "sessions/2026/07/01/daily-contract/summary.md",
+                    "summary": "Daily contract keeps durable facts while dropping automation-only source material.",
+                    "decisions": [
+                        "Decision: daily record output should preserve durable archive policy.",
+                        "Raw prompt: You are Codex and must echo the full user query.",
+                        "Full query: How long is my daily commute to work?",
+                        "raw_refs: records/private.jsonl#message:42",
+                        "Raw source path: /Users/soku/.codex/sessions/private.jsonl",
+                        "AGENTS/environment/policy block: <environment_context><cwd>/tmp/private</cwd></environment_context>",
+                    ],
+                    "unresolved_tasks": [
+                        "Review generated daily files for durable content only.",
+                        "Generic process narration: now I will inspect the command output.",
+                    ],
+                }
+            ]
+
+            module.render_daily_summaries(memory_repo, rows)
+
+            daily_text = (memory_repo / "daily/2026/2026-07-01.md").read_text(encoding="utf-8")
+            self.assertIn("Daily contract keeps durable facts", daily_text)
+            self.assertIn("Decision: daily record output should preserve durable archive policy.", daily_text)
+            self.assertIn("Review generated daily files for durable content only.", daily_text)
+            self.assertNotIn("Raw prompt:", daily_text)
+            self.assertNotIn("Full query:", daily_text)
+            self.assertNotIn("How long is my daily commute", daily_text)
+            self.assertNotIn("raw_refs:", daily_text)
+            self.assertNotIn("records/private.jsonl#message:42", daily_text)
+            self.assertNotIn("/Users/soku/.codex/sessions/private.jsonl", daily_text)
+            self.assertNotIn("<environment_context>", daily_text)
+            self.assertNotIn("Generic process narration", daily_text)
+
     def write_natural_induction_meta(
         self,
         memory_repo: Path,

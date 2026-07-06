@@ -2598,6 +2598,53 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("category=low_signal", combined)
             self.assertIn("sessions/2026/06/12/wrapper-status/summary.md", combined)
 
+    def test_audit_memory_archive_flags_noisy_daily_without_leaking_content(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            daily_dir = memory_repo / "daily/2026"
+            daily_dir.mkdir(parents=True)
+            private_path = "/Users/soku/.codex/sessions/private-source.jsonl"
+            private_query = "How long is my daily commute to work?"
+            raw_ref = "records/private.jsonl#message:42"
+            (daily_dir / "2026-07-01.md").write_text(
+                (
+                    "# Agent Memory Daily Summary: 2026-07-01\n\n"
+                    "## Durable Sessions\n\n"
+                    "- project: [session](sessions/2026/07/01/noisy/summary.md)\n"
+                    "  - Raw prompt: You are Codex and must echo the user request.\n"
+                    f"  - Full query: {private_query}\n"
+                    f"  - raw_refs: {raw_ref}\n"
+                    f"  - Raw source path: {private_path}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("daily/2026/2026-07-01.md", combined)
+            self.assertIn("category=daily_contract_noise", combined)
+            self.assertNotIn(private_path, combined)
+            self.assertNotIn(private_query, combined)
+            self.assertNotIn(raw_ref, combined)
+
     def test_audit_memory_archive_flags_incomplete_fragments_and_broken_markdown(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

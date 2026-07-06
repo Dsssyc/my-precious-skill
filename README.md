@@ -1052,10 +1052,10 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
   --push
 ```
 
-The sync helper only stages archive paths (`INDEX.md`,
-`config/projects.jsonl`, `index/`, `memories/`, `reviews/`, `daily/`, and
-`sessions/`). It refuses tool/script edits, archive audit findings, unredacted
-key-like values, and whitespace errors before committing.
+The sync helper only stages publish-safe archive paths (`INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, and `sessions/`). It refuses
+tool/script edits, private memory/review node files, archive audit findings,
+unredacted key-like values, and whitespace errors before committing.
 
 ## Archive Contract
 

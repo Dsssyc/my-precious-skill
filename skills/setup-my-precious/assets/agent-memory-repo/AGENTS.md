@@ -31,9 +31,11 @@ When the user asks to update memory now:
 5. Review generated summaries before committing or pushing.
 6. If the user requested automatic Git sync, run `python tools/sync_memory_archive.py --push` instead of hand-staging files.
 
-`tools/sync_memory_archive.py` stages only generated archive paths and refuses
-unexpected files such as tool/script edits. Commit template or tool updates
-separately before running automatic archive sync.
+`tools/sync_memory_archive.py` stages only `INDEX.md`, `config/projects.jsonl`,
+`index/`, `daily/`, and `sessions/`. It refuses unexpected files such as
+tool/script edits, private memory/review node files, and source-stream registry
+changes. Commit template or tool updates separately before running automatic
+archive sync.
 
 When `config/projects.jsonl` is empty, the global runner should scan source
 records for project metadata and register discovered projects before updating.
