@@ -86,6 +86,7 @@ Compile bundled scripts when implementation code changes:
 ```bash
 python3 -m py_compile \
   tools/validate_skills.py \
+  benchmarks/packaged_lifecycle_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
