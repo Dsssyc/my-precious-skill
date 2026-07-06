@@ -941,8 +941,17 @@ skills/using-my-precious/references/archive-format.md
 
 ## 验证
 
-先用仓库内置 validator 校验 skill；如果当前环境提供 runtime 专用 validator，
-可以额外运行。然后运行仓库测试：
+发布或提交 release PR 前，优先运行 canonical release gate：
+
+```bash
+python3 tools/run_quality_gates.py
+```
+
+release gate 只输出 aggregate JSON，并只汇总 v1 readiness scorecard；不会渲染
+子命令 stdout/stderr、memory text、search hits、source paths、temporary paths 或
+raw refs。
+
+如果需要定位失败原因，可以直接运行底层检查命令：
 
 ```bash
 python3 tools/validate_skills.py
@@ -957,6 +966,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
   tools/validate_skills.py \
+  tools/run_quality_gates.py \
   benchmarks/packaged_lifecycle_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \

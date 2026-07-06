@@ -1200,9 +1200,17 @@ Runtime setup work that belongs in `$setup-my-precious`:
 
 ## Verification
 
-Validate the skills with the repo-local validator, optionally run any
-runtime-specific validator available in your environment, then run the
-repository tests:
+Run the canonical release gate before publishing or opening a release PR:
+
+```bash
+python3 tools/run_quality_gates.py
+```
+
+The release gate emits aggregate-only JSON and summarizes the v1 readiness
+scorecards without rendering child command stdout/stderr, memory text, search
+hits, source paths, temporary paths, or raw refs.
+
+For focused debugging, run the underlying checks directly:
 
 ```bash
 python3 tools/validate_skills.py
@@ -1217,6 +1225,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
   tools/validate_skills.py \
+  tools/run_quality_gates.py \
   benchmarks/packaged_lifecycle_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \

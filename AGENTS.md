@@ -66,6 +66,12 @@ cmp -s templates/agent-memory-repo/tools/search_memory.py skills/using-my-precio
 
 ## Verification
 
+Run the canonical release gate before publishing or opening a release PR:
+
+```bash
+python3 tools/run_quality_gates.py
+```
+
 Run the focused test suite after changes:
 
 ```bash
@@ -94,6 +100,7 @@ Compile bundled scripts when implementation code changes:
 ```bash
 python3 -m py_compile \
   tools/validate_skills.py \
+  tools/run_quality_gates.py \
   benchmarks/packaged_lifecycle_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
@@ -132,7 +139,8 @@ rm -rf .uv-cache tests/__pycache__ benchmarks/__pycache__ \
   skills/setup-my-precious/scripts/__pycache__ \
   skills/setup-my-precious/assets/agent-memory-repo/tools/__pycache__ \
   skills/update-my-precious/scripts/__pycache__ \
-  skills/using-my-precious/scripts/__pycache__
+  skills/using-my-precious/scripts/__pycache__ \
+  tools/__pycache__
 ```
 
 ## Git Hygiene
