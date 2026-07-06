@@ -2560,6 +2560,51 @@ neighbors and a small same-layer/same-scope/different-topic tail, so the next
 ranking step should not add broader lexical heuristics unless a fresh
 aggregate-only run shows a new dominant bucket.
 
+### Residual Top-K Noise Classification Loop
+
+Code point for the current classification pass:
+`572b90b fix: prune same-layer memory topic noise`
+
+This pass reran the strict v2 and expanded v3 private real-archive shadow
+evaluations from the current implementation. The reports stayed outside this
+repository and were used only for aggregate metrics and privacy-safe diagnostic
+counts; no private probe cases, queries, memory IDs, memory text, source refs,
+source paths, raw refs, or full JSON reports were copied into this repository.
+
+Current residual aggregate:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.9230769230769231 | 0.9117647058823529 |
+| top_k_noise_at_5 | 0.07692307692307687 | 0.08823529411764708 |
+| diagnostics.failure_types.top_k_noise | 2 | 3 |
+| noise_sources_at_5.broad_lexical_match | 1 | 2 |
+| noise_sources_at_5.scope_mixed | 1 | 1 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 2 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 1 | 1 |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+
+Decision: no implementation change in this pass. The residual failure set is
+too small and not dominated by one safe pruning category: strict v2 is split
+one-to-one between same-topic/cross-scope and same-scope/different-topic
+relations, while expanded v3 has only a two-to-one relation skew. The
+diagnostic source buckets are similarly split between broad lexical and
+scope-mixed neighbors. The search runtime can see layer, scope, topic, score,
+and ranking reasons, but it does not have the evaluator's expected-record
+relation labels. A global prune of same-layer/different-scope/same-topic tails
+would therefore risk deleting legitimate supporting memories, not just noise.
+
+The next ranking change should wait for stronger aggregate evidence or a public
+synthetic fixture that proves a safe runtime signal for same-topic/cross-scope
+noise. Until then, the latest implementation remains the current clean cut.
+
 ## V1 Evidence Convergence Snapshot
 
 Date: 2026-07-01
