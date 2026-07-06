@@ -1073,6 +1073,21 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
             payload["metrics"]["noise_relation_to_expected_at_5"]["same_layer_diff_scope_same_topic"],
             1,
         )
+        runtime_signals = payload["metrics"]["runtime_signal_diagnostics_at_5"]["same_topic_cross_scope"]
+        self.assertEqual(runtime_signals["support"]["count"], 2)
+        self.assertEqual(runtime_signals["noise"]["count"], 1)
+        self.assertEqual(runtime_signals["support"]["relative_score_to_top"]["gte_99"], 2)
+        self.assertEqual(runtime_signals["noise"]["relative_score_to_top"]["gte_99"], 1)
+        self.assertEqual(runtime_signals["support"]["reason_flags"]["strict_token_coverage"], 2)
+        self.assertEqual(runtime_signals["noise"]["reason_flags"]["strict_token_coverage"], 1)
+        self.assertEqual(runtime_signals["support"]["reason_flags"]["field_topic"], 2)
+        self.assertEqual(runtime_signals["noise"]["reason_flags"]["field_topic"], 1)
+        self.assertEqual(runtime_signals["support"]["source_kind"]["automatic"], 2)
+        self.assertEqual(runtime_signals["noise"]["source_kind"]["automatic"], 1)
+        self.assertEqual(runtime_signals["support"]["confidence"]["high"], 2)
+        self.assertEqual(runtime_signals["noise"]["confidence"]["high"], 1)
+        self.assertEqual(runtime_signals["support"]["support_count"]["2_4"], 2)
+        self.assertEqual(runtime_signals["noise"]["support_count"]["2_4"], 1)
 
         support_detail, noise_detail, abstain_detail = payload["case_details"]
         self.assertEqual(support_detail["expected_memory_count"], 2)

@@ -2633,6 +2633,53 @@ ranking goal must first identify a runtime-visible signal, such as a stable
 score/reason pattern, before pruning same-layer/different-scope/same-topic tail
 hits.
 
+### Same-Topic Cross-Scope Runtime-Signal Audit
+
+Code point for the diagnostic addition:
+this documentation update
+
+The shadow evaluator now emits `runtime_signal_diagnostics_at_5` as an
+aggregate-only diagnostic. For same-topic/cross-scope candidates it counts
+support and noise classes separately, but only renders runtime-visible buckets:
+relative score band, whitelisted reason-flag counters, source kind, confidence,
+and support-count band. It does not render queries, case text, memory IDs,
+memory text, source refs, source paths, raw refs, full `why` strings, scopes, or
+topics.
+
+Public synthetic fixture aggregate:
+
+| class | count | relative score band | strict-token coverage | confidence | support-count band |
+| --- | ---: | --- | ---: | --- | --- |
+| support | 2 | `gte_99=2` | 2 | high=2 | `2_4=2` |
+| noise | 1 | `gte_99=1` | 1 | high=1 | `2_4=1` |
+
+Private real-archive aggregate rerun:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.9230769230769231 | 0.9117647058823529 |
+| top_k_noise_at_5 | 0.07692307692307687 | 0.08823529411764708 |
+| same-topic/cross-scope support count | 0 | 0 |
+| same-topic/cross-scope noise count | 1 | 2 |
+| noise relative score band | `gte_99=1` | `gte_99=2` |
+| noise strict-token coverage | 0 | 0 |
+| noise important-token coverage | 1 | 2 |
+| noise field:text | 1 | 2 |
+| noise field:topic | 1 | 1 |
+| noise source kind | automatic=1 | automatic=2 |
+| noise confidence | medium confidence=1 | medium confidence=2 |
+| noise support-count band | support_count=1 | support_count=1 |
+
+Decision: the private residual noise has a candidate runtime-visible pattern:
+same-topic/cross-scope noise is near-tied with the top hit, automatic,
+medium-confidence, support_count=1, and lacks strict-token coverage. This is
+not yet sufficient for a ranking patch. The public fixture proves the evaluator
+can expose the signal safely, but it also shows that same-topic/cross-scope
+support can be high-signal and must not be globally pruned. A future ranking
+goal would need a public RED/GREEN regression for the stricter candidate
+pattern before changing production ranking.
+
 ## V1 Evidence Convergence Snapshot
 
 Date: 2026-07-01

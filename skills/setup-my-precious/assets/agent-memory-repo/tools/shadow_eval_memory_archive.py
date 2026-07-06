@@ -251,6 +251,178 @@ def classify_noise_relation_to_expected(hit: search_memory.Hit, expected_records
     return "diff_layer"
 
 
+def new_runtime_signal_candidate_bucket() -> dict[str, Any]:
+    return {
+        "count": 0,
+        "relative_score_to_top": {
+            "gte_99": 0,
+            "gte_95_lt_99": 0,
+            "gte_90_lt_95": 0,
+            "lt_90": 0,
+            "unknown": 0,
+        },
+        "reason_flags": {
+            "strict_token_coverage": 0,
+            "meaningful_token_coverage": 0,
+            "important_token_coverage": 0,
+            "field_text": 0,
+            "field_topic": 0,
+            "phrase": 0,
+        },
+        "source_kind": {
+            "automatic": 0,
+            "explicit": 0,
+            "other": 0,
+            "unknown": 0,
+        },
+        "confidence": {
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "other": 0,
+            "unknown": 0,
+        },
+        "support_count": {
+            "0": 0,
+            "1": 0,
+            "2_4": 0,
+            "5_plus": 0,
+            "unknown": 0,
+        },
+    }
+
+
+def new_runtime_signal_diagnostics() -> dict[str, Any]:
+    return {
+        "same_topic_cross_scope": {
+            "support": new_runtime_signal_candidate_bucket(),
+            "noise": new_runtime_signal_candidate_bucket(),
+        }
+    }
+
+
+def relative_score_bucket(hit_score: int, top_score: int) -> str:
+    if top_score <= 0:
+        return "unknown"
+    score_ratio = hit_score / top_score
+    if score_ratio >= 0.99:
+        return "gte_99"
+    if score_ratio >= 0.95:
+        return "gte_95_lt_99"
+    if score_ratio >= 0.90:
+        return "gte_90_lt_95"
+    return "lt_90"
+
+
+def reason_values(hit: search_memory.Hit, prefix: str) -> list[str]:
+    values: list[str] = []
+    for reason in hit.why:
+        if reason.startswith(prefix):
+            values.append(reason.removeprefix(prefix))
+    return values
+
+
+def source_kind_bucket(hit: search_memory.Hit) -> str:
+    values = reason_values(hit, "source:")
+    if not values:
+        return "unknown"
+    value = values[0]
+    if value in {"automatic", "explicit"}:
+        return value
+    return "other"
+
+
+def confidence_bucket(hit: search_memory.Hit) -> str:
+    values = reason_values(hit, "confidence:")
+    if not values:
+        return "unknown"
+    value = values[0]
+    if value in {"high", "medium", "low"}:
+        return value
+    return "other"
+
+
+def support_count_bucket(hit: search_memory.Hit) -> str:
+    values = reason_values(hit, "support_count:")
+    if not values:
+        return "unknown"
+    try:
+        support_count = int(values[0])
+    except ValueError:
+        return "unknown"
+    if support_count <= 0:
+        return "0"
+    if support_count == 1:
+        return "1"
+    if support_count <= 4:
+        return "2_4"
+    return "5_plus"
+
+
+def update_runtime_signal_bucket(bucket: dict[str, Any], hit: search_memory.Hit, top_score: int) -> None:
+    bucket["count"] += 1
+    bucket["relative_score_to_top"][relative_score_bucket(hit.score, top_score)] += 1
+    if "strict-token-coverage" in hit.why:
+        bucket["reason_flags"]["strict_token_coverage"] += 1
+    if "meaningful-token-coverage" in hit.why:
+        bucket["reason_flags"]["meaningful_token_coverage"] += 1
+    if "important-token-coverage" in hit.why:
+        bucket["reason_flags"]["important_token_coverage"] += 1
+    if "field:text" in hit.why:
+        bucket["reason_flags"]["field_text"] += 1
+    if "field:topic" in hit.why:
+        bucket["reason_flags"]["field_topic"] += 1
+    if any(reason.startswith("phrase:") for reason in hit.why):
+        bucket["reason_flags"]["phrase"] += 1
+    bucket["source_kind"][source_kind_bucket(hit)] += 1
+    bucket["confidence"][confidence_bucket(hit)] += 1
+    bucket["support_count"][support_count_bucket(hit)] += 1
+
+
+def same_topic_cross_scope_support_candidate(
+    hit: search_memory.Hit,
+    hit_id: str,
+    expected_records_by_id: dict[str, dict],
+) -> bool:
+    hit_layer, hit_scope, hit_topic = hit_relation(hit)
+    if not (hit_layer and hit_scope and hit_topic):
+        return False
+    for expected_id, record in expected_records_by_id.items():
+        if expected_id == hit_id:
+            continue
+        expected_layer, expected_scope, expected_topic = record_relation(record)
+        if (
+            expected_layer
+            and expected_scope
+            and expected_topic
+            and hit_layer == expected_layer
+            and hit_topic == expected_topic
+            and hit_scope != expected_scope
+        ):
+            return True
+    return False
+
+
+def update_runtime_signal_diagnostics(
+    diagnostics: dict[str, Any],
+    hits: list[search_memory.Hit],
+    expected_id_set: set[str],
+    expected_records: list[dict],
+    expected_records_by_id: dict[str, dict],
+) -> None:
+    top_score = max((hit.score for hit in hits), default=0)
+    same_topic_cross_scope = diagnostics["same_topic_cross_scope"]
+    for hit in hits:
+        hit_id = safe_memory_id(hit.memory_id)
+        if not hit_id:
+            continue
+        if hit_id in expected_id_set:
+            if same_topic_cross_scope_support_candidate(hit, hit_id, expected_records_by_id):
+                update_runtime_signal_bucket(same_topic_cross_scope["support"], hit, top_score)
+        elif classify_noise_relation_to_expected(hit, expected_records) == "same_layer_diff_scope_same_topic":
+            update_runtime_signal_bucket(same_topic_cross_scope["noise"], hit, top_score)
+
+
 def evaluate_cases(
     repo: Path,
     cases: list[dict],
@@ -275,6 +447,7 @@ def evaluate_cases(
     }
     noise_sources = new_noise_sources()
     noise_relation_to_expected = new_noise_relation_to_expected()
+    runtime_signal_diagnostics = new_runtime_signal_diagnostics()
     details: list[dict[str, Any]] = []
     inactive_ids = inactive_memory_ids(records)
     records_by_id = record_id_map(records)
@@ -317,6 +490,16 @@ def evaluate_cases(
             if relevant_count:
                 totals["recall_hits"] += 1
             expected_records = [records_by_id[memory_id] for memory_id in expected_ids if memory_id in records_by_id]
+            expected_records_by_id = {
+                memory_id: records_by_id[memory_id] for memory_id in expected_ids if memory_id in records_by_id
+            }
+            update_runtime_signal_diagnostics(
+                runtime_signal_diagnostics,
+                hits,
+                expected_id_set,
+                expected_records,
+                expected_records_by_id,
+            )
             for hit in hits:
                 hit_id = safe_memory_id(hit.memory_id)
                 if hit_id and hit_id not in expected_id_set:
@@ -364,6 +547,7 @@ def evaluate_cases(
         "top_k_noise_at_5": None if precision is None else 1.0 - precision,
         "noise_sources_at_5": noise_sources,
         "noise_relation_to_expected_at_5": noise_relation_to_expected,
+        "runtime_signal_diagnostics_at_5": runtime_signal_diagnostics,
         "abstain_pass_rate": ratio(totals["abstain_hits"], totals["abstain_cases"]),
         "abstain_false_positive_results": totals["abstain_false_positive_results"],
         "active_memory_suppression": ratio(totals["suppression_hits"], totals["suppression_cases"]),
@@ -719,6 +903,7 @@ def build_report(repo: Path, cases: list[dict], audit_script: Path | None, limit
             "top_k_noise_at_5": case_metrics["top_k_noise_at_5"],
             "noise_sources_at_5": case_metrics["noise_sources_at_5"],
             "noise_relation_to_expected_at_5": case_metrics["noise_relation_to_expected_at_5"],
+            "runtime_signal_diagnostics_at_5": case_metrics["runtime_signal_diagnostics_at_5"],
             "abstain_pass_rate": case_metrics["abstain_pass_rate"],
             "abstain_false_positive_results": case_metrics["abstain_false_positive_results"],
             "active_memory_suppression": case_metrics["active_memory_suppression"],

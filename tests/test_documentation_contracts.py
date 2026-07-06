@@ -85,6 +85,18 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_private_shadow_refresh_section_records_runtime_signal_audit(self):
+        section = self.evaluation_section("## V1.1 Private Shadow Coverage Refresh")
+        for phrase in (
+            "Same-Topic Cross-Scope Runtime-Signal Audit",
+            "runtime_signal_diagnostics_at_5",
+            "support_count=1",
+            "medium confidence",
+            "not yet sufficient for a ranking patch",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
 
 if __name__ == "__main__":
     unittest.main()
