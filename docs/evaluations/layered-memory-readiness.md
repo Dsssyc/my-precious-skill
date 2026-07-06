@@ -2605,6 +2605,34 @@ The next ranking change should wait for stronger aggregate evidence or a public
 synthetic fixture that proves a safe runtime signal for same-topic/cross-scope
 noise. Until then, the latest implementation remains the current clean cut.
 
+### Same-Topic Cross-Scope Safety Fixture
+
+Code point for the fixture addition:
+this documentation update
+
+The repository now includes a public synthetic shadow-eval fixture for
+same-topic/cross-scope support and same-topic/cross-scope noise. The fixture
+uses generated public marker text only; it does not depend on private archive
+records, private probes, private queries, memory IDs from a deployment archive,
+source paths, raw refs, or private source content.
+
+Synthetic fixture result:
+
+| scenario | expected aggregate behavior |
+| --- | --- |
+| same-topic/cross-scope support | two expected memories with the same layer and topic but different scopes are both counted as relevant; `noise_result_count=0` |
+| same-topic/cross-scope noise | a same-layer/different-scope/same-topic neighbor that is not expected is counted as one top-k noise result with `noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic=1` |
+| abstain/privacy/suppression guard | the fixture keeps recall at 1.0 for positive cases, abstention passing for the negative case, suppression passing for an expected-not memory, and privacy aggregate output passing |
+
+Decision: this fixture proves that the aggregate evaluator can distinguish
+expected same-topic/cross-scope support from unexpected same-topic/cross-scope
+noise when the case file supplies ground-truth expected memory IDs. This
+fixture is not sufficient to justify a production ranking change, because the
+search runtime still does not have that expected-record truth label. A future
+ranking goal must first identify a runtime-visible signal, such as a stable
+score/reason pattern, before pruning same-layer/different-scope/same-topic tail
+hits.
+
 ## V1 Evidence Convergence Snapshot
 
 Date: 2026-07-01

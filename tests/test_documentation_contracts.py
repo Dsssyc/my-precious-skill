@@ -74,6 +74,17 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_private_shadow_refresh_section_records_cross_scope_safety_fixture(self):
+        section = self.evaluation_section("## V1.1 Private Shadow Coverage Refresh")
+        for phrase in (
+            "Same-Topic Cross-Scope Safety Fixture",
+            "same-topic/cross-scope support",
+            "same-topic/cross-scope noise",
+            "not sufficient to justify a production ranking change",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
 
 if __name__ == "__main__":
     unittest.main()

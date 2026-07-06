@@ -246,6 +246,8 @@ def write_multi_relevant_archive(repo: Path) -> None:
 
 
 RELATION_QUERY = "relationnoise271828 alpha271828 beta271828 gamma271828 delta271828 epsilon271828"
+X_SCOPE_SUPPORT_QUERY = "xscope support marker314159 durable handoff policy"
+X_SCOPE_NOISE_QUERY = "xscope noise marker271828 durable ranking policy"
 
 
 def relation_memory_record(memory_id: str, layer: str, scope: str, topic: str) -> dict:
@@ -308,6 +310,62 @@ def write_relation_noise_archive(repo: Path) -> None:
                 "domain",
                 "scope:neighbor",
                 "topic:neighbor",
+            ),
+        ],
+    )
+
+
+def cross_scope_same_topic_record(memory_id: str, text: str, scope: str, topic: str) -> dict:
+    record = memory_record(memory_id, "domain", text, topic=topic)
+    record["scope"] = scope
+    record["support_count"] = 3
+    return record
+
+
+def write_cross_scope_same_topic_safety_archive(repo: Path) -> None:
+    (repo / "index").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted").mkdir(parents=True)
+    (repo / "sessions/2026/06/21/redacted/summary.md").write_text(
+        "# Session: Cross-scope safety fixture\n\n"
+        "Synthetic public summary for same-topic cross-scope safety evaluation.\n",
+        encoding="utf-8",
+    )
+    (repo / "sessions/2026/06/21/redacted/evidence.md").write_text(
+        "# Evidence\n\nredacted_ev_001:\nSynthetic public evidence.\n",
+        encoding="utf-8",
+    )
+    write_jsonl(
+        repo / "index/memories.jsonl",
+        [
+            cross_scope_same_topic_record(
+                "mem_xscope_support_primary",
+                f"{X_SCOPE_SUPPORT_QUERY} primary durable rule",
+                "domain:memory-core",
+                "handoff-policy",
+            ),
+            cross_scope_same_topic_record(
+                "mem_xscope_support_secondary",
+                f"{X_SCOPE_SUPPORT_QUERY} secondary durable rule",
+                "domain:archive-operations",
+                "handoff-policy",
+            ),
+            cross_scope_same_topic_record(
+                "mem_xscope_noise_target",
+                f"{X_SCOPE_NOISE_QUERY} precise target durable rule",
+                "domain:ranking-target",
+                "ranking-policy",
+            ),
+            cross_scope_same_topic_record(
+                "mem_xscope_noise_neighbor",
+                f"{X_SCOPE_NOISE_QUERY} broad lexical neighbor repeated ranking terms",
+                "domain:ranking-neighbor",
+                "ranking-policy",
+            ),
+            cross_scope_same_topic_record(
+                "mem_xscope_suppressed_neighbor",
+                "suppression sentinel marker should stay out of unrelated searches",
+                "domain:suppression",
+                "suppression-policy",
             ),
         ],
     )
@@ -949,6 +1007,113 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
             "topic:target",
             "scope:neighbor",
             "topic:neighbor",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_shadow_eval_distinguishes_same_topic_cross_scope_support_from_noise(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "cross-scope-agent-memory"
+            cases = Path(tmpdir) / "cross_scope_cases.jsonl"
+            write_cross_scope_same_topic_safety_archive(repo)
+            write_jsonl(
+                cases,
+                [
+                    {
+                        "case_id": "redacted:xscope_support_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": X_SCOPE_SUPPORT_QUERY,
+                        "expected_memory_ids": [
+                            "mem_xscope_support_primary",
+                            "mem_xscope_support_secondary",
+                        ],
+                        "expected_layer": "domain",
+                        "forbidden_output_patterns": ["SECRET_CROSS_SCOPE_OUTPUT"],
+                    },
+                    {
+                        "case_id": "redacted:xscope_noise_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": X_SCOPE_NOISE_QUERY,
+                        "expected_memory_id": "mem_xscope_noise_target",
+                        "expected_not_memory_id": "mem_xscope_suppressed_neighbor",
+                        "expected_layer": "domain",
+                    },
+                    {
+                        "case_id": "redacted:xscope_abstain_SECRET_CASE_SHOULD_NOT_RENDER",
+                        "query": "absentomega314159 unmatchedtheta271828",
+                        "expected_abstain": True,
+                        "forbidden_output_patterns": ["SECRET_CROSS_SCOPE_ABSTAIN_OUTPUT"],
+                    },
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--limit",
+                    "5",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["probe_cases"]["positive_cases"], 2)
+        self.assertEqual(payload["probe_cases"]["abstain_cases"], 1)
+        self.assertEqual(payload["metrics"]["memory_recall_at_5"], 1.0)
+        self.assertEqual(payload["metrics"]["abstain_pass_rate"], 1.0)
+        self.assertEqual(payload["metrics"]["active_memory_suppression"], 1.0)
+        self.assertEqual(payload["metrics"]["privacy_boundary_pass_rate"], 1.0)
+        self.assertEqual(payload["metrics"]["noise_sources_at_5"]["broad_lexical_match"], 1)
+        self.assertEqual(
+            payload["metrics"]["noise_relation_to_expected_at_5"]["same_layer_diff_scope_same_topic"],
+            1,
+        )
+
+        support_detail, noise_detail, abstain_detail = payload["case_details"]
+        self.assertEqual(support_detail["expected_memory_count"], 2)
+        self.assertEqual(support_detail["relevant_result_count"], 2)
+        self.assertEqual(support_detail["noise_result_count"], 0)
+        self.assertEqual(
+            support_detail["noise_relation_to_expected_at_5"]["same_layer_diff_scope_same_topic"],
+            0,
+        )
+        self.assertEqual(noise_detail["expected_memory_count"], 1)
+        self.assertEqual(noise_detail["relevant_result_count"], 1)
+        self.assertEqual(noise_detail["noise_result_count"], 1)
+        self.assertEqual(
+            noise_detail["noise_relation_to_expected_at_5"]["same_layer_diff_scope_same_topic"],
+            1,
+        )
+        self.assertTrue(noise_detail["suppression_hit"])
+        self.assertTrue(abstain_detail["abstention_hit"])
+        self.assertEqual(abstain_detail["result_count"], 0)
+        self.assertEqual(payload["diagnostics"]["failure_types"]["top_k_noise"]["count"], 1)
+        self.assertEqual(payload["diagnostics"]["failure_types"]["recall_miss"]["count"], 0)
+        self.assertEqual(payload["diagnostics"]["failure_types"]["abstain_false_positive"]["count"], 0)
+        self.assertEqual(payload["diagnostics"]["failure_types"]["suppression_failure"]["count"], 0)
+        self.assertEqual(payload["diagnostics"]["failure_types"]["privacy_failure"]["count"], 0)
+
+        serialized = json.dumps(payload, sort_keys=True)
+        for forbidden in (
+            "SECRET_CASE_SHOULD_NOT_RENDER",
+            "SECRET_CROSS_SCOPE_OUTPUT",
+            "SECRET_CROSS_SCOPE_ABSTAIN_OUTPUT",
+            X_SCOPE_SUPPORT_QUERY,
+            X_SCOPE_NOISE_QUERY,
+            "mem_xscope_support_primary",
+            "mem_xscope_support_secondary",
+            "mem_xscope_noise_target",
+            "mem_xscope_noise_neighbor",
+            "mem_xscope_suppressed_neighbor",
+            "domain:memory-core",
+            "domain:archive-operations",
+            "domain:ranking-target",
+            "domain:ranking-neighbor",
         ):
             self.assertNotIn(forbidden, serialized)
 
