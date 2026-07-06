@@ -649,7 +649,7 @@ def prune_cross_scope_topic_tail_memory_hits(hits: list[Hit]) -> list[Hit]:
         if not (hit.layer and hit.scope and hit.topic):
             kept.append(hit)
             continue
-        if hit.layer != anchor.layer or hit.scope == anchor.scope or hit.topic == anchor.topic:
+        if hit.layer != anchor.layer or hit.topic == anchor.topic:
             kept.append(hit)
     return kept
 

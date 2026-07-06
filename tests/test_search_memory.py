@@ -1264,7 +1264,7 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("memory_id: mem_source_anchor_target", result.stdout)
         self.assertNotIn("memory_id: mem_process_repetition_neighbor", result.stdout)
 
-    def test_search_memory_prunes_same_layer_cross_scope_topic_tail_hits(self):
+    def test_search_memory_prunes_same_layer_different_topic_tail_hits(self):
         search_memory = load_search_memory_module()
         hits = [
             search_memory.Hit(
@@ -1313,7 +1313,7 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertEqual(
             [hit.memory_id for hit in kept],
-            ["mem_source_depth_anchor", "mem_same_scope_related", "mem_same_topic_related"],
+            ["mem_source_depth_anchor", "mem_same_topic_related"],
         )
 
     def test_search_memory_skips_superseded_memory_nodes(self):

@@ -2502,7 +2502,7 @@ Aggregate refresh results:
 | lifecycle_integrity.score | 1.0 | 1.0 |
 | audit.status | passed | passed |
 | diagnostics.failure_types.recall_miss | 0 | 0 |
-| diagnostics.failure_types.top_k_noise | 6 | 8 |
+| diagnostics.failure_types.top_k_noise | 5 | 8 |
 
 Threshold audit:
 
@@ -2520,6 +2520,45 @@ provenance repair: `lifecycle_integrity.score`,
 all green. The remaining measurable issue is top-k noise, concentrated in
 broad lexical matches and scope-mixed neighbors, with relation buckets at the
 current strict and expanded ceilings.
+
+### Ranking/Noise Reduction Slice
+
+Code point before this ranking change:
+`6d4303a docs: refresh private shadow coverage evidence`
+
+Hypothesis tested: once the highest-ranked memory hit has full
+layer/scope/topic metadata, same-layer/different-topic tail hits are residual
+ranking noise even when they share the anchor scope. The implementation keeps
+missing-metadata tails and same-topic supporting memories, but no longer lets
+same-scope/different-topic neighbors survive the relation tail pruning step.
+
+Private real-archive aggregate before/after:
+
+| metric | strict v2 before | strict v2 after | expanded v3 before | expanded v3 after |
+| --- | ---: | ---: | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.8064516129032258 | 0.9230769230769231 | 0.7804878048780488 | 0.9117647058823529 |
+| top_k_noise_at_5 | 0.19354838709677424 | 0.07692307692307687 | 0.2195121951219512 | 0.08823529411764708 |
+| noise_sources_at_5.broad_lexical_match | 4 | 1 | 6 | 2 |
+| noise_sources_at_5.scope_mixed | 2 | 1 | 3 | 1 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 5 | 1 | 7 | 1 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 1 | 2 | 2 |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 | 0 | 0 |
+| diagnostics.failure_types.top_k_noise | 5 | 2 | 8 | 3 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 | 1.0 | 1.0 |
+| abstain_pass_rate | 1.0 | 1.0 | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 | 1.0 | 1.0 |
+| provenance_coverage.score | 1.0 | 1.0 | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 | 1.0 | 1.0 |
+
+Decision: keep the ranking patch. It reduces private real-archive top-k noise
+on both strict and expanded probes, improves precision, and preserves recall,
+privacy, abstention, lifecycle, suppression, and provenance gates. The
+remaining residual noise is now concentrated in same-topic cross-scope
+neighbors and a small same-layer/same-scope/different-topic tail, so the next
+ranking step should not add broader lexical heuristics unless a fresh
+aggregate-only run shows a new dominant bucket.
 
 ## V1 Evidence Convergence Snapshot
 

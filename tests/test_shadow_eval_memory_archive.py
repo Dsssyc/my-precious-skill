@@ -923,7 +923,7 @@ class ShadowEvalMemoryArchiveTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         relation_counts = payload["metrics"]["noise_relation_to_expected_at_5"]
         self.assertEqual(relation_counts["same_layer_scope_topic"], 0)
-        self.assertEqual(relation_counts["same_layer_scope_diff_topic"], 1)
+        self.assertEqual(relation_counts["same_layer_scope_diff_topic"], 0)
         self.assertEqual(relation_counts["same_layer_diff_scope_same_topic"], 1)
         self.assertEqual(relation_counts["same_layer_diff_scope_topic"], 0)
         self.assertEqual(relation_counts["diff_layer_same_scope_topic"], 1)
