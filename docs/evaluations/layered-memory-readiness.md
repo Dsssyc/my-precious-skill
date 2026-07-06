@@ -2455,6 +2455,72 @@ reruns must first restore `expected_record_missing=0`; only then should a
 bounded ranking change target the remaining same-layer/same-scope/different-topic
 residual noise.
 
+## V1.1 Private Shadow Coverage Refresh
+
+Date: 2026-07-06
+
+Code point before this documentation update:
+`3471b4f docs: align readiness evaluation with release gate`
+
+This refresh reran the private real-archive shadow evaluation against the
+existing strict v2 and expanded v3 redacted probes. The run used the read-only
+shadow evaluator and wrote aggregate JSON under `/tmp`; the private archive
+path, probe paths, raw case rows, queries, memory IDs, memory text, source refs,
+source paths, raw refs, and full JSON reports were not copied into this
+repository. Because the private deployment repository already had unrelated
+archive working-tree changes, this refresh did not run the generated-answer
+dogfood orchestrator, which would create private `.tmp`/`eval` artifacts.
+
+Aggregate refresh results:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| archive.memory_records | 1441 | 1441 |
+| archive.legacy_session_records | 285 | 285 |
+| probe_cases.cases | 27 | 34 |
+| probe_cases.positive_cases | 24 | 31 |
+| probe_cases.abstain_cases | 3 | 3 |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.8064516129032258 | 0.7804878048780488 |
+| top_k_noise_at_5 | 0.19354838709677424 | 0.2195121951219512 |
+| noise_sources_at_5.broad_lexical_match | 4 | 6 |
+| noise_sources_at_5.scope_mixed | 2 | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 5 | 7 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 2 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer_same_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer | 0 | 0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| abstain_false_positive_results | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| audit.status | passed | passed |
+| diagnostics.failure_types.recall_miss | 0 | 0 |
+| diagnostics.failure_types.top_k_noise | 6 | 8 |
+
+Threshold audit:
+
+| gate | result |
+| --- | --- |
+| strict v2 against `real_archive_shadow_v11.json` and `real_archive_shadow_v11_max.json` | passed with 0 threshold failures |
+| expanded v3 against `real_archive_shadow_v11_coverage.json` and `real_archive_shadow_v11_coverage_max.json` | passed with 0 threshold failures |
+
+Decision: the single next optimization category is ranking/noise reduction.
+This refresh no longer supports probe/archive drift cleanup as the next step:
+`expected_record_missing` is 0, `memory_recall_at_5` is 1.0 for both probes,
+and there are no recall misses. It also does not point to lifecycle or
+provenance repair: `lifecycle_integrity.score`,
+`provenance_coverage.score`, privacy, abstention, suppression, and audit are
+all green. The remaining measurable issue is top-k noise, concentrated in
+broad lexical matches and scope-mixed neighbors, with relation buckets at the
+current strict and expanded ceilings.
+
 ## V1 Evidence Convergence Snapshot
 
 Date: 2026-07-01

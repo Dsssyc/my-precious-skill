@@ -15,7 +15,14 @@ class DocumentationContractTests(unittest.TestCase):
         cls.combined = cls.evaluation + "\n" + cls.design
 
     def assert_contains(self, haystack: str, needle: str):
-        self.assertIn(needle, haystack, msg=f"missing documentation contract phrase: {needle!r}")
+        if needle not in haystack:
+            self.fail(f"missing documentation contract phrase: {needle!r}")
+
+    def evaluation_section(self, heading: str) -> str:
+        self.assert_contains(self.evaluation, heading)
+        start = self.evaluation.index(heading)
+        next_heading = self.evaluation.find("\n## ", start + len(heading))
+        return self.evaluation[start:] if next_heading == -1 else self.evaluation[start:next_heading]
 
     def test_evaluation_doc_lists_packaged_lifecycle_as_core_readiness_dimension(self):
         self.assert_contains(self.evaluation, "clean-room packaged lifecycle setup/update/search/audit")
@@ -52,6 +59,20 @@ class DocumentationContractTests(unittest.TestCase):
             "long-horizon governance",
         ):
             self.assert_contains(self.evaluation, phrase)
+
+    def test_private_shadow_refresh_section_is_aggregate_only_and_decisive(self):
+        section = self.evaluation_section("## V1.1 Private Shadow Coverage Refresh")
+        for phrase in (
+            "memory_recall_at_5",
+            "memory_precision_at_5",
+            "top_k_noise_at_5",
+            "expected_record_missing",
+            "privacy_boundary_pass_rate",
+            "lifecycle_integrity.score",
+            "ranking/noise reduction",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
 
 if __name__ == "__main__":
