@@ -11,30 +11,46 @@ The conclusion is intentionally narrow: the current benchmark set provides
 repeatable local quality gates for retrieval, layer-path drilldown,
 source-reference reachability, broad lexical noise resistance, stale
 suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
-updater-driven automatic induction on synthetic archives, and end-to-end
-induction-to-recall behavior on synthetic source records, plus explicit
-non-project source stream registry updates on synthetic archives. It is not a direct
-leaderboard score against public long-memory systems such as MemPalace,
-LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
+updater-driven automatic induction on synthetic archives, end-to-end
+induction-to-recall behavior on synthetic source records, explicit non-project
+source stream registry updates on synthetic archives, and clean-room packaged
+lifecycle setup/update/search/audit. It is not a direct leaderboard score
+against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
+Memora, or RULER-style long-context retrieval tests.
 
 ## V1 Readiness Gate
 
-`benchmarks/v1_readiness_gate.py` is the convergence entrypoint for this
-evaluation. It aggregates existing JSON reports without rendering queries,
-memory text, source paths, raw refs, private probe cases, or forbidden-pattern
-text. The gate requires four packaged synthetic dimensions:
+`benchmarks/v1_readiness_gate.py` is the memory-readiness convergence
+entrypoint for this evaluation. It aggregates existing JSON reports without
+rendering queries, memory text, source paths, raw refs, private probe cases, or
+forbidden-pattern text. The current packaged gate requires five core synthetic
+dimensions:
 
 - layered recall and drilldown;
 - updater-driven automatic induction;
-- end-to-end induction-to-recall; and
-- explicit non-project source stream registry update plus layered recall.
+- end-to-end induction-to-recall;
+- explicit non-project source stream registry update plus layered recall; and
+- clean-room packaged lifecycle setup/update/search/audit
+  (`packaged_lifecycle`).
+
+The current packaged core command,
+`python3 benchmarks/v1_readiness_gate.py --run-packaged`, reports required 5/5.
+The current packaged generated-answer command,
+`python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer`,
+reports required 6/6.
 
 When those required dimensions pass, the gate reports
 `overall_status: core_synthetic_ready`. That status is deliberately bounded: it
 means the core synthetic evidence is green, not that the full
-non-project-boundary v1 target, automatic source discovery, public leaderboard
-parity, generated-answer accuracy, or long-horizon multi-principal governance
-has been proven.
+non-project-boundary v1 target, private archive behavior, automatic source
+discovery, public leaderboard parity, live model answer quality, automatic
+ontology discovery, or long-horizon multi-principal governance has been proven.
+
+Repo release verification is a separate contract. `tools/run_quality_gates.py`
+is the canonical repo-local release gate; it runs skill validation, packaged
+lifecycle, packaged v1 readiness with and without generated-answer evidence,
+unit tests, Python compilation, template sync checks, and diff hygiene while
+emitting aggregate-only JSON.
 
 Optional report inputs extend the evidence surface without changing the privacy
 boundary:
@@ -1939,7 +1955,7 @@ The command emitted aggregate-only JSON and returned success. It did not render
 private case rows, queries, reference answers, generated answers, memory text,
 source paths, or raw refs.
 
-Current required v1 gate summary:
+Recorded required v1 gate summary at that code point:
 
 | dimension | status | evidence level | key metrics |
 | --- | --- | --- | --- |
@@ -1949,7 +1965,7 @@ Current required v1 gate summary:
 | source_stream_registry | passed | packaged synthetic | `source_stream_update_rate=1.0`, `project_registry_independence_rate=1.0`, `archive_scope_assignment_rate=1.0`, `source_partition_assignment_rate=1.0`, `source_stream_evidence_reachability_rate=1.0`, `privacy_leak_count=0` |
 | generated_answer_eval | passed | private deployment aggregate | `case_pass_rate=1.0`, `answer_normalized_match_rate=1.0`, `abstention_accuracy=1.0`, `answer_scorable_case_rate=1.0`, `privacy_leak_count=0` |
 
-Current v1 readiness status:
+Recorded v1 readiness status at that code point:
 
 | metric | value |
 | --- | ---: |
@@ -1969,7 +1985,7 @@ Requirement audit:
 | Explicit forced memory | satisfied for v1 | updater and e2e gates include `forced_memory_capture_rate=1.0` and `e2e_forced_memory_recall_rate=1.0` |
 | Layered recall across memory/session/source/raw evidence | satisfied for v1 | layered and e2e gates pass layer calibration, session drilldown, evidence/source reachability, source-depth policy, raw-preview authorization, and redaction checks |
 | Safe drilldown from high-level memory to evidence/source | satisfied for v1 | source ref reachability, source-depth policy, source-drilldown privacy, raw-preview authorization, and raw-preview redaction are required gate metrics |
-| Quantified readiness gate | satisfied for v1 | `v1_readiness_gate.py` returns `extended_evidence_ready` with 5/5 required dimensions passed |
+| Quantified readiness gate | satisfied for v1 | `v1_readiness_gate.py` returned `extended_evidence_ready` with 5/5 required dimensions passed at that code point; the current packaged release contract is summarized in the V1 Readiness Gate section above |
 | Privacy boundary proof | satisfied for v1 | all required reports are aggregate-only and gate privacy leak counts are zero; private dogfood artifacts remain in the private deployment archive |
 | Deployment dogfood | satisfied for v1 | private dogfood answer flow authors, audits, answers, grades, and gates 20 positive plus 5 expected-abstain cases as aggregate-only evidence |
 
@@ -2446,10 +2462,10 @@ Date: 2026-07-01
 Code point before this documentation update: `20c9380 fix: add archive search
 health check`
 
-This is the current evidence convergence snapshot for the v1 goal. It does not
-add new memory features. It records which evidence is currently green, which
-existing aggregate reports are safe to use with the readiness gate, and which
-claim boundaries remain.
+This is a historical evidence convergence snapshot for the v1 goal. It does
+not add new memory features. It records which evidence was green at that code
+point, which existing aggregate reports were safe to use with the readiness
+gate, and which claim boundaries remained.
 
 Repository baseline before this documentation update:
 

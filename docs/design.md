@@ -100,6 +100,9 @@ and JSONL indexes.
   benchmark that drives setup, `config/source_streams.jsonl`, the real global
   runner, generated memory indexes, layered recall scoring, and source-policy
   checks without project registry rows or rendered private case details.
+- `benchmarks/packaged_lifecycle_gate.py`: clean-room packaged lifecycle gate
+  that verifies setup, update, search, audit, privacy refusal, and template
+  sync behavior without using private archives.
 - `benchmarks/generated_answer_benchmark.py`: aggregate-only offline grader for
   already generated answer records. It scores exact, normalized, token-overlap,
   abstention, missing/duplicate/unknown-answer, and privacy metrics without
@@ -143,15 +146,23 @@ and JSONL indexes.
   `--run-packaged --require-answer` and no external `--answer-report`.
 - `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
   combines required packaged synthetic reports, including the explicit source
-  stream registry benchmark, with optional adapted public benchmark, private
-  shadow-eval, and generated-answer aggregate reports. Required private shadow
-  reports must include the privacy shape plus a minimum real-archive retrieval
-  quality floor for precision, top-k noise, abstention, active-memory
-  suppression, scope-mixed noise, and inactive-lifecycle noise. Generated-answer
-  reports must include aggregate source benchmark and case-origin counts in
-  addition to metrics and privacy flags. It reports bounded readiness status
-  without rendering private probe cases, queries, memory text, source paths, raw
-  refs, generated answers, or reference answers.
+  stream registry benchmark and packaged lifecycle gate, with optional adapted
+  public benchmark, private shadow-eval, and generated-answer aggregate
+  reports. The packaged core run currently reports required 5/5; the packaged
+  generated-answer run with `--require-answer` currently reports required 6/6.
+  Required private shadow reports must include the privacy shape plus a minimum
+  real-archive retrieval quality floor for precision, top-k noise, abstention,
+  active-memory suppression, scope-mixed noise, and inactive-lifecycle noise.
+  Generated-answer reports must include aggregate source benchmark and
+  case-origin counts in addition to metrics and privacy flags. It reports
+  bounded readiness status without rendering private probe cases, queries,
+  memory text, source paths, raw refs, generated answers, or reference answers.
+- `tools/run_quality_gates.py`: canonical repo-local release gate that runs
+  validation, packaged lifecycle, packaged v1 readiness with and without
+  generated-answer evidence, unit tests, Python compilation, template sync, and
+  diff hygiene while emitting aggregate-only JSON. This is the release
+  verification entrypoint; `benchmarks/v1_readiness_gate.py` remains the
+  memory-readiness entrypoint.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
