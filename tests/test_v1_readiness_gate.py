@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -131,6 +131,19 @@ class V1ReadinessGateTests(unittest.TestCase):
             },
         }
 
+    def passing_lifecycle_report(self) -> dict:
+        return {
+            "status": "passed",
+            "records_archived": 1,
+            "session_count": 1,
+            "daily_file_count": 1,
+            "memory_count": 2,
+            "memory_file_count": 4,
+            "search_depths": ["memory", "session", "evidence", "source"],
+            "audit": "passed",
+            "output_contract": "aggregate_only",
+        }
+
     def passing_shadow_report(self) -> dict:
         return {
             "report_kind": "real_archive_shadow_evaluation",
@@ -219,6 +232,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["dimensions"]["public_benchmark_adapter"]["status"], "not_run_optional")
             self.assertEqual(payload["dimensions"]["real_archive_shadow_eval"]["status"], "not_run_optional")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "not_run_optional")
+            self.assertNotIn("packaged_lifecycle", payload["dimensions"])
             self.assertEqual(payload["scorecard"]["required_dimensions"], 4)
             self.assertEqual(payload["scorecard"]["required_passed"], 4)
             self.assertEqual(payload["scorecard"]["optional_passed"], 0)
@@ -1063,6 +1077,7 @@ class V1ReadinessGateTests(unittest.TestCase):
                 "updater": self.passing_updater_report(),
                 "e2e": self.passing_e2e_report(),
                 "source_stream": self.passing_source_stream_report(),
+                "lifecycle": self.passing_lifecycle_report(),
                 "answer": self.passing_answer_report(),
             }
             stdout = io.StringIO()
@@ -1082,8 +1097,108 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(return_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
+            self.assertEqual(payload["dimensions"]["packaged_lifecycle"]["status"], "passed")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
+            self.assertEqual(payload["scorecard"]["required_dimensions"], 6)
+
+    def test_run_packaged_includes_required_lifecycle_dimension(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = Path(tmpdir) / "work"
+            packaged_reports = {
+                "layered": self.passing_layered_report(),
+                "updater": self.passing_updater_report(),
+                "e2e": self.passing_e2e_report(),
+                "source_stream": self.passing_source_stream_report(),
+                "lifecycle": self.passing_lifecycle_report(),
+            }
+            stdout = io.StringIO()
+
+            with mock.patch.object(readiness_gate, "run_packaged_reports", return_value=packaged_reports) as runner:
+                with redirect_stdout(stdout):
+                    return_code = readiness_gate.main(
+                        [
+                            "--run-packaged",
+                            "--work-dir",
+                            str(work_dir),
+                        ]
+                    )
+
+            runner.assert_called_once_with(work_dir.resolve(), include_answer=False)
+            self.assertEqual(return_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["overall_status"], "core_synthetic_ready")
+            self.assertEqual(
+                payload["claim_boundary"],
+                "core synthetic gates passed, including explicit source streams and clean-room packaged lifecycle; full v1 target remains unproven",
+            )
             self.assertEqual(payload["scorecard"]["required_dimensions"], 5)
+            self.assertEqual(payload["scorecard"]["required_passed"], 5)
+            lifecycle = payload["dimensions"]["packaged_lifecycle"]
+            self.assertTrue(lifecycle["required"])
+            self.assertEqual(lifecycle["status"], "passed")
+            self.assertEqual(
+                lifecycle["claim_boundary"],
+                "clean-room packaged lifecycle only; no private archive or raw transcript claim",
+            )
+            self.assertEqual(lifecycle["metrics"]["records_archived"], 1)
+            self.assertEqual(lifecycle["metrics"]["session_count"], 1)
+            self.assertEqual(lifecycle["metrics"]["daily_file_count"], 1)
+            self.assertEqual(lifecycle["metrics"]["memory_count"], 2)
+            self.assertEqual(lifecycle["metrics"]["memory_file_count"], 4)
+            self.assertEqual(lifecycle["metrics"]["search_depth_count"], 4)
+            self.assertTrue(lifecycle["metrics"]["audit_passed"])
+            self.assertEqual(lifecycle["output_contract"], "aggregate_only")
+            self.assertNotIn("search_depths", lifecycle)
+
+    def test_run_packaged_lifecycle_failure_keeps_readiness_output_aggregate_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = Path(tmpdir) / "work"
+            packaged_reports = {
+                "layered": self.passing_layered_report(),
+                "updater": self.passing_updater_report(),
+                "e2e": self.passing_e2e_report(),
+                "source_stream": self.passing_source_stream_report(),
+                "lifecycle": {
+                    "status": "failed",
+                    "failures": [
+                        {
+                            "stage": "/tmp/my-precious-lifecycle-sensitive/source-records",
+                            "reason": "command_failed with clean-room lifecycle fact",
+                            "returncode": 1,
+                            "stderr": "raw source text should not be echoed",
+                        }
+                    ],
+                },
+            }
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with mock.patch.object(readiness_gate, "run_packaged_reports", return_value=packaged_reports):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    return_code = readiness_gate.main(
+                        [
+                            "--run-packaged",
+                            "--work-dir",
+                            str(work_dir),
+                        ]
+                    )
+
+            self.assertEqual(return_code, 1)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["overall_status"], "not_ready")
+            lifecycle = payload["dimensions"]["packaged_lifecycle"]
+            self.assertEqual(lifecycle["status"], "failed")
+            self.assertEqual(
+                lifecycle["failures"],
+                [{"stage": "packaged_lifecycle", "reason": "child_gate_failed", "returncode": 1}],
+            )
+            self.assertIn("packaged_lifecycle", stderr.getvalue())
+            self.assertNotIn("/tmp", stdout.getvalue())
+            self.assertNotIn("/tmp", stderr.getvalue())
+            self.assertNotIn("clean-room lifecycle fact", stdout.getvalue())
+            self.assertNotIn("clean-room lifecycle fact", stderr.getvalue())
+            self.assertNotIn("raw source text", stdout.getvalue())
+            self.assertNotIn("raw source text", stderr.getvalue())
 
 
 if __name__ == "__main__":

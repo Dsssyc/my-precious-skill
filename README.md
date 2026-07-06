@@ -415,9 +415,12 @@ Or run the packaged synthetic gates directly:
 python benchmarks/v1_readiness_gate.py --run-packaged
 ```
 
-The readiness gate emits aggregate-only JSON. It requires the packaged layered
-recall, updater induction, e2e induction-to-recall, and explicit source stream
-registry dimensions to pass before reporting `core_synthetic_ready`.
+The readiness gate emits aggregate-only JSON. With `--run-packaged`, it requires
+the packaged layered recall, updater induction, e2e induction-to-recall,
+explicit source stream registry, and clean-room packaged lifecycle dimensions to
+pass before reporting `core_synthetic_ready`. The lifecycle dimension summarizes
+archive/update/search/audit counts only; it does not render raw source text,
+memory text, search hits, source paths, or temporary paths.
 Source-stream reports must also be aggregate-only and must state that case
 details, memory text, source content, source paths, and raw refs were not
 rendered; passing metrics alone are not accepted as source-stream readiness
@@ -1205,6 +1208,10 @@ repository tests:
 python3 tools/validate_skills.py
 
 python3 benchmarks/packaged_lifecycle_gate.py
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 
 python3 -m unittest discover -s tests -p 'test_*.py'
 

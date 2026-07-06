@@ -117,6 +117,7 @@ GENERATED_ANSWER_GATES = (
 )
 PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
 SAFE_REQUIRED_COUNT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+SAFE_LIFECYCLE_FAILURE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SECRET_LIKE_REQUIRED_COUNT_KEY = re.compile(
     "|".join(
         (
@@ -506,6 +507,139 @@ def has_positive_count(value: object) -> bool:
     return False
 
 
+def safe_lifecycle_failure_token(value: object, fallback: str) -> str:
+    if isinstance(value, str) and SAFE_LIFECYCLE_FAILURE_TOKEN.fullmatch(value):
+        return value
+    return fallback
+
+
+def safe_lifecycle_returncode(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def sanitize_lifecycle_failures(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_failures = payload.get("failures")
+    failures: list[dict[str, Any]] = []
+    if isinstance(raw_failures, list):
+        for raw_failure in raw_failures:
+            if not isinstance(raw_failure, dict):
+                continue
+            failure: dict[str, Any] = {
+                "stage": safe_lifecycle_failure_token(raw_failure.get("stage"), "packaged_lifecycle"),
+                "reason": safe_lifecycle_failure_token(raw_failure.get("reason"), "child_gate_failed"),
+            }
+            returncode = safe_lifecycle_returncode(raw_failure.get("returncode"))
+            if returncode is not None:
+                failure["returncode"] = returncode
+            failures.append(failure)
+    if failures:
+        return failures
+    fallback: dict[str, Any] = {"stage": "packaged_lifecycle", "reason": "child_gate_failed"}
+    returncode = safe_lifecycle_returncode(payload.get("returncode"))
+    if returncode is not None:
+        fallback["returncode"] = returncode
+    return [fallback]
+
+
+def nonnegative_int_metric(payload: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
+    if payload is None:
+        return {
+            "status": "missing_required" if required else "not_run_optional",
+            "evidence_level": "packaged_clean_room_lifecycle",
+            "required": required,
+            "metrics": {},
+            "claim_boundary": "clean-room packaged lifecycle only; no private archive or raw transcript claim",
+        }
+
+    failures: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+    for key in ("records_archived", "session_count", "daily_file_count", "memory_count", "memory_file_count"):
+        value = nonnegative_int_metric(payload, key)
+        if value is None:
+            failures.append(
+                {
+                    "metric": key,
+                    "comparison": "min",
+                    "threshold": 1.0,
+                    "reason": "missing_or_non_numeric",
+                }
+            )
+        else:
+            metrics[key] = value
+            if value < 1:
+                failures.append(
+                    {
+                        "metric": key,
+                        "comparison": "min",
+                        "threshold": 1.0,
+                        "value": value,
+                    }
+                )
+
+    search_depths = payload.get("search_depths")
+    search_depth_count = len(search_depths) if isinstance(search_depths, list) else 0
+    metrics["search_depth_count"] = search_depth_count
+    if not isinstance(search_depths, list) or set(search_depths) != {"memory", "session", "evidence", "source"}:
+        failures.append(
+            {
+                "metric": "search_depth_count",
+                "comparison": "min",
+                "threshold": 4.0,
+                "value": search_depth_count,
+                "reason": "missing_required_depths",
+            }
+        )
+
+    audit_passed = payload.get("audit") == "passed"
+    metrics["audit_passed"] = audit_passed
+    if not audit_passed:
+        failures.append(
+            {
+                "metric": "audit",
+                "expected": "passed",
+                "actual": payload.get("audit") if isinstance(payload.get("audit"), str) else None,
+                "reason": "audit_not_passed",
+            }
+        )
+
+    output_contract = payload.get("output_contract")
+    if output_contract != "aggregate_only":
+        failures.append(
+            {
+                "metric": "output_contract",
+                "expected": "aggregate_only",
+                "actual": output_contract if isinstance(output_contract, str) else None,
+                "reason": "lifecycle_report_not_aggregate_only",
+            }
+        )
+
+    if payload.get("status") != "passed":
+        failures = sanitize_lifecycle_failures(payload)
+
+    result: dict[str, Any] = {
+        "status": "passed" if not failures else "failed",
+        "evidence_level": "packaged_clean_room_lifecycle",
+        "required": required,
+        "metrics": metrics,
+        "failures": failures,
+        "claim_boundary": "clean-room packaged lifecycle only; no private archive or raw transcript claim",
+    }
+    if output_contract == "aggregate_only":
+        result["output_contract"] = output_contract
+    return result
+
+
 def run_command(command: list[str], *, cwd: Path) -> dict[str, Any]:
     result = subprocess.run(
         command,
@@ -528,6 +662,52 @@ def run_command(command: list[str], *, cwd: Path) -> dict[str, Any]:
         raise SystemExit("packaged readiness command did not emit JSON") from exc
     if not isinstance(payload, dict):
         raise SystemExit("packaged readiness command emitted non-object JSON")
+    return payload
+
+
+def lifecycle_failure_report(reason: str, returncode: int | None = None) -> dict[str, Any]:
+    failure: dict[str, Any] = {"stage": "packaged_lifecycle", "reason": reason}
+    if returncode is not None:
+        failure["returncode"] = returncode
+    return {"status": "failed", "failures": [failure]}
+
+
+def lifecycle_failure_from_stderr(stderr: str, returncode: int) -> dict[str, Any]:
+    try:
+        payload = json.loads(stderr)
+    except json.JSONDecodeError:
+        return lifecycle_failure_report("command_failed", returncode)
+    if not isinstance(payload, dict):
+        return lifecycle_failure_report("command_failed", returncode)
+    payload = dict(payload)
+    payload.setdefault("status", "failed")
+    if "failures" not in payload:
+        payload["returncode"] = returncode
+    return {"status": "failed", "failures": sanitize_lifecycle_failures(payload)}
+
+
+def run_packaged_lifecycle_report(work_dir: Path) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT_DIR / "packaged_lifecycle_gate.py"),
+            "--work-dir",
+            str(work_dir),
+        ],
+        cwd=str(REPO_ROOT),
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        return lifecycle_failure_from_stderr(result.stderr.strip(), result.returncode)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return lifecycle_failure_report("invalid_json")
+    if not isinstance(payload, dict):
+        return lifecycle_failure_report("non_object_json")
     return payload
 
 
@@ -609,6 +789,7 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
         cwd=REPO_ROOT,
     )
     reports = {"layered": layered, "updater": updater, "e2e": e2e, "source_stream": source_stream}
+    reports["lifecycle"] = run_packaged_lifecycle_report(work_dir)
     if include_answer:
         reports["answer"] = run_command(
             [
@@ -658,6 +839,8 @@ def build_report(
     require_public: bool,
     require_shadow: bool,
     require_answer: bool,
+    lifecycle: dict[str, Any] | None = None,
+    require_lifecycle: bool = False,
     required_answer_source_benchmarks: tuple[str, ...] = (),
     required_answer_case_origins: tuple[str, ...] = (),
 ) -> dict[str, Any]:
@@ -693,6 +876,8 @@ def build_report(
             required_case_origins=required_answer_case_origins,
         ),
     }
+    if require_lifecycle or lifecycle is not None:
+        dimensions["packaged_lifecycle"] = assess_lifecycle_report(lifecycle, required=require_lifecycle)
     required = [dimension for dimension in dimensions.values() if dimension["required"]]
     optional = [dimension for dimension in dimensions.values() if not dimension["required"]]
     required_passed = sum(1 for dimension in required if dimension["status"] == "passed")
@@ -704,17 +889,22 @@ def build_report(
         overall_status = "extended_evidence_ready"
     else:
         overall_status = "core_synthetic_ready"
+    if overall_status == "core_synthetic_ready" and "packaged_lifecycle" in dimensions:
+        claim_boundary = (
+            "core synthetic gates passed, including explicit source streams and clean-room packaged lifecycle; "
+            "full v1 target remains unproven"
+        )
+    elif overall_status == "core_synthetic_ready":
+        claim_boundary = "core synthetic gates passed, including explicit source streams; full v1 target remains unproven"
+    elif overall_status == "extended_evidence_ready":
+        claim_boundary = "extended evidence gates passed; generated-answer and long-horizon governance remain bounded claims"
+    else:
+        claim_boundary = "one or more required readiness dimensions are missing or failed"
     return {
         "report_kind": "v1_layered_memory_readiness_gate",
         "report_version": 1,
         "overall_status": overall_status,
-        "claim_boundary": (
-            "core synthetic gates passed, including explicit source streams; full v1 target remains unproven"
-            if overall_status == "core_synthetic_ready"
-            else "extended evidence gates passed; generated-answer and long-horizon governance remain bounded claims"
-            if overall_status == "extended_evidence_ready"
-            else "one or more required readiness dimensions are missing or failed"
-        ),
+        "claim_boundary": claim_boundary,
         "privacy": {
             "aggregate_only": True,
             "private_probe_cases_rendered": False,
@@ -799,12 +989,14 @@ def main(argv: list[str] | None = None) -> int:
             updater = core["updater"]
             e2e = core["e2e"]
             source_stream = core["source_stream"]
+            lifecycle = core.get("lifecycle")
             answer = core.get("answer")
         else:
             layered = read_json(Path(args.layered_report).expanduser()) if args.layered_report else None
             updater = read_json(Path(args.updater_report).expanduser()) if args.updater_report else None
             e2e = read_json(Path(args.e2e_report).expanduser()) if args.e2e_report else None
             source_stream = read_json(Path(args.source_stream_report).expanduser()) if args.source_stream_report else None
+            lifecycle = None
             answer = None
         public = read_json(Path(args.public_report).expanduser()) if args.public_report else None
         shadow = read_json(Path(args.shadow_report).expanduser()) if args.shadow_report else None
@@ -815,9 +1007,11 @@ def main(argv: list[str] | None = None) -> int:
             updater=updater,
             e2e=e2e,
             source_stream=source_stream,
+            lifecycle=lifecycle,
             public=public,
             shadow=shadow,
             answer=answer,
+            require_lifecycle=args.run_packaged,
             require_public=args.require_public,
             require_shadow=args.require_shadow,
             require_answer=require_answer,

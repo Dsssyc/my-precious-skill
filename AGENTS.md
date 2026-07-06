@@ -81,6 +81,14 @@ python3 tools/validate_skills.py
 Runtime-specific skill validators may still be run additionally when they are
 available in the current environment.
 
+Run packaged lifecycle/readiness gates when readiness contract changes:
+
+```bash
+python3 benchmarks/packaged_lifecycle_gate.py
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+```
+
 Compile bundled scripts when implementation code changes:
 
 ```bash

@@ -355,9 +355,12 @@ python benchmarks/v1_readiness_gate.py \
 python benchmarks/v1_readiness_gate.py --run-packaged
 ```
 
-readiness gate 只输出 aggregate JSON。它要求 packaged layered recall、
-updater induction、e2e induction-to-recall 和 explicit source stream registry
-四个核心维度通过后，才会报告 `core_synthetic_ready`。可选的
+readiness gate 只输出 aggregate JSON。使用 `--run-packaged` 时，它要求
+packaged layered recall、updater induction、e2e induction-to-recall、explicit
+source stream registry 和 clean-room packaged lifecycle 五个核心维度通过后，
+才会报告 `core_synthetic_ready`。lifecycle 维度只汇总
+archive/update/search/audit 的计数，不渲染 raw source text、memory text、
+search hits、source paths 或 temporary paths。可选的
 `--public-report` 和 `--shadow-report` 可以接入
 仓库外 adapted public benchmark 报告和私有真实 archive 的 aggregate shadow eval
 报告；如果希望这些可选维度缺失时也让 gate 失败，使用 `--require-public` 或
@@ -945,6 +948,10 @@ skills/using-my-precious/references/archive-format.md
 python3 tools/validate_skills.py
 
 python3 benchmarks/packaged_lifecycle_gate.py
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 
 python3 -m unittest discover -s tests -p 'test_*.py'
 
