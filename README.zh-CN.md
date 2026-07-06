@@ -938,12 +938,16 @@ skills/using-my-precious/references/archive-format.md
 
 ## 验证
 
-先用你的 runtime 对应的 skill validator 校验 skill，然后运行仓库测试：
+先用仓库内置 validator 校验 skill；如果当前环境提供 runtime 专用 validator，
+可以额外运行。然后运行仓库测试：
 
 ```bash
+python3 tools/validate_skills.py
+
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  tools/validate_skills.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \

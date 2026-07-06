@@ -1197,12 +1197,17 @@ Runtime setup work that belongs in `$setup-my-precious`:
 
 ## Verification
 
-Validate the skill with your runtime's skill validator, then run the repository tests:
+Validate the skills with the repo-local validator, optionally run any
+runtime-specific validator available in your environment, then run the
+repository tests:
 
 ```bash
+python3 tools/validate_skills.py
+
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  tools/validate_skills.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \

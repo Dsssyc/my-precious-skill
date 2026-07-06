@@ -72,19 +72,20 @@ Run the focused test suite after changes:
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-Validate skill folders with the runtime's skill validator. If the validator
-needs PyYAML and the system Python does not provide it, use an isolated uv run:
+Validate skill folders with the repo-local validator:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /path/to/skill-creator/scripts/quick_validate.py skills/setup-my-precious
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /path/to/skill-creator/scripts/quick_validate.py skills/update-my-precious
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /path/to/skill-creator/scripts/quick_validate.py skills/using-my-precious
+python3 tools/validate_skills.py
 ```
+
+Runtime-specific skill validators may still be run additionally when they are
+available in the current environment.
 
 Compile bundled scripts when implementation code changes:
 
 ```bash
 python3 -m py_compile \
+  tools/validate_skills.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
