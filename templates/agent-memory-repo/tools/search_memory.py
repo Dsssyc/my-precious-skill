@@ -134,6 +134,15 @@ GENERIC_SEARCH_TOKENS = {
     "update",
     "workflow",
 }
+LIFECYCLE_QUERY_TOKENS = {
+    "deprecated",
+    "inactive",
+    "legacy",
+    "obsolete",
+    "retired",
+    "superseded",
+    "withdrawn",
+}
 MEMORY_LAYERS = ("global", "domain", "project")
 PROCESS_MEMORY_PATTERN = re.compile(
     r"\b(?:"
@@ -338,7 +347,11 @@ def important_query_tokens(query_tokens: list[str]) -> list[str]:
     return [
         token
         for token in query_tokens
-        if token_importance(token) >= 2 or (any(char.isdigit() for char in token) and len(token) >= 3)
+        if (
+            token_importance(token) >= 2
+            or token in LIFECYCLE_QUERY_TOKENS
+            or (any(char.isdigit() for char in token) and len(token) >= 3)
+        )
     ]
 
 

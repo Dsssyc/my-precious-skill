@@ -26,6 +26,8 @@ EXPLICIT_WITHDRAW_QUERY = "obsolete explicit withdrawal policy conflict handling
 EXPLICIT_WITHDRAW_OLD_TEXT = "Prefer the obsolete explicit withdrawal policy for conflict handling."
 EXPLICIT_WITHDRAW_MARKER_TEXT = "Withdraw obsolete explicit withdrawal policy for conflict handling."
 EXPLICIT_UNSAFE_REVISION_SENTINEL = "mem_cookie_SHOULD_NOT_RENDER"
+EXPLICIT_UNKNOWN_REVISION_TARGET = "mem_missing_explicit_revision_target"
+CONTEXT_REPORT_KIND = "memory_recall_context_package"
 SOURCE_TEXT = (
     "Remember this: clean-room lifecycle fact validates packaged setup, update, "
     "search, and audit using public synthetic records."
@@ -607,6 +609,241 @@ def run_explicit_revision_adapter(paths: GatePaths) -> dict[str, object]:
     }
 
 
+def context_package_for_query(paths: GatePaths, query: str, stage: str) -> tuple[dict[str, object], subprocess.CompletedProcess[str]]:
+    result = run_command(
+        [
+            sys.executable,
+            str(paths.memory_repo / "tools/search_memory.py"),
+            query,
+            "--repo",
+            str(paths.memory_repo),
+            "--limit",
+            "5",
+            "--depth",
+            "evidence",
+            "--context-json",
+        ],
+        stage,
+    )
+    try:
+        package = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise GateFailure(stage, "invalid_context_package_json") from exc
+    if not isinstance(package, dict) or package.get("report_kind") != CONTEXT_REPORT_KIND:
+        raise GateFailure(stage, "wrong_context_package_kind")
+    return package, result
+
+
+def context_package_answerable_for(package: dict[str, object], memory_id: str) -> bool:
+    answerability = package.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
+        return False
+    hits = package.get("hits")
+    if not isinstance(hits, list):
+        return False
+    for hit in hits:
+        if not isinstance(hit, dict) or hit.get("memory_id") != memory_id:
+            continue
+        hit_answerability = hit.get("answerability")
+        query_support = hit.get("query_support")
+        return bool(
+            hit.get("active_current") is True
+            and isinstance(hit_answerability, dict)
+            and hit_answerability.get("status") == "supported"
+            and isinstance(query_support, dict)
+            and query_support.get("status") == "supported"
+            and isinstance(hit.get("summary_drill_paths"), list)
+            and hit["summary_drill_paths"]
+            and isinstance(hit.get("evidence_drill_paths"), list)
+            and hit["evidence_drill_paths"]
+        )
+    return False
+
+
+def context_package_abstains(package: dict[str, object]) -> bool:
+    answerability = package.get("answerability")
+    return bool(
+        isinstance(answerability, dict)
+        and answerability.get("status") == "unsupported"
+        and int(answerability.get("supported_hit_count") or 0) == 0
+    )
+
+
+def adapter_result(paths: GatePaths, records: list[dict[str, object]], label: str) -> subprocess.CompletedProcess[str]:
+    input_path = paths.root / f"{label}.jsonl"
+    input_path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    return subprocess.run(
+        [
+            sys.executable,
+            str(paths.memory_repo / "tools/capture_explicit_memory.py"),
+            "--memory-repo",
+            str(paths.memory_repo),
+            "--input",
+            str(input_path),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def run_explicit_governance_gate(paths: GatePaths) -> dict[str, object]:
+    explicit_rows = list(iter_jsonl(paths.memory_repo / "memories/explicit.jsonl"))
+    rows_by_text = {row.get("text"): row for row in explicit_rows}
+    old_node = rows_by_text.get(EXPLICIT_REVISION_OLD_TEXT)
+    current_node = rows_by_text.get(EXPLICIT_REVISION_CURRENT_TEXT)
+    withdrawn_old_node = rows_by_text.get(EXPLICIT_WITHDRAW_OLD_TEXT)
+    withdrawal_node = rows_by_text.get(EXPLICIT_WITHDRAW_MARKER_TEXT)
+    if not all(isinstance(row, dict) for row in (old_node, current_node, withdrawn_old_node, withdrawal_node)):
+        raise GateFailure("explicit_governance:nodes", "missing_revision_nodes")
+
+    old_id = str(old_node.get("memory_id") or "")
+    current_id = str(current_node.get("memory_id") or "")
+    withdrawn_old_id = str(withdrawn_old_node.get("memory_id") or "")
+    active_packages = 0
+    active_hits = 0
+    package_parse_count = 0
+
+    current_package, _current_result = context_package_for_query(
+        paths,
+        EXPLICIT_REVISION_QUERY,
+        "explicit_governance:current-context",
+    )
+    package_parse_count += 1
+    active_packages += 1
+    active_hits += int(context_package_answerable_for(current_package, current_id))
+
+    replaced_package, _replaced_result = context_package_for_query(
+        paths,
+        EXPLICIT_REVISION_OLD_TEXT,
+        "explicit_governance:replaced-context",
+    )
+    package_parse_count += 1
+    replaced_abstains = context_package_abstains(replaced_package)
+
+    withdrawn_package, _withdrawn_result = context_package_for_query(
+        paths,
+        EXPLICIT_WITHDRAW_OLD_TEXT,
+        "explicit_governance:withdrawn-context",
+    )
+    package_parse_count += 1
+    withdrawn_abstains = context_package_abstains(withdrawn_package)
+
+    link_cases = 2
+    link_hits = int(
+        current_node.get("supersedes") == [old_id]
+        and old_node.get("superseded_by") == current_id
+    ) + int(
+        withdrawal_node.get("deprecates") == [withdrawn_old_id]
+        and withdrawn_old_node.get("deprecated_by") == withdrawal_node.get("memory_id")
+    )
+
+    before_duplicate_rows = len(list(iter_jsonl(paths.memory_repo / "memories/explicit.jsonl")))
+    duplicate_result = adapter_result(
+        paths,
+        [
+            {
+                "text": EXPLICIT_REVISION_CURRENT_TEXT,
+                "layer": "domain",
+                "scope": "domain:agent-memory",
+                "source": "explicit_request",
+            },
+            {
+                "text": EXPLICIT_REVISION_CURRENT_TEXT,
+                "layer": "domain",
+                "scope": "domain:agent-memory",
+                "source": "explicit_request",
+            },
+        ],
+        "explicit-governance-duplicates",
+    )
+    if duplicate_result.returncode != 0:
+        raise GateFailure("explicit_governance:duplicates", "command_failed", duplicate_result.returncode)
+    after_duplicate_rows = len(list(iter_jsonl(paths.memory_repo / "memories/explicit.jsonl")))
+    duplicate_suppression_rate = 1.0 if after_duplicate_rows == before_duplicate_rows else 0.0
+
+    conflict_result = adapter_result(
+        paths,
+        [
+            {
+                "operation": "replace",
+                "text": "Prefer explicit governance conflict refusal.",
+                "replaces_memory_id": current_id,
+                "deprecates_memory_id": withdrawn_old_id,
+            }
+        ],
+        "explicit-governance-conflict",
+    )
+    unsafe_result = adapter_result(
+        paths,
+        [
+            {
+                "operation": "replace",
+                "text": "Prefer safe explicit governance targets.",
+                "replaces_memory_id": EXPLICIT_UNSAFE_REVISION_SENTINEL,
+            }
+        ],
+        "explicit-governance-unsafe",
+    )
+    unknown_result = adapter_result(
+        paths,
+        [
+            {
+                "operation": "replace",
+                "text": "Prefer known explicit governance targets.",
+                "replaces_memory_id": EXPLICIT_UNKNOWN_REVISION_TARGET,
+            }
+        ],
+        "explicit-governance-unknown",
+    )
+
+    fail_closed_outputs = [conflict_result, unsafe_result, unknown_result]
+    package_privacy_scan_text = "\n".join(
+        json.dumps(
+            {key: value for key, value in package.items() if key != "query"},
+            sort_keys=True,
+        )
+        for package in (current_package, replaced_package, withdrawn_package)
+    )
+    privacy_scan_text = "\n".join(
+        [
+            package_privacy_scan_text,
+            duplicate_result.stdout,
+            duplicate_result.stderr,
+            *(
+                result.stdout + "\n" + result.stderr
+                for result in fail_closed_outputs
+            ),
+        ]
+    )
+    privacy_markers = (
+        EXPLICIT_REVISION_OLD_TEXT,
+        EXPLICIT_REVISION_CURRENT_TEXT,
+        EXPLICIT_WITHDRAW_OLD_TEXT,
+        EXPLICIT_WITHDRAW_MARKER_TEXT,
+        EXPLICIT_UNSAFE_REVISION_SENTINEL,
+        EXPLICIT_UNKNOWN_REVISION_TARGET,
+    )
+    privacy_leak_count = sum(1 for marker in privacy_markers if marker in privacy_scan_text)
+
+    return {
+        "status": "passed",
+        "explicit_context_package_parse_success_rate": package_parse_count / 3,
+        "explicit_current_fact_answerability_rate": active_hits / active_packages,
+        "explicit_replaced_fact_abstention_rate": 1.0 if replaced_abstains else 0.0,
+        "explicit_withdrawn_fact_abstention_rate": 1.0 if withdrawn_abstains else 0.0,
+        "explicit_revision_link_integrity_rate": link_hits / link_cases,
+        "explicit_bulk_duplicate_suppression_rate": duplicate_suppression_rate,
+        "explicit_conflict_fail_closed_count": 1 if conflict_result.returncode != 0 else 0,
+        "explicit_unsafe_target_refusal_count": 1 if unsafe_result.returncode != 0 else 0,
+        "explicit_unknown_target_refusal_count": 1 if unknown_result.returncode != 0 else 0,
+        "privacy_leak_count": privacy_leak_count,
+    }
+
+
 def audit_archive(paths: GatePaths) -> None:
     audit_script = paths.memory_repo / "tools/audit_memory_archive.py"
     run_command(
@@ -742,12 +979,33 @@ def validate_explicit_revision(report: dict[str, object]) -> None:
             raise GateFailure("explicit_revision", f"{key}_unexpected")
 
 
+def validate_explicit_governance(report: dict[str, object]) -> None:
+    expected = {
+        "explicit_context_package_parse_success_rate": 1.0,
+        "explicit_current_fact_answerability_rate": 1.0,
+        "explicit_replaced_fact_abstention_rate": 1.0,
+        "explicit_withdrawn_fact_abstention_rate": 1.0,
+        "explicit_revision_link_integrity_rate": 1.0,
+        "explicit_bulk_duplicate_suppression_rate": 1.0,
+        "explicit_conflict_fail_closed_count": 1,
+        "explicit_unsafe_target_refusal_count": 1,
+        "explicit_unknown_target_refusal_count": 1,
+        "privacy_leak_count": 0,
+    }
+    if report.get("status") != "passed":
+        raise GateFailure("explicit_governance", "status_unexpected")
+    for key, expected_value in expected.items():
+        if report.get(key) != expected_value:
+            raise GateFailure("explicit_governance", f"{key}_unexpected")
+
+
 def build_report(
     paths: GatePaths,
     search_depths: list[str],
     self_maintenance: dict[str, object],
     explicit_capture: dict[str, object],
     explicit_revision: dict[str, object],
+    explicit_governance: dict[str, object],
 ) -> dict[str, object]:
     sessions = archived_record_session_dirs(paths.memory_repo)
     daily_files = sorted((paths.memory_repo / "daily").glob("*/*.md"))
@@ -766,6 +1024,7 @@ def build_report(
         "self_maintenance": self_maintenance,
         "explicit_capture": explicit_capture,
         "explicit_revision": explicit_revision,
+        "explicit_governance": explicit_governance,
         "output_contract": "aggregate_only",
     }
 
@@ -783,6 +1042,7 @@ def run_gate(root: Path) -> dict[str, object]:
     update_archive(paths)
     explicit_capture = run_explicit_capture_adapter(paths)
     explicit_revision = run_explicit_revision_adapter(paths)
+    explicit_governance = run_explicit_governance_gate(paths)
     artifact_errors = validate_archive_artifacts(paths.memory_repo)
     if artifact_errors:
         raise GateFailure("artifacts", artifact_errors[0])
@@ -793,9 +1053,10 @@ def run_gate(root: Path) -> dict[str, object]:
     validate_self_maintenance(self_maintenance)
     validate_explicit_capture(explicit_capture)
     validate_explicit_revision(explicit_revision)
+    validate_explicit_governance(explicit_governance)
     initialize_git_repo(paths.memory_repo, "Synthetic archive after update")
     run_sync_dry_run(paths)
-    return build_report(paths, search_depths, self_maintenance, explicit_capture, explicit_revision)
+    return build_report(paths, search_depths, self_maintenance, explicit_capture, explicit_revision, explicit_governance)
 
 
 def make_work_root(work_dir: str | None) -> tuple[Path, tempfile.TemporaryDirectory[str] | None, Path | None]:

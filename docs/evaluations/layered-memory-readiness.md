@@ -17,7 +17,8 @@ source stream registry updates on synthetic archives, clean-room packaged
 lifecycle setup/update/search/audit with self-maintenance safeguards, and
 deterministic source-grounded answer handoff records, plus agent-facing recall
 context packaging and consumption for supported answer versus abstain
-decisions. It is
+decisions, including packaged explicit-memory capture/revision/withdrawal
+governance checks. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -530,6 +531,43 @@ not vector search, not ontology discovery, not full human memory modeling,
 not multi-month decay, not deletion policy, and not private archive quality.
 The command is stable and non-duplicative because it extends the existing
 updater benchmark already included in `tools/run_quality_gates.py`.
+
+## V2.5 Packaged Explicit Memory Governance Gate
+
+V2.5 extends `benchmarks/packaged_lifecycle_gate.py` to prove that explicit
+memory capture, replace, and withdraw operations in a clean packaged
+deployment repo preserve the package-first runtime contract. The gate uses the
+packaged `capture_explicit_memory.py` adapter to create synthetic explicit
+facts, then invokes the copied deployment `tools/search_memory.py` with
+`--depth evidence --context-json` and parses
+`report_kind: memory_recall_context_package`. Free-form search output is not
+used as answerability evidence.
+
+The synthetic cases cover one current explicit fact that must answer through a
+supported active/current context package, one replaced legacy fact that must
+abstain, one withdrawn obsolete fact that must abstain, duplicate explicit
+inputs that must not create extra active/current nodes, and conflict, unsafe
+target, and unknown target inputs that must fail closed. The gate reports
+aggregate metrics:
+`explicit_context_package_parse_success_rate`,
+`explicit_current_fact_answerability_rate`,
+`explicit_replaced_fact_abstention_rate`,
+`explicit_withdrawn_fact_abstention_rate`,
+`explicit_revision_link_integrity_rate`,
+`explicit_bulk_duplicate_suppression_rate`,
+`explicit_conflict_fail_closed_count`,
+`explicit_unsafe_target_refusal_count`,
+`explicit_unknown_target_refusal_count`, and `privacy_leak_count`.
+
+V2.5 also tightens context-package query support for lifecycle qualifiers such
+as `legacy`, `obsolete`, `retired`, `deprecated`, `superseded`, `withdrawn`,
+and `inactive`. An active/current replacement cannot answer a query for a
+legacy or withdrawn fact merely because it shares broad topic words. This
+proves packaged explicit-memory governance consumption of context packages.
+It is not LLM answer quality, ranking quality, vector search, ontology
+discovery, public leaderboard parity, or a complete long-horizon governance
+system. The command is stable and already runs through the packaged lifecycle
+gate included in `tools/run_quality_gates.py`.
 
 ## Current Baseline
 

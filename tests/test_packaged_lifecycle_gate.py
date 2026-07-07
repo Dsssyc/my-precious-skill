@@ -79,6 +79,22 @@ class PackagedLifecycleGateTests(unittest.TestCase):
                     "privacy_leak_count": 0,
                 },
             )
+            self.assertEqual(
+                report["explicit_governance"],
+                {
+                    "status": "passed",
+                    "explicit_context_package_parse_success_rate": 1.0,
+                    "explicit_current_fact_answerability_rate": 1.0,
+                    "explicit_replaced_fact_abstention_rate": 1.0,
+                    "explicit_withdrawn_fact_abstention_rate": 1.0,
+                    "explicit_revision_link_integrity_rate": 1.0,
+                    "explicit_bulk_duplicate_suppression_rate": 1.0,
+                    "explicit_conflict_fail_closed_count": 1,
+                    "explicit_unsafe_target_refusal_count": 1,
+                    "explicit_unknown_target_refusal_count": 1,
+                    "privacy_leak_count": 0,
+                },
+            )
             self.assertEqual(set(report["search_depths"]), {"memory", "session", "evidence", "source"})
             self.assertNotIn("clean-room lifecycle fact", result.stdout)
             self.assertNotIn("clean-room lifecycle fact", result.stderr)
@@ -92,6 +108,8 @@ class PackagedLifecycleGateTests(unittest.TestCase):
             self.assertNotIn("legacy explicit revision policy", result.stderr)
             self.assertNotIn("obsolete explicit withdrawal policy", result.stdout)
             self.assertNotIn("obsolete explicit withdrawal policy", result.stderr)
+            self.assertNotIn("explicit memory revision target was not found", result.stdout)
+            self.assertNotIn("explicit memory cannot both supersede and deprecate", result.stdout)
             self.assertTrue(Path(tmpdir).exists())
             self.assertEqual(list(Path(tmpdir).iterdir()), [])
 

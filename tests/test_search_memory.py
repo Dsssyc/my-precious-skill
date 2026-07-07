@@ -5474,6 +5474,97 @@ class SearchMemoryTests(unittest.TestCase):
         rendered = json.dumps(payload, sort_keys=True)
         self.assertNotIn("mem_context_package_old", rendered)
 
+    def test_search_memory_context_json_rejects_legacy_query_supported_only_by_current_replacement(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            session_dir = repo / "sessions/2026/07/07/legacy-replacement"
+            session_dir.mkdir(parents=True)
+            (repo / "index").mkdir()
+            (session_dir / "summary.md").write_text("# Session: Legacy Replacement\n", encoding="utf-8")
+            (session_dir / "evidence.md").write_text(
+                "ev_001: Current explicit revision policy evidence.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_context_package_legacy_old",
+                        "layer": "domain",
+                        "scope": "project:synthetic",
+                        "topic": "explicit-revision-policy",
+                        "text": "Prefer the legacy explicit revision policy for conflict handling.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/07/07/legacy-replacement/summary.md"],
+                        "evidence_refs": [
+                            {
+                                "path": "sessions/2026/07/07/legacy-replacement/evidence.md",
+                                "quote_id": "ev_001",
+                            }
+                        ],
+                        "raw_refs": [],
+                        "superseded_by": "mem_context_package_legacy_current",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_context_package_legacy_current",
+                        "layer": "domain",
+                        "scope": "project:synthetic",
+                        "topic": "explicit-revision-policy",
+                        "text": "Prefer the current explicit revision policy for conflict handling.",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": ["sessions/2026/07/07/legacy-replacement/summary.md"],
+                        "evidence_refs": [
+                            {
+                                "path": "sessions/2026/07/07/legacy-replacement/evidence.md",
+                                "quote_id": "ev_001",
+                            }
+                        ],
+                        "raw_refs": [],
+                        "supersedes": ["mem_context_package_legacy_old"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "Prefer the legacy explicit revision policy for conflict handling.",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "evidence",
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["answerability"]["status"], "unsupported")
+        self.assertEqual(payload["answerability"]["reason"], "no_active_current_support")
+        self.assertEqual(payload["answerability"]["supported_hit_count"], 0)
+        self.assertEqual(payload["hits"][0]["memory_id"], "mem_context_package_legacy_current")
+        self.assertEqual(payload["hits"][0]["answerability"]["status"], "unsupported")
+        self.assertEqual(payload["hits"][0]["answerability"]["reason"], "insufficient_query_support")
+        self.assertEqual(payload["hits"][0]["query_support"]["status"], "weak")
+        self.assertIn("legacy", payload["hits"][0]["query_support"]["missing_tokens"])
+        rendered = json.dumps(payload, sort_keys=True)
+        self.assertNotIn("mem_context_package_legacy_old", rendered)
+
     def test_search_memory_context_json_source_depth_is_privacy_safe(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir) / "agent-memory"
