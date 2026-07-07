@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 PUBLIC_REPO = Path(__file__).resolve().parents[1]
@@ -180,27 +179,48 @@ def run_json_to_file(name: str, command: list[str], output: Path) -> dict[str, A
     return read_json_file(output)
 
 
-def cleanup_success_artifacts(repo: Path, case_output: Path, work_dir: Path) -> bool:
+def remove_empty_ancestors(path: Path, stop: Path) -> None:
+    current = path.resolve(strict=False)
+    stop_resolved = stop.resolve(strict=False)
+    while current != stop_resolved and current.is_relative_to(stop_resolved):
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def cleanup_success_artifacts(
+    repo: Path,
+    case_output: Path,
+    work_dir: Path,
+    *,
+    generated_paths: Iterable[Path] = (),
+) -> bool:
+    generated_path_list = list(generated_paths)
     try:
-        if case_output.exists():
-            case_output.unlink()
+        for path in [case_output, *generated_path_list]:
+            if path.exists():
+                path.unlink()
         tmp_root = repo.resolve() / ".tmp"
-        parent = case_output.parent
-        while parent.resolve(strict=False).is_relative_to(tmp_root) and parent != tmp_root:
-            try:
-                parent.rmdir()
-            except OSError:
-                break
-            parent = parent.parent
+        remove_empty_ancestors(case_output.parent, tmp_root)
         if tmp_root.exists():
             try:
                 tmp_root.rmdir()
             except OSError:
                 pass
-        shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir_resolved = work_dir.resolve(strict=False)
+        for path in generated_path_list:
+            parent = path.parent
+            if parent.resolve(strict=False).is_relative_to(work_dir_resolved):
+                remove_empty_ancestors(parent, work_dir_resolved)
+        try:
+            work_dir.rmdir()
+        except OSError:
+            pass
     except OSError:
         return False
-    return not case_output.exists() and not work_dir.exists()
+    return not case_output.exists() and all(not path.exists() for path in generated_path_list)
 
 
 def readiness_dimension_statuses(report: dict[str, Any]) -> dict[str, str]:
@@ -240,6 +260,7 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     answer_report_path = work_dir / "answer_report.json"
     answer_details = work_dir / "details.jsonl"
     shadow_report_path = work_dir / "shadow_report.json"
+    generated_artifacts = (answer_records, answer_report_path, answer_details, shadow_report_path)
 
     python = args.python
     try:
@@ -400,10 +421,20 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             }
         )
         if args.cleanup_on_failure:
-            report["cleanup_success"] = cleanup_success_artifacts(repo, case_output, work_dir)
+            report["cleanup_success"] = cleanup_success_artifacts(
+                repo,
+                case_output,
+                work_dir,
+                generated_paths=generated_artifacts,
+            )
         return report, 1
 
-    cleanup_success = cleanup_success_artifacts(repo, case_output, work_dir)
+    cleanup_success = cleanup_success_artifacts(
+        repo,
+        case_output,
+        work_dir,
+        generated_paths=generated_artifacts,
+    )
     final_preflight = preflight_report(repo, case_output)
     report.update(
         {

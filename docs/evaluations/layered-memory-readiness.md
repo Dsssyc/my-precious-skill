@@ -299,6 +299,42 @@ python3 benchmarks/v1_readiness_gate.py \
   --source-stream-report /tmp/source-stream.json
 ```
 
+## V1.7 Private Aggregate Dogfood Gate
+
+V1.7 is a private aggregate dogfood gate for the V1.6 answer handoff
+contract. It is not a public benchmark, not live model answer quality, not a
+ranking overhaul, and not automatic ontology or long-horizon governance.
+
+`benchmarks/private_generated_answer_dogfood_gate.py` now has public synthetic
+coverage for the private dogfood wrapper path. The wrapper is allowed to expose
+only aggregate counts, rates, pass/fail status, and generic failure reasons.
+`v1_readiness_gate.py` normalizes the wrapper's nested generated-answer report
+and requires the same handoff metrics as V1.6:
+`answer_handoff_present_rate`, `answer_handoff_support_coverage_rate`,
+supported/abstention handoff counts, `unsupported_claim_count=0`,
+`inactive_memory_answer_count=0`, and `privacy_leak_count=0`.
+
+The private dogfood wrapper privacy block is now a readiness contract of its
+own. In addition to ordinary answer-report privacy flags, the gate rejects a
+private dogfood wrapper unless `private_paths_rendered`, `memory_text_rendered`,
+`memory_ids_rendered`, `source_paths_rendered`, and `raw_refs_rendered` are all
+false. This keeps private queries, answers, memory IDs, source paths, raw refs,
+and source text out of the reusable repository's evidence stream.
+
+The private runner also only deletes known dogfood-generated artifacts during
+cleanup. It removes the temporary case file and the known aggregate work files,
+then removes now-empty dogfood directories. It does not recursively delete
+arbitrary files that merely happen to be inside the configured work directory.
+This makes cleanup evidence stronger without weakening the existing fail-closed
+preflight for dirty private `eval/` and `.tmp/` artifacts.
+
+The V1.7 evidence is still bounded. A safe real private archive run can report
+aggregate metrics for deployment confidence, but the reusable repository's
+claim is that the private dogfood orchestration enforces the V1.6
+source-grounded handoff and privacy contract. It does not store private cases,
+private answers, raw transcripts, source paths, raw refs, scheduler logs, or
+archive data.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

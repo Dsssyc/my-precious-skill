@@ -121,6 +121,13 @@ GENERATED_ANSWER_GATES = (
     MetricGate("positive_without_reference_answer", "max", 0.0),
     MetricGate("answer_scorable_case_rate", "min", 1.0),
 )
+PRIVATE_DOGFOOD_PRIVACY_FALSE_METRICS = (
+    "private_paths_rendered",
+    "memory_text_rendered",
+    "memory_ids_rendered",
+    "source_paths_rendered",
+    "raw_refs_rendered",
+)
 PUBLIC_BENCHMARK_SOURCES = {"LongMemEval", "LongMemEval-V2", "LoCoMo", "Memora"}
 SAFE_REQUIRED_COUNT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SAFE_LIFECYCLE_FAILURE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -391,7 +398,7 @@ def normalize_answer_report(payload: dict[str, Any] | None) -> dict[str, Any] | 
     normalized.setdefault("report_kind", "generated_answer_benchmark")
     privacy = payload.get("privacy")
     if isinstance(privacy, dict):
-        normalized.setdefault("privacy", privacy)
+        normalized["privacy"] = privacy
     return normalized
 
 
@@ -445,6 +452,18 @@ def assess_answer_report(
                     }
                 )
                 result["status"] = "failed"
+        if payload is not None and payload.get("report_kind") == "private_generated_answer_dogfood_gate":
+            for metric in PRIVATE_DOGFOOD_PRIVACY_FALSE_METRICS:
+                if privacy.get(metric) is not False:
+                    result.setdefault("failures", []).append(
+                        {
+                            "metric": f"privacy.{metric}",
+                            "expected": False,
+                            "actual": privacy.get(metric),
+                            "reason": "private_dogfood_report_rendered_private_detail",
+                        }
+                    )
+                    result["status"] = "failed"
         source_benchmarks = report_payload.get("source_benchmarks")
         if not has_positive_count(source_benchmarks):
             result.setdefault("failures", []).append(

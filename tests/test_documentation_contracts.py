@@ -203,6 +203,24 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v17_private_aggregate_dogfood_gate(self):
+        section = self.evaluation_section("## V1.7 Private Aggregate Dogfood Gate")
+        for phrase in (
+            "private aggregate dogfood",
+            "not a public benchmark",
+            "not live model answer quality",
+            "private_generated_answer_dogfood_gate.py",
+            "private dogfood wrapper",
+            "answer_handoff_present_rate",
+            "answer_handoff_support_coverage_rate",
+            "memory_ids_rendered",
+            "source_paths_rendered",
+            "raw_refs_rendered",
+            "only deletes known dogfood-generated artifacts",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

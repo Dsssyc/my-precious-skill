@@ -1106,7 +1106,17 @@ class V1ReadinessGateTests(unittest.TestCase):
             answer_payload["source_benchmarks"] = {"MyPreciousPrivateDogfood": 3}
             answer_payload["case_origins"] = {"private_dogfood": 3}
             answer_payload.pop("report_kind")
-            answer_payload.pop("privacy")
+            answer_payload["privacy"] = {
+                "aggregate_only": True,
+                "queries_rendered": False,
+                "generated_answers_rendered": False,
+                "reference_answers_rendered": False,
+                "private_paths_rendered": False,
+                "memory_text_rendered": False,
+                "memory_ids_rendered": False,
+                "source_paths_rendered": False,
+                "raw_refs_rendered": False,
+            }
             answer = self.write_json(
                 root,
                 "answer.json",
@@ -1119,6 +1129,11 @@ class V1ReadinessGateTests(unittest.TestCase):
                         "queries_rendered": False,
                         "generated_answers_rendered": False,
                         "reference_answers_rendered": False,
+                        "private_paths_rendered": False,
+                        "memory_text_rendered": False,
+                        "memory_ids_rendered": False,
+                        "source_paths_rendered": False,
+                        "raw_refs_rendered": False,
                     },
                 },
             )
@@ -1153,6 +1168,84 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
+
+    def test_private_dogfood_gate_wrapper_rejects_private_detail_privacy_flags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            answer_payload["source_benchmarks"] = {"MyPreciousPrivateDogfood": 3}
+            answer_payload["case_origins"] = {"private_dogfood": 3}
+            answer_payload.pop("report_kind")
+            answer_payload["privacy"] = {
+                "aggregate_only": True,
+                "queries_rendered": False,
+                "generated_answers_rendered": False,
+                "reference_answers_rendered": False,
+                "private_paths_rendered": False,
+                "memory_text_rendered": False,
+                "memory_ids_rendered": False,
+                "source_paths_rendered": False,
+                "raw_refs_rendered": False,
+            }
+            answer = self.write_json(
+                root,
+                "answer.json",
+                {
+                    "report_kind": "private_generated_answer_dogfood_gate",
+                    "status": "passed",
+                    "answer_benchmark": answer_payload,
+                    "privacy": {
+                        "aggregate_only": True,
+                        "queries_rendered": False,
+                        "generated_answers_rendered": False,
+                        "reference_answers_rendered": False,
+                        "private_paths_rendered": False,
+                        "memory_text_rendered": False,
+                        "memory_ids_rendered": True,
+                        "source_paths_rendered": True,
+                        "raw_refs_rendered": True,
+                    },
+                },
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                    "--require-answer-source-benchmark",
+                    "MyPreciousPrivateDogfood",
+                    "--require-answer-case-origin",
+                    "private_dogfood",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["generated_answer_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("privacy.memory_ids_rendered", failed_metrics)
+            self.assertIn("privacy.source_paths_rendered", failed_metrics)
+            self.assertIn("privacy.raw_refs_rendered", failed_metrics)
 
     def test_run_packaged_require_answer_uses_packaged_answer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -561,6 +561,13 @@ failure artifacts are not needed for local diagnosis. Custom external
 `my_precious_generated_answer_dogfood` so cleanup cannot target a generic
 temporary or repository directory.
 
+The private dogfood wrapper is also validated by `v1_readiness_gate.py`: the
+nested answer benchmark must carry the V1.6 `answer_handoff` metrics, and the
+wrapper privacy block must declare that private paths, memory text, memory IDs,
+source paths, and raw refs were not rendered. Cleanup removes only the known
+dogfood-generated artifacts and then prunes empty dogfood directories, so
+unowned files in the work directory are preserved.
+
 Author an initial private dogfood generated-answer case set from an existing
 deployment archive's layered memories:
 

@@ -425,6 +425,12 @@ memory ID、source path 或 raw ref；如果不需要保留失败产物做本地
 例如 `my_precious_generated_answer_dogfood`，避免 cleanup 指向泛用临时目录或
 仓库目录。
 
+这个 private dogfood wrapper 也会被 `v1_readiness_gate.py` 校验：嵌套的
+answer benchmark 必须带有 V1.6 `answer_handoff` 指标，wrapper privacy block
+必须声明 private path、memory text、memory ID、source path 和 raw ref 都没有
+被渲染。cleanup 只删除已知 dogfood 生成产物，然后清理空的 dogfood 目录；如果
+work dir 里有不属于 dogfood 的文件，会被保留。
+
 也可以从私有部署 archive 的 layered memories 生成初始 private dogfood
 generated-answer case set：
 
