@@ -88,10 +88,13 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 5. Use source depth only when the user explicitly asks for source reachability:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --context-json
    ```
 
-   This prints safe source ref status metadata (`source_ref_id`, `status`, and
+   Apply the same package-first decision boundary. For source reachability,
+   use `source_refs` status metadata from supported active/current hits; do not
+   use free-form source-depth output as source reachability evidence. This
+   renders safe source ref status metadata (`source_ref_id`, `status`, and
    `reason`) rather than raw source content. If the user explicitly asks for a
    raw-source check, request only a short redacted preview and include the
    separate authorization confirmation flag:

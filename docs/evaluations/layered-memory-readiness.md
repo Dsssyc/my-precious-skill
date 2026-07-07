@@ -18,7 +18,7 @@ lifecycle setup/update/search/audit with self-maintenance safeguards, and
 deterministic source-grounded answer handoff records, plus agent-facing recall
 context packaging and consumption for supported answer versus abstain
 decisions, including packaged explicit-memory capture/revision/withdrawal
-governance checks. It is
+governance checks and packaged progressive source-drilldown consumption. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -568,6 +568,42 @@ It is not LLM answer quality, ranking quality, vector search, ontology
 discovery, public leaderboard parity, or a complete long-horizon governance
 system. The command is stable and already runs through the packaged lifecycle
 gate included in `tools/run_quality_gates.py`.
+
+## V2.6 Packaged Progressive Source Drilldown Gate
+
+V2.6 adds `benchmarks/progressive_source_drilldown_gate.py` to prove that the
+package-first read path can consume progressive source drilldown metadata from
+a clean packaged deployment repo. The gate installs the packaged template,
+writes synthetic public memory rows and source anchors, then invokes the
+copied deployment `tools/search_memory.py` with both
+`--depth evidence --context-json` and `--depth source --context-json`. It
+parses `report_kind: memory_recall_context_package` and uses only context
+package fields for answer, drill, block, and abstain decisions. Free-form
+search output is not used as source reachability evidence.
+
+The synthetic cases cover a supported answer at evidence depth, a supported
+source drilldown at source depth, a high-level memory derived from lower
+support memory with multi-hop source-ref resolution, an evidence-only memory
+that must not satisfy an original-source request, inactive/superseded
+source-only support that must abstain, unsafe raw/source refs that must block,
+and malformed packages that must fail closed. The gate reports aggregate
+metrics:
+`source_context_package_parse_success_rate`,
+`source_drilldown_decision_accuracy`,
+`memory_to_summary_drilldown_rate`,
+`summary_to_evidence_drilldown_rate`,
+`evidence_to_source_ref_reachability_rate`,
+`memory_graph_multihop_source_resolution_rate`,
+`evidence_only_original_source_rejection_count`,
+`inactive_source_rejection_count`, `unsafe_source_ref_block_count`,
+`raw_source_content_default_block_rate`, and `privacy_leak_count`.
+
+This proves packaged progressive source drilldown consumption of context
+packages. It does not prove raw transcript ingestion, private archive quality,
+LLM answer quality, vector search, ranking quality, ontology discovery, or a
+source browser UI. Raw source content remains blocked by default; source-depth
+context packages render source-ref status metadata rather than raw source
+content. The command is stable and included in `tools/run_quality_gates.py`.
 
 ## Current Baseline
 
