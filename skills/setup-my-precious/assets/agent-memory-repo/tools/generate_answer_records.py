@@ -25,6 +25,7 @@ import search_memory  # noqa: E402
 
 ABSTENTION_ANSWER = "There is not enough information in memory to answer."
 ANSWERABILITY_POLICY = "query_token_support"
+HANDOFF_CONTRACT_VERSION = 1
 REFERENCE_ANSWER_PREFIX_PATTERN = re.compile(r"\bReference answer:\s*", re.IGNORECASE)
 REFERENCE_SECTION_BOUNDARY_PATTERN = re.compile(
     r"\s+\b(?:Expected memory|Query|Reference evidence|Synthetic answer target):",
@@ -143,14 +144,65 @@ def extract_answer_from_hit(repo: Path, hit: search_memory.Hit, query: str = "")
     return answer
 
 
-def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, str]], dict[str, Any]]:
-    records: list[dict[str, str]] = []
+def answer_support_refs(hit: search_memory.Hit) -> list[dict[str, Any]]:
+    summary_paths = sorted(path for path in hit.drill_paths if Path(path).name == "summary.md")
+    evidence_refs = sorted(hit.evidence_refs)
+    if not hit.memory_id or not summary_paths or not evidence_refs:
+        return []
+    return [
+        {
+            "memory_id": hit.memory_id,
+            "summary_paths": summary_paths,
+            "evidence_refs": evidence_refs,
+        }
+    ]
+
+
+def support_refs_cover_answer(support_refs: list[dict[str, Any]]) -> bool:
+    for support_ref in support_refs:
+        if not isinstance(support_ref, dict):
+            continue
+        memory_id = support_ref.get("memory_id")
+        summary_paths = support_ref.get("summary_paths")
+        evidence_refs = support_ref.get("evidence_refs")
+        if (
+            isinstance(memory_id, str)
+            and memory_id.strip()
+            and isinstance(summary_paths, list)
+            and any(isinstance(path, str) and path.strip() for path in summary_paths)
+            and isinstance(evidence_refs, list)
+            and any(isinstance(ref, str) and ref.strip() for ref in evidence_refs)
+        ):
+            return True
+    return False
+
+
+def answer_handoff(*, abstained: bool, support_refs: list[dict[str, Any]], abstain_reason: str = "") -> dict[str, Any]:
+    handoff: dict[str, Any] = {
+        "contract_version": HANDOFF_CONTRACT_VERSION,
+        "abstained": abstained,
+        "active_memory_only": True,
+        "support_refs": support_refs,
+        "unsupported_claim_count": 0,
+        "inactive_memory_answer_count": 0,
+        "privacy_leak_count": 0,
+    }
+    if abstained:
+        handoff["abstain_reason"] = abstain_reason or "no_supported_memory_hit"
+    return handoff
+
+
+def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    records: list[dict[str, Any]] = []
     source_benchmarks: Counter[str] = Counter()
     case_origins: Counter[str] = Counter()
     memory_answer_count = 0
     abstention_answer_count = 0
     no_hit_count = 0
     unsupported_hit_count = 0
+    answer_handoff_supported_case_count = 0
+    answer_handoff_abstain_case_count = 0
+    support_ref_covered_answer_count = 0
 
     for case in cases:
         source_benchmark = optional_text(case, "source_benchmark")
@@ -164,28 +216,60 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
         hits = search_memory_hits(repo, query, limit)
         if hits and hit_supports_query(repo, hits[0], query):
             answer = extract_answer_from_hit(repo, hits[0], query)
-            if answer == ABSTENTION_ANSWER:
+            support_refs = answer_support_refs(hits[0])
+            support_covered = support_refs_cover_answer(support_refs)
+            if answer == ABSTENTION_ANSWER or not support_covered:
+                if answer != ABSTENTION_ANSWER:
+                    unsupported_hit_count += 1
+                answer = ABSTENTION_ANSWER
                 abstention_answer_count += 1
+                answer_handoff_abstain_case_count += 1
+                handoff = answer_handoff(
+                    abstained=True,
+                    support_refs=[],
+                    abstain_reason="missing_support_refs" if not support_covered else "privacy_boundary",
+                )
             else:
                 memory_answer_count += 1
+                answer_handoff_supported_case_count += 1
+                support_ref_covered_answer_count += 1
+                handoff = answer_handoff(abstained=False, support_refs=support_refs)
         else:
             answer = ABSTENTION_ANSWER
             abstention_answer_count += 1
+            answer_handoff_abstain_case_count += 1
             if hits:
                 unsupported_hit_count += 1
             else:
                 no_hit_count += 1
-        records.append({"case_id": case_id, "generated_answer": answer})
+            handoff = answer_handoff(
+                abstained=True,
+                support_refs=[],
+                abstain_reason="no_supported_memory_hit",
+            )
+        records.append({"case_id": case_id, "generated_answer": answer, "answer_handoff": handoff})
 
     report = {
         "report_kind": "generated_answer_records_adapter",
         "report_version": 1,
-        "claim_boundary": "extractive memory-answer records only; no model-generation or semantic equivalence claim",
+        "claim_boundary": (
+            "extractive source-grounded answer handoff records only; "
+            "no model-generation or semantic equivalence claim"
+        ),
         "answerability_policy": ANSWERABILITY_POLICY,
+        "answer_handoff_contract_version": HANDOFF_CONTRACT_VERSION,
         "cases": len(cases),
         "answers_written": len(records),
         "memory_answer_count": memory_answer_count,
         "abstention_answer_count": abstention_answer_count,
+        "answer_handoff_supported_case_count": answer_handoff_supported_case_count,
+        "answer_handoff_abstain_case_count": answer_handoff_abstain_case_count,
+        "answer_handoff_support_coverage_rate": (
+            1.0 if memory_answer_count == 0 else support_ref_covered_answer_count / memory_answer_count
+        ),
+        "unsupported_claim_count": 0,
+        "inactive_memory_answer_count": 0,
+        "privacy_leak_count": 0,
         "no_hit_count": no_hit_count,
         "unsupported_hit_count": unsupported_hit_count,
         "source_benchmarks": dict(sorted(source_benchmarks.items())),
@@ -202,7 +286,7 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
     return records, report
 
 
-def write_jsonl(path: Path, rows: list[dict[str, str]]) -> None:
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
 

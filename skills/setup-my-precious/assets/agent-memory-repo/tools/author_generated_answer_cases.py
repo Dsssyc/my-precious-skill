@@ -108,6 +108,26 @@ def record_memory_id(record: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
+def record_has_answer_support_refs(record: dict[str, Any]) -> bool:
+    derived_from = record.get("derived_from")
+    evidence_refs = record.get("evidence_refs")
+    has_summary = (
+        isinstance(derived_from, list)
+        and any(isinstance(path, str) and path.strip().endswith("summary.md") for path in derived_from)
+    )
+    has_evidence = False
+    if isinstance(evidence_refs, list):
+        for evidence_ref in evidence_refs:
+            if not isinstance(evidence_ref, dict):
+                continue
+            path = evidence_ref.get("path")
+            quote_id = evidence_ref.get("quote_id")
+            if isinstance(path, str) and path.strip() and isinstance(quote_id, str) and quote_id.strip():
+                has_evidence = True
+                break
+    return has_summary and has_evidence
+
+
 def query_terms(text: str) -> list[str]:
     tokens = search_memory.coverage_query_tokens(
         search_memory.meaningful_query_tokens(search_memory.unique_query_tokens(text))
@@ -226,6 +246,9 @@ def build_cases(
         text = record_text(record)
         if not memory_id or not text:
             skip_counts["missing_required_field"] += 1
+            continue
+        if not record_has_answer_support_refs(record):
+            skip_counts["missing_answer_support_refs"] += 1
             continue
         if len(text) > MAX_REFERENCE_ANSWER_CHARS:
             skip_counts["reference_answer_too_long"] += 1

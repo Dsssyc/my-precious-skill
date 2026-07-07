@@ -260,12 +260,16 @@ python tools/generate_answer_records.py \
 ```
 
 The adapter searches this archive and writes private answer-record JSONL for
-`generated_answer_benchmark.py`. Its stdout is aggregate-only: it reports case
-counts, answer records written, memory-answer counts, abstention counts, no-hit
-counts, source benchmark counts, case-origin counts, and privacy flags without
-printing queries, generated answers, reference answers, source paths, or raw
-refs. It is extractive and deterministic; it does not call a model or prove
-semantic generated-answer quality.
+`generated_answer_benchmark.py`. Each non-abstention answer record includes an
+`answer_handoff` object with `support_refs` that connect the generated answer
+to active/current memory, summary, and evidence layers. Cases without a
+supported active memory hit abstain instead of fabricating an answer. The
+adapter stdout is aggregate-only: it reports case counts, answer records
+written, memory-answer counts, abstention counts, answer handoff support
+coverage, no-hit counts, source benchmark counts, case-origin counts, and
+privacy flags without printing queries, generated answers, reference answers,
+source paths, or raw refs. It is extractive and deterministic; it does not call
+a model or prove semantic generated-answer quality.
 
 ## Capture Explicit Memories
 

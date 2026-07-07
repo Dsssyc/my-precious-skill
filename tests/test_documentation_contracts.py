@@ -183,6 +183,26 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v16_source_grounded_answer_handoff_contract(self):
+        section = self.evaluation_section("## V1.6 Source-Grounded Answer Handoff Contract")
+        for phrase in (
+            "deterministic answer handoff",
+            "not live model answer quality",
+            "answer_handoff",
+            "support_refs",
+            "active/current memory",
+            "abstain",
+            "answer_handoff_support_coverage_rate",
+            "answer_handoff_present_rate",
+            "answer_handoff_supported_case_count",
+            "answer_handoff_abstain_case_count",
+            "unsupported_claim_count=0",
+            "inactive_memory_answer_count=0",
+            "privacy_leak_count=0",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
@@ -204,6 +224,17 @@ class DocumentationContractTests(unittest.TestCase):
             "prefer the current fact",
             "old fact is superseded rather than deleted",
             "provenance remains traceable",
+        ):
+            self.assert_contains(self.skill_contracts, phrase)
+
+    def test_skill_docs_record_source_grounded_answer_handoff_contract(self):
+        for phrase in (
+            "source-grounded answer handoff",
+            "Answer from archive evidence only",
+            "abstain when support is missing",
+            "support_refs",
+            "active/current memory",
+            "do not expose raw refs",
         ):
             self.assert_contains(self.skill_contracts, phrase)
 

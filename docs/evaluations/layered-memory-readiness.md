@@ -13,8 +13,9 @@ source-reference reachability, broad lexical noise resistance, stale
 suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
 updater-driven automatic induction on synthetic archives, end-to-end
 induction-to-recall behavior on synthetic source records, explicit non-project
-source stream registry updates on synthetic archives, and clean-room packaged
-lifecycle setup/update/search/audit with self-maintenance safeguards. It is
+source stream registry updates on synthetic archives, clean-room packaged
+lifecycle setup/update/search/audit with self-maintenance safeguards, and
+deterministic source-grounded answer handoff records. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -70,11 +71,16 @@ boundary:
   local private probe set should be a required readiness gate for the run.
 - `--answer-report` accepts an offline generated-answer aggregate report. When
   `--run-packaged --require-answer` is used without an answer report, the gate
-  runs the packaged synthetic generated-answer fixture automatically. This is
-  synthetic dogfood evidence for the grading path, not proof of live model
-  answer quality. Answer reports must include aggregate `source_benchmarks` and
-  `case_origins`; metric-only generated-answer JSON is rejected because it
-  cannot prove which benchmark or dogfood stream produced the answers.
+  builds the packaged synthetic generated-answer archive, runs the extractive
+  answer-record adapter, and grades the generated `answer_handoff` records.
+  This is deterministic answer handoff evidence for the grading path, not live
+  model answer quality. Answer reports must include aggregate
+  `source_benchmarks`, `case_origins`, `answer_handoff_present_rate`,
+  `answer_handoff_support_coverage_rate`, supported/abstention handoff counts,
+  `unsupported_claim_count`, and `inactive_memory_answer_count`; metric-only
+  or answer-text-only generated-answer JSON is rejected because it cannot prove
+  which benchmark stream produced the answers or whether the answers were
+  grounded in active/current memory evidence.
 
 The strongest recorded local gate below combines a private real-archive
 aggregate shadow report with the 100-case converted LongMemEval public-adapter
@@ -89,26 +95,33 @@ The packaged generated-answer gate can be included in local convergence runs:
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
 
-The current packaged generated-answer fixture has 3 cases: 2 positive answer
+The current packaged generated-answer fixture has 4 cases: 3 positive answer
 cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
 `answer_normalized_match_rate: 1.0`, `answer_token_f1: 1.0`,
 `abstention_accuracy: 1.0`, `privacy_leak_count: 0`,
 `missing_answer_count: 0`, `duplicate_answer_count: 0`, and
-`unknown_answer_count: 0`. It also carries
-`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 3` and
-`case_origins.packaged_generated_answer_fixture: 3`, satisfying the answer
-provenance gate without rendering queries, generated answers, or reference
-answers.
+`unknown_answer_count: 0`. It also reports
+`answer_handoff_present_rate: 1.0`,
+`answer_handoff_support_coverage_rate: 1.0`,
+`answer_handoff_supported_case_count: 3`,
+`answer_handoff_abstain_case_count: 1`, `unsupported_claim_count: 0`, and
+`inactive_memory_answer_count: 0`. It carries
+`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 4` and
+`case_origins.packaged_generated_answer_fixture: 4`, satisfying the answer
+provenance and source-grounded handoff gates without rendering queries,
+generated answers, reference answers, source paths, or raw refs.
 
 The deployment template also includes an extractive
 `tools/generate_answer_records.py` adapter for producing answer-record JSONL
 from memory search hits. Its own report is aggregate-only: it includes case
-count, answer records written, memory-answer count, abstention count, no-hit
-count, source benchmark counts, case-origin counts, and privacy flags without
-rendering queries, generated answers, reference answers, source paths, or raw
-refs. This proves the answer-record production path can be wired into the
-offline grader, but it remains extractive evidence rather than live model
-answer quality.
+count, answer records written, memory-answer count, abstention count, answer
+handoff support coverage, no-hit count, source benchmark counts, case-origin
+counts, and privacy flags without rendering queries, generated answers,
+reference answers, source paths, or raw refs. Each non-abstention
+`answer_handoff` carries `support_refs` to active/current memory, summary, and
+evidence layers; unsupported or inactive-only cases abstain. This proves the
+answer-record production path can be wired into the offline grader, but it
+remains extractive evidence rather than live model answer quality.
 
 The current packaged source-stream registry fixture has 1 case and 1
 metadata-free source record. It reports `source_stream_update_rate: 1.0`,
@@ -232,6 +245,43 @@ through the `explicit_revision` metrics:
 | withdrawn_fact_default_search_hit_count=0 | true |
 | revision_evidence_reachability_count=2 | true |
 | privacy_leak_count=0 | true |
+
+## V1.6 Source-Grounded Answer Handoff Contract
+
+V1.6 is a deterministic answer handoff contract. It is not live model answer quality,
+not semantic generation, not a ranking overhaul, and not a general long-horizon
+governance system.
+
+The read path now has a bounded extractive answer-record adapter:
+`tools/generate_answer_records.py` searches layered memory nodes, uses only
+active/current memory hits, and writes private answer records with an
+`answer_handoff` object. A non-abstention handoff must carry `support_refs`
+that connect the answer to memory, summary, and evidence layers. If support is
+missing, if only inactive lifecycle memory matches, or if the candidate answer
+would violate the privacy boundary, the adapter must abstain instead of
+fabricating an answer.
+
+The public packaged generated-answer fixture covers supported answers,
+abstain behavior, multi-hop summary/evidence reachability through `support_refs`,
+privacy boundary checks, and currentness when an old stale fact has been
+superseded by an active/current memory. The readiness gate keeps the output
+aggregate-only and requires these metrics:
+
+| metric | expected value |
+| --- | ---: |
+| answer_handoff_present_rate | 1.0 |
+| answer_handoff_support_coverage_rate | 1.0 |
+| answer_handoff_supported_case_count | >= 1 |
+| answer_handoff_abstain_case_count | >= 1 |
+| unsupported_claim_count=0 | true |
+| inactive_memory_answer_count=0 | true |
+| privacy_leak_count=0 | true |
+
+The handoff privacy rule is intentionally stricter than ordinary answer text
+grading: benchmark reports must not render queries, generated answers,
+reference answers, memory text, source paths, raw refs, raw transcripts,
+scheduler state, credentials, or local private paths. This makes V1.6 useful as
+an answer handoff audit, but it still does not claim live model answer quality.
 
 Run the packaged convergence gate locally with:
 

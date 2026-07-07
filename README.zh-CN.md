@@ -366,13 +366,20 @@ search hits、source paths 或 temporary paths。可选的
 仓库外 adapted public benchmark 报告和私有真实 archive 的 aggregate shadow eval
 报告；如果希望这些可选维度缺失时也让 gate 失败，使用 `--require-public` 或
 `--require-shadow`。`--answer-report` 可以接入离线 generated-answer 评分报告；
+required answer report 必须包含 deterministic answer handoff 指标：非拒答答案
+必须通过 `support_refs` 连接到 active/current memory、summary 和 evidence，
+unsupported claim 与 inactive-memory answer 计数必须为 0，拒答 case 也必须在
+handoff contract 中明确记录。
 如果需要证明某个特定 dogfood 或 benchmark answer stream，而不是任意 answer
 report，可以添加 `--require-answer-source-benchmark NAME` 或
 `--require-answer-case-origin NAME`。这些参数只检查 aggregate
 `source_benchmarks` / `case_origins` 中对应 key 是否有正计数，并且会隐式要求
 answer 维度必须存在，即使没有额外写 `--require-answer`。例如
 `--require-answer-case-origin private_dogfood` 可以防止 packaged synthetic fixture
-或 public-only answer report 被误当成私有 dogfood answer evidence。public report
+或 public-only answer report 被误当成私有 dogfood answer evidence。
+`--run-packaged --require-answer` 在没有外部 `--answer-report` 时，会先构建
+packaged synthetic generated-answer archive，再用 `generate_answer_records.py`
+生成 extractive answer handoff records 并评分。public report
 必须是由公开 benchmark 转换 case 生成的
 layered recall 报告，并包含 aggregate `source_benchmarks` 计数和
 `case_origins.public_benchmark_adapter`；converter-only 输出或普通合成 layered
@@ -442,6 +449,14 @@ case-origin 和 privacy flags。生成的 case 文件包含私有 query 与 refe
 answer，不能放进本开发仓库，并且 gate 结束后要清理 `.tmp` 输出。
 `--abstain-limit` 会额外生成确定性的 no-hit `expected_abstain` case，让私有
 dogfood answer report 同时证明正向回答和拒答行为。
+
+`generate_answer_records.py` 写出的每条非拒答 answer record 都带有
+`answer_handoff.support_refs`，把答案连接到 active/current memory、summary 和
+evidence 层；只有 inactive 记忆或缺少 support 时会拒答，而不是拼接无证据答案。
+adapter stdout 只输出 aggregate JSON，包括 handoff support coverage、
+supported/abstain handoff counts、`unsupported_claim_count`、
+`inactive_memory_answer_count` 和 privacy flags；它不证明 live model answer
+quality。
 
 不用 agent，也可以直接运行搜索脚本：
 

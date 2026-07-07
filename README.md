@@ -443,8 +443,12 @@ is solved. Optional
 `--answer-report` can add offline generated-answer grading evidence. Answer
 reports must include aggregate `source_benchmarks` and `case_origins` counts;
 passing answer metrics alone are not accepted as provenance-backed answer
-evidence. When a run needs to prove a specific dogfood or benchmark answer
-stream rather than any answer report, add one or more
+evidence. Required answer reports must also include deterministic answer
+handoff metrics: every non-abstention answer needs active/current memory
+support with `support_refs`, unsupported claims and inactive-memory answers
+must be zero, and abstention cases must be represented in the handoff contract.
+When a run needs to prove a specific dogfood or benchmark answer stream rather
+than any answer report, add one or more
 `--require-answer-source-benchmark NAME` or
 `--require-answer-case-origin NAME` checks; each required key must be present
 with a positive aggregate count, and either check makes the answer dimension
@@ -455,8 +459,10 @@ answer evidence. Add `--require-public`, `--require-shadow`, or
 `--require-answer` when those optional dimensions should fail the gate if
 absent. When
 `--run-packaged --require-answer` is used without an
-`--answer-report`, the gate runs the packaged synthetic generated-answer fixture
-and includes that aggregate report automatically. Public reports must be
+`--answer-report`, the gate builds the packaged synthetic generated-answer
+archive, generates extractive answer handoff records with
+`generate_answer_records.py`, grades them, and includes that aggregate report
+automatically. Public reports must be
 layered recall reports produced from converted
 public benchmark cases, including aggregate `source_benchmarks` counts and
 `case_origins.public_benchmark_adapter`; converter-only output or ordinary
@@ -479,26 +485,38 @@ python benchmarks/generated_answer_benchmark.py \
   --fail-under answer_normalized_match_rate=1.0 \
   --fail-under abstention_accuracy=1.0 \
   --fail-under answer_scorable_case_rate=1.0 \
+  --fail-under answer_handoff_present_rate=1.0 \
+  --fail-under answer_handoff_support_coverage_rate=1.0 \
+  --fail-under answer_handoff_supported_case_count=1 \
+  --fail-under answer_handoff_abstain_case_count=1 \
   --fail-over privacy_leak_count=0 \
   --fail-over failed_case_count=0 \
   --fail-over missing_answer_count=0 \
   --fail-over duplicate_answer_count=0 \
   --fail-over unknown_answer_count=0 \
-  --fail-over positive_without_reference_answer=0
+  --fail-over positive_without_reference_answer=0 \
+  --fail-over unsupported_claim_count=0 \
+  --fail-over inactive_memory_answer_count=0
 ```
 
 The answer benchmark reports aggregate `case_pass_rate`,
 `answer_exact_match_rate`, `answer_normalized_match_rate`, `answer_token_f1`,
 `abstention_accuracy`, missing/duplicate/unknown answer counts, answer-scorable
-case coverage, positive cases without reference answers, and privacy counts. It
+case coverage, positive cases without reference answers, answer handoff
+presence, answer handoff support coverage, supported/abstention handoff counts,
+unsupported claim count, inactive-memory answer count, and privacy counts. It
 also reports aggregate `source_benchmarks` and `case_origins` so
 `v1_readiness_gate.py` can reject source-less answer reports. Required answer
-reports must have `answer_scorable_case_rate: 1.0` and
-`positive_without_reference_answer: 0`; otherwise the gate cannot prove answer
-correctness for positive cases. Its claim boundary is narrow: it grades
-provided answer records against reference answers; it does not call a model,
-generate answers, or claim semantic equivalence beyond exact, normalized, and
-token-overlap checks.
+reports must have `answer_scorable_case_rate: 1.0`,
+`positive_without_reference_answer: 0`,
+`answer_handoff_present_rate: 1.0`,
+`answer_handoff_support_coverage_rate: 1.0`,
+`unsupported_claim_count: 0`, and `inactive_memory_answer_count: 0`; otherwise
+the gate cannot prove source-grounded answer handoff coverage for positive
+cases. Its claim boundary is narrow: it grades provided answer records against
+reference answers and audits deterministic handoff metadata; it does not call a
+model, generate answers, or claim semantic equivalence beyond exact,
+normalized, and token-overlap checks.
 
 Before generating answers, audit a private or public generated-answer case set
 for scoreability and aggregate provenance without rendering case IDs, queries,
@@ -582,11 +600,14 @@ python ~/repos/agent-memory/tools/generate_answer_records.py \
 ```
 
 This adapter searches memory and writes private answer-record JSONL for later
-grading. Its stdout is aggregate-only and reports case counts, memory-answer
-counts, abstention counts, source benchmark counts, case-origin counts, and
-privacy flags. It is deliberately extractive: it does not call a model, does
-not read benchmark reference answers as inputs, and does not prove live
-generated-answer quality by itself.
+grading. Each non-abstention record carries an `answer_handoff` with
+`support_refs` from active/current memory through summary and evidence layers;
+unsupported or inactive-only cases abstain. Its stdout is aggregate-only and
+reports case counts, memory-answer counts, abstention counts, handoff support
+coverage, source benchmark counts, case-origin counts, and privacy flags. It is
+deliberately extractive: it does not call a model, does not read benchmark
+reference answers as inputs, and does not prove live generated-answer quality
+by itself.
 
 Search without invoking an agent:
 

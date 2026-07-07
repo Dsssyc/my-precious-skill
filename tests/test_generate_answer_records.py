@@ -94,9 +94,37 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertEqual(report["answers_written"], 2)
             self.assertEqual(report["memory_answer_count"], 1)
             self.assertEqual(report["abstention_answer_count"], 1)
+            self.assertEqual(report["answer_handoff_supported_case_count"], 1)
+            self.assertEqual(report["answer_handoff_abstain_case_count"], 1)
+            self.assertEqual(report["answer_handoff_support_coverage_rate"], 1.0)
+            self.assertEqual(report["unsupported_claim_count"], 0)
+            self.assertEqual(report["inactive_memory_answer_count"], 0)
+            self.assertEqual(report["privacy_leak_count"], 0)
             self.assertTrue(report["privacy"]["aggregate_only"])
             self.assertFalse(report["privacy"]["queries_rendered"])
             self.assertFalse(report["privacy"]["generated_answers_rendered"])
+
+            answer_rows = [json.loads(line) for line in answers.read_text(encoding="utf-8").splitlines()]
+            supported_handoff = answer_rows[0]["answer_handoff"]
+            self.assertFalse(supported_handoff["abstained"])
+            self.assertTrue(supported_handoff["active_memory_only"])
+            self.assertEqual(supported_handoff["unsupported_claim_count"], 0)
+            self.assertEqual(supported_handoff["inactive_memory_answer_count"], 0)
+            self.assertEqual(supported_handoff["privacy_leak_count"], 0)
+            self.assertEqual(supported_handoff["support_refs"][0]["memory_id"], "answer_adapter_source_depth")
+            self.assertEqual(
+                supported_handoff["support_refs"][0]["summary_paths"],
+                ["sessions/synthetic/answer-adapter/source-depth/summary.md"],
+            )
+            self.assertEqual(
+                supported_handoff["support_refs"][0]["evidence_refs"],
+                ["sessions/synthetic/answer-adapter/source-depth/evidence.md#syn_ev_001"],
+            )
+
+            abstain_handoff = answer_rows[1]["answer_handoff"]
+            self.assertTrue(abstain_handoff["abstained"])
+            self.assertEqual(abstain_handoff["abstain_reason"], "no_supported_memory_hit")
+            self.assertEqual(abstain_handoff["support_refs"], [])
 
             rendered = adapter.stdout + adapter.stderr
             self.assertNotIn(rows[0]["query"], rendered)
@@ -137,8 +165,109 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             )
             payload = json.loads(benchmark.stdout)
             self.assertEqual(payload["case_pass_rate"], 1.0)
+            self.assertEqual(payload["answer_handoff_present_rate"], 1.0)
+            self.assertEqual(payload["answer_handoff_support_coverage_rate"], 1.0)
+            self.assertEqual(payload["answer_handoff_supported_case_count"], 1)
+            self.assertEqual(payload["answer_handoff_abstain_case_count"], 1)
+            self.assertEqual(payload["unsupported_claim_count"], 0)
+            self.assertEqual(payload["inactive_memory_answer_count"], 0)
             self.assertEqual(payload["source_benchmarks"], {"MyPreciousAnswerAdapterSynthetic": 2})
             self.assertEqual(payload["case_origins"], {"extractive_answer_adapter_fixture": 2})
+
+    def test_abstains_when_only_inactive_lifecycle_memory_matches(self):
+        rows = [
+            {
+                "case_id": "answer-adapter:inactive-only",
+                "query": "What is the inactive-only handoff answer?",
+                "category": "generated_answer_abstain",
+                "source_benchmark": "MyPreciousAnswerAdapterSynthetic",
+                "case_origin": "extractive_answer_adapter_fixture",
+                "reference_answer": "not enough information",
+                "expected_abstain": True,
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            (repo / "index").mkdir(parents=True)
+            (repo / "sessions").mkdir(parents=True)
+            cases = root / "answer_cases.jsonl"
+            answers = root / "answers.jsonl"
+            self.write_jsonl(cases, rows)
+            self.write_jsonl(
+                repo / "index" / "memories.jsonl",
+                [
+                    {
+                        "memory_id": "inactive_only_old",
+                        "layer": "project",
+                        "scope": "synthetic",
+                        "topic": "answer-handoff",
+                        "text": (
+                            "Reference answer: SHOULD NOT USE. What is the inactive-only "
+                            "handoff answer? What is the inactive-only handoff answer?"
+                        ),
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "first_seen": "2026-06-01",
+                        "last_seen": "2026-06-01",
+                        "derived_from": ["sessions/synthetic/inactive-only/summary.md"],
+                        "evidence_refs": [
+                            {
+                                "path": "sessions/synthetic/inactive-only/evidence.md",
+                                "quote_id": "syn_ev_001",
+                            }
+                        ],
+                        "superseded_by": "inactive_only_current",
+                    },
+                    {
+                        "memory_id": "inactive_only_current",
+                        "layer": "project",
+                        "scope": "synthetic",
+                        "topic": "answer-handoff",
+                        "text": "Current replacement deliberately lacks the queried inactive answer.",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "first_seen": "2026-06-02",
+                        "last_seen": "2026-06-02",
+                        "derived_from": [],
+                        "evidence_refs": [],
+                        "supersedes": ["inactive_only_old"],
+                    },
+                ],
+            )
+
+            adapter = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--output",
+                    str(answers),
+                    "--limit",
+                    "3",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(adapter.returncode, 0, adapter.stderr)
+            report = json.loads(adapter.stdout)
+            self.assertEqual(report["memory_answer_count"], 0)
+            self.assertEqual(report["abstention_answer_count"], 1)
+            self.assertEqual(report["inactive_memory_answer_count"], 0)
+            answer_row = json.loads(answers.read_text(encoding="utf-8"))
+            self.assertEqual(answer_row["generated_answer"], "There is not enough information in memory to answer.")
+            self.assertTrue(answer_row["answer_handoff"]["abstained"])
+            self.assertEqual(answer_row["answer_handoff"]["abstain_reason"], "no_supported_memory_hit")
+            self.assertEqual(answer_row["answer_handoff"]["support_refs"], [])
 
     def test_abstains_when_top_hit_lacks_query_support(self):
         answer_text = "Use source anchors for provenance without printing raw transcript content"

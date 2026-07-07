@@ -13,7 +13,32 @@ ANSWER_BENCHMARK = Path("benchmarks/generated_answer_benchmark.py").resolve()
 
 
 class AuthorGeneratedAnswerCasesTests(unittest.TestCase):
+    def support_paths(self, memory_id: str) -> tuple[str, str]:
+        safe_id = "".join(char if char.isalnum() or char in "._-" else "_" for char in memory_id).strip("._")
+        safe_id = safe_id or "memory"
+        base = f"sessions/synthetic/author-generated-answer/{safe_id}"
+        return f"{base}/summary.md", f"{base}/evidence.md"
+
     def write_memory_index(self, repo: Path, rows: list[dict]) -> None:
+        for row in rows:
+            memory_id = row.get("memory_id")
+            if not isinstance(memory_id, str) or not memory_id.strip():
+                continue
+            summary_path, evidence_path = self.support_paths(memory_id)
+            row.setdefault("derived_from", [summary_path])
+            row.setdefault("evidence_refs", [{"path": evidence_path, "quote_id": "ev_001"}])
+            (repo / summary_path).parent.mkdir(parents=True, exist_ok=True)
+            (repo / summary_path).write_text(
+                "# Synthetic Author Case Summary\n\n"
+                f"Support memory: {memory_id}\n",
+                encoding="utf-8",
+            )
+            (repo / evidence_path).parent.mkdir(parents=True, exist_ok=True)
+            (repo / evidence_path).write_text(
+                "# Synthetic Author Case Evidence\n\n"
+                f"ev_001: Evidence supporting {memory_id}.\n",
+                encoding="utf-8",
+            )
         path = repo / "index" / "memories.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -164,6 +189,50 @@ class AuthorGeneratedAnswerCasesTests(unittest.TestCase):
             self.assertNotIn(private_answer, rendered)
             self.assertNotIn("mem_private_answer", rendered)
             self.assertNotIn(str(repo), rendered)
+
+    def test_authoring_skips_memories_without_answer_handoff_support_refs(self):
+        supported_answer = "Use source anchors for provenance without printing raw transcript content."
+        unsupported_answer = "Unsupported memories should not become answer cases."
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            output = repo / "eval" / "private_cases.jsonl"
+            self.write_memory_index(
+                repo,
+                [
+                    self.memory_row("mem_supported_answer", supported_answer),
+                    self.memory_row(
+                        "mem_unsupported_answer",
+                        unsupported_answer,
+                        derived_from=[],
+                        evidence_refs=[],
+                    ),
+                ],
+            )
+
+            author = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--output",
+                    str(output),
+                    "--dry-run",
+                    "--limit",
+                    "3",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            report = json.loads(author.stdout)
+            self.assertEqual(report["selected_case_count"], 1)
+            self.assertEqual(report["skip_counts"], {"missing_answer_support_refs": 1})
+            rendered = author.stdout + author.stderr
+            self.assertNotIn(supported_answer, rendered)
+            self.assertNotIn(unsupported_answer, rendered)
 
     def test_authored_cases_feed_extractive_answer_benchmark(self):
         private_answer = "Use source anchors for provenance without printing raw transcript content."

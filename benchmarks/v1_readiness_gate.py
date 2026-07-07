@@ -107,6 +107,12 @@ GENERATED_ANSWER_GATES = (
     MetricGate("case_pass_rate", "min", 1.0),
     MetricGate("answer_normalized_match_rate", "min", 1.0),
     MetricGate("abstention_accuracy", "min", 1.0),
+    MetricGate("answer_handoff_present_rate", "min", 1.0),
+    MetricGate("answer_handoff_support_coverage_rate", "min", 1.0),
+    MetricGate("answer_handoff_supported_case_count", "min", 1.0),
+    MetricGate("answer_handoff_abstain_case_count", "min", 1.0),
+    MetricGate("unsupported_claim_count", "max", 0.0),
+    MetricGate("inactive_memory_answer_count", "max", 0.0),
     MetricGate("privacy_leak_count", "max", 0.0),
     MetricGate("failed_case_count", "max", 0.0),
     MetricGate("missing_answer_count", "max", 0.0),
@@ -481,7 +487,10 @@ def assess_answer_report(
                     }
                 )
                 result["status"] = "failed"
-    result["claim_boundary"] = "offline generated-answer grading only; no model-generation claim"
+    result["claim_boundary"] = (
+        "offline generated-answer grading plus deterministic answer handoff audit; "
+        "no model-generation claim"
+    )
     return result
 
 
@@ -985,6 +994,35 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
     reports = {"layered": layered, "updater": updater, "e2e": e2e, "source_stream": source_stream}
     reports["lifecycle"] = run_packaged_lifecycle_report(work_dir)
     if include_answer:
+        answer_archive = work_dir / "generated-answer-archive"
+        answer_records = work_dir / "generated-answer-records.jsonl"
+        run_command(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "build_synthetic_recall_archive.py"),
+                "--repo",
+                str(answer_archive),
+                "--cases",
+                str(SCRIPT_DIR / "cases/generated_answer_synthetic.jsonl"),
+                "--include-superseded-distractors",
+            ],
+            cwd=REPO_ROOT,
+        )
+        run_command(
+            [
+                sys.executable,
+                str(REPO_ROOT / "templates/agent-memory-repo/tools/generate_answer_records.py"),
+                "--repo",
+                str(answer_archive),
+                "--cases",
+                str(SCRIPT_DIR / "cases/generated_answer_synthetic.jsonl"),
+                "--output",
+                str(answer_records),
+                "--limit",
+                "5",
+            ],
+            cwd=REPO_ROOT,
+        )
         reports["answer"] = run_command(
             [
                 sys.executable,
@@ -992,7 +1030,7 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
                 "--cases",
                 str(SCRIPT_DIR / "cases/generated_answer_synthetic.jsonl"),
                 "--answers",
-                str(SCRIPT_DIR / "cases/generated_answer_synthetic_answers.jsonl"),
+                str(answer_records),
                 "--details-jsonl",
                 str(work_dir / "generated-answer-details.jsonl"),
                 "--fail-under",
@@ -1003,6 +1041,14 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
                 "abstention_accuracy=1.0",
                 "--fail-under",
                 "answer_scorable_case_rate=1.0",
+                "--fail-under",
+                "answer_handoff_present_rate=1.0",
+                "--fail-under",
+                "answer_handoff_support_coverage_rate=1.0",
+                "--fail-under",
+                "answer_handoff_supported_case_count=1",
+                "--fail-under",
+                "answer_handoff_abstain_case_count=1",
                 "--fail-over",
                 "privacy_leak_count=0",
                 "--fail-over",
@@ -1015,6 +1061,10 @@ def run_packaged_reports(work_dir: Path, *, include_answer: bool = False) -> dic
                 "unknown_answer_count=0",
                 "--fail-over",
                 "positive_without_reference_answer=0",
+                "--fail-over",
+                "unsupported_claim_count=0",
+                "--fail-over",
+                "inactive_memory_answer_count=0",
             ],
             cwd=REPO_ROOT,
         )
