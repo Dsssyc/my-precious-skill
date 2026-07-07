@@ -14,7 +14,8 @@ suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
 updater-driven automatic induction on synthetic archives, end-to-end
 induction-to-recall behavior on synthetic source records, explicit non-project
 source stream registry updates on synthetic archives, and clean-room packaged
-lifecycle setup/update/search/audit. It is not a direct leaderboard score
+lifecycle setup/update/search/audit with self-maintenance safeguards. It is
+not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
 
@@ -124,6 +125,45 @@ The readiness gate also requires the source-stream report's privacy block to
 declare `aggregate_only: true` and no rendered case details, memory text,
 source content, source paths, or raw refs. A report with green source-stream
 metrics but missing or unsafe privacy flags is rejected.
+
+## V1.3 Self-Maintenance Lifecycle Gate
+
+V1.3 is not a new retrieval capability. It is a self-maintenance lifecycle
+contract added after an automation review showed that scheduled archive updates
+can fail for operational reasons even when recall benchmarks remain green.
+
+The public synthetic self-maintenance fixture now runs inside
+`benchmarks/packaged_lifecycle_gate.py`. It creates one ordinary local source
+record and two scheduled automation source records marked with
+`thread_source=automation`. The update path must archive only the ordinary
+durable source record. The automation records are present in the source
+fixture, but they must not produce archive session entries, memory nodes, daily
+durable entries, or search indexes.
+
+The packaged lifecycle report exposes only aggregate contract metrics:
+
+| metric | expected value |
+| --- | ---: |
+| automation_source_records=2 | true |
+| automation_session_entries=0 | true |
+| automation_memory_nodes=0 | true |
+| automation_daily_noise_hits=0 | true |
+| automation_index_noise_hits=0 | true |
+| search_health_check | passed |
+| sync_dry_run | passed |
+
+The automation gate contract is explicit: `search_memory.py --health-check` is
+the readiness check for archive searchability. A generic `search_memory.py memory`
+content query is not a readiness check and must not block or permit publication.
+The scheduled prompt rendered by `render_scheduler.py` also keeps automation run
+notes separate from generated daily archive files and routes any publish step
+through `sync_memory_archive.py` rather than hand-staging files.
+
+Private dogfood for this contract must stay aggregate-only private dogfood:
+audit status, search health status, clean/dirty status, and counts of archived
+automation-thread entries or automation-run noise are allowed. Private source
+text, source paths, queries, memory IDs, raw refs, and automation transcript
+content are not part of this public readiness record.
 
 Run the packaged convergence gate locally with:
 

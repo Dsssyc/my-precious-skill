@@ -141,6 +141,16 @@ class V1ReadinessGateTests(unittest.TestCase):
             "memory_file_count": 4,
             "search_depths": ["memory", "session", "evidence", "source"],
             "audit": "passed",
+            "search_health_check": "passed",
+            "sync_dry_run": "passed",
+            "self_maintenance": {
+                "status": "passed",
+                "automation_source_records": 2,
+                "automation_session_entries": 0,
+                "automation_memory_nodes": 0,
+                "automation_daily_noise_hits": 0,
+                "automation_index_noise_hits": 0,
+            },
             "output_contract": "aggregate_only",
         }
 
@@ -1147,6 +1157,18 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(lifecycle["metrics"]["memory_file_count"], 4)
             self.assertEqual(lifecycle["metrics"]["search_depth_count"], 4)
             self.assertTrue(lifecycle["metrics"]["audit_passed"])
+            self.assertTrue(lifecycle["metrics"]["search_health_check_passed"])
+            self.assertTrue(lifecycle["metrics"]["sync_dry_run_passed"])
+            self.assertEqual(
+                lifecycle["metrics"]["self_maintenance"],
+                {
+                    "automation_source_records": 2,
+                    "automation_session_entries": 0,
+                    "automation_memory_nodes": 0,
+                    "automation_daily_noise_hits": 0,
+                    "automation_index_noise_hits": 0,
+                },
+            )
             self.assertEqual(lifecycle["output_contract"], "aggregate_only")
             self.assertNotIn("search_depths", lifecycle)
 

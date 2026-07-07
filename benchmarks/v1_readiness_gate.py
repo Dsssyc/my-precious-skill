@@ -552,6 +552,63 @@ def nonnegative_int_metric(payload: dict[str, Any], key: str) -> int | None:
     return value
 
 
+def nonnegative_int_from_mapping(payload: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def assess_lifecycle_self_maintenance(payload: dict[str, Any], failures: list[dict[str, Any]]) -> dict[str, int]:
+    raw = payload.get("self_maintenance")
+    metrics: dict[str, int] = {}
+    expected_zero_metrics = (
+        "automation_session_entries",
+        "automation_memory_nodes",
+        "automation_daily_noise_hits",
+        "automation_index_noise_hits",
+    )
+    if not isinstance(raw, dict):
+        failures.append({"metric": "self_maintenance", "reason": "missing_or_non_object"})
+        return metrics
+    if raw.get("status") != "passed":
+        failures.append(
+            {
+                "metric": "self_maintenance.status",
+                "expected": "passed",
+                "actual": raw.get("status") if isinstance(raw.get("status"), str) else None,
+            }
+        )
+    source_records = nonnegative_int_from_mapping(raw, "automation_source_records")
+    if source_records is None or source_records < 2:
+        failures.append(
+            {
+                "metric": "self_maintenance.automation_source_records",
+                "comparison": "min",
+                "threshold": 2.0,
+                "value": source_records,
+            }
+        )
+    elif source_records is not None:
+        metrics["automation_source_records"] = source_records
+    for key in expected_zero_metrics:
+        value = nonnegative_int_from_mapping(raw, key)
+        if value is None:
+            failures.append({"metric": f"self_maintenance.{key}", "reason": "missing_or_non_numeric"})
+        elif value != 0:
+            failures.append(
+                {
+                    "metric": f"self_maintenance.{key}",
+                    "expected": 0,
+                    "actual": value,
+                }
+            )
+            metrics[key] = value
+        else:
+            metrics[key] = value
+    return metrics
+
+
 def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
     if payload is None:
         return {
@@ -612,6 +669,32 @@ def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -
                 "reason": "audit_not_passed",
             }
         )
+
+    search_health_check_passed = payload.get("search_health_check") == "passed"
+    metrics["search_health_check_passed"] = search_health_check_passed
+    if not search_health_check_passed:
+        failures.append(
+            {
+                "metric": "search_health_check",
+                "expected": "passed",
+                "actual": payload.get("search_health_check") if isinstance(payload.get("search_health_check"), str) else None,
+                "reason": "search_health_check_not_passed",
+            }
+        )
+
+    sync_dry_run_passed = payload.get("sync_dry_run") == "passed"
+    metrics["sync_dry_run_passed"] = sync_dry_run_passed
+    if not sync_dry_run_passed:
+        failures.append(
+            {
+                "metric": "sync_dry_run",
+                "expected": "passed",
+                "actual": payload.get("sync_dry_run") if isinstance(payload.get("sync_dry_run"), str) else None,
+                "reason": "sync_dry_run_not_passed",
+            }
+        )
+
+    metrics["self_maintenance"] = assess_lifecycle_self_maintenance(payload, failures)
 
     output_contract = payload.get("output_contract")
     if output_contract != "aggregate_only":

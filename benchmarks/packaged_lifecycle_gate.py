@@ -20,6 +20,12 @@ SOURCE_TEXT = (
     "Remember this: clean-room lifecycle fact validates packaged setup, update, "
     "search, and audit using public synthetic records."
 )
+AUTOMATION_NOISE_MARKERS = (
+    "Automation run status",
+    "No memory hits for: memory",
+    "AGENTS/environment/policy blocks",
+)
+AUTOMATION_SOURCE_RECORDS = ("automation-thread.jsonl", "automation-noise.jsonl")
 
 
 class GateFailure(Exception):
@@ -57,10 +63,14 @@ def run_command(command: list[str], stage: str, cwd: Path | None = None) -> subp
     return result
 
 
-def write_synthetic_source_record(source_dir: Path, project_path: Path) -> None:
+def write_jsonl(path: Path, events: list[dict[str, object]]) -> None:
+    path.write_text("\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n", encoding="utf-8")
+
+
+def write_synthetic_source_records(source_dir: Path, project_path: Path) -> None:
     source_dir.mkdir(parents=True, exist_ok=True)
     project_path.mkdir(parents=True, exist_ok=True)
-    events = [
+    human_events: list[dict[str, object]] = [
         {
             "type": "session_meta",
             "timestamp": "2026-07-06T12:00:00Z",
@@ -68,6 +78,7 @@ def write_synthetic_source_record(source_dir: Path, project_path: Path) -> None:
                 "id": "packaged-lifecycle-clean-room",
                 "cwd": str(project_path),
                 "project_path": str(project_path),
+                "thread_source": "local",
             },
         },
         {
@@ -95,8 +106,67 @@ def write_synthetic_source_record(source_dir: Path, project_path: Path) -> None:
             },
         },
     ]
-    record = source_dir / "packaged-lifecycle.jsonl"
-    record.write_text("\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n", encoding="utf-8")
+    write_jsonl(source_dir / "packaged-lifecycle.jsonl", human_events)
+
+    automation_events: list[dict[str, object]] = [
+        {
+            "type": "session_meta",
+            "timestamp": "2026-07-06T13:00:00Z",
+            "payload": {
+                "id": "packaged-lifecycle-automation-thread",
+                "cwd": str(project_path),
+                "project_path": str(project_path),
+                "thread_source": "automation",
+            },
+        },
+        {
+            "type": "response_item",
+            "timestamp": "2026-07-06T13:00:01Z",
+            "payload": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": (
+                            "Automation run status: updater completed. "
+                            "AGENTS/environment/policy blocks were checked."
+                        ),
+                    }
+                ],
+            },
+        },
+    ]
+    write_jsonl(source_dir / AUTOMATION_SOURCE_RECORDS[0], automation_events)
+
+    automation_noise_events: list[dict[str, object]] = [
+        {
+            "type": "session_meta",
+            "timestamp": "2026-07-06T14:00:00Z",
+            "payload": {
+                "id": "packaged-lifecycle-automation-noise",
+                "cwd": str(project_path),
+                "project_path": str(project_path),
+                "thread_source": "automation",
+            },
+        },
+        {
+            "type": "response_item",
+            "timestamp": "2026-07-06T14:00:01Z",
+            "payload": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": (
+                            "No memory hits for: memory. "
+                            "This scheduled run note is not durable memory."
+                        ),
+                    }
+                ],
+            },
+        },
+    ]
+    write_jsonl(source_dir / AUTOMATION_SOURCE_RECORDS[1], automation_noise_events)
 
 
 def nonempty_jsonl_count(path: Path) -> int:
@@ -164,6 +234,14 @@ def setup_archive(paths: GatePaths) -> None:
     )
 
 
+def initialize_git_repo(memory_repo: Path, message: str) -> None:
+    run_command(["git", "init", "-q"], "git:init", cwd=memory_repo)
+    run_command(["git", "config", "user.email", "synthetic@example.invalid"], "git:config-email", cwd=memory_repo)
+    run_command(["git", "config", "user.name", "Synthetic Gate"], "git:config-name", cwd=memory_repo)
+    run_command(["git", "add", "."], "git:add", cwd=memory_repo)
+    run_command(["git", "commit", "-m", message], "git:commit", cwd=memory_repo)
+
+
 def update_archive(paths: GatePaths) -> None:
     update_script = paths.memory_repo / "tools/update_memory_archive.py"
     run_command(
@@ -215,6 +293,20 @@ def run_searches(paths: GatePaths) -> list[str]:
     return completed_depths
 
 
+def run_search_health_check(paths: GatePaths) -> None:
+    search_script = paths.memory_repo / "tools/search_memory.py"
+    run_command(
+        [
+            sys.executable,
+            str(search_script),
+            "--repo",
+            str(paths.memory_repo),
+            "--health-check",
+        ],
+        "search:health-check",
+    )
+
+
 def audit_archive(paths: GatePaths) -> None:
     audit_script = paths.memory_repo / "tools/audit_memory_archive.py"
     run_command(
@@ -228,7 +320,100 @@ def audit_archive(paths: GatePaths) -> None:
     )
 
 
-def build_report(paths: GatePaths, search_depths: list[str]) -> dict[str, object]:
+def run_sync_dry_run(paths: GatePaths) -> None:
+    sync_script = paths.memory_repo / "tools/sync_memory_archive.py"
+    run_command(
+        [
+            sys.executable,
+            str(sync_script),
+            "--memory-repo",
+            str(paths.memory_repo),
+            "--dry-run",
+        ],
+        "sync:dry-run",
+        cwd=paths.memory_repo,
+    )
+
+
+def file_contains_any(path: Path, markers: tuple[str, ...]) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(marker in text for marker in markers)
+
+
+def count_files_with_markers(paths: list[Path], markers: tuple[str, ...]) -> int:
+    return sum(1 for path in paths if path.is_file() and file_contains_any(path, markers))
+
+
+def count_automation_source_records(source_dir: Path) -> int:
+    return sum(1 for name in AUTOMATION_SOURCE_RECORDS if (source_dir / name).exists())
+
+
+def count_archived_automation_sessions(memory_repo: Path) -> int:
+    automation_names = set(AUTOMATION_SOURCE_RECORDS)
+    count = 0
+    for meta_path in (memory_repo / "sessions").glob("**/meta.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        source_record = meta.get("source_record")
+        if isinstance(source_record, str) and Path(source_record).name in automation_names:
+            count += 1
+    for row in iter_jsonl(memory_repo / "index/sessions.jsonl"):
+        source_record = row.get("source_record")
+        if isinstance(source_record, str) and Path(source_record).name in automation_names:
+            count += 1
+    return count
+
+
+def iter_jsonl(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
+
+
+def build_self_maintenance_report(paths: GatePaths) -> dict[str, object]:
+    memory_files = sorted((paths.memory_repo / "memories").glob("*.jsonl"))
+    daily_files = sorted((paths.memory_repo / "daily").glob("*/*.md"))
+    index_files = [paths.memory_repo / "INDEX.md"]
+    index_files.extend(sorted((paths.memory_repo / "index").glob("*.jsonl")))
+    return {
+        "status": "passed",
+        "automation_source_records": count_automation_source_records(paths.source_dir),
+        "automation_session_entries": count_archived_automation_sessions(paths.memory_repo),
+        "automation_memory_nodes": count_files_with_markers(memory_files, AUTOMATION_NOISE_MARKERS),
+        "automation_daily_noise_hits": count_files_with_markers(daily_files, AUTOMATION_NOISE_MARKERS),
+        "automation_index_noise_hits": count_files_with_markers(index_files, AUTOMATION_NOISE_MARKERS),
+    }
+
+
+def validate_self_maintenance(report: dict[str, object]) -> None:
+    expected = {
+        "automation_source_records": 2,
+        "automation_session_entries": 0,
+        "automation_memory_nodes": 0,
+        "automation_daily_noise_hits": 0,
+        "automation_index_noise_hits": 0,
+    }
+    for key, expected_value in expected.items():
+        if report.get(key) != expected_value:
+            raise GateFailure("self_maintenance", f"{key}_unexpected")
+
+
+def build_report(paths: GatePaths, search_depths: list[str], self_maintenance: dict[str, object]) -> dict[str, object]:
     sessions = session_dirs(paths.memory_repo)
     daily_files = sorted((paths.memory_repo / "daily").glob("*/*.md"))
     memory_files = sorted((paths.memory_repo / "memories").glob("*.jsonl"))
@@ -241,6 +426,9 @@ def build_report(paths: GatePaths, search_depths: list[str]) -> dict[str, object
         "memory_file_count": len(memory_files),
         "search_depths": search_depths,
         "audit": "passed",
+        "search_health_check": "passed",
+        "sync_dry_run": "passed",
+        "self_maintenance": self_maintenance,
         "output_contract": "aggregate_only",
     }
 
@@ -253,14 +441,20 @@ def run_gate(root: Path) -> dict[str, object]:
         project_path=root / "synthetic-project",
     )
     setup_archive(paths)
-    write_synthetic_source_record(paths.source_dir, paths.project_path)
+    initialize_git_repo(paths.memory_repo, "Initial synthetic archive")
+    write_synthetic_source_records(paths.source_dir, paths.project_path)
     update_archive(paths)
     artifact_errors = validate_archive_artifacts(paths.memory_repo)
     if artifact_errors:
         raise GateFailure("artifacts", artifact_errors[0])
     search_depths = run_searches(paths)
+    run_search_health_check(paths)
     audit_archive(paths)
-    return build_report(paths, search_depths)
+    self_maintenance = build_self_maintenance_report(paths)
+    validate_self_maintenance(self_maintenance)
+    initialize_git_repo(paths.memory_repo, "Synthetic archive after update")
+    run_sync_dry_run(paths)
+    return build_report(paths, search_depths, self_maintenance)
 
 
 def make_work_root(work_dir: str | None) -> tuple[Path, tempfile.TemporaryDirectory[str] | None, Path | None]:

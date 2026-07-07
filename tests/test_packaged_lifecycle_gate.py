@@ -41,9 +41,26 @@ class PackagedLifecycleGateTests(unittest.TestCase):
             self.assertGreaterEqual(report["session_count"], 1)
             self.assertGreaterEqual(report["memory_count"], 1)
             self.assertEqual(report["audit"], "passed")
+            self.assertEqual(report["search_health_check"], "passed")
+            self.assertEqual(report["sync_dry_run"], "passed")
+            self.assertEqual(
+                report["self_maintenance"],
+                {
+                    "status": "passed",
+                    "automation_source_records": 2,
+                    "automation_session_entries": 0,
+                    "automation_memory_nodes": 0,
+                    "automation_daily_noise_hits": 0,
+                    "automation_index_noise_hits": 0,
+                },
+            )
             self.assertEqual(set(report["search_depths"]), {"memory", "session", "evidence", "source"})
             self.assertNotIn("clean-room lifecycle fact", result.stdout)
             self.assertNotIn("clean-room lifecycle fact", result.stderr)
+            self.assertNotIn("Automation run status", result.stdout)
+            self.assertNotIn("Automation run status", result.stderr)
+            self.assertNotIn("No memory hits", result.stdout)
+            self.assertNotIn("No memory hits", result.stderr)
             self.assertTrue(Path(tmpdir).exists())
             self.assertEqual(list(Path(tmpdir).iterdir()), [])
 

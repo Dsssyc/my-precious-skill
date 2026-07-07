@@ -110,6 +110,25 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v13_self_maintenance_lifecycle_gate(self):
+        section = self.evaluation_section("## V1.3 Self-Maintenance Lifecycle Gate")
+        for phrase in (
+            "not a new retrieval capability",
+            "public synthetic self-maintenance fixture",
+            "`thread_source=automation`",
+            "`search_memory.py --health-check`",
+            "generic `search_memory.py memory`",
+            "`sync_memory_archive.py`",
+            "aggregate-only private dogfood",
+            "automation_source_records=2",
+            "automation_session_entries=0",
+            "automation_memory_nodes=0",
+            "automation_daily_noise_hits=0",
+            "automation_index_noise_hits=0",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
 
 if __name__ == "__main__":
     unittest.main()
