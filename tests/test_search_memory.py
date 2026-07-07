@@ -1316,6 +1316,125 @@ class SearchMemoryTests(unittest.TestCase):
             ["mem_source_depth_anchor", "mem_same_topic_related"],
         )
 
+    def test_search_memory_prunes_weak_same_topic_cross_scope_tail_but_keeps_support(self):
+        search_memory = load_search_memory_module()
+        hits = [
+            search_memory.Hit(
+                path=Path("anchor"),
+                score=1000,
+                source="memory",
+                why=[
+                    "source:automatic",
+                    "confidence:high",
+                    "support_count:3",
+                    "strict-token-coverage",
+                ],
+                memory_id="mem_source_depth_anchor",
+                layer="domain",
+                scope="domain:memory-retrieval",
+                topic="source-depth",
+            ),
+            search_memory.Hit(
+                path=Path("weak-tail"),
+                score=998,
+                source="memory",
+                why=[
+                    "source:automatic",
+                    "confidence:medium",
+                    "support_count:1",
+                    "field:text",
+                    "field:topic",
+                    "important-token-coverage",
+                ],
+                memory_id="mem_same_topic_cross_scope_weak_tail",
+                layer="domain",
+                scope="domain:automation-process",
+                topic="source-depth",
+            ),
+            search_memory.Hit(
+                path=Path("cross-scope-support"),
+                score=996,
+                source="memory",
+                why=[
+                    "source:automatic",
+                    "confidence:high",
+                    "support_count:2",
+                    "strict-token-coverage",
+                ],
+                memory_id="mem_same_topic_cross_scope_support",
+                layer="domain",
+                scope="domain:archive-audit",
+                topic="source-depth",
+            ),
+        ]
+
+        kept = search_memory.prune_cross_scope_topic_tail_memory_hits(hits)
+
+        self.assertEqual(
+            [hit.memory_id for hit in kept],
+            ["mem_source_depth_anchor", "mem_same_topic_cross_scope_support"],
+        )
+
+    def test_search_memory_prunes_second_weak_same_topic_cross_scope_tail_when_anchor_is_weak(self):
+        search_memory = load_search_memory_module()
+        hits = [
+            search_memory.Hit(
+                path=Path("weak-anchor"),
+                score=1000,
+                source="memory",
+                why=[
+                    "source:automatic",
+                    "confidence:medium",
+                    "support_count:1",
+                    "field:text",
+                    "important-token-coverage",
+                ],
+                memory_id="mem_same_topic_weak_anchor",
+                layer="domain",
+                scope="domain:memory-retrieval",
+                topic="source-depth",
+            ),
+            search_memory.Hit(
+                path=Path("weak-tail"),
+                score=999,
+                source="memory",
+                why=[
+                    "source:automatic",
+                    "confidence:medium",
+                    "support_count:1",
+                    "field:text",
+                    "field:topic",
+                    "important-token-coverage",
+                ],
+                memory_id="mem_same_topic_cross_scope_second_weak_tail",
+                layer="domain",
+                scope="domain:automation-process",
+                topic="source-depth",
+            ),
+            search_memory.Hit(
+                path=Path("cross-scope-support"),
+                score=998,
+                source="memory",
+                why=[
+                    "source:automatic",
+                    "confidence:high",
+                    "support_count:2",
+                    "strict-token-coverage",
+                ],
+                memory_id="mem_same_topic_cross_scope_support",
+                layer="domain",
+                scope="domain:archive-audit",
+                topic="source-depth",
+            ),
+        ]
+
+        kept = search_memory.prune_cross_scope_topic_tail_memory_hits(hits)
+
+        self.assertEqual(
+            [hit.memory_id for hit in kept],
+            ["mem_same_topic_weak_anchor", "mem_same_topic_cross_scope_support"],
+        )
+
     def test_search_memory_skips_superseded_memory_nodes(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
 

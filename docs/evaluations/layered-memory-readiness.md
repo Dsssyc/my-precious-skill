@@ -2680,6 +2680,46 @@ support can be high-signal and must not be globally pruned. A future ranking
 goal would need a public RED/GREEN regression for the stricter candidate
 pattern before changing production ranking.
 
+### V1.2 Conservative Same-Topic Cross-Scope Ranking Gate
+
+Date: 2026-07-07
+
+Code points for the ranking patch:
+`templates/agent-memory-repo/tools/search_memory.py`,
+`skills/using-my-precious/scripts/search_memory.py`, and the synchronized
+setup template copy.
+
+Decision: the V1.2 change is accepted as a narrow ranking/noise reduction patch.
+The search path now prunes a weak same-topic/cross-scope tail only after the
+existing 99% relative-score floor and only when the later tail hit is a memory
+hit with the same layer and topic as the top memory anchor, a different scope,
+`source:automatic`, `confidence:medium`, `support_count:1`, and no
+`strict-token-coverage` reason. It does not globally prune same-topic
+cross-scope results: public fixtures keep high-confidence or strict-token
+cross-scope support.
+
+Public fail-first fixtures:
+
+| fixture | RED behavior | GREEN behavior |
+| --- | --- | --- |
+| strong anchor plus weak cross-scope tail | weak tail remained in top-k | weak tail pruned; high/strict support kept |
+| weak anchor plus second weak cross-scope tail | second weak tail remained in top-k | second weak tail pruned; high/strict support kept |
+
+Private real-archive aggregate-only rerun after the patch:
+
+| metric | strict v2 before | strict v2 after | expanded v3 before | expanded v3 after |
+| --- | ---: | ---: | ---: | ---: |
+| `memory_recall_at_5` | 1.0 | 1.0 | 1.0 | 1.0 |
+| `memory_precision_at_5` | 0.9230769230769231 | 1.0 | 0.9117647058823529 | 1.0 |
+| `top_k_noise_at_5` | 0.07692307692307687 | 0.0 | 0.08823529411764708 | 0.0 |
+| same-topic/cross-scope support count | 0 | 0 | 0 | 0 |
+| same-topic/cross-scope noise count | 1 | 0 | 2 | 0 |
+
+`memory_recall_at_5` stayed 1.0 in both private shadow suites, while
+`top_k_noise_at_5` dropped to 0.0. The private evidence remains aggregate-only:
+the report does not render queries, case text, memory IDs, memory text, source
+refs, source paths, raw refs, full `why` strings, scopes, or topics.
+
 ## V1 Evidence Convergence Snapshot
 
 Date: 2026-07-01

@@ -638,6 +638,29 @@ def prune_low_relative_memory_hits(hits: list[Hit]) -> list[Hit]:
     return [hit for hit in hits if hit.score >= threshold]
 
 
+def hit_reason_value(hit: Hit, prefix: str) -> str:
+    for reason in hit.why:
+        if reason.startswith(prefix):
+            return reason[len(prefix) :].strip().lower()
+    return ""
+
+
+def hit_support_count_value(hit: Hit) -> int:
+    return support_count_value(hit_reason_value(hit, "support_count:"))
+
+
+def weak_same_topic_cross_scope_tail_candidate(hit: Hit) -> bool:
+    source = hit_reason_value(hit, "source:")
+    confidence = hit_reason_value(hit, "confidence:")
+    return (
+        hit.source == "memory"
+        and source == "automatic"
+        and confidence == "medium"
+        and hit_support_count_value(hit) == 1
+        and "strict-token-coverage" not in hit.why
+    )
+
+
 def prune_cross_scope_topic_tail_memory_hits(hits: list[Hit]) -> list[Hit]:
     if len(hits) <= 1:
         return hits
@@ -648,6 +671,17 @@ def prune_cross_scope_topic_tail_memory_hits(hits: list[Hit]) -> list[Hit]:
     for hit in hits[1:]:
         if not (hit.layer and hit.scope and hit.topic):
             kept.append(hit)
+            continue
+        same_topic_cross_scope = (
+            hit.layer == anchor.layer
+            and hit.topic == anchor.topic
+            and hit.scope != anchor.scope
+        )
+        if (
+            same_topic_cross_scope
+            and anchor.source == "memory"
+            and weak_same_topic_cross_scope_tail_candidate(hit)
+        ):
             continue
         if hit.layer != anchor.layer or hit.topic == anchor.topic:
             kept.append(hit)
