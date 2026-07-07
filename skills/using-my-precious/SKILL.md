@@ -70,7 +70,12 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    | malformed or missing package -> abstain | The agent must fail closed to abstain rather than falling back to free-form output for answerability. |
 
    Treat active/current hits with weak or missing `query_support` as unsupported
-   near-misses even when they have drill paths. A supported package is not
+   near-misses even when they have drill paths. For project-tied questions,
+   treat `--project-path` as context, not a filter: answer only from supported
+   active/current hits whose `layer` and `scope` match the requested
+   global/domain/project context. Same-topic project hits from another project
+   scope, and project-only support when no project context was provided, are
+   unsupported near-misses. A supported package is not
    permission to expose private query text, memory text,
    raw refs, source paths, raw source content, credentials, scheduler state, or
    local private paths. Keep answers bounded to summarized evidence and

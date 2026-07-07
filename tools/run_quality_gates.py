@@ -23,6 +23,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/using_my_precious_runtime_gate.py",
     "benchmarks/query_support_recall_gate.py",
     "benchmarks/progressive_source_drilldown_gate.py",
+    "benchmarks/scope_arbitration_gate.py",
     "benchmarks/e2e_induction_recall_benchmark.py",
     "benchmarks/updater_induction_benchmark.py",
     "benchmarks/layered_recall_benchmark.py",
@@ -85,6 +86,7 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec("using_my_precious_runtime", ("python3", "benchmarks/using_my_precious_runtime_gate.py")),
         CheckSpec("query_support_recall", ("python3", "benchmarks/query_support_recall_gate.py")),
         CheckSpec("progressive_source_drilldown", ("python3", "benchmarks/progressive_source_drilldown_gate.py")),
+        CheckSpec("scope_arbitration", ("python3", "benchmarks/scope_arbitration_gate.py")),
         CheckSpec(
             "v1_readiness_core",
             ("python3", "benchmarks/v1_readiness_gate.py", "--run-packaged"),

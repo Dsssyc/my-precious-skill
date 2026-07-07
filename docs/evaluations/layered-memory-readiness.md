@@ -18,7 +18,8 @@ lifecycle setup/update/search/audit with self-maintenance safeguards, and
 deterministic source-grounded answer handoff records, plus agent-facing recall
 context packaging and consumption for supported answer versus abstain
 decisions, including packaged explicit-memory capture/revision/withdrawal
-governance checks and packaged progressive source-drilldown consumption. It is
+governance checks, packaged progressive source-drilldown consumption, and
+packaged scope arbitration across global/domain/project memory layers. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -604,6 +605,39 @@ LLM answer quality, vector search, ranking quality, ontology discovery, or a
 source browser UI. Raw source content remains blocked by default; source-depth
 context packages render source-ref status metadata rather than raw source
 content. The command is stable and included in `tools/run_quality_gates.py`.
+
+## V2.7 Packaged Scope Arbitration And Override Gate
+
+V2.7 adds `benchmarks/scope_arbitration_gate.py` to prove that the
+package-first read path can consume context-package layer and scope metadata
+from a clean packaged deployment repo when deciding whether to answer or
+abstain. The gate installs the packaged template, writes synthetic public
+global/domain/project memory rows, then invokes the copied deployment
+`tools/search_memory.py` with `--depth evidence --context-json` plus
+`--project-path` and `--preferred-scope` where applicable. It parses
+`report_kind: memory_recall_context_package` and uses only context package
+fields for answerability and scope arbitration. Free-form search output is not
+used as answerability evidence.
+
+The synthetic cases cover global foundational fallback, domain-preferred
+support across projects, current project support overriding broader memory,
+same-topic wrong-project support that must abstain, stale broad support that
+must abstain after supersession, missing project context for project-only
+support, unsupported no-hit packages, and malformed packages that fail closed.
+The gate reports aggregate metrics:
+`scope_context_package_parse_success_rate`,
+`global_fallback_answerability_rate`, `domain_preference_accuracy`,
+`project_override_accuracy`, `wrong_project_rejection_count`,
+`broad_stale_rejection_count`,
+`missing_project_context_abstention_accuracy`,
+`scope_arbitration_decision_accuracy`,
+`scope_mixed_related_hit_count_at_5`, and `privacy_leak_count`.
+
+This proves packaged scope arbitration and override decision behavior for
+context packages. It does not prove LLM answer quality, vector search,
+embedding-store readiness, ranking overhaul, ontology discovery, private
+archive quality, or public leaderboard parity. The command is stable and
+included in `tools/run_quality_gates.py`.
 
 ## Current Baseline
 
