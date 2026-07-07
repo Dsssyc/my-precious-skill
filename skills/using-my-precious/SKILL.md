@@ -65,7 +65,21 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth evidence
    ```
 
-4. Use source depth only when the user explicitly asks for source reachability:
+4. For source-grounded answer handoff, prefer the machine-readable context
+   package when the deployed search tool supports it:
+
+   ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --context-json
+   ```
+
+   The package has `report_kind: memory_recall_context_package` and an
+   `answerability.status`. If it is `supported`, answer only from
+   active/current memory hits and cite the listed summary or evidence drill
+   paths. If it is `unsupported`, abstain instead of inferring a historical
+   fact. The package is designed to omit memory text, raw refs, raw source
+   content, credentials, scheduler state, and local private paths.
+
+5. Use source depth only when the user explicitly asks for source reachability:
 
    ```bash
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source
@@ -80,13 +94,14 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
    ```
 
-5. If the deployment repo has no search tool, use the bundled script:
+6. If the deployment repo has no search tool, use the bundled script. The
+   bundled script also supports `--context-json`:
 
    ```bash
    python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO"
    ```
 
-6. Read `why:` and `drill:` lines. Prefer high-level memories with strong
+7. Read `why:` and `drill:` lines. Prefer high-level memories with strong
    provenance, such as `confidence:high`, `support_count:<n>`,
    `source:explicit`, high-signal `field:<name>` reasons,
    `important-token-coverage`, or `project-context`.
@@ -94,10 +109,10 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    fact is superseded rather than deleted, and provenance remains traceable
    through drilldown.
 
-7. Open supporting summaries from `drill:` first. Open `evidence.md` only when
+8. Open supporting summaries from `drill:` first. Open `evidence.md` only when
    the summary is insufficient or the user asks for stronger support.
 
-8. Answer from the archive evidence, and mention the archive paths used.
+9. Answer from the archive evidence, and mention the archive paths used.
    For a source-grounded answer handoff, Answer from archive evidence only:
    use active/current memory hits, cite supporting summaries or evidence, and
    abstain when support is missing. A valid handoff carries `support_refs`
@@ -106,7 +121,7 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    credentials, or local private paths.
    The contract phrase is do not expose raw refs.
 
-9. If search returns no relevant result, say that explicitly instead of
+10. If search returns no relevant result, say that explicitly instead of
    inferring historical facts.
 
 ## Privacy Rules

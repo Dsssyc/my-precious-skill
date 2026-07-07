@@ -1623,6 +1623,45 @@ def collect_memory_hits(
     return prune_cross_scope_topic_tail_memory_hits(hits)
 
 
+def inactive_memory_match_count(
+    repo: Path,
+    query_tokens: list[str],
+    context_terms: list[str] | None = None,
+    scope: str = "all",
+) -> int:
+    index_path = repo / "index" / "memories.jsonl"
+    if not is_safe_repo_file(repo, index_path):
+        return 0
+    records = list(iter_jsonl(index_path))
+    supersedes_by_memory_id = collect_supersedes_by_memory_id(records)
+    forward_superseded_ids = collect_forward_superseded_ids(supersedes_by_memory_id)
+    contradicts_by_memory_id = collect_contradicts_by_memory_id(records)
+    forward_contradicted_ids = collect_forward_contradicted_ids(contradicts_by_memory_id)
+    deprecates_by_memory_id = collect_deprecates_by_memory_id(records)
+    forward_deprecated_ids = collect_forward_deprecated_ids(deprecates_by_memory_id)
+    inactive_ids = collect_inactive_memory_ids(
+        records,
+        supersedes_by_memory_id,
+        forward_superseded_ids,
+        contradicts_by_memory_id,
+        forward_contradicted_ids,
+        deprecates_by_memory_id,
+        forward_deprecated_ids,
+    )
+    count = 0
+    for record in records:
+        memory_id = memory_record_id(record)
+        layer = safe_display_scalar(record.get("layer") or "", 60)
+        if scope != "all" and layer != scope:
+            continue
+        if memory_id not in inactive_ids and has_valid_memory_lifecycle(record):
+            continue
+        score, matched, _ = score_index_record(query_tokens, record, context_terms)
+        if score and should_keep_match(query_tokens, matched, context_terms):
+            count += 1
+    return count
+
+
 def run_health_check(repo: Path) -> int:
     index_path = repo / "index" / "memories.jsonl"
     failures: list[str] = []
@@ -1792,6 +1831,10 @@ def is_evidence_drill_path(path: str) -> bool:
     return Path(path).name == "evidence.md"
 
 
+def is_summary_drill_path(path: str) -> bool:
+    return Path(path).name == "summary.md"
+
+
 def memory_drill_paths_for_depth(hit: Hit, depth: str) -> tuple[str, ...]:
     if depth in ("evidence", "source"):
         return hit.drill_paths
@@ -1890,6 +1933,156 @@ def format_hit(
     )
 
 
+def context_privacy_block() -> dict[str, bool]:
+    return {
+        "context_package": True,
+        "query_metadata_rendered": True,
+        "memory_ids_rendered": True,
+        "memory_text_rendered": False,
+        "archive_relative_drill_paths_rendered": True,
+        "raw_refs_rendered": False,
+        "raw_source_content_rendered": False,
+        "local_private_paths_rendered": False,
+        "credentials_rendered": False,
+        "scheduler_state_rendered": False,
+    }
+
+
+def context_source_refs(
+    repo: Path,
+    hit: Hit,
+    depth: str,
+) -> list[dict[str, object]]:
+    if depth != "source" or not hit.raw_refs:
+        return []
+    return [
+        {
+            "source_ref_id": status.source_ref_id,
+            "status": status.status,
+            "reason": status.reason,
+            "unsafe_ref": status.unsafe_ref,
+        }
+        for status in source_ref_statuses(repo, hit.raw_refs, (), False)
+    ]
+
+
+def context_hit(
+    repo: Path,
+    hit: Hit,
+    rank: int,
+    depth: str,
+) -> dict[str, object]:
+    drill_paths = tuple(path for path in hit.drill_paths if safe_display_path(path) != UNSAFE_DISPLAY_FIELD)
+    summary_drill_paths = [path for path in drill_paths if is_summary_drill_path(path)]
+    evidence_drill_paths = [path for path in drill_paths if is_evidence_drill_path(path)]
+    active_current = hit.source == "memory" and bool(hit.memory_id)
+    support_path_count = len(summary_drill_paths) + len(evidence_drill_paths)
+    if active_current and support_path_count:
+        answerability_status = "supported"
+        answerability_reason = "active_current_memory_with_drilldown"
+    elif active_current:
+        answerability_status = "unsupported"
+        answerability_reason = "missing_support_drilldown"
+    else:
+        answerability_status = "unsupported"
+        answerability_reason = "not_active_memory_node"
+    return {
+        "rank": rank,
+        "source": hit.source,
+        "score": hit.score,
+        "memory_id": hit.memory_id,
+        "active_current": active_current,
+        "currentness": {
+            "status": "active_current" if active_current else "not_memory_node",
+        },
+        "layer": hit.layer,
+        "scope": hit.scope,
+        "topic": hit.topic,
+        "why": list(hit.why),
+        "summary_drill_paths": summary_drill_paths,
+        "evidence_drill_paths": evidence_drill_paths,
+        "evidence_refs": list(hit.evidence_refs),
+        "source_refs": context_source_refs(repo, hit, depth),
+        "answerability": {
+            "status": answerability_status,
+            "reason": answerability_reason,
+        },
+    }
+
+
+def context_answerability(hits: list[dict[str, object]], inactive_match_count: int) -> dict[str, object]:
+    supported_count = sum(
+        1
+        for hit in hits
+        if isinstance(hit.get("answerability"), dict)
+        and hit["answerability"].get("status") == "supported"
+    )
+    if supported_count:
+        return {
+            "status": "supported",
+            "reason": "active_current_memory_support",
+            "supported_hit_count": supported_count,
+        }
+    if inactive_match_count:
+        return {
+            "status": "unsupported",
+            "reason": "no_active_current_support",
+            "supported_hit_count": 0,
+        }
+    if hits:
+        return {
+            "status": "unsupported",
+            "reason": "related_context_without_active_memory_support",
+            "supported_hit_count": 0,
+        }
+    return {
+        "status": "unsupported",
+        "reason": "no_recall_hits",
+        "supported_hit_count": 0,
+    }
+
+
+def build_context_package(
+    *,
+    repo: Path,
+    query: str,
+    query_tokens: list[str],
+    depth: str,
+    limit: int,
+    scope: str,
+    preferred_scope: str,
+    legacy_sessions: bool,
+    project_path: str | None,
+    hits: list[Hit],
+    inactive_match_count: int,
+) -> dict[str, object]:
+    context_hits = [
+        context_hit(repo, hit, rank, depth)
+        for rank, hit in enumerate(hits[:limit], 1)
+    ]
+    return {
+        "report_kind": "memory_recall_context_package",
+        "report_version": 1,
+        "claim_boundary": (
+            "agent-facing recall context only; no raw transcript, raw source, "
+            "live model answer, ranking overhaul, or ontology claim"
+        ),
+        "query": {
+            "text": safe_display_text(query),
+            "searchable_token_count": len(query_tokens),
+            "depth": depth,
+            "limit": limit,
+            "scope": scope,
+            "preferred_scope": preferred_scope,
+            "legacy_sessions": legacy_sessions,
+            "project_context_provided": bool(project_path),
+        },
+        "answerability": context_answerability(context_hits, inactive_match_count),
+        "hits": context_hits,
+        "privacy": context_privacy_block(),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", nargs="?", help="Search query")
@@ -1941,6 +2134,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Bypass memory nodes and use the legacy session/index/markdown search path",
     )
     parser.add_argument(
+        "--context-json",
+        action="store_true",
+        help="Emit a machine-readable recall context package instead of human-readable hit text",
+    )
+    parser.add_argument(
         "--project-path",
         help="Optional current project path used to boost matching archive records",
     )
@@ -1982,6 +2180,30 @@ def main(argv: list[str] | None = None) -> int:
             selected_hits = session_hits
     hits = merge_hits(repo, selected_hits)
     display_query = safe_display_text(args.query)
+
+    if args.context_json:
+        inactive_count = 0
+        if not hits:
+            inactive_count = inactive_memory_match_count(repo, query_tokens, context_terms, args.scope)
+        print(
+            json.dumps(
+                build_context_package(
+                    repo=repo,
+                    query=args.query,
+                    query_tokens=query_tokens,
+                    depth=args.depth,
+                    limit=args.limit,
+                    scope=args.scope,
+                    preferred_scope=args.preferred_scope,
+                    legacy_sessions=args.legacy_sessions,
+                    project_path=args.project_path,
+                    hits=hits,
+                    inactive_match_count=inactive_count,
+                ),
+                sort_keys=True,
+            )
+        )
+        return 0
 
     if not hits:
         print(f"No memory hits for: {display_query}")

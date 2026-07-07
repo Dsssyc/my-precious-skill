@@ -15,7 +15,8 @@ updater-driven automatic induction on synthetic archives, end-to-end
 induction-to-recall behavior on synthetic source records, explicit non-project
 source stream registry updates on synthetic archives, clean-room packaged
 lifecycle setup/update/search/audit with self-maintenance safeguards, and
-deterministic source-grounded answer handoff records. It is
+deterministic source-grounded answer handoff records, plus agent-facing recall
+context packaging for supported answer versus abstain decisions. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -334,6 +335,27 @@ claim is that the private dogfood orchestration enforces the V1.6
 source-grounded handoff and privacy contract. It does not store private cases,
 private answers, raw transcripts, source paths, raw refs, scheduler logs, or
 archive data.
+
+## V1.8 Agent-Facing Recall Context Package
+
+V1.8 adds an agent-facing recall context package to the read path. The
+`search_memory.py --context-json` mode emits
+`report_kind: memory_recall_context_package` with query metadata,
+active/current hit currentness, rank, layer and scope, why signals, summary and
+evidence drill paths, source-ref status metadata when requested, privacy flags,
+and top-level `answerability.status`.
+
+This is a packaging and answerability contract, not live model answer quality,
+not a ranking overhaul, and not automatic ontology or governance discovery. The
+package lets a future agent decide supported answer versus abstain without
+parsing free-form search output. Supported means active/current memory support
+with summary or evidence drilldown. Unsupported covers no hits, related context
+without active/current support, or only inactive/superseded support.
+
+The privacy boundary is part of the evidence. The context package must not
+render memory text, raw transcript text, raw refs, raw source content, local private paths,
+credentials, or scheduler state. It may render archive-relative summary and
+evidence drill paths and aggregate source-ref status identifiers.
 
 ## Current Baseline
 

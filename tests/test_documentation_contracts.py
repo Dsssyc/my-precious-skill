@@ -221,6 +221,23 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v18_agent_facing_recall_context_package(self):
+        section = self.evaluation_section("## V1.8 Agent-Facing Recall Context Package")
+        for phrase in (
+            "memory_recall_context_package",
+            "--context-json",
+            "answerability.status",
+            "active/current",
+            "supported answer versus abstain",
+            "not live model answer quality",
+            "not a ranking overhaul",
+            "not automatic ontology",
+            "raw refs",
+            "local private paths",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
@@ -248,6 +265,9 @@ class DocumentationContractTests(unittest.TestCase):
     def test_skill_docs_record_source_grounded_answer_handoff_contract(self):
         for phrase in (
             "source-grounded answer handoff",
+            "memory_recall_context_package",
+            "--context-json",
+            "answerability.status",
             "Answer from archive evidence only",
             "abstain when support is missing",
             "support_refs",

@@ -5198,6 +5198,269 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("mem_retrieval_policy_exact_target", result.stdout)
         self.assertNotIn("mem_retrieval_policy_broad_neighbor", result.stdout)
 
+    def test_search_memory_context_json_returns_supported_active_memory_package(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            session_dir = repo / "sessions/2026/07/07/context"
+            session_dir.mkdir(parents=True)
+            (repo / "index").mkdir()
+            (session_dir / "summary.md").write_text(
+                "# Session: Context Package\n\n"
+                "Context package supported answer summary.\n",
+                encoding="utf-8",
+            )
+            (session_dir / "evidence.md").write_text(
+                "ev_001: Context package supported answer evidence.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_context_package_supported",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "recall-context-package",
+                        "text": "context package supported answer should be grounded by drill paths",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": ["sessions/2026/07/07/context/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/07/07/context/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "context package supported answer",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "evidence",
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["report_kind"], "memory_recall_context_package")
+        self.assertEqual(payload["query"]["text"], "context package supported answer")
+        self.assertEqual(payload["query"]["depth"], "evidence")
+        self.assertEqual(payload["answerability"]["status"], "supported")
+        self.assertEqual(payload["answerability"]["supported_hit_count"], 1)
+        self.assertEqual(payload["hits"][0]["rank"], 1)
+        self.assertEqual(payload["hits"][0]["memory_id"], "mem_context_package_supported")
+        self.assertTrue(payload["hits"][0]["active_current"])
+        self.assertEqual(payload["hits"][0]["currentness"]["status"], "active_current")
+        self.assertEqual(payload["hits"][0]["answerability"]["status"], "supported")
+        self.assertEqual(payload["hits"][0]["layer"], "global")
+        self.assertEqual(payload["hits"][0]["scope"], "global")
+        self.assertIn("source:explicit", payload["hits"][0]["why"])
+        self.assertEqual(
+            payload["hits"][0]["summary_drill_paths"],
+            ["sessions/2026/07/07/context/summary.md"],
+        )
+        self.assertEqual(
+            payload["hits"][0]["evidence_drill_paths"],
+            ["sessions/2026/07/07/context/evidence.md"],
+        )
+        self.assertEqual(
+            payload["hits"][0]["evidence_refs"],
+            ["sessions/2026/07/07/context/evidence.md#ev_001"],
+        )
+        self.assertTrue(payload["privacy"]["context_package"])
+        self.assertFalse(payload["privacy"]["memory_text_rendered"])
+        self.assertFalse(payload["privacy"]["raw_refs_rendered"])
+        self.assertNotIn(str(repo), result.stdout)
+
+    def test_search_memory_context_json_returns_unsupported_package_for_no_hits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_other_context",
+                        "unrelated archive memory",
+                    )
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "zzabsent qxmissing factoid",
+                    "--repo",
+                    str(repo),
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["report_kind"], "memory_recall_context_package")
+        self.assertEqual(payload["answerability"]["status"], "unsupported")
+        self.assertEqual(payload["answerability"]["reason"], "no_recall_hits")
+        self.assertEqual(payload["answerability"]["supported_hit_count"], 0)
+        self.assertEqual(payload["hits"], [])
+        self.assertTrue(payload["privacy"]["context_package"])
+        self.assertFalse(payload["privacy"]["raw_source_content_rendered"])
+        self.assertNotIn(str(repo), result.stdout)
+
+    def test_search_memory_context_json_does_not_support_inactive_only_memory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            session_dir = repo / "sessions/2026/07/07/inactive"
+            session_dir.mkdir(parents=True)
+            (repo / "index").mkdir()
+            (session_dir / "summary.md").write_text("# Session: Inactive Memory\n", encoding="utf-8")
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_context_package_old",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "retired-widget-zeta",
+                        "text": "retired widget zeta legacy clause",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": ["sessions/2026/07/07/inactive/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                        "superseded_by": "mem_context_package_current",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "memory_id": "mem_context_package_current",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "current-widget-policy",
+                        "text": "replacement memory has different active wording",
+                        "source": "automatic",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": ["sessions/2026/07/07/inactive/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [],
+                        "supersedes": ["mem_context_package_old"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "retired widget zeta legacy clause",
+                    "--repo",
+                    str(repo),
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["answerability"]["status"], "unsupported")
+        self.assertEqual(payload["answerability"]["reason"], "no_active_current_support")
+        rendered = json.dumps(payload, sort_keys=True)
+        self.assertNotIn("mem_context_package_old", rendered)
+
+    def test_search_memory_context_json_source_depth_is_privacy_safe(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            session_dir = repo / "sessions/2026/07/07/source-context"
+            session_dir.mkdir(parents=True)
+            (repo / "index").mkdir()
+            (session_dir / "summary.md").write_text("# Session: Source Context\n", encoding="utf-8")
+            raw_path = repo / "records/private.jsonl"
+            raw_path.parent.mkdir(parents=True)
+            raw_path.write_text(
+                "message:42: RAW SOURCE CONTENT SHOULD NOT RENDER cookie=SHOULD_NOT_RENDER\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_context_source_depth",
+                        "layer": "domain",
+                        "scope": "domain:memory-retrieval",
+                        "topic": "source-depth",
+                        "text": "context package source depth anchor status",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 1,
+                        "derived_from": ["sessions/2026/07/07/source-context/summary.md"],
+                        "evidence_refs": [],
+                        "raw_refs": [{"path": "records/private.jsonl", "anchor": "message:42"}],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "context package source depth",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "source",
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        source_refs = payload["hits"][0]["source_refs"]
+        self.assertEqual(len(source_refs), 1)
+        self.assertTrue(source_refs[0]["source_ref_id"].startswith("src_"))
+        self.assertEqual(source_refs[0]["status"], "available")
+        self.assertEqual(source_refs[0]["reason"], "archive_source_anchor_reachable")
+        self.assertNotIn("records/private.jsonl", result.stdout)
+        self.assertNotIn("message:42", result.stdout)
+        self.assertNotIn("RAW SOURCE CONTENT SHOULD NOT RENDER", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RENDER", result.stdout)
+        self.assertNotIn("cookie=", result.stdout)
+        self.assertNotIn(str(repo), result.stdout)
+        self.assertFalse(payload["privacy"]["raw_refs_rendered"])
+        self.assertFalse(payload["privacy"]["raw_source_content_rendered"])
+        self.assertFalse(payload["privacy"]["local_private_paths_rendered"])
+
 
 if __name__ == "__main__":
     unittest.main()
