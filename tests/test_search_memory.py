@@ -5265,6 +5265,13 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertTrue(payload["hits"][0]["active_current"])
         self.assertEqual(payload["hits"][0]["currentness"]["status"], "active_current")
         self.assertEqual(payload["hits"][0]["answerability"]["status"], "supported")
+        self.assertEqual(payload["hits"][0]["query_support"]["status"], "supported")
+        self.assertEqual(
+            payload["hits"][0]["query_support"]["policy"],
+            "strict_meaningful_or_important_query_token_coverage",
+        )
+        self.assertEqual(payload["hits"][0]["query_support"]["coverage"], "complete")
+        self.assertTrue(payload["hits"][0]["query_support"]["meaningful_token_coverage"])
         self.assertEqual(payload["hits"][0]["layer"], "global")
         self.assertEqual(payload["hits"][0]["scope"], "global")
         self.assertIn("source:explicit", payload["hits"][0]["why"])
@@ -5283,6 +5290,80 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertTrue(payload["privacy"]["context_package"])
         self.assertFalse(payload["privacy"]["memory_text_rendered"])
         self.assertFalse(payload["privacy"]["raw_refs_rendered"])
+        self.assertNotIn(str(repo), result.stdout)
+
+    def test_search_memory_context_json_rejects_weak_active_support(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            session_dir = repo / "sessions/2026/07/07/weak-support"
+            session_dir.mkdir(parents=True)
+            (repo / "index").mkdir()
+            (session_dir / "summary.md").write_text("# Session: Weak Support\n", encoding="utf-8")
+            (session_dir / "evidence.md").write_text(
+                "ev_001: Synthetic evidence exists but does not cover the query.\n",
+                encoding="utf-8",
+            )
+            (repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    {
+                        "memory_id": "mem_context_package_weak_active",
+                        "layer": "global",
+                        "scope": "global",
+                        "topic": "weak nearby miss",
+                        "text": "weakonly generic active memory with drill paths",
+                        "source": "explicit",
+                        "confidence": "high",
+                        "support_count": 2,
+                        "derived_from": ["sessions/2026/07/07/weak-support/summary.md"],
+                        "evidence_refs": [
+                            {"path": "sessions/2026/07/07/weak-support/evidence.md", "quote_id": "ev_001"}
+                        ],
+                        "raw_refs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    "weakonly support coverage marker",
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "evidence",
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["report_kind"], "memory_recall_context_package")
+        self.assertEqual(payload["answerability"]["status"], "unsupported")
+        self.assertEqual(payload["answerability"]["reason"], "related_context_without_active_memory_support")
+        self.assertEqual(payload["answerability"]["supported_hit_count"], 0)
+        self.assertEqual(payload["hits"][0]["memory_id"], "mem_context_package_weak_active")
+        self.assertTrue(payload["hits"][0]["active_current"])
+        self.assertEqual(payload["hits"][0]["answerability"]["status"], "unsupported")
+        self.assertEqual(payload["hits"][0]["answerability"]["reason"], "insufficient_query_support")
+        self.assertEqual(payload["hits"][0]["query_support"]["status"], "weak")
+        self.assertEqual(
+            payload["hits"][0]["query_support"]["policy"],
+            "strict_meaningful_or_important_query_token_coverage",
+        )
+        self.assertEqual(payload["hits"][0]["query_support"]["coverage"], "partial")
+        self.assertIn("weakonly", payload["hits"][0]["query_support"]["matched_tokens"])
+        self.assertIn("support", payload["hits"][0]["query_support"]["missing_tokens"])
+        self.assertIn("coverage", payload["hits"][0]["query_support"]["missing_tokens"])
+        self.assertIn("marker", payload["hits"][0]["query_support"]["missing_tokens"])
+        self.assertFalse(payload["privacy"]["memory_text_rendered"])
         self.assertNotIn(str(repo), result.stdout)
 
     def test_search_memory_context_json_returns_unsupported_package_for_no_hits(self):

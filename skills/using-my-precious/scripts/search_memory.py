@@ -86,6 +86,7 @@ class Hit:
     drill_paths: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     raw_refs: tuple[str, ...] = ()
+    matched_tokens: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1615,6 +1616,7 @@ def collect_memory_hits(
                 drill_paths=support_refs.drill_paths,
                 evidence_refs=support_refs.evidence_refs,
                 raw_refs=support_refs.raw_refs,
+                matched_tokens=tuple(matched),
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
@@ -1809,6 +1811,7 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
         current.drill_paths = unique_ordered((*current.drill_paths, *hit.drill_paths))
         current.evidence_refs = unique_ordered((*current.evidence_refs, *hit.evidence_refs))
         current.raw_refs = unique_ordered((*current.raw_refs, *hit.raw_refs))
+        current.matched_tokens = unique_ordered((*current.matched_tokens, *hit.matched_tokens))
         if current.source != hit.source:
             current.source = "mixed"
     return sorted(
@@ -1966,20 +1969,60 @@ def context_source_refs(
     ]
 
 
+def context_query_support_tokens(query_tokens: list[str]) -> list[str]:
+    direct_tokens = meaningful_coverage_tokens(query_tokens)
+    if direct_tokens:
+        return direct_tokens
+    important_tokens = important_query_tokens(coverage_query_tokens(meaningful_query_tokens(query_tokens)))
+    if len(important_tokens) >= 2:
+        return important_tokens
+    return strict_coverage_tokens(query_tokens)
+
+
+def context_query_support(query_tokens: list[str], matched_tokens: list[str]) -> dict[str, object]:
+    required_tokens = context_query_support_tokens(query_tokens)
+    matched_required = [token for token in required_tokens if token in matched_tokens]
+    missing_tokens = [token for token in required_tokens if token not in matched_tokens]
+    strict_supported = has_strict_token_coverage(query_tokens, matched_tokens)
+    meaningful_supported = has_meaningful_token_coverage(query_tokens, matched_tokens)
+    context_supported = bool(required_tokens) and not missing_tokens
+    if required_tokens and not missing_tokens:
+        coverage = "complete"
+    elif matched_required:
+        coverage = "partial"
+    else:
+        coverage = "none"
+    return {
+        "status": "supported" if strict_supported or meaningful_supported or context_supported else "weak",
+        "policy": "strict_meaningful_or_important_query_token_coverage",
+        "coverage": coverage,
+        "matched_tokens": [token for token in matched_tokens if token in required_tokens],
+        "missing_tokens": missing_tokens,
+        "strict_token_coverage": strict_supported,
+        "meaningful_token_coverage": meaningful_supported,
+    }
+
+
 def context_hit(
     repo: Path,
     hit: Hit,
     rank: int,
     depth: str,
+    query_tokens: list[str],
 ) -> dict[str, object]:
     drill_paths = tuple(path for path in hit.drill_paths if safe_display_path(path) != UNSAFE_DISPLAY_FIELD)
     summary_drill_paths = [path for path in drill_paths if is_summary_drill_path(path)]
     evidence_drill_paths = [path for path in drill_paths if is_evidence_drill_path(path)]
     active_current = hit.source == "memory" and bool(hit.memory_id)
     support_path_count = len(summary_drill_paths) + len(evidence_drill_paths)
-    if active_current and support_path_count:
+    query_support = context_query_support(query_tokens, list(hit.matched_tokens))
+    query_supported = query_support["status"] == "supported"
+    if active_current and support_path_count and query_supported:
         answerability_status = "supported"
-        answerability_reason = "active_current_memory_with_drilldown"
+        answerability_reason = "active_current_memory_with_drilldown_and_query_support"
+    elif active_current and support_path_count:
+        answerability_status = "unsupported"
+        answerability_reason = "insufficient_query_support"
     elif active_current:
         answerability_status = "unsupported"
         answerability_reason = "missing_support_drilldown"
@@ -1999,6 +2042,7 @@ def context_hit(
         "scope": hit.scope,
         "topic": hit.topic,
         "why": list(hit.why),
+        "query_support": query_support,
         "summary_drill_paths": summary_drill_paths,
         "evidence_drill_paths": evidence_drill_paths,
         "evidence_refs": list(hit.evidence_refs),
@@ -2057,7 +2101,7 @@ def build_context_package(
     inactive_match_count: int,
 ) -> dict[str, object]:
     context_hits = [
-        context_hit(repo, hit, rank, depth)
+        context_hit(repo, hit, rank, depth, query_tokens)
         for rank, hit in enumerate(hits[:limit], 1)
     ]
     return {

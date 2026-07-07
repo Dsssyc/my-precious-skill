@@ -407,7 +407,7 @@ The agent-facing decision recipe is deliberately small:
 
 | package state | action |
 | --- | --- |
-| supported package -> answer | Answer only from supported active/current hits and cite summary or evidence drill paths. |
+| supported package -> answer | Answer only from supported active/current hits with `query_support.status: supported` plus summary and evidence drill paths. |
 | unsupported package -> abstain | Say the archive has no supported memory for the requested fact. |
 | inactive/superseded-only package -> abstain | Treat stale-only support as insufficient unless a current replacement is separately supported. |
 | malformed or missing package -> abstain | Fail closed rather than deriving answerability from free-form text. |
@@ -446,6 +446,28 @@ and not public leaderboard parity. It also does not expand governance,
 embeddings, ranking, or live-answer generation. The command is stable and
 synthetic, so it is included in `tools/run_quality_gates.py` as part of the
 repo-local release gate.
+
+## V2.2 Runtime Support-Coverage Contract
+
+V2.2 tightens the supported package boundary. `memory_recall_context_package`
+hits now include per-hit `query_support` metadata derived from existing
+token-coverage signals. A hit is answerable only when it is active/current,
+has summary and evidence drill paths, and has
+`query_support.status: supported`. Active/current drillable hits with weak or
+partial query coverage are unsupported near-misses and must abstain.
+
+`benchmarks/using_my_precious_runtime_gate.py` now keeps the V2.1 supported,
+unsupported/no-hit, inactive/superseded-only, and malformed cases, and adds
+weak-active and same-topic near-miss hard negatives. The gate reports
+`runtime_support_coverage_accuracy`,
+`runtime_weak_active_rejection_count`,
+`runtime_near_miss_abstention_accuracy`,
+`runtime_supported_decision_accuracy`, `runtime_abstention_accuracy`,
+`runtime_context_package_parse_success_rate`, and `privacy_leak_count`.
+
+This proves deterministic support-coverage decision reliability for the
+package-first runtime contract. It is not ranking quality, not LLM answer quality,
+not vector search, not ontology discovery, and not public leaderboard parity.
 
 ## Current Baseline
 

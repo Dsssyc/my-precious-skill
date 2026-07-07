@@ -77,6 +77,28 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v22_runtime_support_coverage_contract(self):
+        section = self.evaluation_section("## V2.2 Runtime Support-Coverage Contract")
+        for phrase in (
+            "query_support",
+            "query_support.status: supported",
+            "weak-active",
+            "same-topic near-miss",
+            "runtime_support_coverage_accuracy",
+            "runtime_weak_active_rejection_count",
+            "runtime_near_miss_abstention_accuracy",
+            "runtime_supported_decision_accuracy",
+            "runtime_abstention_accuracy",
+            "runtime_context_package_parse_success_rate",
+            "privacy_leak_count",
+            "not ranking quality",
+            "not LLM answer quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_preserves_bounded_claim_language(self):
         for phrase in (
             "private archive",

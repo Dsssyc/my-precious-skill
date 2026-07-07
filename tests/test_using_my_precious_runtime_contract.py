@@ -38,6 +38,8 @@ def documented_action(package: dict) -> str:
             hit.get("active_current") is True
             and isinstance(hit_answerability, dict)
             and hit_answerability.get("status") == "supported"
+            and isinstance(hit.get("query_support"), dict)
+            and hit["query_support"].get("status") == "supported"
             and hit.get("summary_drill_paths")
             and hit.get("evidence_drill_paths")
         ):
@@ -99,6 +101,7 @@ class UsingMyPreciousRuntimeContractTests(unittest.TestCase):
                         {
                             "active_current": True,
                             "answerability": {"status": "supported"},
+                            "query_support": {"status": "supported"},
                             "summary_drill_paths": ["sessions/synthetic/summary.md"],
                             "evidence_drill_paths": ["sessions/synthetic/evidence.md"],
                         }
@@ -123,6 +126,22 @@ class UsingMyPreciousRuntimeContractTests(unittest.TestCase):
                 "inactive/superseded-only package -> abstain",
             ),
             ({"report_kind": "unexpected_report"}, "malformed or missing package -> abstain"),
+            (
+                {
+                    "report_kind": "memory_recall_context_package",
+                    "answerability": {"status": "supported", "reason": "active_current_memory_support"},
+                    "hits": [
+                        {
+                            "active_current": True,
+                            "answerability": {"status": "supported"},
+                            "query_support": {"status": "weak"},
+                            "summary_drill_paths": ["sessions/synthetic/summary.md"],
+                            "evidence_drill_paths": ["sessions/synthetic/evidence.md"],
+                        }
+                    ],
+                },
+                "unsupported package -> abstain",
+            ),
         ]
         for package, expected in cases:
             with self.subTest(expected=expected):

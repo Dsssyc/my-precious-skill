@@ -27,19 +27,27 @@ CONTEXT_REPORT_KIND = "memory_recall_context_package"
 SUPPORTED_CASE = "supported_active_current"
 UNSUPPORTED_CASE = "unsupported_no_hit"
 INACTIVE_CASE = "inactive_superseded_only"
+WEAK_ACTIVE_CASE = "weak_active_current"
+SAME_TOPIC_NEAR_MISS_CASE = "same_topic_near_miss"
 MALFORMED_CASE = "malformed_package"
 
 SUPPORTED_QUERY = "packagefirst answerability marker"
 UNSUPPORTED_QUERY = "zzabsent qxmissing factoid"
 INACTIVE_QUERY = "staleonly zetaomega legacyonly"
+WEAK_ACTIVE_QUERY = "weakonly support coverage marker"
+SAME_TOPIC_QUERY = "samealpha exactbeta answerdelta"
 
 ACTIVE_MEMORY_TEXT = "packagefirst answerability marker active support"
 INACTIVE_MEMORY_TEXT = "staleonly zetaomega legacyonly stale support"
+WEAK_ACTIVE_MEMORY_TEXT = "weakonly generic active memory with drill paths"
+SAME_TOPIC_MEMORY_TEXT = "samealpha nearby topic active memory"
 RAW_SOURCE_SENTINEL = "RAW TRANSCRIPT SHOULD NOT RENDER"
 SECRET_SENTINEL = "cookie=SHOULD_NOT_RENDER"
 LEAK_MARKERS = (
     ACTIVE_MEMORY_TEXT,
     INACTIVE_MEMORY_TEXT,
+    WEAK_ACTIVE_MEMORY_TEXT,
+    SAME_TOPIC_MEMORY_TEXT,
     RAW_SOURCE_SENTINEL,
     SECRET_SENTINEL,
 )
@@ -117,6 +125,7 @@ def memory_row(
     *,
     summary_path: str,
     evidence_path: str,
+    topic: str = "using-my-precious-runtime-gate",
     supersedes: list[str] | None = None,
     superseded_by: str | None = None,
 ) -> dict[str, object]:
@@ -124,7 +133,7 @@ def memory_row(
         "memory_id": memory_id,
         "layer": "domain",
         "scope": "domain:runtime-gate",
-        "topic": "using-my-precious-runtime-gate",
+        "topic": topic,
         "text": text,
         "source": "synthetic",
         "confidence": "high",
@@ -145,6 +154,10 @@ def write_synthetic_archive(memory_repo: Path) -> None:
     inactive_evidence = "sessions/synthetic/runtime-inactive/evidence.md"
     current_summary = "sessions/synthetic/runtime-current/summary.md"
     current_evidence = "sessions/synthetic/runtime-current/evidence.md"
+    weak_summary = "sessions/synthetic/runtime-weak/summary.md"
+    weak_evidence = "sessions/synthetic/runtime-weak/evidence.md"
+    same_topic_summary = "sessions/synthetic/runtime-same-topic/summary.md"
+    same_topic_evidence = "sessions/synthetic/runtime-same-topic/evidence.md"
 
     write_support_file(memory_repo / supported_summary, "# Synthetic Runtime Support\n")
     write_support_file(
@@ -160,6 +173,16 @@ def write_synthetic_archive(memory_repo: Path) -> None:
     write_support_file(
         memory_repo / current_evidence,
         "ev_runtime_gate_001: Synthetic evidence for the current replacement.\n",
+    )
+    write_support_file(memory_repo / weak_summary, "# Synthetic Weak Active Support\n")
+    write_support_file(
+        memory_repo / weak_evidence,
+        "ev_runtime_gate_001: Synthetic evidence for a weak active near miss.\n",
+    )
+    write_support_file(memory_repo / same_topic_summary, "# Synthetic Same Topic Near Miss\n")
+    write_support_file(
+        memory_repo / same_topic_evidence,
+        "ev_runtime_gate_001: Synthetic evidence for a same-topic near miss.\n",
     )
     write_support_file(
         memory_repo / "records/synthetic-runtime.jsonl",
@@ -195,6 +218,20 @@ def write_synthetic_archive(memory_repo: Path) -> None:
             summary_path=current_summary,
             evidence_path=current_evidence,
             supersedes=["runtime_gate_inactive_old"],
+        ),
+        memory_row(
+            "runtime_gate_weak_active",
+            WEAK_ACTIVE_MEMORY_TEXT,
+            summary_path=weak_summary,
+            evidence_path=weak_evidence,
+            topic="weak nearby miss",
+        ),
+        memory_row(
+            "runtime_gate_same_topic_near_miss",
+            SAME_TOPIC_MEMORY_TEXT,
+            summary_path=same_topic_summary,
+            evidence_path=same_topic_evidence,
+            topic="samealpha",
         ),
     ]
     index_path = memory_repo / "index/memories.jsonl"
@@ -260,10 +297,12 @@ def documented_runtime_decision(raw_package: str) -> RuntimeDecision:
             hit.get("active_current") is True
             and isinstance(hit_answerability, dict)
             and hit_answerability.get("status") == "supported"
+            and isinstance(hit.get("query_support"), dict)
+            and hit["query_support"].get("status") == "supported"
             and hit.get("summary_drill_paths")
             and hit.get("evidence_drill_paths")
         ):
-            return RuntimeDecision("answer", "supported_active_current_package", True, report_kind)
+            return RuntimeDecision("answer", "supported_active_current_package_with_query_support", True, report_kind)
 
     return RuntimeDecision("abstain", "unsupported_package", True, report_kind)
 
@@ -273,6 +312,8 @@ def run_cases(memory_repo: Path) -> list[CaseResult]:
         (SUPPORTED_CASE, "answer", run_context_package(memory_repo, SUPPORTED_QUERY)),
         (UNSUPPORTED_CASE, "abstain", run_context_package(memory_repo, UNSUPPORTED_QUERY)),
         (INACTIVE_CASE, "abstain", run_context_package(memory_repo, INACTIVE_QUERY)),
+        (WEAK_ACTIVE_CASE, "abstain", run_context_package(memory_repo, WEAK_ACTIVE_QUERY)),
+        (SAME_TOPIC_NEAR_MISS_CASE, "abstain", run_context_package(memory_repo, SAME_TOPIC_QUERY)),
         (MALFORMED_CASE, "abstain", "{not-json"),
     ]
     return [
@@ -320,14 +361,35 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
         and result.decision.action == "abstain"
         and result.decision.reason == "malformed_or_missing_package"
     )
+    support_coverage_case_ids = {SUPPORTED_CASE, WEAK_ACTIVE_CASE, SAME_TOPIC_NEAR_MISS_CASE}
+    support_coverage_results = [
+        result for result in results if result.case_id in support_coverage_case_ids
+    ]
+    support_coverage_correct = sum(
+        1 for result in support_coverage_results if result.decision.action == result.expected_action
+    )
+    near_miss_results = [
+        result for result in results if result.case_id in {WEAK_ACTIVE_CASE, SAME_TOPIC_NEAR_MISS_CASE}
+    ]
+    near_miss_abstentions = sum(1 for result in near_miss_results if result.decision.action == "abstain")
+    weak_active_rejection_count = near_miss_abstentions
     case_outcomes = {result.case_id: result.decision.action for result in results}
     metrics: dict[str, object] = {
         "runtime_context_package_parse_success_rate": safe_rate(
             parse_success_count,
             len(valid_package_results),
         ),
+        "runtime_support_coverage_accuracy": safe_rate(
+            support_coverage_correct,
+            len(support_coverage_results),
+        ),
+        "runtime_near_miss_abstention_accuracy": safe_rate(
+            near_miss_abstentions,
+            len(near_miss_results),
+        ),
         "runtime_supported_decision_accuracy": safe_rate(supported_correct, len(supported_results)),
         "runtime_abstention_accuracy": safe_rate(abstain_correct, len(abstain_results)),
+        "runtime_weak_active_rejection_count": weak_active_rejection_count,
         "runtime_inactive_rejection_count": inactive_rejection_count,
         "runtime_malformed_fail_closed_count": malformed_fail_closed_count,
         "privacy_leak_count": 0,
@@ -342,6 +404,7 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
             "depth": "evidence",
             "context_json": True,
             "answerability_source": CONTEXT_REPORT_KIND,
+            "query_support_required": True,
         },
         "case_outcomes": case_outcomes,
         "metrics": metrics,
@@ -358,8 +421,11 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
     metrics["privacy_leak_count"] = count_privacy_leaks(results, report)
     if (
         metrics["runtime_context_package_parse_success_rate"] != 1.0
+        or metrics["runtime_support_coverage_accuracy"] != 1.0
+        or metrics["runtime_near_miss_abstention_accuracy"] != 1.0
         or metrics["runtime_supported_decision_accuracy"] != 1.0
         or metrics["runtime_abstention_accuracy"] != 1.0
+        or weak_active_rejection_count != 2
         or inactive_rejection_count != 1
         or malformed_fail_closed_count != 1
         or metrics["privacy_leak_count"] != 0
@@ -368,6 +434,8 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
             SUPPORTED_CASE: "answer",
             UNSUPPORTED_CASE: "abstain",
             INACTIVE_CASE: "abstain",
+            WEAK_ACTIVE_CASE: "abstain",
+            SAME_TOPIC_NEAR_MISS_CASE: "abstain",
             MALFORMED_CASE: "abstain",
         }
     ):

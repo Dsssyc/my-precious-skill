@@ -47,8 +47,8 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth evidence --context-json
    ```
 
-   The package must have `report_kind: memory_recall_context_package` and
-   `answerability.status`. Do not use free-form search output as the answerability source.
+   The package must have `report_kind: memory_recall_context_package`,
+   `answerability.status`, and per-hit `query_support.status`. Do not use free-form search output as the answerability source.
    Use free-form search output only for exploration or drilldown after the package decision.
 
 2. When the current task is tied to a local project, pass project context:
@@ -64,12 +64,14 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
    | package state | agent action |
    | --- | --- |
-   | supported package -> answer | Answer only from supported active/current memory hits. Cite `summary_drill_paths` or `evidence_drill_paths`; open those archive-relative files only if more support is needed. |
+   | supported package -> answer | Answer only from supported active/current memory hits with `query_support.status: supported` plus `summary_drill_paths` and `evidence_drill_paths`. |
    | unsupported package -> abstain | Say the archive does not provide supported memory for the requested fact. Do not infer from related context. |
    | inactive/superseded-only package -> abstain | Treat `answerability.reason: no_active_current_support` as stale support only; prefer current replacements when they are separately supported. |
    | malformed or missing package -> abstain | The agent must fail closed to abstain rather than falling back to free-form output for answerability. |
 
-   A supported package is not permission to expose private query text, memory text,
+   Treat active/current hits with weak or missing `query_support` as unsupported
+   near-misses even when they have drill paths. A supported package is not
+   permission to expose private query text, memory text,
    raw refs, source paths, raw source content, credentials, scheduler state, or
    local private paths. Keep answers bounded to summarized evidence and
    archive-relative summary/evidence drill paths.
