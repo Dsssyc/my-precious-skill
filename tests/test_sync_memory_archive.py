@@ -136,6 +136,37 @@ class SyncMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/global.jsonl", result.stderr)
             self.assertNotIn("Would stage allowed archive roots", result.stdout)
 
+    def test_sync_memory_archive_dry_run_allows_explicit_memory_node_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = create_git_backed_archive(Path(tmpdir))
+            entry_dir = memory_repo / "sessions/2026/06/17/explicit-sync"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "summary.md").write_text("Summary for explicit sync memory.\n", encoding="utf-8")
+            (entry_dir / "evidence.md").write_text("ev_001: Evidence for explicit sync memory.\n", encoding="utf-8")
+            memory_node = (
+                '{"memory_id":"mem_explicit_sync","layer":"global","scope":"global","topic":"sync",'
+                '"text":"Synthetic explicit memory node for sync dry run.","rationale":"test",'
+                '"source":"explicit","confidence":"high","persistence":"sticky",'
+                '"support_count":1,"first_seen":"2026-06-17","last_seen":"2026-06-17",'
+                '"derived_from":["sessions/2026/06/17/explicit-sync/summary.md"],'
+                '"evidence_refs":[{"path":"sessions/2026/06/17/explicit-sync/evidence.md","quote_id":"ev_001"}],'
+                '"raw_refs":[],"supersedes":[],"superseded_by":null,"tags":["sync"]}'
+            )
+            (memory_repo / "memories/explicit.jsonl").write_text(memory_node + "\n", encoding="utf-8")
+            (memory_repo / "index/memories.jsonl").write_text(memory_node + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/sync_memory_archive.py"), "--dry-run"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("memories/explicit.jsonl", result.stdout)
+            self.assertNotIn("unexpected files", result.stderr)
+
     def test_sync_memory_archive_dry_run_refuses_review_decision_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))

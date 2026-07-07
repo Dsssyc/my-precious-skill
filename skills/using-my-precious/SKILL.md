@@ -12,6 +12,11 @@ The archive may contain any compatible agent session summaries, as long as it fo
 
 This is a read-path skill. It helps locate and interpret existing memory.
 It does not create summaries, schedule archive jobs, upload transcripts, or read raw session logs by default.
+Automatic induction is the default write path for ordinary source records. If
+the user explicitly asks to remember, force-save, or distill a short fact, do
+not write from this read-path skill; use the deployment repository's
+`tools/capture_explicit_memory.py` explicit capture path through
+`update-my-precious`.
 
 ## Locate the Archive
 
@@ -93,6 +98,8 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 ## Privacy Rules
 
 - Do not read raw transcripts unless the user explicitly asks and the archive marks them safe to inspect.
+- Do not paste raw chat transcripts into explicit memory capture; explicit
+  capture accepts a short fact through agent-neutral JSONL.
 - Do not expose secrets, credentials, cookies, private keys, or unredacted customer data.
 - Treat the archive as private even if it is stored in a Git repository.
 - Prefer summarized facts and evidence snippets over raw logs.

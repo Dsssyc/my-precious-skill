@@ -89,6 +89,13 @@ and JSONL indexes.
   `archive_scope` when project should be only a source context, and
   `--source-partition` or registry `source_partition` when source freshness
   should survive project path migration.
+- `templates/agent-memory-repo/tools/capture_explicit_memory.py`: minimal
+  runtime adapter for explicit memory capture. Automatic induction is the
+  default for ordinary source records; when a user or governing prompt explicitly
+  asks to remember a short fact, this adapter accepts agent-neutral JSONL with
+  `text`, optional `layer`, optional `scope`, and optional `source`, creates
+  evidence-bound support files, calls the existing explicit-memory updater path,
+  and refuses raw transcript fields.
 - `benchmarks/updater_induction_benchmark.py`: synthetic write-path benchmark
   that drives the real setup and updater scripts from temporary source records
   and reports aggregate induction, lifecycle, provenance, and privacy metrics.
@@ -183,8 +190,8 @@ and JSONL indexes.
   paths, queries, raw refs, or transcripts.
 - `templates/agent-memory-repo/tools/sync_memory_archive.py`: safe Git sync
   helper that stages only publish-safe archive paths (`INDEX.md`,
-  `config/projects.jsonl`, `index/`, `daily/`, and `sessions/`) and refuses
-  unexpected files or unredacted key-like values.
+  `config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+  `sessions/`) and refuses unexpected files or unredacted key-like values.
 - `templates/agent-memory-repo/`: starter private archive repository layout.
 
 ## Scheduling Model

@@ -609,6 +609,58 @@ def assess_lifecycle_self_maintenance(payload: dict[str, Any], failures: list[di
     return metrics
 
 
+def assess_lifecycle_explicit_capture(payload: dict[str, Any], failures: list[dict[str, Any]]) -> dict[str, int]:
+    raw = payload.get("explicit_capture")
+    metrics: dict[str, int] = {}
+    expected_min_metrics = (
+        "adapter_input_records",
+        "captured_memory_nodes",
+        "rejected_raw_transcript_records",
+        "search_hit_count",
+    )
+    expected_zero_metrics = ("privacy_leak_count",)
+    if not isinstance(raw, dict):
+        failures.append({"metric": "explicit_capture", "reason": "missing_or_non_object"})
+        return metrics
+    if raw.get("status") != "passed":
+        failures.append(
+            {
+                "metric": "explicit_capture.status",
+                "expected": "passed",
+                "actual": raw.get("status") if isinstance(raw.get("status"), str) else None,
+            }
+        )
+    for key in expected_min_metrics:
+        value = nonnegative_int_from_mapping(raw, key)
+        if value is None or value < 1:
+            failures.append(
+                {
+                    "metric": f"explicit_capture.{key}",
+                    "comparison": "min",
+                    "threshold": 1.0,
+                    "value": value,
+                }
+            )
+        elif value is not None:
+            metrics[key] = value
+    for key in expected_zero_metrics:
+        value = nonnegative_int_from_mapping(raw, key)
+        if value is None:
+            failures.append({"metric": f"explicit_capture.{key}", "reason": "missing_or_non_numeric"})
+        elif value != 0:
+            failures.append(
+                {
+                    "metric": f"explicit_capture.{key}",
+                    "expected": 0,
+                    "actual": value,
+                }
+            )
+            metrics[key] = value
+        else:
+            metrics[key] = value
+    return metrics
+
+
 def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
     if payload is None:
         return {
@@ -695,6 +747,7 @@ def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -
         )
 
     metrics["self_maintenance"] = assess_lifecycle_self_maintenance(payload, failures)
+    metrics["explicit_capture"] = assess_lifecycle_explicit_capture(payload, failures)
 
     output_contract = payload.get("output_contract")
     if output_contract != "aggregate_only":

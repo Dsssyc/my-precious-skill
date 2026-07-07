@@ -165,6 +165,38 @@ automation-thread entries or automation-run noise are allowed. Private source
 text, source paths, queries, memory IDs, raw refs, and automation transcript
 content are not part of this public readiness record.
 
+## V1.4 Explicit Memory Capture Contract
+
+V1.4 is an explicit memory capture contract. It is not a new ranking capability,
+not generated-answer quality, and not long-horizon ontology or governance.
+
+The deployment template now includes `capture_explicit_memory.py`, a minimal
+runtime adapter for explicit memory requests. Automatic induction remains the
+default behavior for ordinary source records. When a user or governing prompt
+explicitly asks to remember, force-save, or distill a short fact, the adapter
+accepts agent-neutral JSONL input with `text`, optional `layer`, optional
+`scope`, and optional `source`. It creates evidence-bound support files, calls
+the existing explicit-memory updater path, and writes sticky `source: explicit`
+memory nodes.
+
+The adapter contract is that raw transcript fields are refused, along with
+message arrays, raw source content, tool logs, and automation run notes. The
+public packaged lifecycle gate covers
+one accepted short fact and one refused raw-transcript-shaped input. Its
+readiness output stays aggregate-only through the `explicit_capture` metrics:
+
+| metric | expected value |
+| --- | ---: |
+| adapter_input_records=1 | true |
+| captured_memory_nodes=1 | true |
+| rejected_raw_transcript_records=1 | true |
+| search_hit_count=1 | true |
+| privacy_leak_count=0 | true |
+
+The sync helper publish boundary is deliberately narrow: `memories/explicit.jsonl`
+is allowed so user-forced memories can be published through the safe sync path,
+while automatic memory node files and review files remain outside automatic sync.
+
 Run the packaged convergence gate locally with:
 
 ```bash
@@ -867,8 +899,10 @@ Current gaps:
   memory text, probe cases, queries, source paths, or raw refs. This is still
   not a broad natural-language consolidation engine, a public benchmark score,
   or an end-to-end generated-answer evaluation.
-- Direct explicit-memory writes exist in the reusable updater, but runtime-level
-  adapters and governing-prompt integration still need policy design.
+- Direct explicit-memory writes now have a minimal runtime adapter and governing
+  prompt contract for short, evidence-bound facts. The remaining gap is broader
+  policy design for bulk explicit-memory governance, deletion, and conflict
+  handling.
 - The system has `global`, `domain`, and `project` memory files, and now has a
   minimum semantic lifecycle loop for support merge, paraphrase consolidation,
   false partial-supersession guards, refresh/supersession, contradiction links,

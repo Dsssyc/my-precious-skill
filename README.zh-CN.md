@@ -84,6 +84,7 @@ my-precious-skill/
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
+      tools/capture_explicit_memory.py
       tools/run_memory_updates.py
       tools/audit_memory_archive.py
       tools/backfill_memory_archive.py
@@ -802,9 +803,9 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 ```
 
 sync helper 只 stage publish-safe archive 路径（`INDEX.md`、
-`config/projects.jsonl`、`index/`、`daily/` 和 `sessions/`）。提交前它会拒绝
-tool/script 改动、私有 memory/review node 文件、archive audit findings、
-未脱敏的 key-like value 和 whitespace 错误。
+`config/projects.jsonl`、`index/`、`daily/`、`memories/explicit.jsonl` 和
+`sessions/`）。提交前它会拒绝 tool/script 改动、automatic memory/review node
+文件、archive audit findings、未脱敏的 key-like value 和 whitespace 错误。
 
 ## 归档格式约定
 
@@ -982,6 +983,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
+  templates/agent-memory-repo/tools/capture_explicit_memory.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \

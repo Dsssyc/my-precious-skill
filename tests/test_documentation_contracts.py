@@ -5,6 +5,10 @@ from pathlib import Path
 
 EVALUATION_DOC = Path("docs/evaluations/layered-memory-readiness.md")
 DESIGN_DOC = Path("docs/design.md")
+UPDATE_SKILL = Path("skills/update-my-precious/SKILL.md")
+USING_SKILL = Path("skills/using-my-precious/SKILL.md")
+SETUP_SKILL = Path("skills/setup-my-precious/SKILL.md")
+TEMPLATE_AGENTS = Path("templates/agent-memory-repo/AGENTS.md")
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -13,6 +17,10 @@ class DocumentationContractTests(unittest.TestCase):
         cls.evaluation = EVALUATION_DOC.read_text(encoding="utf-8")
         cls.design = DESIGN_DOC.read_text(encoding="utf-8")
         cls.combined = cls.evaluation + "\n" + cls.design
+        cls.skill_contracts = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (UPDATE_SKILL, USING_SKILL, SETUP_SKILL, TEMPLATE_AGENTS)
+        )
 
     def assert_contains(self, haystack: str, needle: str):
         if needle not in haystack:
@@ -128,6 +136,38 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_evaluation_doc_records_v14_explicit_capture_contract(self):
+        section = self.evaluation_section("## V1.4 Explicit Memory Capture Contract")
+        for phrase in (
+            "explicit memory capture contract",
+            "not a new ranking capability",
+            "not generated-answer quality",
+            "not long-horizon ontology or governance",
+            "`capture_explicit_memory.py`",
+            "agent-neutral JSONL input",
+            "short fact",
+            "raw transcript fields are refused",
+            "explicit_capture",
+            "adapter_input_records=1",
+            "captured_memory_nodes=1",
+            "rejected_raw_transcript_records=1",
+            "search_hit_count=1",
+            "privacy_leak_count=0",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_skill_docs_record_explicit_capture_adapter_contract(self):
+        for phrase in (
+            "capture_explicit_memory.py",
+            "agent-neutral JSONL",
+            "automatic induction is the default",
+            "explicit capture path",
+            "Do not paste raw chat transcripts",
+            "short fact",
+        ):
+            self.assert_contains(self.skill_contracts, phrase)
 
 
 if __name__ == "__main__":

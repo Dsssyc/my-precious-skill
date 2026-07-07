@@ -151,6 +151,14 @@ class V1ReadinessGateTests(unittest.TestCase):
                 "automation_daily_noise_hits": 0,
                 "automation_index_noise_hits": 0,
             },
+            "explicit_capture": {
+                "status": "passed",
+                "adapter_input_records": 1,
+                "captured_memory_nodes": 1,
+                "rejected_raw_transcript_records": 1,
+                "search_hit_count": 1,
+                "privacy_leak_count": 0,
+            },
             "output_contract": "aggregate_only",
         }
 
@@ -1167,6 +1175,16 @@ class V1ReadinessGateTests(unittest.TestCase):
                     "automation_memory_nodes": 0,
                     "automation_daily_noise_hits": 0,
                     "automation_index_noise_hits": 0,
+                },
+            )
+            self.assertEqual(
+                lifecycle["metrics"]["explicit_capture"],
+                {
+                    "adapter_input_records": 1,
+                    "captured_memory_nodes": 1,
+                    "rejected_raw_transcript_records": 1,
+                    "search_hit_count": 1,
+                    "privacy_leak_count": 0,
                 },
             )
             self.assertEqual(lifecycle["output_contract"], "aggregate_only")

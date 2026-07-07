@@ -54,6 +54,17 @@ class PackagedLifecycleGateTests(unittest.TestCase):
                     "automation_index_noise_hits": 0,
                 },
             )
+            self.assertEqual(
+                report["explicit_capture"],
+                {
+                    "status": "passed",
+                    "adapter_input_records": 1,
+                    "captured_memory_nodes": 1,
+                    "rejected_raw_transcript_records": 1,
+                    "search_hit_count": 1,
+                    "privacy_leak_count": 0,
+                },
+            )
             self.assertEqual(set(report["search_depths"]), {"memory", "session", "evidence", "source"})
             self.assertNotIn("clean-room lifecycle fact", result.stdout)
             self.assertNotIn("clean-room lifecycle fact", result.stderr)
@@ -61,6 +72,8 @@ class PackagedLifecycleGateTests(unittest.TestCase):
             self.assertNotIn("Automation run status", result.stderr)
             self.assertNotIn("No memory hits", result.stdout)
             self.assertNotIn("No memory hits", result.stderr)
+            self.assertNotIn("Prefer explicit memory capture adapter", result.stdout)
+            self.assertNotIn("Prefer explicit memory capture adapter", result.stderr)
             self.assertTrue(Path(tmpdir).exists())
             self.assertEqual(list(Path(tmpdir).iterdir()), [])
 

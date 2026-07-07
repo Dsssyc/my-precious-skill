@@ -16,6 +16,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SETUP_SCRIPT = REPO_ROOT / "skills/setup-my-precious/scripts/setup_memory_archive.py"
 QUERY = "packaged lifecycle clean-room archive audit"
+EXPLICIT_CAPTURE_QUERY = "explicit memory capture adapter unsupported recollection"
+EXPLICIT_CAPTURE_TEXT = "Prefer explicit memory capture adapter over unsupported recollection."
+EXPLICIT_RAW_TRANSCRIPT_SENTINEL = "RAW TRANSCRIPT SHOULD NOT BE CAPTURED"
 SOURCE_TEXT = (
     "Remember this: clean-room lifecycle fact validates packaged setup, update, "
     "search, and audit using public synthetic records."
@@ -182,6 +185,10 @@ def session_dirs(memory_repo: Path) -> list[Path]:
     return sorted(path for path in sessions_root.glob("*/*/*/*") if path.is_dir())
 
 
+def archived_record_session_dirs(memory_repo: Path) -> list[Path]:
+    return [path for path in session_dirs(memory_repo) if not path.name.startswith("explicit-capture-")]
+
+
 def validate_archive_artifacts(memory_repo: Path) -> list[str]:
     errors: list[str] = []
     required_files = (
@@ -196,7 +203,7 @@ def validate_archive_artifacts(memory_repo: Path) -> list[str]:
         elif path.stat().st_size == 0:
             errors.append(f"empty {rel_path}")
 
-    sessions = session_dirs(memory_repo)
+    sessions = archived_record_session_dirs(memory_repo)
     if not sessions:
         errors.append("missing sessions entry")
     for required in ("summary.md", "evidence.md", "meta.json", "source-map.json"):
@@ -307,6 +314,105 @@ def run_search_health_check(paths: GatePaths) -> None:
     )
 
 
+def run_explicit_capture_adapter(paths: GatePaths) -> dict[str, object]:
+    adapter_script = paths.memory_repo / "tools/capture_explicit_memory.py"
+    valid_input = paths.root / "explicit-capture.jsonl"
+    valid_input.write_text(
+        json.dumps(
+            {
+                "text": EXPLICIT_CAPTURE_TEXT,
+                "layer": "domain",
+                "scope": "domain:agent-memory",
+                "source": "explicit_request",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = run_command(
+        [
+            sys.executable,
+            str(adapter_script),
+            "--memory-repo",
+            str(paths.memory_repo),
+            "--input",
+            str(valid_input),
+        ],
+        "explicit_capture:adapter",
+    )
+    try:
+        adapter_report = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise GateFailure("explicit_capture:adapter", "invalid_json") from exc
+    if not isinstance(adapter_report, dict) or adapter_report.get("status") != "passed":
+        raise GateFailure("explicit_capture:adapter", "report_not_passed")
+
+    rejected_input = paths.root / "explicit-capture-raw.jsonl"
+    rejected_input.write_text(
+        json.dumps(
+            {
+                "text": "Prefer short explicit memory facts.",
+                "raw_transcript": EXPLICIT_RAW_TRANSCRIPT_SENTINEL,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(adapter_script),
+            "--memory-repo",
+            str(paths.memory_repo),
+            "--input",
+            str(rejected_input),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if rejected.returncode == 0:
+        raise GateFailure("explicit_capture:raw_refusal", "accepted_raw_transcript")
+    if "raw transcript fields are not accepted" not in rejected.stderr:
+        raise GateFailure("explicit_capture:raw_refusal", "unexpected_refusal_reason")
+
+    explicit_nodes = [
+        row
+        for row in iter_jsonl(paths.memory_repo / "memories/explicit.jsonl")
+        if row.get("text") == EXPLICIT_CAPTURE_TEXT
+    ]
+    search = run_command(
+        [
+            sys.executable,
+            str(paths.memory_repo / "tools/search_memory.py"),
+            EXPLICIT_CAPTURE_QUERY,
+            "--repo",
+            str(paths.memory_repo),
+            "--depth",
+            "source",
+        ],
+        "explicit_capture:search",
+    )
+    if explicit_nodes and f"memory_id: {explicit_nodes[0].get('memory_id')}" not in search.stdout:
+        raise GateFailure("explicit_capture:search", "missing_explicit_memory_hit")
+    if "raw_source_preview" in search.stdout:
+        raise GateFailure("explicit_capture:search", "rendered_raw_source_preview")
+    combined_output = "\n".join((result.stdout, result.stderr, rejected.stdout, rejected.stderr))
+    privacy_leak_count = sum(
+        1 for value in (EXPLICIT_CAPTURE_TEXT, EXPLICIT_RAW_TRANSCRIPT_SENTINEL) if value in combined_output
+    )
+    return {
+        "status": "passed",
+        "adapter_input_records": int(adapter_report.get("records_read", 0)),
+        "captured_memory_nodes": len(explicit_nodes),
+        "rejected_raw_transcript_records": 1,
+        "search_hit_count": 1 if explicit_nodes else 0,
+        "privacy_leak_count": privacy_leak_count,
+    }
+
+
 def audit_archive(paths: GatePaths) -> None:
     audit_script = paths.memory_repo / "tools/audit_memory_archive.py"
     run_command(
@@ -413,8 +519,26 @@ def validate_self_maintenance(report: dict[str, object]) -> None:
             raise GateFailure("self_maintenance", f"{key}_unexpected")
 
 
-def build_report(paths: GatePaths, search_depths: list[str], self_maintenance: dict[str, object]) -> dict[str, object]:
-    sessions = session_dirs(paths.memory_repo)
+def validate_explicit_capture(report: dict[str, object]) -> None:
+    expected = {
+        "adapter_input_records": 1,
+        "captured_memory_nodes": 1,
+        "rejected_raw_transcript_records": 1,
+        "search_hit_count": 1,
+        "privacy_leak_count": 0,
+    }
+    for key, expected_value in expected.items():
+        if report.get(key) != expected_value:
+            raise GateFailure("explicit_capture", f"{key}_unexpected")
+
+
+def build_report(
+    paths: GatePaths,
+    search_depths: list[str],
+    self_maintenance: dict[str, object],
+    explicit_capture: dict[str, object],
+) -> dict[str, object]:
+    sessions = archived_record_session_dirs(paths.memory_repo)
     daily_files = sorted((paths.memory_repo / "daily").glob("*/*.md"))
     memory_files = sorted((paths.memory_repo / "memories").glob("*.jsonl"))
     return {
@@ -429,6 +553,7 @@ def build_report(paths: GatePaths, search_depths: list[str], self_maintenance: d
         "search_health_check": "passed",
         "sync_dry_run": "passed",
         "self_maintenance": self_maintenance,
+        "explicit_capture": explicit_capture,
         "output_contract": "aggregate_only",
     }
 
@@ -444,6 +569,7 @@ def run_gate(root: Path) -> dict[str, object]:
     initialize_git_repo(paths.memory_repo, "Initial synthetic archive")
     write_synthetic_source_records(paths.source_dir, paths.project_path)
     update_archive(paths)
+    explicit_capture = run_explicit_capture_adapter(paths)
     artifact_errors = validate_archive_artifacts(paths.memory_repo)
     if artifact_errors:
         raise GateFailure("artifacts", artifact_errors[0])
@@ -452,9 +578,10 @@ def run_gate(root: Path) -> dict[str, object]:
     audit_archive(paths)
     self_maintenance = build_self_maintenance_report(paths)
     validate_self_maintenance(self_maintenance)
+    validate_explicit_capture(explicit_capture)
     initialize_git_repo(paths.memory_repo, "Synthetic archive after update")
     run_sync_dry_run(paths)
-    return build_report(paths, search_depths, self_maintenance)
+    return build_report(paths, search_depths, self_maintenance, explicit_capture)
 
 
 def make_work_root(work_dir: str | None) -> tuple[Path, tempfile.TemporaryDirectory[str] | None, Path | None]:

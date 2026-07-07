@@ -94,6 +94,7 @@ my-precious-skill/
       tools/search_memory.py
       tools/generate_answer_records.py
       tools/update_memory_archive.py
+      tools/capture_explicit_memory.py
       tools/induction_consolidation_audit.py
       tools/run_memory_updates.py
       tools/audit_memory_archive.py
@@ -1056,9 +1057,10 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 ```
 
 The sync helper only stages publish-safe archive paths (`INDEX.md`,
-`config/projects.jsonl`, `index/`, `daily/`, and `sessions/`). It refuses
-tool/script edits, private memory/review node files, archive audit findings,
-unredacted key-like values, and whitespace errors before committing.
+`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+`sessions/`). It refuses tool/script edits, automatic memory/review node files,
+archive audit findings, unredacted key-like values, and whitespace errors
+before committing.
 
 ## Archive Contract
 
@@ -1241,6 +1243,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
+  templates/agent-memory-repo/tools/capture_explicit_memory.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \

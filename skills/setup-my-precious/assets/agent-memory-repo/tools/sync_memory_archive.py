@@ -17,6 +17,7 @@ ALLOWED_ROOTS = (
     "config/projects.jsonl",
     "index",
     "daily",
+    "memories/explicit.jsonl",
     "sessions",
 )
 SECRET_PATTERNS = {

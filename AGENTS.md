@@ -121,6 +121,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/apply_memory_review_decisions.py \
   templates/agent-memory-repo/tools/author_generated_answer_cases.py \
+  templates/agent-memory-repo/tools/capture_explicit_memory.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \

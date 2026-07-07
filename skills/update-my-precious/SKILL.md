@@ -63,6 +63,27 @@ Use `--rewrite-existing` only for deliberate backfill/repair runs; it rebuilds
 matching source records and replaces older archive entries for the same
 archive scope/source partition/source record.
 
+## Explicit Capture Rule
+
+Automatic induction is the default memory behavior for ordinary source
+records. When the user or governing prompt explicitly says to remember,
+force-save, or distill a short fact, use the deployment repository's
+`tools/capture_explicit_memory.py` explicit capture path instead of waiting for
+ordinary summarization.
+
+The explicit capture adapter consumes agent-neutral JSONL. Each row should
+contain a short fact in `text` plus optional `layer`, `scope`, and `source`
+fields:
+
+```jsonl
+{"text":"Prefer evidence-bound memories over unsupported recollection.","layer":"global","scope":"global","source":"explicit_request"}
+```
+
+Do not paste raw chat transcripts, message arrays, source content, tool logs,
+or automation run notes into this adapter. It creates evidence-bound support
+files and writes `source: explicit` sticky memory nodes; raw transcript fields
+are refused.
+
 The updater should:
 
 - read the latest archived timestamp from `index/sessions.jsonl` and `sessions/**/meta.json`

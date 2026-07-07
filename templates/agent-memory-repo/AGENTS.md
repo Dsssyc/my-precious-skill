@@ -31,11 +31,24 @@ When the user asks to update memory now:
 5. Review generated summaries before committing or pushing.
 6. If the user requested automatic Git sync, run `python tools/sync_memory_archive.py --push` instead of hand-staging files.
 
+When the user explicitly asks to remember, force-save, or distill a short fact,
+automatic induction is the default for ordinary source records, but explicit
+requests should use the `tools/capture_explicit_memory.py` explicit capture path.
+Write agent-neutral JSONL with `text` plus optional `layer`, `scope`, and
+`source`; then run:
+
+```bash
+python tools/capture_explicit_memory.py --input /path/to/explicit-memory.jsonl
+```
+
+Do not paste raw chat transcripts, message arrays, source content, tool logs, or
+automation run notes into explicit capture. Each row should be a short fact.
+
 `tools/sync_memory_archive.py` stages only `INDEX.md`, `config/projects.jsonl`,
-`index/`, `daily/`, and `sessions/`. It refuses unexpected files such as
-tool/script edits, private memory/review node files, and source-stream registry
-changes. Commit template or tool updates separately before running automatic
-archive sync.
+`index/`, `daily/`, `memories/explicit.jsonl`, and `sessions/`. It refuses
+unexpected files such as tool/script edits, automatic memory/review node files,
+and source-stream registry changes. Commit template or tool updates separately
+before running automatic archive sync.
 
 When `config/projects.jsonl` is empty, the global runner should scan source
 records for project metadata and register discovered projects before updating.

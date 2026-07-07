@@ -267,6 +267,30 @@ printing queries, generated answers, reference answers, source paths, or raw
 refs. It is extractive and deterministic; it does not call a model or prove
 semantic generated-answer quality.
 
+## Capture Explicit Memories
+
+Automatic induction is the default path for ordinary source records. When a user
+or governing prompt explicitly asks to remember, force-save, or distill a short
+fact, use the explicit capture adapter with agent-neutral JSONL:
+
+```jsonl
+{"text":"Prefer evidence-bound memories over unsupported recollection.","layer":"global","scope":"global","source":"explicit_request"}
+```
+
+Run:
+
+```bash
+python tools/capture_explicit_memory.py \
+  --input /path/to/explicit-memory.jsonl
+```
+
+Rows may include `text`, optional `layer`, optional `scope`, and optional
+`source`. Do not paste raw chat transcripts, message arrays, source content,
+tool logs, or automation run notes into explicit capture. Each row should be a
+short fact. The adapter creates evidence-bound support files, writes a sticky
+`source: explicit` memory node, rebuilds indexes, and refuses raw transcript
+fields.
+
 ## Render Scheduler Config
 
 Generate reviewable scheduler configuration without installing it:
@@ -319,9 +343,9 @@ The sync helper refuses to proceed when non-archive paths changed, when
 generated archive files still contain recognized key-like values, when archive
 audit finds low-quality index text, or when `git diff --cached --check` fails.
 Expected publish-safe archive paths are limited to `INDEX.md`,
-`config/projects.jsonl`, `index/`, `daily/`, and `sessions/`. Private memory
-node files, review decisions, source-stream registries, tools, and docs must be
-handled outside automatic archive sync.
+`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+`sessions/`. Automatic memory node files, review decisions, source-stream
+registries, tools, and docs must be handled outside automatic archive sync.
 
 ## Archive Data
 
