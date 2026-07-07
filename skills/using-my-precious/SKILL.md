@@ -128,7 +128,9 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 9. Answer from the archive evidence, and mention the archive paths used.
    For a source-grounded answer handoff, Answer from archive evidence only:
    use active/current memory hits, cite supporting summaries or evidence, and
-   abstain when support is missing. A valid handoff carries `support_refs`
+   abstain when support is missing or when the supported hit fails the same
+   layer/scope/project-context checks used for the context-package decision.
+   A valid handoff carries `support_refs`
    that connect the answer to memory, summary, and evidence layers. Do not
    expose raw refs, raw transcripts, source content, scheduler state,
    credentials, or local private paths.

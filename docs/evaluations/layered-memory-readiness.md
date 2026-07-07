@@ -18,8 +18,9 @@ lifecycle setup/update/search/audit with self-maintenance safeguards, and
 deterministic source-grounded answer handoff records, plus agent-facing recall
 context packaging and consumption for supported answer versus abstain
 decisions, including packaged explicit-memory capture/revision/withdrawal
-governance checks, packaged progressive source-drilldown consumption, and
-packaged scope arbitration across global/domain/project memory layers. It is
+governance checks, packaged progressive source-drilldown consumption,
+packaged scope arbitration across global/domain/project memory layers, and
+packaged scope-aware answer-handoff consumption. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -638,6 +639,43 @@ context packages. It does not prove LLM answer quality, vector search,
 embedding-store readiness, ranking overhaul, ontology discovery, private
 archive quality, or public leaderboard parity. The command is stable and
 included in `tools/run_quality_gates.py`.
+
+## V2.8 Packaged Scope-Aware Answer Handoff Gate
+
+V2.8 adds `benchmarks/scope_answer_handoff_gate.py` to prove that the
+package-first answer handoff path can consume scope-arbitrated context-package
+metadata from a clean packaged deployment repo. The gate installs the packaged
+template, writes synthetic public global/domain/project memory rows, then
+invokes the copied deployment `tools/search_memory.py` with
+`--depth evidence --context-json` plus `--project-path` and
+`--preferred-scope` where applicable. It parses
+`report_kind: memory_recall_context_package` and builds deterministic
+answer-or-abstain handoff decisions only from context package fields and
+summary/evidence `support_refs`. Free-form search output is not used as
+answerability evidence.
+
+The synthetic cases cover global foundational answer handoff, domain-preferred
+answer handoff, current project override handoff, same-topic wrong-project
+support that must abstain, project-only support without project context that
+must abstain, stale broad support that must abstain after supersession,
+unsupported no-hit packages, and malformed packages that fail closed. The gate
+reports aggregate metrics:
+`scope_handoff_context_package_parse_success_rate`,
+`scope_handoff_supported_answer_accuracy`,
+`scope_handoff_abstention_accuracy`,
+`scope_handoff_support_ref_coverage_rate`,
+`scope_handoff_project_override_accuracy`,
+`scope_handoff_wrong_project_rejection_count`,
+`scope_handoff_missing_project_context_rejection_count`,
+`scope_handoff_stale_broad_rejection_count`,
+`scope_handoff_malformed_fail_closed_count`, `unsupported_claim_count`, and
+`privacy_leak_count`.
+
+This proves packaged scope-aware answer handoff consumption for context
+packages. It does not prove live LLM answer quality, semantic equivalence,
+ranking overhaul, vector search, ontology discovery, private archive quality,
+or public leaderboard parity. The command is stable and included in
+`tools/run_quality_gates.py`.
 
 ## Current Baseline
 
