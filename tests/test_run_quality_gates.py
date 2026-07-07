@@ -72,6 +72,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("tools/validate_skills.py", commands[0])
         self.assertTrue(any("benchmarks/packaged_lifecycle_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/using_my_precious_runtime_gate.py" in command for command in commands))
+        self.assertTrue(any("benchmarks/query_support_recall_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/v1_readiness_gate.py --run-packaged" in command for command in commands))
         self.assertTrue(
             any("benchmarks/v1_readiness_gate.py --run-packaged --require-answer" in command for command in commands)
@@ -81,6 +82,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any(command.startswith("cmp -s ") for command in commands))
         self.assertTrue(any(command == "git diff --check" for command in commands))
         self.assertIn("benchmarks/using_my_precious_runtime_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/query_support_recall_gate.py", module.PY_COMPILE_TARGETS)
 
     def test_passing_gate_returns_aggregate_scorecards(self):
         module = load_gate_module()

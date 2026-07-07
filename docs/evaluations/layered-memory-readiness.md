@@ -469,6 +469,38 @@ This proves deterministic support-coverage decision reliability for the
 package-first runtime contract. It is not ranking quality, not LLM answer quality,
 not vector search, not ontology discovery, and not public leaderboard parity.
 
+## V2.3 Query-Support-Aware Hard-Negative Recall Gate
+
+V2.3 adds `benchmarks/query_support_recall_gate.py` to quantify the
+query-support boundary under hard-negative recall conditions. The gate builds a
+small synthetic public archive, invokes `search_memory.py` with
+`--limit 5 --depth evidence --context-json`, parses
+`report_kind: memory_recall_context_package`, and treats
+`query_support`, lifecycle status, and summary/evidence drill paths as the
+only answerability source. Free-form search output is not used.
+
+The synthetic cases cover supported active/current memory, same-topic wrong-scope
+near miss, weak active/current support, broad lexical overlap,
+inactive/superseded-only support, unsupported/no-hit abstention, and malformed
+package fail-closed behavior. The gate reports aggregate metrics:
+`supported_context_recall_at_5`, `answerable_precision_at_5`,
+`query_support_boundary_pass_rate`, `weak_support_rejection_count`,
+`scope_mixed_noise_at_5`, `inactive_lifecycle_rejection_count`,
+`runtime_abstention_accuracy`, and `privacy_leak_count`.
+
+The V2.3 synthetic baseline passes with
+`supported_context_recall_at_5=1.0`, `answerable_precision_at_5=1.0`,
+`query_support_boundary_pass_rate=1.0`, `weak_support_rejection_count=2`,
+`scope_mixed_noise_at_5=0.0`, `inactive_lifecycle_rejection_count=1`,
+`runtime_abstention_accuracy=1.0`, and `privacy_leak_count=0`. It also records
+`scope_mixed_related_hit_count_at_5=1` to show that a wrong-scope related hit
+can still be observed in top-k while remaining outside the answerable surface.
+
+This proves query-support-aware hard-negative recall diagnostics for context
+packages. It is not live LLM answer quality, not vector search quality, not public
+benchmark status, not public leaderboard parity, not automatic ontology discovery,
+and not solved long-horizon memory decay.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

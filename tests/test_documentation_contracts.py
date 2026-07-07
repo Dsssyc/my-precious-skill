@@ -99,6 +99,30 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v23_hard_negative_recall_gate(self):
+        section = self.evaluation_section("## V2.3 Query-Support-Aware Hard-Negative Recall Gate")
+        for phrase in (
+            "benchmarks/query_support_recall_gate.py",
+            "same-topic wrong-scope",
+            "weak active/current",
+            "broad lexical overlap",
+            "inactive/superseded-only",
+            "supported_context_recall_at_5",
+            "answerable_precision_at_5",
+            "query_support_boundary_pass_rate",
+            "weak_support_rejection_count",
+            "scope_mixed_noise_at_5",
+            "inactive_lifecycle_rejection_count",
+            "runtime_abstention_accuracy",
+            "privacy_leak_count",
+            "not live LLM answer quality",
+            "not vector search quality",
+            "not public leaderboard parity",
+            "not automatic ontology discovery",
+            "not solved long-horizon memory decay",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_preserves_bounded_claim_language(self):
         for phrase in (
             "private archive",
