@@ -40,44 +40,48 @@ If none exists, say that no local agent memory archive was found.
 
 After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
-1. Run the deployment repo search tool when present:
+1. Before answering a historical fact, run the machine-readable context package
+   first:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>"
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth evidence --context-json
    ```
 
-   This starts with high-level layered memory nodes when the archive contains
-   `index/memories.jsonl`.
+   The package must have `report_kind: memory_recall_context_package` and
+   `answerability.status`. Do not use free-form search output as the answerability source.
+   Use free-form search output only for exploration or drilldown after the package decision.
 
 2. When the current task is tied to a local project, pass project context:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --project-path "$PWD"
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --project-path "$PWD" --depth evidence --context-json
    ```
 
    This boosts matching `project_path`, `cwd`, `repository`, or project
    records without hiding cross-project hits.
 
-3. If high-level memory is insufficient, drill down:
+3. Apply the context-package decision recipe:
+
+   | package state | agent action |
+   | --- | --- |
+   | supported package -> answer | Answer only from supported active/current memory hits. Cite `summary_drill_paths` or `evidence_drill_paths`; open those archive-relative files only if more support is needed. |
+   | unsupported package -> abstain | Say the archive does not provide supported memory for the requested fact. Do not infer from related context. |
+   | inactive/superseded-only package -> abstain | Treat `answerability.reason: no_active_current_support` as stale support only; prefer current replacements when they are separately supported. |
+   | malformed or missing package -> abstain | The agent must fail closed to abstain rather than falling back to free-form output for answerability. |
+
+   A supported package is not permission to expose private query text, memory text,
+   raw refs, source paths, raw source content, credentials, scheduler state, or
+   local private paths. Keep answers bounded to summarized evidence and
+   archive-relative summary/evidence drill paths.
+
+4. If package-supported evidence needs human-readable exploration, use
+   free-form search after the decision:
 
    ```bash
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>"
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth session
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth evidence
    ```
-
-4. For source-grounded answer handoff, prefer the machine-readable context
-   package when the deployed search tool supports it:
-
-   ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --context-json
-   ```
-
-   The package has `report_kind: memory_recall_context_package` and an
-   `answerability.status`. If it is `supported`, answer only from
-   active/current memory hits and cite the listed summary or evidence drill
-   paths. If it is `unsupported`, abstain instead of inferring a historical
-   fact. The package is designed to omit memory text, raw refs, raw source
-   content, credentials, scheduler state, and local private paths.
 
 5. Use source depth only when the user explicitly asks for source reachability:
 
@@ -94,11 +98,10 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
    ```
 
-6. If the deployment repo has no search tool, use the bundled script. The
-   bundled script also supports `--context-json`:
+6. If the deployment repo has no search tool, use the bundled script:
 
    ```bash
-   python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO"
+   python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO" --depth evidence --context-json
    ```
 
 7. Read `why:` and `drill:` lines. Prefer high-level memories with strong

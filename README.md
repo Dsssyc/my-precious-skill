@@ -158,21 +158,25 @@ $using-my-precious search my historical agent memory for why raw transcripts sho
 $using-my-precious find previous context about the production incident investigation
 ```
 
-For agent-facing source-grounded handoff, the read-path search tool can emit a
-deterministic recall context package:
+For agent-facing source-grounded handoff, the default read path is to request a
+deterministic recall context package before answering from memory:
 
 ```bash
 python "$AGENT_SESSION_MEMORY_REPO/tools/search_memory.py" \
   "prior decisions about the migration strategy" \
+  --depth evidence \
   --context-json
 ```
 
 The JSON output has `report_kind: memory_recall_context_package` plus
 `answerability.status`. Agents should answer only from supported
 active/current hits and cite the listed summary or evidence drill paths. If the
-package is unsupported, they should abstain. The package omits memory text, raw
-refs, raw source content, credentials, scheduler state, and local private
-paths.
+package is unsupported, inactive/superseded-only, malformed, or missing, they
+should abstain. Free-form search output is only for exploration or drilldown
+after the package decision; it is not the answerability source. The package
+omits memory text, raw refs, raw source content, credentials, scheduler state,
+and local private paths, and agents should not render private query text in
+answers or aggregate reports.
 
 `$setup-my-precious` records the archive location in
 `~/.config/my-precious/config.json` by default. The environment variable is an

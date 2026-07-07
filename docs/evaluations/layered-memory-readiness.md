@@ -392,6 +392,33 @@ aggregate/privacy-safe: no memory text, raw transcript text, raw source
 content, raw refs, local private paths, credentials, scheduler state, private queries,
 generated answers, or reference answers are rendered in the readiness output.
 
+## V2.0 Runtime Skill Consumption Contract
+
+V2.0 moves context-package consumption into the runtime instructions for the
+`using-my-precious` read-path skill and the deployment repository guidance. An
+agent answering a historical memory question should first request
+`memory_recall_context_package` with `--depth evidence --context-json`, then
+use `answerability.status` and per-hit support metadata as the decision
+boundary. Do not use free-form search output as the answerability source.
+Free-form search remains useful only for exploration or drilldown after the
+package decision.
+
+The agent-facing decision recipe is deliberately small:
+
+| package state | action |
+| --- | --- |
+| supported package -> answer | Answer only from supported active/current hits and cite summary or evidence drill paths. |
+| unsupported package -> abstain | Say the archive has no supported memory for the requested fact. |
+| inactive/superseded-only package -> abstain | Treat stale-only support as insufficient unless a current replacement is separately supported. |
+| malformed or missing package -> abstain | Fail closed rather than deriving answerability from free-form text. |
+
+This is a runtime skill consumption contract, not live LLM answer quality, not vector search,
+not ranking quality, and not automatic ontology discovery. The same privacy
+boundary applies at the skill layer: no private query text, memory text, raw refs,
+raw source content, source paths, credentials, scheduler state, or local private paths
+should be rendered in answers, skill examples, benchmark reports, or reusable
+repository artifacts.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

@@ -147,20 +147,25 @@ $using-my-precious 根据我的历史 agent memory，找一下之前为什么不
 $using-my-precious 查找之前关于生产事故排查的上下文
 ```
 
-用于 agent 面向证据回答的 handoff 时，read-path 搜索工具可以输出确定性的
-recall context package：
+用于 agent 面向证据回答的 handoff 时，默认 read path 是先请求确定性的
+recall context package，再决定是否回答：
 
 ```bash
 python "$AGENT_SESSION_MEMORY_REPO/tools/search_memory.py" \
   "prior decisions about the migration strategy" \
+  --depth evidence \
   --context-json
 ```
 
 JSON 输出包含 `report_kind: memory_recall_context_package` 和
 `answerability.status`。agent 只能基于 supported 的 active/current hits
 回答，并引用列出的 summary 或 evidence drill paths；如果 package 是
-unsupported，就应该 abstain。该 package 不渲染 memory text、raw refs、
-raw source content、credentials、scheduler state 或 local private paths。
+unsupported、inactive/superseded-only、malformed 或 missing，就应该
+abstain。free-form search output 只能在 package decision 之后用于探索或
+drilldown，不能作为 answerability source。该 package 不渲染 memory
+text、raw refs、raw source content、credentials、scheduler state 或 local
+private paths；agent 在答案或 aggregate reports 中也不应渲染 private
+query text。
 
 `$setup-my-precious` 默认会把 archive 位置写入
 `~/.config/my-precious/config.json`。环境变量只是当前 shell 和自动化任务的

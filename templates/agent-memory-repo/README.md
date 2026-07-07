@@ -8,8 +8,24 @@ unresolved work, reusable facts, and user preferences.
 
 ## Search
 
-Search starts with high-level memory nodes and can drill down into supporting
-sessions and evidence when `index/memories.jsonl` exists:
+Before answering a historical fact from memory, request the machine-readable
+recall context package and use `answerability.status` as the decision boundary:
+
+```bash
+python tools/search_memory.py "<query>" --depth evidence --context-json
+python tools/search_memory.py "<query>" --project-path /path/to/current/project --depth evidence --context-json
+```
+
+The JSON output has `report_kind: memory_recall_context_package`. Answer only
+from supported active/current hits and the listed summary or evidence drill
+paths. Abstain when the package is unsupported, inactive/superseded-only,
+malformed, or missing. Free-form search output is for exploration after the
+package decision; it is not the answerability source and should not render
+private query text, memory text, raw refs, source paths, credentials, scheduler
+state, or local private paths.
+
+After the package decision, use free-form search to inspect high-level memory
+nodes and drill down into supporting sessions and evidence:
 
 ```bash
 python tools/search_memory.py "<query>"

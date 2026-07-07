@@ -261,6 +261,28 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v20_runtime_skill_consumption_contract(self):
+        section = self.evaluation_section("## V2.0 Runtime Skill Consumption Contract")
+        for phrase in (
+            "using-my-precious",
+            "memory_recall_context_package",
+            "--depth evidence --context-json",
+            "answerability.status",
+            "Do not use free-form search output as the answerability source",
+            "supported package -> answer",
+            "unsupported package -> abstain",
+            "inactive/superseded-only package -> abstain",
+            "malformed or missing package -> abstain",
+            "not live LLM answer quality",
+            "not vector search",
+            "not ranking quality",
+            "private query",
+            "raw refs",
+            "local private paths",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
