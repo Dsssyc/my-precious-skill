@@ -2666,13 +2666,17 @@ def direct_explicit_memory_node(
     summary_path: str,
     evidence_refs: list[dict],
     raw_refs: list[dict],
+    supersedes: list[str],
+    deprecates: list[str],
     now: str,
 ) -> dict:
     cleaned = clean_explicit_memory_text(text)
     if not cleaned or is_sensitive_explicit_memory_text(cleaned) or is_noisy_text(cleaned):
         raise SystemExit("explicit memory text is empty, noisy, or sensitive")
+    if supersedes and deprecates:
+        raise SystemExit("explicit memory cannot both supersede and deprecate targets")
     topic = memory_topic(cleaned, [])
-    return {
+    node = {
         "memory_id": memory_id_for(layer, scope, cleaned, "explicit"),
         "layer": layer,
         "scope": scope,
@@ -2688,10 +2692,13 @@ def direct_explicit_memory_node(
         "derived_from": [summary_path],
         "evidence_refs": evidence_refs,
         "raw_refs": raw_refs,
-        "supersedes": [],
+        "supersedes": sorted(set(supersedes)),
         "superseded_by": None,
         "tags": sorted({topic, "explicit-memory"}),
     }
+    if deprecates:
+        node["deprecates"] = sorted(set(deprecates))
+    return node
 
 
 def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
@@ -4117,6 +4124,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
         help="Optional raw/source ref PATH#ANCHOR for --explicit-memory",
     )
+    parser.add_argument(
+        "--explicit-supersedes",
+        action="append",
+        default=[],
+        help="Existing memory id superseded by --explicit-memory",
+    )
+    parser.add_argument(
+        "--explicit-deprecates",
+        action="append",
+        default=[],
+        help="Existing memory id deprecated by --explicit-memory",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show records that would be archived")
     return parser.parse_args(argv)
 
@@ -4158,7 +4177,26 @@ def main(argv: list[str] | None = None) -> int:
             if not is_safe_direct_raw_ref(ref):
                 raise SystemExit("--explicit-raw-ref is unsafe")
             raw_refs.append(ref)
+        if args.explicit_supersedes and args.explicit_deprecates:
+            raise SystemExit("--explicit-memory cannot use both --explicit-supersedes and --explicit-deprecates")
+        for value in [*args.explicit_supersedes, *args.explicit_deprecates]:
+            if not is_safe_memory_review_id(value):
+                raise SystemExit("explicit memory lifecycle target is unsafe")
         now = isoformat(datetime.now(UTC))
+        existing_rows = collect_meta(memory_repo)
+        generated_nodes = build_memory_nodes(existing_rows)
+        existing_node_ids = {
+            memory_id
+            for node in [*generated_nodes, *load_existing_explicit_memory_nodes(memory_repo)]
+            if isinstance((memory_id := node.get("memory_id")), str) and memory_id
+        }
+        missing_targets = [
+            value
+            for value in [*args.explicit_supersedes, *args.explicit_deprecates]
+            if value not in existing_node_ids
+        ]
+        if missing_targets:
+            raise SystemExit("explicit memory lifecycle target was not found")
         direct_nodes = [
             direct_explicit_memory_node(
                 text,
@@ -4167,12 +4205,12 @@ def main(argv: list[str] | None = None) -> int:
                 summary_path,
                 evidence_refs,
                 raw_refs,
+                args.explicit_supersedes,
+                args.explicit_deprecates,
                 now,
             )
             for text in args.explicit_memory
         ]
-        existing_rows = collect_meta(memory_repo)
-        generated_nodes = build_memory_nodes(existing_rows)
         write_memory_nodes(memory_repo, [*generated_nodes, *direct_nodes])
         rebuild_indexes(memory_repo)
         return 0

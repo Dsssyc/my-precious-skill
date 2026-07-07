@@ -661,6 +661,63 @@ def assess_lifecycle_explicit_capture(payload: dict[str, Any], failures: list[di
     return metrics
 
 
+def assess_lifecycle_explicit_revision(payload: dict[str, Any], failures: list[dict[str, Any]]) -> dict[str, int]:
+    raw = payload.get("explicit_revision")
+    metrics: dict[str, int] = {}
+    expected_min_metrics = (
+        "explicit_revision_input_records",
+        "explicit_revision_superseded_records",
+        "explicit_revision_deprecated_records",
+        "current_fact_search_hit_count",
+        "revision_evidence_reachability_count",
+    )
+    expected_zero_metrics = (
+        "stale_fact_default_search_hit_count",
+        "withdrawn_fact_default_search_hit_count",
+        "privacy_leak_count",
+    )
+    if not isinstance(raw, dict):
+        failures.append({"metric": "explicit_revision", "reason": "missing_or_non_object"})
+        return metrics
+    if raw.get("status") != "passed":
+        failures.append(
+            {
+                "metric": "explicit_revision.status",
+                "expected": "passed",
+                "actual": raw.get("status") if isinstance(raw.get("status"), str) else None,
+            }
+        )
+    for key in expected_min_metrics:
+        value = nonnegative_int_from_mapping(raw, key)
+        if value is None or value < 1:
+            failures.append(
+                {
+                    "metric": f"explicit_revision.{key}",
+                    "comparison": "min",
+                    "threshold": 1.0,
+                    "value": value,
+                }
+            )
+        elif value is not None:
+            metrics[key] = value
+    for key in expected_zero_metrics:
+        value = nonnegative_int_from_mapping(raw, key)
+        if value is None:
+            failures.append({"metric": f"explicit_revision.{key}", "reason": "missing_or_non_numeric"})
+        elif value != 0:
+            failures.append(
+                {
+                    "metric": f"explicit_revision.{key}",
+                    "expected": 0,
+                    "actual": value,
+                }
+            )
+            metrics[key] = value
+        else:
+            metrics[key] = value
+    return metrics
+
+
 def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -> dict[str, Any]:
     if payload is None:
         return {
@@ -748,6 +805,7 @@ def assess_lifecycle_report(payload: dict[str, Any] | None, *, required: bool) -
 
     metrics["self_maintenance"] = assess_lifecycle_self_maintenance(payload, failures)
     metrics["explicit_capture"] = assess_lifecycle_explicit_capture(payload, failures)
+    metrics["explicit_revision"] = assess_lifecycle_explicit_revision(payload, failures)
 
     output_contract = payload.get("output_contract")
     if output_contract != "aggregate_only":

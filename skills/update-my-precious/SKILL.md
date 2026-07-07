@@ -84,6 +84,21 @@ or automation run notes into this adapter. It creates evidence-bound support
 files and writes `source: explicit` sticky memory nodes; raw transcript fields
 are refused.
 
+When the user explicitly corrects or retracts an earlier explicit memory, use
+the same adapter's explicit revision path. Use `operation: replace` with
+`replaces_memory_id` for a new current fact, or `operation: withdraw` with
+`deprecates_memory_id` when the old fact should stop being active without a
+replacement:
+
+```jsonl
+{"operation":"replace","text":"Prefer the current fact.","replaces_memory_id":"mem_old_fact"}
+{"operation":"withdraw","text":"Withdraw the obsolete fact.","deprecates_memory_id":"mem_old_fact"}
+```
+
+Search should prefer the current fact after a replacement. The old fact is
+superseded rather than deleted, and provenance remains traceable through memory
+lifecycle links and evidence drilldown.
+
 The updater should:
 
 - read the latest archived timestamp from `index/sessions.jsonl` and `sessions/**/meta.json`

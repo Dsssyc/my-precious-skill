@@ -25,7 +25,10 @@ RAW_TRANSCRIPT_KEYS = {
     "transcript",
 }
 VALID_LAYERS = {"global", "domain", "project"}
+VALID_OPERATIONS = {"capture", "replace", "withdraw"}
 SAFE_SCOPE = re.compile(r"^[A-Za-z0-9_.:/@+-]{1,160}$")
+SAFE_MEMORY_ID = re.compile(r"^[A-Za-z0-9_.:@+-]{1,160}$")
+UNSAFE_MEMORY_ID_TOKENS = re.compile(r"(?i)(cookie|password|secret|should_not_render|token)")
 MAX_TEXT_CHARS = 500
 
 
@@ -83,6 +86,25 @@ def safe_source(value: object) -> str:
     return source
 
 
+def safe_operation(value: object) -> str:
+    operation = compact_text(value) or "capture"
+    if operation not in VALID_OPERATIONS:
+        raise CaptureFailure("explicit memory operation must be capture, replace, or withdraw")
+    return operation
+
+
+def safe_memory_id(value: object) -> str:
+    memory_id = compact_text(value)
+    if (
+        not memory_id
+        or not SAFE_MEMORY_ID.fullmatch(memory_id)
+        or ".." in memory_id
+        or UNSAFE_MEMORY_ID_TOKENS.search(memory_id)
+    ):
+        raise CaptureFailure("explicit memory revision target is unsafe")
+    return memory_id
+
+
 def parse_input(path: Path) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -102,14 +124,27 @@ def parse_input(path: Path) -> list[dict[str, str]]:
         if len(text) > MAX_TEXT_CHARS:
             raise CaptureFailure("explicit memory text must be a short fact")
         layer = safe_layer(row.get("layer"))
-        records.append(
-            {
-                "text": text,
-                "layer": layer,
-                "scope": safe_scope(row.get("scope"), layer),
-                "source": safe_source(row.get("source")),
-            }
-        )
+        operation = safe_operation(row.get("operation"))
+        record = {
+            "operation": operation,
+            "text": text,
+            "layer": layer,
+            "scope": safe_scope(row.get("scope"), layer),
+            "source": safe_source(row.get("source")),
+            "replaces_memory_id": "",
+            "deprecates_memory_id": "",
+        }
+        if operation == "replace":
+            if "deprecates_memory_id" in row:
+                raise CaptureFailure("explicit memory replace cannot deprecate a target")
+            record["replaces_memory_id"] = safe_memory_id(row.get("replaces_memory_id"))
+        elif operation == "withdraw":
+            if "replaces_memory_id" in row:
+                raise CaptureFailure("explicit memory withdraw cannot replace a target")
+            record["deprecates_memory_id"] = safe_memory_id(row.get("deprecates_memory_id"))
+        elif "replaces_memory_id" in row or "deprecates_memory_id" in row:
+            raise CaptureFailure("explicit memory capture cannot include revision targets")
+        records.append(record)
     if not records:
         raise CaptureFailure("input did not contain explicit memory records")
     return records
@@ -117,7 +152,10 @@ def parse_input(path: Path) -> list[dict[str, str]]:
 
 def write_support_files(memory_repo: Path, record: dict[str, str], now: datetime) -> tuple[str, str, str]:
     digest = hashlib.sha256(
-        f"{record['layer']}|{record['scope']}|{record['text']}".encode("utf-8")
+        (
+            f"{record['operation']}|{record['layer']}|{record['scope']}|"
+            f"{record['replaces_memory_id']}|{record['deprecates_memory_id']}|{record['text']}"
+        ).encode("utf-8")
     ).hexdigest()[:12]
     day = now.strftime("%Y/%m/%d")
     entry_dir = memory_repo / "sessions" / day / f"explicit-capture-{digest}"
@@ -159,6 +197,10 @@ def run_update(memory_repo: Path, record: dict[str, str], summary_rel: str, evid
         "--explicit-evidence-ref",
         f"{evidence_rel}#{quote_id}",
     ]
+    if record["operation"] == "replace":
+        command.extend(["--explicit-supersedes", record["replaces_memory_id"]])
+    elif record["operation"] == "withdraw":
+        command.extend(["--explicit-deprecates", record["deprecates_memory_id"]])
     result = subprocess.run(
         command,
         cwd=memory_repo,
@@ -178,6 +220,10 @@ def capture_records(memory_repo: Path, records: list[dict[str, str]]) -> int:
         run_update(memory_repo, record, summary_rel, evidence_rel, quote_id)
         captured += 1
     return captured
+
+
+def count_records(records: list[dict[str, str]], operation: str) -> int:
+    return sum(1 for record in records if record.get("operation") == operation)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -206,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
                 "status": "passed",
                 "records_read": len(records),
                 "captured": captured,
+                "revised": count_records(records, "replace"),
+                "withdrawn": count_records(records, "withdraw"),
                 "refused": 0,
                 "privacy": {
                     "aggregate_only": True,

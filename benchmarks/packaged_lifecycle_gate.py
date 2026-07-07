@@ -19,6 +19,13 @@ QUERY = "packaged lifecycle clean-room archive audit"
 EXPLICIT_CAPTURE_QUERY = "explicit memory capture adapter unsupported recollection"
 EXPLICIT_CAPTURE_TEXT = "Prefer explicit memory capture adapter over unsupported recollection."
 EXPLICIT_RAW_TRANSCRIPT_SENTINEL = "RAW TRANSCRIPT SHOULD NOT BE CAPTURED"
+EXPLICIT_REVISION_QUERY = "explicit revision policy conflict handling"
+EXPLICIT_REVISION_OLD_TEXT = "Prefer the legacy explicit revision policy for conflict handling."
+EXPLICIT_REVISION_CURRENT_TEXT = "Prefer the current explicit revision policy for conflict handling."
+EXPLICIT_WITHDRAW_QUERY = "obsolete explicit withdrawal policy conflict handling"
+EXPLICIT_WITHDRAW_OLD_TEXT = "Prefer the obsolete explicit withdrawal policy for conflict handling."
+EXPLICIT_WITHDRAW_MARKER_TEXT = "Withdraw obsolete explicit withdrawal policy for conflict handling."
+EXPLICIT_UNSAFE_REVISION_SENTINEL = "mem_cookie_SHOULD_NOT_RENDER"
 SOURCE_TEXT = (
     "Remember this: clean-room lifecycle fact validates packaged setup, update, "
     "search, and audit using public synthetic records."
@@ -413,6 +420,193 @@ def run_explicit_capture_adapter(paths: GatePaths) -> dict[str, object]:
     }
 
 
+def run_explicit_revision_adapter(paths: GatePaths) -> dict[str, object]:
+    adapter_script = paths.memory_repo / "tools/capture_explicit_memory.py"
+
+    def run_adapter(record: dict[str, object], label: str) -> dict[str, object]:
+        input_path = paths.root / f"{label}.jsonl"
+        input_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        result = run_command(
+            [
+                sys.executable,
+                str(adapter_script),
+                "--memory-repo",
+                str(paths.memory_repo),
+                "--input",
+                str(input_path),
+            ],
+            f"explicit_revision:{label}",
+        )
+        try:
+            parsed = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GateFailure(f"explicit_revision:{label}", "invalid_json") from exc
+        if not isinstance(parsed, dict) or parsed.get("status") != "passed":
+            raise GateFailure(f"explicit_revision:{label}", "report_not_passed")
+        return parsed
+
+    run_adapter(
+        {
+            "text": EXPLICIT_REVISION_OLD_TEXT,
+            "layer": "domain",
+            "scope": "domain:agent-memory",
+            "source": "explicit_request",
+        },
+        "old-capture",
+    )
+    old_node = next(
+        (row for row in iter_jsonl(paths.memory_repo / "memories/explicit.jsonl") if row.get("text") == EXPLICIT_REVISION_OLD_TEXT),
+        None,
+    )
+    if not isinstance(old_node, dict):
+        raise GateFailure("explicit_revision:old-capture", "missing_old_node")
+    old_memory_id = str(old_node.get("memory_id") or "")
+
+    replace_report = run_adapter(
+        {
+            "operation": "replace",
+            "text": EXPLICIT_REVISION_CURRENT_TEXT,
+            "layer": "domain",
+            "scope": "domain:agent-memory",
+            "source": "explicit_request",
+            "replaces_memory_id": old_memory_id,
+        },
+        "replace",
+    )
+    run_adapter(
+        {
+            "text": EXPLICIT_WITHDRAW_OLD_TEXT,
+            "layer": "domain",
+            "scope": "domain:agent-memory",
+            "source": "explicit_request",
+        },
+        "withdraw-old-capture",
+    )
+    withdrawn_old_node = next(
+        (row for row in iter_jsonl(paths.memory_repo / "memories/explicit.jsonl") if row.get("text") == EXPLICIT_WITHDRAW_OLD_TEXT),
+        None,
+    )
+    if not isinstance(withdrawn_old_node, dict):
+        raise GateFailure("explicit_revision:withdraw-old-capture", "missing_withdraw_old_node")
+    withdrawn_old_memory_id = str(withdrawn_old_node.get("memory_id") or "")
+
+    withdraw_report = run_adapter(
+        {
+            "operation": "withdraw",
+            "text": EXPLICIT_WITHDRAW_MARKER_TEXT,
+            "layer": "domain",
+            "scope": "domain:agent-memory",
+            "source": "explicit_request",
+            "deprecates_memory_id": withdrawn_old_memory_id,
+        },
+        "withdraw",
+    )
+
+    rejected_input = paths.root / "explicit-revision-unsafe.jsonl"
+    rejected_input.write_text(
+        json.dumps(
+            {
+                "operation": "replace",
+                "text": "Prefer safe explicit memory revision targets.",
+                "replaces_memory_id": EXPLICIT_UNSAFE_REVISION_SENTINEL,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(adapter_script),
+            "--memory-repo",
+            str(paths.memory_repo),
+            "--input",
+            str(rejected_input),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if rejected.returncode == 0:
+        raise GateFailure("explicit_revision:unsafe_refusal", "accepted_unsafe_target")
+    if "explicit memory revision target is unsafe" not in rejected.stderr:
+        raise GateFailure("explicit_revision:unsafe_refusal", "unexpected_refusal_reason")
+
+    explicit_rows = list(iter_jsonl(paths.memory_repo / "memories/explicit.jsonl"))
+    rows_by_text = {row.get("text"): row for row in explicit_rows}
+    old_node = rows_by_text.get(EXPLICIT_REVISION_OLD_TEXT)
+    current_node = rows_by_text.get(EXPLICIT_REVISION_CURRENT_TEXT)
+    withdrawn_old_node = rows_by_text.get(EXPLICIT_WITHDRAW_OLD_TEXT)
+    withdrawal_node = rows_by_text.get(EXPLICIT_WITHDRAW_MARKER_TEXT)
+    if not all(isinstance(row, dict) for row in (old_node, current_node, withdrawn_old_node, withdrawal_node)):
+        raise GateFailure("explicit_revision:nodes", "missing_revision_nodes")
+    if current_node.get("supersedes") != [old_node.get("memory_id")] or old_node.get("superseded_by") != current_node.get("memory_id"):
+        raise GateFailure("explicit_revision:supersession", "missing_supersession_links")
+    if withdrawal_node.get("deprecates") != [withdrawn_old_node.get("memory_id")] or withdrawn_old_node.get("deprecated_by") != withdrawal_node.get("memory_id"):
+        raise GateFailure("explicit_revision:deprecation", "missing_deprecation_links")
+
+    current_search = run_command(
+        [
+            sys.executable,
+            str(paths.memory_repo / "tools/search_memory.py"),
+            EXPLICIT_REVISION_QUERY,
+            "--repo",
+            str(paths.memory_repo),
+            "--depth",
+            "source",
+        ],
+        "explicit_revision:search-current",
+    )
+    withdrawn_search = run_command(
+        [
+            sys.executable,
+            str(paths.memory_repo / "tools/search_memory.py"),
+            EXPLICIT_WITHDRAW_QUERY,
+            "--repo",
+            str(paths.memory_repo),
+        ],
+        "explicit_revision:search-withdrawn",
+    )
+    current_id = str(current_node.get("memory_id") or "")
+    old_id = str(old_node.get("memory_id") or "")
+    withdrawn_old_id = str(withdrawn_old_node.get("memory_id") or "")
+    if current_id not in current_search.stdout:
+        raise GateFailure("explicit_revision:search-current", "missing_current_fact")
+    if old_id in current_search.stdout or EXPLICIT_REVISION_OLD_TEXT in current_search.stdout:
+        raise GateFailure("explicit_revision:search-current", "rendered_stale_fact")
+    if withdrawn_old_id in withdrawn_search.stdout or EXPLICIT_WITHDRAW_OLD_TEXT in withdrawn_search.stdout:
+        raise GateFailure("explicit_revision:search-withdrawn", "rendered_withdrawn_fact")
+    evidence_reachability_count = sum(
+        1
+        for ref in current_node.get("evidence_refs", [])
+        if isinstance(ref, dict) and f"{ref.get('path')}#{ref.get('quote_id')}" in current_search.stdout
+    )
+    combined_output = "\n".join((rejected.stdout, rejected.stderr))
+    privacy_leak_count = sum(
+        1
+        for value in (
+            EXPLICIT_REVISION_OLD_TEXT,
+            EXPLICIT_REVISION_CURRENT_TEXT,
+            EXPLICIT_WITHDRAW_OLD_TEXT,
+            EXPLICIT_WITHDRAW_MARKER_TEXT,
+            EXPLICIT_UNSAFE_REVISION_SENTINEL,
+        )
+        if value in combined_output
+    )
+    return {
+        "status": "passed",
+        "explicit_revision_input_records": int(replace_report.get("records_read", 0)) + int(withdraw_report.get("records_read", 0)),
+        "explicit_revision_superseded_records": 1 if old_node.get("superseded_by") == current_id else 0,
+        "explicit_revision_deprecated_records": 1 if withdrawn_old_node.get("deprecated_by") == withdrawal_node.get("memory_id") else 0,
+        "current_fact_search_hit_count": 1 if current_id in current_search.stdout else 0,
+        "stale_fact_default_search_hit_count": 1 if old_id in current_search.stdout or EXPLICIT_REVISION_OLD_TEXT in current_search.stdout else 0,
+        "withdrawn_fact_default_search_hit_count": 1 if withdrawn_old_id in withdrawn_search.stdout or EXPLICIT_WITHDRAW_OLD_TEXT in withdrawn_search.stdout else 0,
+        "revision_evidence_reachability_count": evidence_reachability_count,
+        "privacy_leak_count": privacy_leak_count,
+    }
+
+
 def audit_archive(paths: GatePaths) -> None:
     audit_script = paths.memory_repo / "tools/audit_memory_archive.py"
     run_command(
@@ -532,11 +726,28 @@ def validate_explicit_capture(report: dict[str, object]) -> None:
             raise GateFailure("explicit_capture", f"{key}_unexpected")
 
 
+def validate_explicit_revision(report: dict[str, object]) -> None:
+    expected = {
+        "explicit_revision_input_records": 2,
+        "explicit_revision_superseded_records": 1,
+        "explicit_revision_deprecated_records": 1,
+        "current_fact_search_hit_count": 1,
+        "stale_fact_default_search_hit_count": 0,
+        "withdrawn_fact_default_search_hit_count": 0,
+        "revision_evidence_reachability_count": 2,
+        "privacy_leak_count": 0,
+    }
+    for key, expected_value in expected.items():
+        if report.get(key) != expected_value:
+            raise GateFailure("explicit_revision", f"{key}_unexpected")
+
+
 def build_report(
     paths: GatePaths,
     search_depths: list[str],
     self_maintenance: dict[str, object],
     explicit_capture: dict[str, object],
+    explicit_revision: dict[str, object],
 ) -> dict[str, object]:
     sessions = archived_record_session_dirs(paths.memory_repo)
     daily_files = sorted((paths.memory_repo / "daily").glob("*/*.md"))
@@ -554,6 +765,7 @@ def build_report(
         "sync_dry_run": "passed",
         "self_maintenance": self_maintenance,
         "explicit_capture": explicit_capture,
+        "explicit_revision": explicit_revision,
         "output_contract": "aggregate_only",
     }
 
@@ -570,6 +782,7 @@ def run_gate(root: Path) -> dict[str, object]:
     write_synthetic_source_records(paths.source_dir, paths.project_path)
     update_archive(paths)
     explicit_capture = run_explicit_capture_adapter(paths)
+    explicit_revision = run_explicit_revision_adapter(paths)
     artifact_errors = validate_archive_artifacts(paths.memory_repo)
     if artifact_errors:
         raise GateFailure("artifacts", artifact_errors[0])
@@ -579,9 +792,10 @@ def run_gate(root: Path) -> dict[str, object]:
     self_maintenance = build_self_maintenance_report(paths)
     validate_self_maintenance(self_maintenance)
     validate_explicit_capture(explicit_capture)
+    validate_explicit_revision(explicit_revision)
     initialize_git_repo(paths.memory_repo, "Synthetic archive after update")
     run_sync_dry_run(paths)
-    return build_report(paths, search_depths, self_maintenance, explicit_capture)
+    return build_report(paths, search_depths, self_maintenance, explicit_capture, explicit_revision)
 
 
 def make_work_root(work_dir: str | None) -> tuple[Path, tempfile.TemporaryDirectory[str] | None, Path | None]:

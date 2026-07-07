@@ -159,6 +159,17 @@ class V1ReadinessGateTests(unittest.TestCase):
                 "search_hit_count": 1,
                 "privacy_leak_count": 0,
             },
+            "explicit_revision": {
+                "status": "passed",
+                "explicit_revision_input_records": 2,
+                "explicit_revision_superseded_records": 1,
+                "explicit_revision_deprecated_records": 1,
+                "current_fact_search_hit_count": 1,
+                "stale_fact_default_search_hit_count": 0,
+                "withdrawn_fact_default_search_hit_count": 0,
+                "revision_evidence_reachability_count": 2,
+                "privacy_leak_count": 0,
+            },
             "output_contract": "aggregate_only",
         }
 
@@ -1184,6 +1195,19 @@ class V1ReadinessGateTests(unittest.TestCase):
                     "captured_memory_nodes": 1,
                     "rejected_raw_transcript_records": 1,
                     "search_hit_count": 1,
+                    "privacy_leak_count": 0,
+                },
+            )
+            self.assertEqual(
+                lifecycle["metrics"]["explicit_revision"],
+                {
+                    "explicit_revision_input_records": 2,
+                    "explicit_revision_superseded_records": 1,
+                    "explicit_revision_deprecated_records": 1,
+                    "current_fact_search_hit_count": 1,
+                    "stale_fact_default_search_hit_count": 0,
+                    "withdrawn_fact_default_search_hit_count": 0,
+                    "revision_evidence_reachability_count": 2,
                     "privacy_leak_count": 0,
                 },
             )

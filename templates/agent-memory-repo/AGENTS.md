@@ -44,6 +44,14 @@ python tools/capture_explicit_memory.py --input /path/to/explicit-memory.jsonl
 Do not paste raw chat transcripts, message arrays, source content, tool logs, or
 automation run notes into explicit capture. Each row should be a short fact.
 
+When the user explicitly corrects or retracts an earlier explicit memory, use
+the explicit revision path in the same adapter. Use `operation: replace` with
+`replaces_memory_id` when there is a new current fact. Use `operation:
+withdraw` with `deprecates_memory_id` when the old fact should stop being
+active without a replacement. Search should prefer the current fact after
+replacement; the old fact is superseded rather than deleted, and provenance
+remains traceable through memory lifecycle links and evidence drilldown.
+
 `tools/sync_memory_archive.py` stages only `INDEX.md`, `config/projects.jsonl`,
 `index/`, `daily/`, `memories/explicit.jsonl`, and `sessions/`. It refuses
 unexpected files such as tool/script edits, automatic memory/review node files,

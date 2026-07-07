@@ -65,6 +65,20 @@ class PackagedLifecycleGateTests(unittest.TestCase):
                     "privacy_leak_count": 0,
                 },
             )
+            self.assertEqual(
+                report["explicit_revision"],
+                {
+                    "status": "passed",
+                    "explicit_revision_input_records": 2,
+                    "explicit_revision_superseded_records": 1,
+                    "explicit_revision_deprecated_records": 1,
+                    "current_fact_search_hit_count": 1,
+                    "stale_fact_default_search_hit_count": 0,
+                    "withdrawn_fact_default_search_hit_count": 0,
+                    "revision_evidence_reachability_count": 2,
+                    "privacy_leak_count": 0,
+                },
+            )
             self.assertEqual(set(report["search_depths"]), {"memory", "session", "evidence", "source"})
             self.assertNotIn("clean-room lifecycle fact", result.stdout)
             self.assertNotIn("clean-room lifecycle fact", result.stderr)
@@ -74,6 +88,10 @@ class PackagedLifecycleGateTests(unittest.TestCase):
             self.assertNotIn("No memory hits", result.stderr)
             self.assertNotIn("Prefer explicit memory capture adapter", result.stdout)
             self.assertNotIn("Prefer explicit memory capture adapter", result.stderr)
+            self.assertNotIn("legacy explicit revision policy", result.stdout)
+            self.assertNotIn("legacy explicit revision policy", result.stderr)
+            self.assertNotIn("obsolete explicit withdrawal policy", result.stdout)
+            self.assertNotIn("obsolete explicit withdrawal policy", result.stderr)
             self.assertTrue(Path(tmpdir).exists())
             self.assertEqual(list(Path(tmpdir).iterdir()), [])
 

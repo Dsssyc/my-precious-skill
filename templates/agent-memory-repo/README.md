@@ -291,6 +291,19 @@ short fact. The adapter creates evidence-bound support files, writes a sticky
 `source: explicit` memory node, rebuilds indexes, and refuses raw transcript
 fields.
 
+When correcting or retracting an earlier explicit memory, keep using the same
+adapter's explicit revision path:
+
+```jsonl
+{"operation":"replace","text":"Prefer the current fact.","replaces_memory_id":"mem_old_fact"}
+{"operation":"withdraw","text":"Withdraw the obsolete fact.","deprecates_memory_id":"mem_old_fact"}
+```
+
+`operation: replace` marks the old fact as superseded by the current fact.
+`operation: withdraw` marks the old fact as deprecated without creating an
+active replacement. The old fact is superseded rather than deleted, and
+provenance remains traceable through lifecycle links and evidence drilldown.
+
 ## Render Scheduler Config
 
 Generate reviewable scheduler configuration without installing it:

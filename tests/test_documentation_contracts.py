@@ -158,6 +158,31 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v15_explicit_revision_contract(self):
+        section = self.evaluation_section("## V1.5 Explicit Memory Revision And Conflict Contract")
+        for phrase in (
+            "explicit memory revision contract",
+            "not a general long-horizon governance system",
+            "not a new ranking capability",
+            "not generated-answer quality",
+            "replace",
+            "withdraw",
+            "current fact",
+            "old fact is not deleted",
+            "superseded and retains evidence traceability",
+            "explicit_revision",
+            "explicit_revision_input_records=2",
+            "explicit_revision_superseded_records=1",
+            "explicit_revision_deprecated_records=1",
+            "current_fact_search_hit_count=1",
+            "stale_fact_default_search_hit_count=0",
+            "withdrawn_fact_default_search_hit_count=0",
+            "revision_evidence_reachability_count=2",
+            "privacy_leak_count=0",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
@@ -166,6 +191,19 @@ class DocumentationContractTests(unittest.TestCase):
             "explicit capture path",
             "Do not paste raw chat transcripts",
             "short fact",
+        ):
+            self.assert_contains(self.skill_contracts, phrase)
+
+    def test_skill_docs_record_explicit_revision_adapter_contract(self):
+        for phrase in (
+            "explicit revision path",
+            "`operation: replace`",
+            "`operation: withdraw`",
+            "`replaces_memory_id`",
+            "`deprecates_memory_id`",
+            "prefer the current fact",
+            "old fact is superseded rather than deleted",
+            "provenance remains traceable",
         ):
             self.assert_contains(self.skill_contracts, phrase)
 

@@ -17,6 +17,10 @@ the user explicitly asks to remember, force-save, or distill a short fact, do
 not write from this read-path skill; use the deployment repository's
 `tools/capture_explicit_memory.py` explicit capture path through
 `update-my-precious`.
+If the user explicitly corrects or withdraws an earlier explicit memory, use
+that same explicit revision path through `update-my-precious`; `operation:
+replace` takes `replaces_memory_id`, and `operation: withdraw` takes
+`deprecates_memory_id`.
 
 ## Locate the Archive
 
@@ -86,6 +90,9 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    provenance, such as `confidence:high`, `support_count:<n>`,
    `source:explicit`, high-signal `field:<name>` reasons,
    `important-token-coverage`, or `project-context`.
+   When lifecycle links show a replacement, prefer the current fact; the old
+   fact is superseded rather than deleted, and provenance remains traceable
+   through drilldown.
 
 7. Open supporting summaries from `drill:` first. Open `evidence.md` only when
    the summary is insufficient or the user asks for stronger support.

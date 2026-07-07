@@ -197,6 +197,42 @@ The sync helper publish boundary is deliberately narrow: `memories/explicit.json
 is allowed so user-forced memories can be published through the safe sync path,
 while automatic memory node files and review files remain outside automatic sync.
 
+## V1.5 Explicit Memory Revision And Conflict Contract
+
+V1.5 is an explicit memory revision contract. It is not a general long-horizon governance system, not a new ranking capability, and not generated-answer quality.
+
+The deployment template keeps `capture_explicit_memory.py` as the single
+runtime adapter for explicit memory requests, and extends its agent-neutral
+JSONL input with bounded operations. `operation: replace` uses
+`replaces_memory_id` to mark an old explicit memory as superseded by the new
+current fact. `operation: withdraw` uses `deprecates_memory_id` to retire an
+old explicit memory without inventing a replacement fact. In both cases the old
+fact is not deleted; the old fact is superseded and retains evidence
+traceability through the existing memory lifecycle links and drilldown paths.
+The contract phrase is explicit: old fact is not deleted.
+The old fact is superseded and retains evidence traceability.
+
+Search default behavior must prefer the current fact. A stale replaced fact and
+a withdrawn fact must not appear as active default memory hits, while source
+and evidence drilldown for the current replacement remains reachable. Raw
+transcript fields, message arrays, source content, tool logs, automation run
+notes, and unsafe revision target identifiers remain refused.
+
+The public packaged lifecycle gate covers one accepted replace operation and
+one accepted withdraw operation. Its readiness output stays aggregate-only
+through the `explicit_revision` metrics:
+
+| metric | expected value |
+| --- | ---: |
+| explicit_revision_input_records=2 | true |
+| explicit_revision_superseded_records=1 | true |
+| explicit_revision_deprecated_records=1 | true |
+| current_fact_search_hit_count=1 | true |
+| stale_fact_default_search_hit_count=0 | true |
+| withdrawn_fact_default_search_hit_count=0 | true |
+| revision_evidence_reachability_count=2 | true |
+| privacy_leak_count=0 | true |
+
 Run the packaged convergence gate locally with:
 
 ```bash
