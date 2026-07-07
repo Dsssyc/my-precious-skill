@@ -501,6 +501,36 @@ packages. It is not live LLM answer quality, not vector search quality, not publ
 benchmark status, not public leaderboard parity, not automatic ontology discovery,
 and not solved long-horizon memory decay.
 
+## V2.4 Packaged Induction Consolidation Gate
+
+V2.4 extends `benchmarks/updater_induction_benchmark.py` to prove that the
+packaged write path can consolidate repeated and paraphrased automatic induction facts
+in a synthetic deployment archive. The gate creates synthetic
+source records, runs the packaged updater, verifies that same-fact paraphrases
+produce one current memory node, checks merged support/evidence refs, and then
+recalls that consolidated memory through the copied `search_memory.py` with
+`--limit 5 --depth evidence --context-json`. The post-consolidation recall
+check parses `report_kind: memory_recall_context_package` and uses
+`answerability.status`, per-hit `query_support.status`, and summary/evidence
+drill paths as the only answerability source.
+
+The synthetic cases also keep the negative write-path boundary in view:
+contradictory facts route to induction review, scope narrowing/broadening
+ambiguity routes to induction review, and repeated process/status noise remains
+rejected rather than promoted. The gate reports aggregate metrics:
+`consolidated_duplicate_suppression_rate`,
+`consolidated_support_merge_rate`,
+`consolidated_evidence_retention_rate`,
+`contradiction_review_routing_rate`,
+`scope_shift_review_routing_rate`, `process_noise_rejection_rate`,
+`post_consolidation_recall_at_5`, and `privacy_leak_count`.
+
+This proves packaged synthetic induction consolidation behavior. It is not LLM summarization quality,
+not vector search, not ontology discovery, not full human memory modeling,
+not multi-month decay, not deletion policy, and not private archive quality.
+The command is stable and non-duplicative because it extends the existing
+updater benchmark already included in `tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
@@ -605,7 +635,7 @@ load.
 
 ## Updater-Driven Induction Baseline
 
-Baseline date: 2026-06-26
+Baseline date: 2026-07-07
 
 Code point used for the benchmark harness: this document revision
 
@@ -613,16 +643,16 @@ Case file:
 `benchmarks/cases/updater_induction_synthetic.jsonl`
 
 Case fingerprint:
-`bfc1cd71ca7e50755cf68e487f39c2bb8ed23c137f1822a0216a5906f88c9bca`
+`70c9cf786338b362189ff246abfbb5e61ecdf3d35dac45d34d12b909d855ecb3`
 
 Runner fingerprint:
-`da94d3800a46664891f998d9dac7fe06c0a03631df4668e15cf3a797ce290c62`
+`f9dd2e8590088aa1707f9fc6a6e95725052703ee0f17959c2d80959075797ac7`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`b811d68366062e6116623e1278292f139b84d9d787017f64fdd4ec8b771f7b2b`
+`0787c964fd662950bb5ad46e5e67972a7ca21b0388baa7f1482b6af3404a73a3`
 
 Baseline command:
 
@@ -637,9 +667,9 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 29 |
-| source_records | 41 |
-| expected_automatic_memories | 14 |
+| cases | 30 |
+| source_records | 43 |
+| expected_automatic_memories | 15 |
 | expected_forced_memories | 1 |
 | expected_lifecycle_links | 3 |
 | expected_memory_id_provenance_links | 3 |
@@ -660,6 +690,12 @@ Baseline result:
 | low_confidence_review_rate | 1.0 |
 | scope_change_review_rate | 1.0 |
 | conflict_review_rate | 1.0 |
+| contradiction_review_routing_rate | 1.0 |
+| scope_shift_review_routing_rate | 1.0 |
+| consolidated_duplicate_suppression_rate | 1.0 |
+| consolidated_support_merge_rate | 1.0 |
+| consolidated_evidence_retention_rate | 1.0 |
+| post_consolidation_recall_at_5 | 1.0 |
 | review_routing_rate | 1.0 |
 | process_noise_rejection_rate | 1.0 |
 | ephemeral_status_rejection_rate | 1.0 |
@@ -685,6 +721,7 @@ The updater-driven suite contains synthetic scenarios across these categories:
 | --- | ---: |
 | automatic_induction | 2 |
 | forced_memory | 1 |
+| induction_consolidation | 1 |
 | lifecycle | 1 |
 | natural_induction | 6 |
 | natural_precision | 8 |
@@ -708,6 +745,9 @@ suppression rates. Unit coverage now also rejects duplicate decision IDs,
 repeated exact rows, and conflicting candidate/fingerprint actions, while
 dry-run preflight reports aggregate duplicate/conflict/stale/unsafe/unknown
 counts.
+The induction consolidation case verifies that paraphrased same-fact automatic
+memories collapse to one current node with merged support/evidence refs and
+remain recallable through a context package at top 5.
 A separate aggregate-safe authoring helper now generates pending private
 decision skeletons from active `index/induction_review_candidates.jsonl` rows
 without rendering candidate text, source paths, queries, raw refs, or

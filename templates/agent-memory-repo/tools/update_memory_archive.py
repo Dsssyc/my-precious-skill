@@ -2894,6 +2894,8 @@ def build_induction_review_candidates(
         for older in ordered[:index]:
             if memory_text_key(current.text) == memory_text_key(older.text):
                 continue
+            if memory_consolidation_key(current.text) == memory_consolidation_key(older.text):
+                continue
             detail = semantic_relation_detail(current.text, older.text)
             reason = induction_review_reason_from_relation(detail)
             if not reason:

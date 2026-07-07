@@ -18,6 +18,7 @@ MEMORY_DEPRECATION_PATTERN = re.compile(
 TOKEN_SYNONYMS = {
     "anchors": "anchor",
     "evidences": "evidence",
+    "keep": "preserve",
     "keeps": "preserve",
     "kept": "preserve",
     "keeping": "preserve",

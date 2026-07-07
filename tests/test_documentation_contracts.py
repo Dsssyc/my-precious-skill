@@ -123,6 +123,31 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v24_induction_consolidation_gate(self):
+        section = self.evaluation_section("## V2.4 Packaged Induction Consolidation Gate")
+        for phrase in (
+            "benchmarks/updater_induction_benchmark.py",
+            "repeated and paraphrased automatic induction facts",
+            "--limit 5 --depth evidence --context-json",
+            "memory_recall_context_package",
+            "answerability.status",
+            "query_support.status",
+            "consolidated_duplicate_suppression_rate",
+            "consolidated_support_merge_rate",
+            "consolidated_evidence_retention_rate",
+            "contradiction_review_routing_rate",
+            "scope_shift_review_routing_rate",
+            "process_noise_rejection_rate",
+            "post_consolidation_recall_at_5",
+            "privacy_leak_count",
+            "not LLM summarization quality",
+            "not vector search",
+            "not ontology discovery",
+            "not private archive quality",
+            "tools/run_quality_gates.py",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_preserves_bounded_claim_language(self):
         for phrase in (
             "private archive",
