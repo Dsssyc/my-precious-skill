@@ -20,6 +20,7 @@ PY_COMPILE_TARGETS = (
     "tools/validate_skills.py",
     "tools/run_quality_gates.py",
     "benchmarks/packaged_lifecycle_gate.py",
+    "benchmarks/using_my_precious_runtime_gate.py",
     "benchmarks/e2e_induction_recall_benchmark.py",
     "benchmarks/updater_induction_benchmark.py",
     "benchmarks/layered_recall_benchmark.py",
@@ -79,6 +80,7 @@ def build_release_checks() -> list[CheckSpec]:
     return [
         CheckSpec("validate_skills", ("python3", "tools/validate_skills.py")),
         CheckSpec("packaged_lifecycle", ("python3", "benchmarks/packaged_lifecycle_gate.py")),
+        CheckSpec("using_my_precious_runtime", ("python3", "benchmarks/using_my_precious_runtime_gate.py")),
         CheckSpec(
             "v1_readiness_core",
             ("python3", "benchmarks/v1_readiness_gate.py", "--run-packaged"),

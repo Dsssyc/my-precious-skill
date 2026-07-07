@@ -58,6 +58,25 @@ class DocumentationContractTests(unittest.TestCase):
         self.assert_contains(self.evaluation, "required 5/5")
         self.assert_contains(self.evaluation, "required 6/6")
 
+    def test_evaluation_doc_records_v21_packaged_runtime_consumption_gate(self):
+        section = self.evaluation_section("## V2.1 Packaged Runtime Consumption Gate")
+        for phrase in (
+            "clean packaged deployment repo",
+            "benchmarks/using_my_precious_runtime_gate.py",
+            "runtime_context_package_parse_success_rate",
+            "runtime_supported_decision_accuracy",
+            "runtime_abstention_accuracy",
+            "runtime_inactive_rejection_count",
+            "runtime_malformed_fail_closed_count",
+            "privacy_leak_count",
+            "not LLM answer quality",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_preserves_bounded_claim_language(self):
         for phrase in (
             "private archive",

@@ -91,6 +91,7 @@ Run packaged lifecycle/readiness gates when readiness contract changes:
 
 ```bash
 python3 benchmarks/packaged_lifecycle_gate.py
+python3 benchmarks/using_my_precious_runtime_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
@@ -102,6 +103,7 @@ python3 -m py_compile \
   tools/validate_skills.py \
   tools/run_quality_gates.py \
   benchmarks/packaged_lifecycle_gate.py \
+  benchmarks/using_my_precious_runtime_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \

@@ -419,6 +419,34 @@ raw source content, source paths, credentials, scheduler state, or local private
 should be rendered in answers, skill examples, benchmark reports, or reusable
 repository artifacts.
 
+## V2.1 Packaged Runtime Consumption Gate
+
+V2.1 adds `benchmarks/using_my_precious_runtime_gate.py` to prove that the
+package-first read path is executable from a clean packaged deployment repo,
+not only documented in the reusable skill. The gate installs the packaged
+template through the setup script, writes synthetic public memory rows into the
+deployment repo, invokes that repo's copied `tools/search_memory.py` with
+`--depth evidence --context-json`, parses
+`report_kind: memory_recall_context_package`, and applies the documented
+runtime decision recipe without using free-form search output as the
+answerability source.
+
+The synthetic cases are intentionally small: supported active/current memory
+with summary and evidence drill paths answers; unsupported/no-hit packages
+abstain; inactive/superseded-only support abstains; malformed packages fail
+closed to abstain. The gate reports only aggregate metrics:
+`runtime_context_package_parse_success_rate`,
+`runtime_supported_decision_accuracy`, `runtime_abstention_accuracy`,
+`runtime_inactive_rejection_count`, `runtime_malformed_fail_closed_count`, and
+`privacy_leak_count`.
+
+This proves packaged runtime consumption of context packages. It is not LLM answer quality,
+not ranking quality, not vector search, not ontology discovery,
+and not public leaderboard parity. It also does not expand governance,
+embeddings, ranking, or live-answer generation. The command is stable and
+synthetic, so it is included in `tools/run_quality_gates.py` as part of the
+repo-local release gate.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
