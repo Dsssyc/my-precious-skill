@@ -234,6 +234,54 @@ class AuthorGeneratedAnswerCasesTests(unittest.TestCase):
             self.assertNotIn(supported_answer, rendered)
             self.assertNotIn(unsupported_answer, rendered)
 
+    def test_authoring_skips_positive_case_without_context_package_support(self):
+        good_answer = "Use verifiable source anchors for supported context package answers."
+        bad_answer = "Require unreachable evidence quote for generated answer support."
+        bad_summary, bad_evidence = self.support_paths("mem_bad_context")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            output = repo / "eval" / "private_cases.jsonl"
+            self.write_memory_index(
+                repo,
+                [
+                    self.memory_row(
+                        "mem_bad_context",
+                        bad_answer,
+                        derived_from=[bad_summary],
+                        evidence_refs=[{"path": bad_evidence, "quote_id": "missing_quote"}],
+                    ),
+                    self.memory_row("mem_good_context", good_answer),
+                ],
+            )
+
+            author = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--output",
+                    str(output),
+                    "--dry-run",
+                    "--limit",
+                    "3",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            report = json.loads(author.stdout)
+            self.assertEqual(report["selected_case_count"], 1)
+            self.assertEqual(report["positive_case_count"], 1)
+            self.assertEqual(report["skip_counts"], {"missing_context_package_support": 1})
+            rendered = author.stdout + author.stderr
+            self.assertNotIn(good_answer, rendered)
+            self.assertNotIn(bad_answer, rendered)
+            self.assertNotIn("mem_good_context", rendered)
+            self.assertNotIn("mem_bad_context", rendered)
+
     def test_authored_cases_feed_extractive_answer_benchmark(self):
         private_answer = "Use source anchors for provenance without printing raw transcript content."
         with tempfile.TemporaryDirectory() as tmpdir:

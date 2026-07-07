@@ -2182,9 +2182,7 @@ def main(argv: list[str] | None = None) -> int:
     display_query = safe_display_text(args.query)
 
     if args.context_json:
-        inactive_count = 0
-        if not hits:
-            inactive_count = inactive_memory_match_count(repo, query_tokens, context_terms, args.scope)
+        inactive_count = inactive_memory_match_count(repo, query_tokens, context_terms, args.scope)
         print(
             json.dumps(
                 build_context_package(

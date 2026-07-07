@@ -36,7 +36,7 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             },
             {
                 "case_id": "answer-adapter:unsupported",
-                "query": "Which private archive path stores the unmentioned adapter password?",
+                "query": "zzqmissing qxfactoid kzunseen",
                 "category": "generated_answer_abstain",
                 "source_benchmark": "MyPreciousAnswerAdapterSynthetic",
                 "case_origin": "extractive_answer_adapter_fixture",
@@ -97,6 +97,15 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertEqual(report["answer_handoff_supported_case_count"], 1)
             self.assertEqual(report["answer_handoff_abstain_case_count"], 1)
             self.assertEqual(report["answer_handoff_support_coverage_rate"], 1.0)
+            self.assertEqual(report["answerability_policy"], "context_package_answerability")
+            self.assertEqual(report["context_package_report_kind"], "memory_recall_context_package")
+            self.assertEqual(report["context_package_parse_success_count"], 2)
+            self.assertEqual(report["context_package_parse_failure_count"], 0)
+            self.assertEqual(report["context_package_supported_case_count"], 1)
+            self.assertEqual(report["context_package_abstain_case_count"], 1)
+            self.assertEqual(report["context_package_support_coverage_rate"], 1.0)
+            self.assertEqual(report["context_package_abstention_accuracy"], 1.0)
+            self.assertEqual(report["context_package_inactive_rejection_count"], 0)
             self.assertEqual(report["unsupported_claim_count"], 0)
             self.assertEqual(report["inactive_memory_answer_count"], 0)
             self.assertEqual(report["privacy_leak_count"], 0)
@@ -111,6 +120,15 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertEqual(supported_handoff["unsupported_claim_count"], 0)
             self.assertEqual(supported_handoff["inactive_memory_answer_count"], 0)
             self.assertEqual(supported_handoff["privacy_leak_count"], 0)
+            self.assertEqual(
+                supported_handoff["context_package"],
+                {
+                    "answerability_reason": "active_current_memory_support",
+                    "answerability_status": "supported",
+                    "parse_success": True,
+                    "report_kind": "memory_recall_context_package",
+                },
+            )
             self.assertEqual(supported_handoff["support_refs"][0]["memory_id"], "answer_adapter_source_depth")
             self.assertEqual(
                 supported_handoff["support_refs"][0]["summary_paths"],
@@ -125,6 +143,8 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertTrue(abstain_handoff["abstained"])
             self.assertEqual(abstain_handoff["abstain_reason"], "no_supported_memory_hit")
             self.assertEqual(abstain_handoff["support_refs"], [])
+            self.assertEqual(abstain_handoff["context_package"]["answerability_status"], "unsupported")
+            self.assertEqual(abstain_handoff["context_package"]["answerability_reason"], "no_recall_hits")
 
             rendered = adapter.stdout + adapter.stderr
             self.assertNotIn(rows[0]["query"], rendered)
@@ -263,11 +283,93 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertEqual(report["memory_answer_count"], 0)
             self.assertEqual(report["abstention_answer_count"], 1)
             self.assertEqual(report["inactive_memory_answer_count"], 0)
+            self.assertEqual(report["context_package_parse_success_count"], 1)
+            self.assertEqual(report["context_package_supported_case_count"], 0)
+            self.assertEqual(report["context_package_abstain_case_count"], 1)
+            self.assertEqual(report["context_package_inactive_rejection_count"], 1)
             answer_row = json.loads(answers.read_text(encoding="utf-8"))
             self.assertEqual(answer_row["generated_answer"], "There is not enough information in memory to answer.")
             self.assertTrue(answer_row["answer_handoff"]["abstained"])
-            self.assertEqual(answer_row["answer_handoff"]["abstain_reason"], "no_supported_memory_hit")
+            self.assertEqual(answer_row["answer_handoff"]["abstain_reason"], "no_active_current_support")
             self.assertEqual(answer_row["answer_handoff"]["support_refs"], [])
+            self.assertEqual(
+                answer_row["answer_handoff"]["context_package"]["answerability_reason"],
+                "no_active_current_support",
+            )
+
+    def test_context_package_parse_failure_fails_closed_to_abstain(self):
+        rows = [
+            {
+                "case_id": "answer-adapter:malformed-context-package",
+                "query": "What should malformed context packages do?",
+                "category": "generated_answer_abstain",
+                "source_benchmark": "MyPreciousAnswerAdapterSynthetic",
+                "case_origin": "extractive_answer_adapter_fixture",
+                "reference_answer": "not enough information",
+                "expected_abstain": True,
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            (repo / "index").mkdir(parents=True)
+            (repo / "sessions").mkdir(parents=True)
+            cases = root / "answer_cases.jsonl"
+            answers = root / "answers.jsonl"
+            stub_search = root / "malformed_search.py"
+            self.write_jsonl(cases, rows)
+            stub_search.write_text(
+                "#!/usr/bin/env python3\n"
+                "print('{\"report_kind\":\"wrong_package\",\"answerability\":{\"status\":\"supported\"}}')\n",
+                encoding="utf-8",
+            )
+
+            adapter = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--output",
+                    str(answers),
+                    "--search-script",
+                    str(stub_search),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(adapter.returncode, 0, adapter.stderr)
+            report = json.loads(adapter.stdout)
+            self.assertEqual(report["context_package_parse_success_count"], 0)
+            self.assertEqual(report["context_package_parse_failure_count"], 1)
+            self.assertEqual(report["context_package_supported_case_count"], 0)
+            self.assertEqual(report["context_package_abstain_case_count"], 1)
+            self.assertEqual(report["context_package_abstention_accuracy"], 1.0)
+            answer_row = json.loads(answers.read_text(encoding="utf-8"))
+            self.assertEqual(answer_row["generated_answer"], "There is not enough information in memory to answer.")
+            self.assertTrue(answer_row["answer_handoff"]["abstained"])
+            self.assertEqual(answer_row["answer_handoff"]["abstain_reason"], "context_package_unavailable")
+            self.assertEqual(
+                answer_row["answer_handoff"]["context_package"],
+                {
+                    "answerability_reason": "parse_failed",
+                    "answerability_status": "unsupported",
+                    "parse_success": False,
+                    "report_kind": "memory_recall_context_package",
+                },
+            )
+
+            rendered = adapter.stdout + adapter.stderr
+            self.assertNotIn(rows[0]["query"], rendered)
+            self.assertNotIn(str(repo), rendered)
+            self.assertNotIn(str(cases), rendered)
+            self.assertNotIn(str(answers), rendered)
 
     def test_abstains_when_top_hit_lacks_query_support(self):
         answer_text = "Use source anchors for provenance without printing raw transcript content"
@@ -344,7 +446,7 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertEqual(report["memory_answer_count"], 1)
             self.assertEqual(report["abstention_answer_count"], 1)
             self.assertEqual(report["unsupported_hit_count"], 1)
-            self.assertEqual(report["answerability_policy"], "query_token_support")
+            self.assertEqual(report["answerability_policy"], "context_package_answerability")
 
             benchmark = subprocess.run(
                 [

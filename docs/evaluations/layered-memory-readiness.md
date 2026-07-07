@@ -16,7 +16,8 @@ induction-to-recall behavior on synthetic source records, explicit non-project
 source stream registry updates on synthetic archives, clean-room packaged
 lifecycle setup/update/search/audit with self-maintenance safeguards, and
 deterministic source-grounded answer handoff records, plus agent-facing recall
-context packaging for supported answer versus abstain decisions. It is
+context packaging and consumption for supported answer versus abstain
+decisions. It is
 not a direct leaderboard score
 against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
 Memora, or RULER-style long-context retrieval tests.
@@ -96,8 +97,9 @@ The packaged generated-answer gate can be included in local convergence runs:
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
 
-The current packaged generated-answer fixture has 4 cases: 3 positive answer
-cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
+The current packaged generated-answer fixture has 5 cases: 3 positive answer
+cases and 2 abstention cases, including one inactive-only support rejection.
+It reports `case_pass_rate: 1.0`,
 `answer_normalized_match_rate: 1.0`, `answer_token_f1: 1.0`,
 `abstention_accuracy: 1.0`, `privacy_leak_count: 0`,
 `missing_answer_count: 0`, `duplicate_answer_count: 0`, and
@@ -105,10 +107,14 @@ cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
 `answer_handoff_present_rate: 1.0`,
 `answer_handoff_support_coverage_rate: 1.0`,
 `answer_handoff_supported_case_count: 3`,
-`answer_handoff_abstain_case_count: 1`, `unsupported_claim_count: 0`, and
-`inactive_memory_answer_count: 0`. It carries
-`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 4` and
-`case_origins.packaged_generated_answer_fixture: 4`, satisfying the answer
+`answer_handoff_abstain_case_count: 2`,
+`context_package_parse_success_rate: 1.0`,
+`context_package_support_coverage_rate: 1.0`,
+`context_package_abstention_accuracy: 1.0`,
+`context_package_inactive_rejection_count: 1`,
+`unsupported_claim_count: 0`, and `inactive_memory_answer_count: 0`. It carries
+`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 5` and
+`case_origins.packaged_generated_answer_fixture: 5`, satisfying the answer
 provenance and source-grounded handoff gates without rendering queries,
 generated answers, reference answers, source paths, or raw refs.
 
@@ -356,6 +362,35 @@ The privacy boundary is part of the evidence. The context package must not
 render memory text, raw transcript text, raw refs, raw source content, local private paths,
 credentials, or scheduler state. It may render archive-relative summary and
 evidence drill paths and aggregate source-ref status identifiers.
+
+## V1.9 Context-Package Consumption Gate
+
+V1.9 proves that the answerability adapter consumes
+`memory_recall_context_package` as the machine-readable read-path handoff. The
+generated-answer adapter calls `search_memory.py --context-json`, parses the
+package, and records a privacy-safe `context_package` handoff block for every
+answer record. Supported answers require a supported active/current package hit
+whose package `matched:` metadata covers the query support tokens and whose
+summary/evidence support refs are present. Unsupported packages, missing token
+coverage, inactive-only support, or malformed packages fail closed to abstain.
+
+`generated_answer_benchmark.py` now reports context-package consumption
+metrics: `context_package_handoff_present_rate`,
+`context_package_parse_success_rate`, `context_package_support_coverage_rate`,
+`context_package_abstention_accuracy`,
+`context_package_supported_case_count`,
+`context_package_abstain_case_count`,
+`context_package_parse_failure_count`, and
+`context_package_inactive_rejection_count`. `v1_readiness_gate.py` requires the
+rate/count metrics when generated-answer evidence is required.
+
+The V1.9 evidence remains bounded. It proves deterministic context-package
+consumption for supported versus abstain decisions. It is not live LLM answer quality,
+not ranking quality, not vector search, not automatic ontology discovery, and
+not public leaderboard parity. The package and benchmark reports must stay
+aggregate/privacy-safe: no memory text, raw transcript text, raw source
+content, raw refs, local private paths, credentials, scheduler state, private queries,
+generated answers, or reference answers are rendered in the readiness output.
 
 ## Current Baseline
 

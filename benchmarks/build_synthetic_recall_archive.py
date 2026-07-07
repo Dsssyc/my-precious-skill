@@ -110,6 +110,10 @@ def positive_case(case: dict) -> bool:
     return case.get("expected_abstain") is not True
 
 
+def inactive_abstain_case(case: dict) -> bool:
+    return case.get("expected_abstain") is True and bool(str(case.get("inactive_memory_id") or "").strip())
+
+
 def text_list(value: object) -> list[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
@@ -167,6 +171,11 @@ def validate_case_memory_identifiers(case: dict) -> None:
             validate_case_memory_identifier(memory_id, field)
     for stale_id in text_list(case.get("stale_memory_id")):
         validate_case_memory_identifier(stale_id, "stale_memory_id")
+    if inactive_abstain_case(case):
+        validate_case_memory_identifier(case.get("inactive_memory_id"), "inactive_memory_id")
+        replacement_id = str(case.get("replacement_memory_id") or "").strip()
+        if replacement_id:
+            validate_case_memory_identifier(replacement_id, "replacement_memory_id")
     for contradicted_id in text_list(case.get("contradicted_memory_id")):
         validate_case_memory_identifier(contradicted_id, "contradicted_memory_id")
     for deprecated_id in text_list(case.get("deprecated_memory_id")):
@@ -501,6 +510,56 @@ def build_superseded_distractor_records(case: dict) -> list[dict]:
     return records
 
 
+def build_inactive_abstain_records(case: dict) -> list[dict]:
+    inactive_id = str(case["inactive_memory_id"])
+    replacement_id = str(case.get("replacement_memory_id") or f"{inactive_id}_current")
+    query = str(case["query"])
+    summary_paths = summary_paths_for_case(case)
+    evidence_paths = evidence_paths_for_case(case)
+    raw_refs = [raw_ref_from_anchor(str(case["expected_source_anchor"]))]
+    old_record = {
+        "memory_id": inactive_id,
+        "layer": memory_layer(case),
+        "scope": "synthetic",
+        "topic": "generated-answer-inactive-only",
+        "text": f"Reference answer: retired stale context package answer. {query} {query} {query}.",
+        "rationale": "Synthetic inactive-only answerability fixture.",
+        "source": "automatic",
+        "confidence": "high",
+        "persistence": "normal",
+        "support_count": max(1, len(summary_paths), len(evidence_paths)),
+        "first_seen": "2026-06-18",
+        "last_seen": "2026-06-18",
+        "derived_from": summary_paths,
+        "evidence_refs": [{"path": path, "quote_id": "syn_ev_001"} for path in evidence_paths],
+        "raw_refs": raw_refs,
+        "supersedes": [],
+        "superseded_by": replacement_id,
+        "tags": ["generated-answer-abstain", "synthetic-benchmark", "inactive-only"],
+    }
+    current_record = {
+        "memory_id": replacement_id,
+        "layer": memory_layer(case),
+        "scope": "synthetic",
+        "topic": "current-replacement",
+        "text": "Current replacement uses unrelated wording.",
+        "rationale": "Synthetic current replacement for inactive-only answerability fixture.",
+        "source": "automatic",
+        "confidence": "high",
+        "persistence": "normal",
+        "support_count": 1,
+        "first_seen": "2026-06-19",
+        "last_seen": "2026-06-19",
+        "derived_from": [],
+        "evidence_refs": [],
+        "raw_refs": [],
+        "supersedes": [inactive_id],
+        "superseded_by": None,
+        "tags": ["synthetic-benchmark", "current-replacement"],
+    }
+    return [old_record, current_record]
+
+
 def write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -593,6 +652,41 @@ def write_memory_record_support_files(repo: Path, case: dict, record: dict) -> N
         )
 
 
+def write_inactive_abstain_case_files(repo: Path, case: dict, records: list[dict]) -> None:
+    for summary_path in summary_paths_for_case(case):
+        write_text(
+            repo / summary_path,
+            "# Synthetic Inactive Answerability Session\n\n"
+            f"Query: {case['query']}\n\n"
+            f"Inactive memory: {case['inactive_memory_id']}\n\n"
+            "This file is generated synthetic benchmark data only.\n",
+        )
+    for evidence_path in evidence_paths_for_case(case):
+        write_text(
+            repo / evidence_path,
+            "# Synthetic Evidence\n\n"
+            f"syn_ev_001: Evidence for inactive-only query {case['query']}.\n",
+        )
+    for record in records:
+        for raw_ref in record.get("raw_refs", []):
+            if not isinstance(raw_ref, dict):
+                continue
+            raw_path_value = raw_ref.get("path")
+            if not isinstance(raw_path_value, str) or not raw_path_value.strip():
+                continue
+            append_text(
+                repo / raw_path_value,
+                json.dumps(
+                    {
+                        "anchor": raw_ref.get("anchor", ""),
+                        "note": "Synthetic source anchor placeholder. No raw private transcript.",
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+            )
+
+
 def write_memory_root_files(repo: Path, records: list[dict]) -> None:
     memories_dir = repo / "memories"
     memories_dir.mkdir(parents=True, exist_ok=True)
@@ -626,6 +720,12 @@ def write_archive(repo: Path, cases: list[dict], *, include_superseded_distracto
         records = []
         for case in cases:
             if not positive_case(case):
+                if inactive_abstain_case(case):
+                    validate_case_memory_identifiers(case)
+                    validate_case_archive_paths(case)
+                    inactive_records = build_inactive_abstain_records(case)
+                    records.extend(inactive_records)
+                    write_inactive_abstain_case_files(repo, case, inactive_records)
                 continue
             validate_case_memory_identifiers(case)
             validate_case_archive_paths(case)

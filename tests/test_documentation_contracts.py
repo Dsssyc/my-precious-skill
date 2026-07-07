@@ -238,6 +238,29 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v19_context_package_consumption_gate(self):
+        section = self.evaluation_section("## V1.9 Context-Package Consumption Gate")
+        for phrase in (
+            "memory_recall_context_package",
+            "search_memory.py --context-json",
+            "context_package_handoff_present_rate",
+            "context_package_parse_success_rate",
+            "context_package_support_coverage_rate",
+            "context_package_abstention_accuracy",
+            "context_package_inactive_rejection_count",
+            "malformed packages fail closed to abstain",
+            "not live LLM answer quality",
+            "not ranking quality",
+            "not vector search",
+            "not automatic ontology",
+            "not public leaderboard parity",
+            "raw refs",
+            "local private paths",
+            "private queries",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

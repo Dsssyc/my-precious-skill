@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -30,6 +31,8 @@ DEFAULT_CASE_ORIGIN = "private_dogfood"
 DEFAULT_CATEGORY = "private_dogfood_memory_answer"
 DEFAULT_ABSTAIN_CATEGORY = "private_dogfood_abstain"
 DEFAULT_LIMIT = 20
+DEFAULT_CONTEXT_PACKAGE_SEARCH_LIMIT = 5
+CONTEXT_PACKAGE_REPORT_KIND = "memory_recall_context_package"
 MIN_QUERY_TERMS = 3
 MAX_QUERY_TERMS = 8
 MAX_REFERENCE_ANSWER_CHARS = 500
@@ -199,6 +202,99 @@ def case_row(
     }
 
 
+def context_query_tokens(query: str) -> list[str]:
+    return search_memory.coverage_query_tokens(
+        search_memory.meaningful_query_tokens(search_memory.unique_query_tokens(query))
+    )
+
+
+def search_context_package(repo: Path, query: str, limit: int = DEFAULT_CONTEXT_PACKAGE_SEARCH_LIMIT) -> dict[str, Any] | None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TOOLS_DIR / "search_memory.py"),
+            query,
+            "--repo",
+            str(repo),
+            "--limit",
+            str(limit),
+            "--depth",
+            "evidence",
+            "--context-json",
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or payload.get("report_kind") != CONTEXT_PACKAGE_REPORT_KIND:
+        return None
+    answerability = payload.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") not in {"supported", "unsupported"}:
+        return None
+    hits = payload.get("hits")
+    if not isinstance(hits, list):
+        return None
+    return payload
+
+
+def context_hit_matched_tokens(context_hit: dict[str, Any]) -> set[str]:
+    why = context_hit.get("why")
+    if not isinstance(why, list):
+        return set()
+    for item in why:
+        if not isinstance(item, str) or not item.startswith("matched:"):
+            continue
+        return {token.strip() for token in item.removeprefix("matched:").split(",") if token.strip()}
+    return set()
+
+
+def context_hit_supports_case(context_hit: dict[str, Any], *, memory_id: str, query: str) -> bool:
+    if context_hit.get("memory_id") != memory_id or context_hit.get("active_current") is not True:
+        return False
+    answerability = context_hit.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
+        return False
+    summary_paths = context_hit.get("summary_drill_paths")
+    evidence_refs = context_hit.get("evidence_refs")
+    if not isinstance(summary_paths, list) or not any(isinstance(path, str) and path.strip() for path in summary_paths):
+        return False
+    if not isinstance(evidence_refs, list) or not any(isinstance(ref, str) and ref.strip() for ref in evidence_refs):
+        return False
+    required_tokens = context_query_tokens(query)
+    if not required_tokens:
+        return False
+    matched_tokens = context_hit_matched_tokens(context_hit)
+    return all(token in matched_tokens for token in required_tokens)
+
+
+def context_package_supports_case(repo: Path, row: dict[str, Any]) -> bool:
+    query = row.get("query")
+    memory_id = row.get("expected_memory_id")
+    if not isinstance(query, str) or not query.strip() or not isinstance(memory_id, str) or not memory_id.strip():
+        return False
+    package = search_context_package(repo, query)
+    if package is None:
+        return False
+    answerability = package.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
+        return False
+    hits = package.get("hits")
+    if not isinstance(hits, list):
+        return False
+    return any(
+        context_hit_supports_case(hit, memory_id=memory_id, query=query)
+        for hit in hits
+        if isinstance(hit, dict)
+    )
+
+
 def abstain_case_row(
     index: int,
     *,
@@ -224,6 +320,7 @@ def load_memory_rows(repo: Path) -> list[dict[str, Any]]:
 
 
 def build_cases(
+    repo: Path,
     rows: list[dict[str, Any]],
     *,
     limit: int,
@@ -264,6 +361,9 @@ def build_cases(
         )
         if row is None:
             skip_counts["insufficient_query_terms"] += 1
+            continue
+        if not context_package_supports_case(repo, row):
+            skip_counts["missing_context_package_support"] += 1
             continue
         case_id = str(row["case_id"])
         if case_id in seen_case_ids:
@@ -309,6 +409,7 @@ def author_report(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     rows = load_memory_rows(repo)
     cases, skip_counts = build_cases(
+        repo,
         rows,
         limit=limit,
         abstain_limit=abstain_limit,

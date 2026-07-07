@@ -283,6 +283,22 @@ def support_refs_cover_answer(handoff: dict[str, Any] | None) -> bool:
     return False
 
 
+def handoff_context_package(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
+    if handoff is None:
+        return None
+    package = handoff.get("context_package")
+    return package if isinstance(package, dict) else None
+
+
+def context_package_parse_success(package: dict[str, Any] | None) -> bool:
+    return bool(
+        package
+        and package.get("report_kind") == "memory_recall_context_package"
+        and package.get("parse_success") is True
+        and package.get("answerability_status") in {"supported", "unsupported"}
+    )
+
+
 def handoff_unsupported_claim_count(handoff: dict[str, Any] | None) -> int:
     if handoff is None:
         return 0
@@ -326,6 +342,14 @@ def evaluate_case(
     handoff_abstained = bool(handoff and handoff.get("abstained") is True)
     handoff_unsupported_claims = handoff_unsupported_claim_count(handoff)
     handoff_inactive_answers = handoff_inactive_memory_answer_count(handoff)
+    context_package = handoff_context_package(handoff)
+    context_package_present = context_package is not None
+    context_parse_success = context_package_parse_success(context_package)
+    context_status = context_package.get("answerability_status") if context_package else ""
+    context_reason = context_package.get("answerability_reason") if context_package else ""
+    context_supported = context_parse_success and context_status == "supported"
+    context_unsupported = context_parse_success and context_status == "unsupported"
+    context_inactive_rejection = context_unsupported and context_reason == "no_active_current_support"
 
     if missing_answer:
         failed_checks.append("missing_generated_answer")
@@ -363,6 +387,11 @@ def evaluate_case(
         "answer_handoff_present": handoff_present,
         "answer_handoff_support_covered": handoff_support_covered,
         "answer_handoff_abstained": handoff_abstained,
+        "context_package_present": context_package_present,
+        "context_package_parse_success": context_parse_success,
+        "context_package_supported": context_supported,
+        "context_package_unsupported": context_unsupported,
+        "context_package_inactive_rejection": context_inactive_rejection,
         "unsupported_claim_count": handoff_unsupported_claims,
         "inactive_memory_answer_count": handoff_inactive_answers,
         "duplicate_answer": duplicate_answer,
@@ -440,6 +469,23 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
     answer_handoff_abstain_case_count = sum(
         1 for detail in abstain_details if detail["answer_handoff_abstained"]
     )
+    context_package_present_count = sum(1 for detail in details if detail["context_package_present"])
+    context_package_parse_success_count = sum(1 for detail in details if detail["context_package_parse_success"])
+    context_package_supported_case_count = sum(
+        1
+        for detail in positive_details
+        if detail["context_package_supported"]
+        and detail["answer_handoff_support_covered"]
+        and not detail["answer_handoff_abstained"]
+    )
+    context_package_abstain_case_count = sum(
+        1
+        for detail in abstain_details
+        if detail["context_package_unsupported"] and detail["answer_handoff_abstained"]
+    )
+    context_package_inactive_rejection_count = sum(
+        1 for detail in details if detail["context_package_inactive_rejection"] and detail["answer_handoff_abstained"]
+    )
     unsupported_claim_count = sum(int(detail["unsupported_claim_count"]) for detail in details)
     inactive_memory_answer_count = sum(int(detail["inactive_memory_answer_count"]) for detail in details)
 
@@ -470,6 +516,20 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
         ),
         "answer_handoff_supported_case_count": answer_handoff_supported_case_count,
         "answer_handoff_abstain_case_count": answer_handoff_abstain_case_count,
+        "context_package_handoff_present_rate": ratio(context_package_present_count, total_cases),
+        "context_package_parse_success_rate": ratio(context_package_parse_success_count, total_cases),
+        "context_package_support_coverage_rate": ratio(
+            context_package_supported_case_count,
+            len(positive_details),
+        ),
+        "context_package_abstention_accuracy": ratio(
+            context_package_abstain_case_count,
+            len(abstain_details),
+        ),
+        "context_package_supported_case_count": context_package_supported_case_count,
+        "context_package_abstain_case_count": context_package_abstain_case_count,
+        "context_package_parse_failure_count": total_cases - context_package_parse_success_count,
+        "context_package_inactive_rejection_count": context_package_inactive_rejection_count,
         "unsupported_claim_count": unsupported_claim_count,
         "inactive_memory_answer_count": inactive_memory_answer_count,
         "privacy_boundary_pass_rate": ratio(privacy_hits, total_cases),

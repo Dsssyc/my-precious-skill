@@ -65,6 +65,12 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
                             "unsupported_claim_count": 0,
                             "inactive_memory_answer_count": 0,
                             "privacy_leak_count": 0,
+                            "context_package": {
+                                "report_kind": "memory_recall_context_package",
+                                "parse_success": True,
+                                "answerability_status": "supported",
+                                "answerability_reason": "active_current_memory_support",
+                            },
                         },
                     },
                     {
@@ -79,6 +85,12 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
                             "unsupported_claim_count": 0,
                             "inactive_memory_answer_count": 0,
                             "privacy_leak_count": 0,
+                            "context_package": {
+                                "report_kind": "memory_recall_context_package",
+                                "parse_success": True,
+                                "answerability_status": "unsupported",
+                                "answerability_reason": "no_recall_hits",
+                            },
                         },
                     },
                 ],
@@ -127,6 +139,14 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_handoff_support_coverage_rate"], 1.0)
             self.assertEqual(payload["answer_handoff_supported_case_count"], 1)
             self.assertEqual(payload["answer_handoff_abstain_case_count"], 1)
+            self.assertEqual(payload["context_package_handoff_present_rate"], 1.0)
+            self.assertEqual(payload["context_package_parse_success_rate"], 1.0)
+            self.assertEqual(payload["context_package_support_coverage_rate"], 1.0)
+            self.assertEqual(payload["context_package_abstention_accuracy"], 1.0)
+            self.assertEqual(payload["context_package_supported_case_count"], 1)
+            self.assertEqual(payload["context_package_abstain_case_count"], 1)
+            self.assertEqual(payload["context_package_parse_failure_count"], 0)
+            self.assertEqual(payload["context_package_inactive_rejection_count"], 0)
             self.assertEqual(payload["unsupported_claim_count"], 0)
             self.assertEqual(payload["inactive_memory_answer_count"], 0)
             self.assertEqual(payload["privacy_leak_count"], 0)
@@ -178,22 +198,30 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
 
         payload = json.loads(result.stdout)
         self.assertEqual(payload["report_kind"], "generated_answer_benchmark")
-        self.assertEqual(payload["cases"], 4)
+        self.assertEqual(payload["cases"], 5)
         self.assertEqual(payload["positive_cases"], 3)
-        self.assertEqual(payload["abstain_cases"], 1)
-        self.assertEqual(payload["reference_answer_cases"], 4)
-        self.assertEqual(payload["answer_scorable_cases"], 4)
+        self.assertEqual(payload["abstain_cases"], 2)
+        self.assertEqual(payload["reference_answer_cases"], 5)
+        self.assertEqual(payload["answer_scorable_cases"], 5)
         self.assertEqual(payload["positive_without_reference_answer"], 0)
         self.assertEqual(payload["answer_scorable_case_rate"], 1.0)
-        self.assertEqual(payload["source_benchmarks"], {"MyPreciousGeneratedAnswerSynthetic": 4})
-        self.assertEqual(payload["case_origins"], {"packaged_generated_answer_fixture": 4})
+        self.assertEqual(payload["source_benchmarks"], {"MyPreciousGeneratedAnswerSynthetic": 5})
+        self.assertEqual(payload["case_origins"], {"packaged_generated_answer_fixture": 5})
         self.assertEqual(payload["case_pass_rate"], 1.0)
         self.assertEqual(payload["answer_normalized_match_rate"], 1.0)
         self.assertEqual(payload["abstention_accuracy"], 1.0)
         self.assertEqual(payload["answer_handoff_present_rate"], 1.0)
         self.assertEqual(payload["answer_handoff_support_coverage_rate"], 1.0)
         self.assertEqual(payload["answer_handoff_supported_case_count"], 3)
-        self.assertEqual(payload["answer_handoff_abstain_case_count"], 1)
+        self.assertEqual(payload["answer_handoff_abstain_case_count"], 2)
+        self.assertEqual(payload["context_package_handoff_present_rate"], 1.0)
+        self.assertEqual(payload["context_package_parse_success_rate"], 1.0)
+        self.assertEqual(payload["context_package_support_coverage_rate"], 1.0)
+        self.assertEqual(payload["context_package_abstention_accuracy"], 1.0)
+        self.assertEqual(payload["context_package_supported_case_count"], 3)
+        self.assertEqual(payload["context_package_abstain_case_count"], 2)
+        self.assertEqual(payload["context_package_parse_failure_count"], 0)
+        self.assertEqual(payload["context_package_inactive_rejection_count"], 1)
         self.assertEqual(payload["unsupported_claim_count"], 0)
         self.assertEqual(payload["inactive_memory_answer_count"], 0)
         self.assertEqual(payload["privacy_leak_count"], 0)

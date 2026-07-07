@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -24,7 +25,8 @@ import search_memory  # noqa: E402
 
 
 ABSTENTION_ANSWER = "There is not enough information in memory to answer."
-ANSWERABILITY_POLICY = "query_token_support"
+ANSWERABILITY_POLICY = "context_package_answerability"
+CONTEXT_PACKAGE_REPORT_KIND = "memory_recall_context_package"
 HANDOFF_CONTRACT_VERSION = 1
 REFERENCE_ANSWER_PREFIX_PATTERN = re.compile(r"\bReference answer:\s*", re.IGNORECASE)
 REFERENCE_SECTION_BOUNDARY_PATTERN = re.compile(
@@ -86,6 +88,66 @@ def search_memory_hits(repo: Path, query: str, limit: int) -> list[search_memory
     return search_memory.merge_hits(repo, hits)[:limit]
 
 
+def context_package_metadata(
+    *,
+    parse_success: bool,
+    answerability_status: str = "unsupported",
+    answerability_reason: str = "parse_failed",
+) -> dict[str, Any]:
+    return {
+        "report_kind": CONTEXT_PACKAGE_REPORT_KIND,
+        "parse_success": parse_success,
+        "answerability_status": answerability_status,
+        "answerability_reason": answerability_reason,
+    }
+
+
+def search_context_package(
+    repo: Path,
+    search_script: Path,
+    query: str,
+    limit: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(search_script),
+            query,
+            "--repo",
+            str(repo),
+            "--limit",
+            str(limit),
+            "--depth",
+            "evidence",
+            "--context-json",
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        return None, context_package_metadata(parse_success=False)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, context_package_metadata(parse_success=False)
+    if not isinstance(payload, dict) or payload.get("report_kind") != CONTEXT_PACKAGE_REPORT_KIND:
+        return None, context_package_metadata(parse_success=False)
+    answerability = payload.get("answerability")
+    if not isinstance(answerability, dict):
+        return None, context_package_metadata(parse_success=False)
+    status = answerability.get("status")
+    reason = answerability.get("reason")
+    if status not in {"supported", "unsupported"} or not isinstance(reason, str) or not reason:
+        return None, context_package_metadata(parse_success=False)
+    return payload, context_package_metadata(
+        parse_success=True,
+        answerability_status=status,
+        answerability_reason=reason,
+    )
+
+
 def memory_text_by_id(repo: Path, memory_id: str) -> str:
     if not memory_id:
         return ""
@@ -100,6 +162,16 @@ def memory_text_by_id(repo: Path, memory_id: str) -> str:
 def full_hit_text(repo: Path, hit: search_memory.Hit) -> str:
     text = memory_text_by_id(repo, hit.memory_id)
     return text or hit.text or hit.title
+
+
+def extract_answer_from_memory_id(repo: Path, memory_id: str, query: str = "") -> str:
+    text = search_memory.compact_whitespace(memory_text_by_id(repo, memory_id))
+    match = REFERENCE_ANSWER_PREFIX_PATTERN.search(text)
+    answer = trim_reference_answer_tail(text[match.end() :], query) if match else text
+    answer = search_memory.compact_whitespace(answer)
+    if not answer or search_memory.has_sensitive_display_text(answer):
+        return ABSTENTION_ANSWER
+    return answer
 
 
 def query_support_tokens(text: str) -> list[str]:
@@ -177,12 +249,78 @@ def support_refs_cover_answer(support_refs: list[dict[str, Any]]) -> bool:
     return False
 
 
-def answer_handoff(*, abstained: bool, support_refs: list[dict[str, Any]], abstain_reason: str = "") -> dict[str, Any]:
+def context_support_refs(context_hit: dict[str, Any]) -> list[dict[str, Any]]:
+    memory_id = context_hit.get("memory_id")
+    summary_paths = context_hit.get("summary_drill_paths")
+    evidence_refs = context_hit.get("evidence_refs")
+    if not isinstance(memory_id, str) or not memory_id.strip():
+        return []
+    if not isinstance(summary_paths, list) or not isinstance(evidence_refs, list):
+        return []
+    clean_summary_paths = [path for path in summary_paths if isinstance(path, str) and path.strip()]
+    clean_evidence_refs = [ref for ref in evidence_refs if isinstance(ref, str) and ref.strip()]
+    if not clean_summary_paths or not clean_evidence_refs:
+        return []
+    return [
+        {
+            "memory_id": memory_id,
+            "summary_paths": sorted(clean_summary_paths),
+            "evidence_refs": sorted(clean_evidence_refs),
+        }
+    ]
+
+
+def context_hit_matched_tokens(context_hit: dict[str, Any]) -> set[str]:
+    why = context_hit.get("why")
+    if not isinstance(why, list):
+        return set()
+    for item in why:
+        if not isinstance(item, str) or not item.startswith("matched:"):
+            continue
+        raw_tokens = item.removeprefix("matched:").split(",")
+        return {token.strip() for token in raw_tokens if token.strip()}
+    return set()
+
+
+def context_hit_has_answer_support(context_hit: dict[str, Any], query: str) -> bool:
+    if context_hit.get("active_current") is not True:
+        return False
+    answerability = context_hit.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
+        return False
+    required_tokens = query_support_tokens(search_memory.compact_whitespace(query))
+    if not required_tokens:
+        return False
+    matched_tokens = context_hit_matched_tokens(context_hit)
+    return all(token in matched_tokens for token in required_tokens)
+
+
+def supported_context_hit(package: dict[str, Any], query: str) -> dict[str, Any] | None:
+    answerability = package.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
+        return None
+    hits = package.get("hits")
+    if not isinstance(hits, list):
+        return None
+    for hit in hits:
+        if isinstance(hit, dict) and context_hit_has_answer_support(hit, query):
+            return hit
+    return None
+
+
+def answer_handoff(
+    *,
+    abstained: bool,
+    support_refs: list[dict[str, Any]],
+    context_package: dict[str, Any],
+    abstain_reason: str = "",
+) -> dict[str, Any]:
     handoff: dict[str, Any] = {
         "contract_version": HANDOFF_CONTRACT_VERSION,
         "abstained": abstained,
         "active_memory_only": True,
         "support_refs": support_refs,
+        "context_package": context_package,
         "unsupported_claim_count": 0,
         "inactive_memory_answer_count": 0,
         "privacy_leak_count": 0,
@@ -192,7 +330,12 @@ def answer_handoff(*, abstained: bool, support_refs: list[dict[str, Any]], absta
     return handoff
 
 
-def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def build_answer_records(
+    repo: Path,
+    cases: list[dict[str, Any]],
+    limit: int,
+    search_script: Path,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     records: list[dict[str, Any]] = []
     source_benchmarks: Counter[str] = Counter()
     case_origins: Counter[str] = Counter()
@@ -203,6 +346,14 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
     answer_handoff_supported_case_count = 0
     answer_handoff_abstain_case_count = 0
     support_ref_covered_answer_count = 0
+    context_package_parse_success_count = 0
+    context_package_parse_failure_count = 0
+    context_package_supported_case_count = 0
+    context_package_abstain_case_count = 0
+    context_package_support_covered_count = 0
+    context_package_expected_abstain_count = 0
+    context_package_abstention_hit_count = 0
+    context_package_inactive_rejection_count = 0
 
     for case in cases:
         source_benchmark = optional_text(case, "source_benchmark")
@@ -213,11 +364,33 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
             case_origins[case_origin] += 1
         case_id = str(case["case_id"])
         query = str(case["query"])
-        hits = search_memory_hits(repo, query, limit)
-        if hits and hit_supports_query(repo, hits[0], query):
-            answer = extract_answer_from_hit(repo, hits[0], query)
-            support_refs = answer_support_refs(hits[0])
+        expected_abstain = case.get("expected_abstain") is True
+        if expected_abstain:
+            context_package_expected_abstain_count += 1
+        package, package_meta = search_context_package(repo, search_script, query, limit)
+        if package_meta["parse_success"] is True:
+            context_package_parse_success_count += 1
+        else:
+            context_package_parse_failure_count += 1
+        reason = str(package_meta["answerability_reason"])
+        if reason == "no_active_current_support":
+            context_package_inactive_rejection_count += 1
+        hit = supported_context_hit(package, query) if package is not None else None
+        if hit is None and package_meta["answerability_status"] == "supported":
+            package_meta = context_package_metadata(
+                parse_success=True,
+                answerability_status="unsupported",
+                answerability_reason="missing_context_token_coverage",
+            )
+            reason = str(package_meta["answerability_reason"])
+        if hit is not None:
+            context_package_supported_case_count += 1
+            support_refs = context_support_refs(hit)
             support_covered = support_refs_cover_answer(support_refs)
+            if support_covered:
+                context_package_support_covered_count += 1
+            memory_id = str(hit.get("memory_id") or "")
+            answer = extract_answer_from_memory_id(repo, memory_id, query)
             if answer == ABSTENTION_ANSWER or not support_covered:
                 if answer != ABSTENTION_ANSWER:
                     unsupported_hit_count += 1
@@ -227,25 +400,36 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
                 handoff = answer_handoff(
                     abstained=True,
                     support_refs=[],
+                    context_package=package_meta,
                     abstain_reason="missing_support_refs" if not support_covered else "privacy_boundary",
                 )
             else:
                 memory_answer_count += 1
                 answer_handoff_supported_case_count += 1
                 support_ref_covered_answer_count += 1
-                handoff = answer_handoff(abstained=False, support_refs=support_refs)
+                handoff = answer_handoff(abstained=False, support_refs=support_refs, context_package=package_meta)
         else:
             answer = ABSTENTION_ANSWER
             abstention_answer_count += 1
             answer_handoff_abstain_case_count += 1
-            if hits:
+            context_package_abstain_case_count += 1
+            if expected_abstain:
+                context_package_abstention_hit_count += 1
+            if package_meta["parse_success"] is False:
+                abstain_reason = "context_package_unavailable"
+            elif reason == "no_active_current_support":
+                abstain_reason = "no_active_current_support"
+            else:
+                abstain_reason = "no_supported_memory_hit"
+            if package is not None and package.get("hits"):
                 unsupported_hit_count += 1
             else:
                 no_hit_count += 1
             handoff = answer_handoff(
                 abstained=True,
                 support_refs=[],
-                abstain_reason="no_supported_memory_hit",
+                context_package=package_meta,
+                abstain_reason=abstain_reason,
             )
         records.append({"case_id": case_id, "generated_answer": answer, "answer_handoff": handoff})
 
@@ -267,6 +451,22 @@ def build_answer_records(repo: Path, cases: list[dict[str, Any]], limit: int) ->
         "answer_handoff_support_coverage_rate": (
             1.0 if memory_answer_count == 0 else support_ref_covered_answer_count / memory_answer_count
         ),
+        "context_package_report_kind": CONTEXT_PACKAGE_REPORT_KIND,
+        "context_package_parse_success_count": context_package_parse_success_count,
+        "context_package_parse_failure_count": context_package_parse_failure_count,
+        "context_package_supported_case_count": context_package_supported_case_count,
+        "context_package_abstain_case_count": context_package_abstain_case_count,
+        "context_package_support_coverage_rate": (
+            1.0
+            if context_package_supported_case_count == 0
+            else context_package_support_covered_count / context_package_supported_case_count
+        ),
+        "context_package_abstention_accuracy": (
+            1.0
+            if context_package_expected_abstain_count == 0
+            else context_package_abstention_hit_count / context_package_expected_abstain_count
+        ),
+        "context_package_inactive_rejection_count": context_package_inactive_rejection_count,
         "unsupported_claim_count": 0,
         "inactive_memory_answer_count": 0,
         "privacy_leak_count": 0,
@@ -297,6 +497,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cases", required=True, help="Answer benchmark cases JSONL")
     parser.add_argument("--output", required=True, help="Generated answer records JSONL to write")
     parser.add_argument("--limit", type=int, default=5, help="Top memory hits to consider per case")
+    parser.add_argument(
+        "--search-script",
+        default=str(TOOLS_DIR / "search_memory.py"),
+        help="Path to search_memory.py; used with --context-json for answerability",
+    )
     return parser.parse_args(argv)
 
 
@@ -306,7 +511,12 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--limit must be greater than 0")
     repo = Path(args.repo).expanduser().resolve()
     cases = load_cases(Path(args.cases).expanduser().resolve())
-    records, report = build_answer_records(repo, cases, args.limit)
+    records, report = build_answer_records(
+        repo,
+        cases,
+        args.limit,
+        Path(args.search_script).expanduser().resolve(),
+    )
     write_jsonl(Path(args.output).expanduser().resolve(), records)
     print(json.dumps(report, sort_keys=True))
     return 0
