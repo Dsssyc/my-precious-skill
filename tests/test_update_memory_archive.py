@@ -4873,6 +4873,79 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
             self.assertIn("Records selected: 0", result.stdout)
 
+    def test_update_memory_archive_skips_codex_automation_thread_source_records(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_path = root / "agent-memory"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            automation_record = source_dir / "automation.jsonl"
+            automation_record.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-07-06T04:00:00Z",
+                        "payload": {
+                            "cwd": str(project_path),
+                            "thread_source": "automation",
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-07-06T04:01:00Z",
+                        "payload": {
+                            "cwd": str(project_path),
+                            "content": "Automation run status should not become durable memory.",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            human_record = source_dir / "human.jsonl"
+            human_record.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "timestamp": "2026-07-06T05:00:00Z",
+                        "payload": {
+                            "cwd": str(project_path),
+                            "thread_source": "local",
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-07-06T05:01:00Z",
+                        "payload": {
+                            "cwd": str(project_path),
+                            "content": "Durable memory archive repair decision.",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            records = module.discover_records(
+                source_dir,
+                ("*.jsonl",),
+                None,
+                project_path,
+                require_project_metadata=True,
+            )
+
+        self.assertEqual([record.path.name for record in records], ["human.jsonl"])
+
     def test_update_memory_archive_archive_scope_decouples_high_water_from_project_path(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

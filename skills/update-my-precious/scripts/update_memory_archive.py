@@ -877,6 +877,21 @@ def record_matches_project(path: Path, text: str, project_path: Path, require_pr
     return any(candidate == project_key for candidate in discovered_paths)
 
 
+def is_codex_automation_thread_source(path: Path, text: str) -> bool:
+    for value in iter_source_json_values(path, text):
+        if not isinstance(value, dict):
+            continue
+        if value.get("type") != "session_meta":
+            continue
+        payload = value.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        thread_source = str(payload.get("thread_source") or "").strip().lower()
+        if thread_source == "automation":
+            return True
+    return False
+
+
 def timestamp_from_filename(path: Path) -> datetime | None:
     text = path.as_posix()
     patterns = (
@@ -951,6 +966,8 @@ def discover_records(
             continue
         seen.add(path)
         text = read_record_text(path)
+        if is_codex_automation_thread_source(path, text):
+            continue
         if not record_matches_project(path, text, project_path, require_project_metadata):
             continue
         updated_at = source_timestamp(path, text)
