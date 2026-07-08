@@ -107,20 +107,27 @@ def search_context_package(
     search_script: Path,
     query: str,
     limit: int,
+    preferred_scope: str = "",
+    project_path: str = "",
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    command = [
+        sys.executable,
+        str(search_script),
+        query,
+        "--repo",
+        str(repo),
+        "--limit",
+        str(limit),
+        "--depth",
+        "evidence",
+        "--context-json",
+    ]
+    if preferred_scope:
+        command.extend(["--preferred-scope", preferred_scope])
+    if project_path:
+        command.extend(["--project-path", project_path])
     result = subprocess.run(
-        [
-            sys.executable,
-            str(search_script),
-            query,
-            "--repo",
-            str(repo),
-            "--limit",
-            str(limit),
-            "--depth",
-            "evidence",
-            "--context-json",
-        ],
+        command,
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -146,6 +153,26 @@ def search_context_package(
         answerability_status=status,
         answerability_reason=reason,
     )
+
+
+def context_package_scope_fields_passed(
+    package: dict[str, Any] | None,
+    *,
+    preferred_scope: str,
+    project_path: str,
+) -> bool:
+    if not preferred_scope and not project_path:
+        return True
+    if package is None:
+        return False
+    query = package.get("query")
+    if not isinstance(query, dict):
+        return False
+    if preferred_scope and query.get("preferred_scope") != preferred_scope:
+        return False
+    if project_path and query.get("project_context_provided") is not True:
+        return False
+    return True
 
 
 def memory_text_by_id(repo: Path, memory_id: str) -> str:
@@ -295,17 +322,50 @@ def context_hit_has_answer_support(context_hit: dict[str, Any], query: str) -> b
     return all(token in matched_tokens for token in required_tokens)
 
 
-def supported_context_hit(package: dict[str, Any], query: str) -> dict[str, Any] | None:
+def project_scope_name(project_path: str) -> str:
+    return Path(project_path).expanduser().name if project_path.strip() else ""
+
+
+def scope_rejection_reason(context_hit: dict[str, Any], *, preferred_scope: str, project_path: str) -> str:
+    if preferred_scope != "project":
+        return ""
+    layer = context_hit.get("layer")
+    if layer != "project":
+        return ""
+    if not project_path:
+        return "missing_project_context_for_project_specific_handoff"
+    expected_name = project_scope_name(project_path)
+    scope = context_hit.get("scope")
+    if expected_name and (not isinstance(scope, str) or expected_name not in scope):
+        return "wrong_project_scope_mismatch"
+    return ""
+
+
+def supported_context_hit(
+    package: dict[str, Any],
+    query: str,
+    *,
+    preferred_scope: str = "",
+    project_path: str = "",
+) -> tuple[dict[str, Any] | None, str]:
     answerability = package.get("answerability")
     if not isinstance(answerability, dict) or answerability.get("status") != "supported":
-        return None
+        return None, ""
     hits = package.get("hits")
     if not isinstance(hits, list):
-        return None
+        return None, ""
     for hit in hits:
-        if isinstance(hit, dict) and context_hit_has_answer_support(hit, query):
-            return hit
-    return None
+        if not isinstance(hit, dict) or not context_hit_has_answer_support(hit, query):
+            continue
+        rejection_reason = scope_rejection_reason(
+            hit,
+            preferred_scope=preferred_scope,
+            project_path=project_path,
+        )
+        if rejection_reason:
+            return None, rejection_reason
+        return hit, ""
+    return None, ""
 
 
 def answer_handoff(
@@ -354,6 +414,8 @@ def build_answer_records(
     context_package_expected_abstain_count = 0
     context_package_abstention_hit_count = 0
     context_package_inactive_rejection_count = 0
+    context_package_scope_field_case_count = 0
+    context_package_scope_field_pass_through_count = 0
 
     for case in cases:
         source_benchmark = optional_text(case, "source_benchmark")
@@ -364,25 +426,60 @@ def build_answer_records(
             case_origins[case_origin] += 1
         case_id = str(case["case_id"])
         query = str(case["query"])
+        preferred_scope = optional_text(case, "preferred_scope")
+        project_path = optional_text(case, "project_path")
+        has_scope_fields = bool(preferred_scope or project_path)
+        if has_scope_fields:
+            context_package_scope_field_case_count += 1
         expected_abstain = case.get("expected_abstain") is True
         if expected_abstain:
             context_package_expected_abstain_count += 1
-        package, package_meta = search_context_package(repo, search_script, query, limit)
+        package, package_meta = search_context_package(
+            repo,
+            search_script,
+            query,
+            limit,
+            preferred_scope,
+            project_path,
+        )
         if package_meta["parse_success"] is True:
             context_package_parse_success_count += 1
         else:
             context_package_parse_failure_count += 1
+        if has_scope_fields and context_package_scope_fields_passed(
+            package,
+            preferred_scope=preferred_scope,
+            project_path=project_path,
+        ):
+            context_package_scope_field_pass_through_count += 1
         reason = str(package_meta["answerability_reason"])
         if reason == "no_active_current_support":
             context_package_inactive_rejection_count += 1
-        hit = supported_context_hit(package, query) if package is not None else None
-        if hit is None and package_meta["answerability_status"] == "supported":
-            package_meta = context_package_metadata(
-                parse_success=True,
-                answerability_status="unsupported",
-                answerability_reason="missing_context_token_coverage",
+        scope_rejection = ""
+        if package is not None:
+            hit, scope_rejection = supported_context_hit(
+                package,
+                query,
+                preferred_scope=preferred_scope,
+                project_path=project_path,
             )
-            reason = str(package_meta["answerability_reason"])
+        else:
+            hit = None
+        if hit is None and package_meta["answerability_status"] == "supported":
+            if scope_rejection:
+                package_meta = context_package_metadata(
+                    parse_success=True,
+                    answerability_status="unsupported",
+                    answerability_reason=scope_rejection,
+                )
+                reason = str(package_meta["answerability_reason"])
+            else:
+                package_meta = context_package_metadata(
+                    parse_success=True,
+                    answerability_status="unsupported",
+                    answerability_reason="missing_context_token_coverage",
+                )
+                reason = str(package_meta["answerability_reason"])
         if hit is not None:
             context_package_supported_case_count += 1
             support_refs = context_support_refs(hit)
@@ -419,6 +516,11 @@ def build_answer_records(
                 abstain_reason = "context_package_unavailable"
             elif reason == "no_active_current_support":
                 abstain_reason = "no_active_current_support"
+            elif reason in {
+                "missing_project_context_for_project_specific_handoff",
+                "wrong_project_scope_mismatch",
+            }:
+                abstain_reason = reason
             else:
                 abstain_reason = "no_supported_memory_hit"
             if package is not None and package.get("hits"):
@@ -467,6 +569,13 @@ def build_answer_records(
             else context_package_abstention_hit_count / context_package_expected_abstain_count
         ),
         "context_package_inactive_rejection_count": context_package_inactive_rejection_count,
+        "context_package_scope_field_case_count": context_package_scope_field_case_count,
+        "context_package_scope_field_pass_through_count": context_package_scope_field_pass_through_count,
+        "context_package_scope_field_pass_through_rate": (
+            1.0
+            if context_package_scope_field_case_count == 0
+            else context_package_scope_field_pass_through_count / context_package_scope_field_case_count
+        ),
         "unsupported_claim_count": 0,
         "inactive_memory_answer_count": 0,
         "privacy_leak_count": 0,

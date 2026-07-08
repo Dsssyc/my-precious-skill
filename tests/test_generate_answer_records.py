@@ -371,6 +371,87 @@ class GenerateAnswerRecordsTests(unittest.TestCase):
             self.assertNotIn(str(cases), rendered)
             self.assertNotIn(str(answers), rendered)
 
+    def test_passes_case_scope_context_to_context_package_search(self):
+        rows = [
+            {
+                "case_id": "answer-adapter:scope-pass-through",
+                "query": "What should scoped answer cases pass through?",
+                "category": "generated_answer_abstain",
+                "source_benchmark": "MyPreciousAnswerAdapterSynthetic",
+                "case_origin": "extractive_answer_adapter_fixture",
+                "reference_answer": "not enough information",
+                "expected_abstain": True,
+                "preferred_scope": "project",
+                "project_path": "/synthetic/workspaces/scope-pass-through",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            (repo / "index").mkdir(parents=True)
+            cases = root / "answer_cases.jsonl"
+            answers = root / "answers.jsonl"
+            argv_log = root / "search_argv.json"
+            stub_search = root / "scope_search.py"
+            self.write_jsonl(cases, rows)
+            stub_search.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                f"argv_log = Path({str(argv_log)!r})\n"
+                "argv_log.write_text(json.dumps(sys.argv[1:], sort_keys=True), encoding='utf-8')\n"
+                "args = sys.argv[1:]\n"
+                "preferred_scope = ''\n"
+                "if '--preferred-scope' in args:\n"
+                "    preferred_scope = args[args.index('--preferred-scope') + 1]\n"
+                "print(json.dumps({\n"
+                "    'report_kind': 'memory_recall_context_package',\n"
+                "    'query': {\n"
+                "        'preferred_scope': preferred_scope,\n"
+                "        'project_context_provided': '--project-path' in args,\n"
+                "    },\n"
+                "    'answerability': {'status': 'unsupported', 'reason': 'no_recall_hits'},\n"
+                "    'hits': [],\n"
+                "}))\n",
+                encoding="utf-8",
+            )
+
+            adapter = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--repo",
+                    str(repo),
+                    "--cases",
+                    str(cases),
+                    "--output",
+                    str(answers),
+                    "--search-script",
+                    str(stub_search),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(adapter.returncode, 0, adapter.stderr)
+            report = json.loads(adapter.stdout)
+            self.assertEqual(report["context_package_scope_field_case_count"], 1)
+            self.assertEqual(report["context_package_scope_field_pass_through_count"], 1)
+            self.assertEqual(report["context_package_scope_field_pass_through_rate"], 1.0)
+            logged_argv = json.loads(argv_log.read_text(encoding="utf-8"))
+            self.assertIn("--preferred-scope", logged_argv)
+            self.assertEqual(logged_argv[logged_argv.index("--preferred-scope") + 1], "project")
+            self.assertIn("--project-path", logged_argv)
+            self.assertEqual(
+                logged_argv[logged_argv.index("--project-path") + 1],
+                "/synthetic/workspaces/scope-pass-through",
+            )
+            self.assertNotIn(rows[0]["project_path"], adapter.stdout + adapter.stderr)
+
     def test_abstains_when_top_hit_lacks_query_support(self):
         answer_text = "Use source anchors for provenance without printing raw transcript content"
         rows = [

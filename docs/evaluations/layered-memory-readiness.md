@@ -677,6 +677,44 @@ ranking overhaul, vector search, ontology discovery, private archive quality,
 or public leaderboard parity. The command is stable and included in
 `tools/run_quality_gates.py`.
 
+## V2.9 Packaged Generated-Answer Adapter Scope Contract Gate
+
+V2.9 adds `benchmarks/generated_answer_scope_adapter_gate.py` to prove that the
+scope-aware package-first contract is consumed by the real packaged
+`tools/generate_answer_records.py` adapter, not only by the focused V2.8
+handoff helper. The gate installs a clean packaged deployment repo, writes
+synthetic public global/domain/project memory rows and synthetic answer cases,
+then invokes the copied deployment `tools/generate_answer_records.py`. The
+adapter reads case-level `preferred_scope` and `project_path`, passes them into
+the copied `tools/search_memory.py --depth evidence --context-json`, parses
+`report_kind: memory_recall_context_package`, and writes deterministic
+answer-or-abstain records from the context-package handoff metadata and
+summary/evidence `support_refs`. Free-form search output is not used as
+answerability evidence.
+
+The synthetic cases cover global current support, domain-preferred support,
+current project override support, same-topic wrong-project rejection, project
+support without project context rejection, stale broader support rejection
+after supersession, unsupported no-hit packages, and malformed package
+fail-closed behavior. The gate reports aggregate metrics:
+`adapter_context_package_parse_success_rate`,
+`adapter_scope_supported_answer_accuracy`,
+`adapter_scope_abstention_accuracy`,
+`adapter_scope_support_ref_coverage_rate`,
+`adapter_project_override_accuracy`,
+`adapter_wrong_project_rejection_count`,
+`adapter_missing_project_context_rejection_count`,
+`adapter_stale_broad_rejection_count`,
+`adapter_malformed_fail_closed_count`,
+`adapter_scope_field_pass_through_rate`, `unsupported_claim_count`, and
+`privacy_leak_count`.
+
+This proves packaged generated-answer adapter consumption of the scope-aware
+context-package contract. It does not prove live LLM answer quality, semantic
+ranking quality, vector search, ontology discovery, private archive quality, or
+public leaderboard parity. The command is stable and included in
+`tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

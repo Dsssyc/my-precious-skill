@@ -96,6 +96,7 @@ python3 benchmarks/query_support_recall_gate.py
 python3 benchmarks/progressive_source_drilldown_gate.py
 python3 benchmarks/scope_arbitration_gate.py
 python3 benchmarks/scope_answer_handoff_gate.py
+python3 benchmarks/generated_answer_scope_adapter_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
@@ -112,6 +113,7 @@ python3 -m py_compile \
   benchmarks/progressive_source_drilldown_gate.py \
   benchmarks/scope_arbitration_gate.py \
   benchmarks/scope_answer_handoff_gate.py \
+  benchmarks/generated_answer_scope_adapter_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
