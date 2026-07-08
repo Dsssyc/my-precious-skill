@@ -167,6 +167,63 @@ class SyncMemoryArchiveTests(unittest.TestCase):
             self.assertIn("memories/explicit.jsonl", result.stdout)
             self.assertNotIn("unexpected files", result.stderr)
 
+    def test_sync_memory_archive_dry_run_with_push_allows_clean_publish_surfaces(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = create_git_backed_archive(Path(tmpdir))
+            daily = memory_repo / "daily/2026/2026-07-08.md"
+            daily.parent.mkdir(parents=True)
+            daily.write_text(
+                "# Daily Memory Index\n\n"
+                "## Durable Sessions\n\n"
+                "- Synthetic project: Durable archive sync contract was updated.\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/sessions.jsonl").write_text(
+                '{"summary":"Durable archive sync contract was updated.",'
+                '"summary_path":"sessions/2026/07/08/synthetic/summary.md"}\n',
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/sync_memory_archive.py"), "--dry-run", "--push"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Would stage allowed archive roots", result.stdout)
+            self.assertIn("Would push after commit.", result.stdout)
+
+    def test_sync_memory_archive_dry_run_refuses_noisy_daily_publish_surface(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = create_git_backed_archive(Path(tmpdir))
+            sentinel = "PRIVATE_DAILY_NOISE_SHOULD_NOT_RENDER"
+            daily = memory_repo / "daily/2026/2026-07-08.md"
+            daily.parent.mkdir(parents=True)
+            daily.write_text(
+                "# Daily Memory Index\n\n"
+                f"Command Status: dry-run would push after commit. {sentinel}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/sync_memory_archive.py"), "--dry-run", "--push"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("publish readiness", combined)
+            self.assertIn("publish_readiness_audit", combined)
+            self.assertIn("command_progress", combined)
+            self.assertNotIn("Would stage allowed archive roots", result.stdout)
+            self.assertNotIn(sentinel, combined)
+
     def test_sync_memory_archive_dry_run_refuses_review_decision_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = create_git_backed_archive(Path(tmpdir))

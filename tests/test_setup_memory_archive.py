@@ -50,6 +50,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertTrue((target / "tools/capture_explicit_memory.py").exists())
             self.assertTrue((target / "tools/run_memory_updates.py").exists())
             self.assertTrue((target / "tools/render_scheduler.py").exists())
+            self.assertTrue((target / "tools/audit_publish_readiness.py").exists())
             self.assertTrue((target / "tools/sync_memory_archive.py").exists())
             self.assertTrue((target / "schemas/session_summary.schema.json").exists())
             self.assertIn("Archive ready:", result.stdout)

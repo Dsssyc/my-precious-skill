@@ -98,11 +98,13 @@ my-precious-skill/
       tools/induction_consolidation_audit.py
       tools/run_memory_updates.py
       tools/audit_memory_archive.py
+      tools/audit_publish_readiness.py
       tools/backfill_memory_archive.py
       tools/render_scheduler.py
       tools/sync_memory_archive.py
   tests/
     test_audit_memory_archive.py
+    test_audit_publish_readiness.py
     test_search_memory.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
@@ -1107,8 +1109,10 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
 The sync helper only stages publish-safe archive paths (`INDEX.md`,
 `config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
 `sessions/`). It refuses tool/script edits, automatic memory/review node files,
-archive audit findings, unredacted key-like values, and whitespace errors
-before committing.
+archive audit findings, publish readiness failures in `daily/` or text-bearing
+indexed summary fields, unredacted key-like values, and whitespace errors before
+committing. Publish readiness reports are aggregate-only and include
+archive-relative paths, categories, and counts without matched snippets.
 
 ## Archive Contract
 
@@ -1267,6 +1271,8 @@ python3 tools/validate_skills.py
 
 python3 benchmarks/packaged_lifecycle_gate.py
 
+python3 benchmarks/automation_publish_readiness_gate.py
+
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
@@ -1277,6 +1283,7 @@ python3 -m py_compile \
   tools/validate_skills.py \
   tools/run_quality_gates.py \
   benchmarks/packaged_lifecycle_gate.py \
+  benchmarks/automation_publish_readiness_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
@@ -1290,6 +1297,7 @@ python3 -m py_compile \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
+  templates/agent-memory-repo/tools/audit_publish_readiness.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/capture_explicit_memory.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \

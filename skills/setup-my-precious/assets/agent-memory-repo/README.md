@@ -372,10 +372,21 @@ After an update, commit and optionally push generated archive changes:
 python tools/sync_memory_archive.py --push
 ```
 
+For a readiness-only check of the publish-facing generated surfaces:
+
+```bash
+python tools/audit_publish_readiness.py --memory-repo .
+```
+
 The sync helper refuses to proceed when non-archive paths changed, when
-generated archive files still contain recognized key-like values, when archive
-audit finds low-quality index text, or when `git diff --cached --check` fails.
-Expected publish-safe archive paths are limited to `INDEX.md`,
+generated archive files still contain recognized key-like values, when the
+publish readiness audit finds command progress, prompt/environment blocks,
+permission/sandbox chatter, raw source paths/raw refs/full queries, secret-like
+values, or generic automation narration in `daily/` or text-bearing indexed
+summary fields, when archive audit finds low-quality index text, or when
+`git diff --cached --check` fails. The readiness report is aggregate-only:
+archive-relative paths, categories, and counts, without matched snippets or
+private text. Expected publish-safe archive paths are limited to `INDEX.md`,
 `config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
 `sessions/`. Automatic memory node files, review decisions, source-stream
 registries, tools, and docs must be handled outside automatic archive sync.

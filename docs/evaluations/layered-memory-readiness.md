@@ -715,6 +715,39 @@ ranking quality, vector search, ontology discovery, private archive quality, or
 public leaderboard parity. The command is stable and included in
 `tools/run_quality_gates.py`.
 
+## V2.10 Deterministic Automation Publish Readiness Gate
+
+V2.10 adds `benchmarks/automation_publish_readiness_gate.py` to prove that a
+clean packaged deployment repository can distinguish safe automatic publish
+intent from publish-blocking generated noise before `sync_memory_archive.py`
+commits or pushes. The packaged repo now includes
+`tools/audit_publish_readiness.py`, which scans only publish-facing generated
+surfaces under `daily/` and text-bearing fields in `index/*.jsonl`. The audit
+reports archive-relative paths, categories, and counts only; it does not render
+matched snippets, memory text, source paths, raw refs, full queries, or secret
+values.
+
+The sync helper runs this readiness audit after the existing key-like value
+scan and before the archive audit or Git staging. Clean daily and indexed
+summary surfaces can reach `sync_memory_archive.py --dry-run --push` publish
+intent. Noisy daily/indexed surfaces fail closed before staging, committing, or
+pushing.
+
+The synthetic cases cover clean daily records, clean indexed summaries, daily
+command-progress noise, indexed prompt/environment noise, indexed raw source
+path/full-query noise, and secret-like values. The gate reports aggregate
+metrics including `publish_readiness_clean_pass_rate`,
+`publish_readiness_noise_rejection_rate`, `sync_clean_publish_intent_count`,
+`sync_noisy_block_count`, `automation_noise_rejection_count`,
+`raw_source_reference_rejection_count`, `secret_like_rejection_count`,
+`aggregate_only_report_count`, and `privacy_leak_count`.
+
+This proves deterministic packaged automation publish readiness and
+pre-commit/pre-push fail-closed behavior. It does not prove memory quality, LLM
+answer quality, private archive quality, GitHub availability, semantic ranking
+quality, vector search, ontology discovery, or public leaderboard parity. The
+command is stable and included in `tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

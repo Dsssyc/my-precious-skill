@@ -97,6 +97,7 @@ python3 benchmarks/progressive_source_drilldown_gate.py
 python3 benchmarks/scope_arbitration_gate.py
 python3 benchmarks/scope_answer_handoff_gate.py
 python3 benchmarks/generated_answer_scope_adapter_gate.py
+python3 benchmarks/automation_publish_readiness_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
@@ -114,6 +115,7 @@ python3 -m py_compile \
   benchmarks/scope_arbitration_gate.py \
   benchmarks/scope_answer_handoff_gate.py \
   benchmarks/generated_answer_scope_adapter_gate.py \
+  benchmarks/automation_publish_readiness_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
@@ -130,6 +132,7 @@ python3 -m py_compile \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
+  templates/agent-memory-repo/tools/audit_publish_readiness.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
   templates/agent-memory-repo/tools/apply_memory_review_decisions.py \
   templates/agent-memory-repo/tools/author_generated_answer_cases.py \

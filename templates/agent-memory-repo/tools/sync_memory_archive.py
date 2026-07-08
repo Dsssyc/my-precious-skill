@@ -138,6 +138,25 @@ def run_archive_audit(repo: Path) -> int:
     return result.returncode
 
 
+def run_publish_readiness_audit(repo: Path) -> int:
+    audit_script = repo / "tools" / "audit_publish_readiness.py"
+    if not audit_script.exists():
+        print("Refusing to sync because publish readiness audit helper is missing.", file=sys.stderr)
+        return 1
+    result = subprocess.run(
+        [sys.executable, str(audit_script), "--memory-repo", str(repo)],
+        cwd=repo,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        print("Refusing to sync because publish readiness failed.", file=sys.stderr)
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+    return result.returncode
+
+
 def existing_allowed_roots(repo: Path) -> list[str]:
     return [root for root in ALLOWED_ROOTS if (repo / root).exists()]
 
@@ -176,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
         if len(secret_hits) > 50:
             print(f"- ... and {len(secret_hits) - 50} more", file=sys.stderr)
         return 1
+
+    publish_status = run_publish_readiness_audit(repo)
+    if publish_status:
+        return publish_status
 
     audit_status = run_archive_audit(repo)
     if audit_status:
