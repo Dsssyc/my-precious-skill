@@ -79,6 +79,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any("benchmarks/generated_answer_scope_adapter_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/automation_publish_readiness_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/publish_surface_repair_gate.py" in command for command in commands))
+        self.assertTrue(any("benchmarks/scheduled_publish_recovery_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/v1_readiness_gate.py --run-packaged" in command for command in commands))
         self.assertTrue(
             any("benchmarks/v1_readiness_gate.py --run-packaged --require-answer" in command for command in commands)
@@ -95,6 +96,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/generated_answer_scope_adapter_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/automation_publish_readiness_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/publish_surface_repair_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/scheduled_publish_recovery_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/audit_publish_readiness.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/repair_publish_surfaces.py", module.PY_COMPILE_TARGETS)
 

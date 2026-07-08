@@ -28,6 +28,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/generated_answer_scope_adapter_gate.py",
     "benchmarks/automation_publish_readiness_gate.py",
     "benchmarks/publish_surface_repair_gate.py",
+    "benchmarks/scheduled_publish_recovery_gate.py",
     "benchmarks/e2e_induction_recall_benchmark.py",
     "benchmarks/updater_induction_benchmark.py",
     "benchmarks/layered_recall_benchmark.py",
@@ -105,6 +106,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "publish_surface_repair",
             ("python3", "benchmarks/publish_surface_repair_gate.py"),
+        ),
+        CheckSpec(
+            "scheduled_publish_recovery",
+            ("python3", "benchmarks/scheduled_publish_recovery_gate.py"),
         ),
         CheckSpec(
             "v1_readiness_core",

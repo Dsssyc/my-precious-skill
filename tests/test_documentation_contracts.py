@@ -107,6 +107,42 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v214_scheduled_recovery_gate(self):
+        section = self.evaluation_section("## V2.14 Scheduled Automation Recovery Drill")
+        for phrase in (
+            "benchmarks/scheduled_publish_recovery_gate.py",
+            "agent-native scheduled automation prompt",
+            "--push-after-update",
+            "memory repository as the only working directory",
+            "python tools/search_memory.py --health-check",
+            "python tools/sync_memory_archive.py --push",
+            "instead of hand staging",
+            "python tools/repair_publish_surfaces.py --apply",
+            "publish readiness blocks",
+            "blocked",
+            "repairable_metadata_noise",
+            "ambiguous_scalar_noise",
+            "malformed_metadata",
+            "sync dry-run publish intent",
+            "scheduler_prompt_contract_pass_rate",
+            "pre_repair_sync_block_count",
+            "repair_apply_success_count",
+            "post_repair_publish_intent_count",
+            "ambiguous_fail_closed_count",
+            "malformed_fail_closed_count",
+            "hand_stage_bypass_count",
+            "privacy_leak_count",
+            "not live scheduler reliability",
+            "not live LLM prompt-following quality",
+            "not GitHub availability",
+            "not ranking quality",
+            "not vector search",
+            "not private archive quality",
+            "not public leaderboard parity",
+            "tools/run_quality_gates.py",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_records_v22_runtime_support_coverage_contract(self):
         section = self.evaluation_section("## V2.2 Runtime Support-Coverage Contract")
         for phrase in (

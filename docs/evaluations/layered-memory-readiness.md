@@ -778,6 +778,37 @@ ontology discovery, not GitHub availability, not private archive quality, and
 not public leaderboard parity. The command is stable and included in
 `tools/run_quality_gates.py`.
 
+## V2.14 Scheduled Automation Recovery Drill
+
+V2.14 adds `benchmarks/scheduled_publish_recovery_gate.py` to prove that the
+agent-native scheduled automation prompt and packaged deployment runtime can
+execute the publish-surface recovery sequence deterministically. The gate
+creates clean packaged repositories through setup tooling, renders an
+agent-native prompt with `--push-after-update`, verifies the prompt contract,
+then runs synthetic recovery cases without live scheduler or LLM execution.
+
+The prompt contract checks that the rendered automation instructions use the
+memory repository as the only working directory, run
+`python tools/search_memory.py --health-check` before
+`python tools/sync_memory_archive.py --push`, rely on the sync helper instead of hand staging,
+invoke `python tools/repair_publish_surfaces.py --apply` only
+for publish readiness blocks, and stop when the repair helper reports
+`blocked`.
+
+The synthetic cases cover `repairable_metadata_noise`,
+`ambiguous_scalar_noise`, and `malformed_metadata`. Repairable metadata noise
+must block sync dry-run before staging, repair successfully, pass readiness,
+and then reach sync dry-run publish intent. Ambiguous scalar noise and
+malformed metadata must fail closed and never reach publish intent.
+
+Aggregate metrics include `scheduler_prompt_contract_pass_rate`,
+`pre_repair_sync_block_count`, `repair_apply_success_count`,
+`post_repair_publish_intent_count`, `ambiguous_fail_closed_count`,
+`malformed_fail_closed_count`, `hand_stage_bypass_count`, and
+`privacy_leak_count`.
+
+This proves deterministic scheduled automation recovery behavior. It is not live scheduler reliability, not live LLM prompt-following quality, not GitHub availability, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
