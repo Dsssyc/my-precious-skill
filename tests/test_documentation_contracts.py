@@ -143,6 +143,48 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v215_scheduled_search_gate(self):
+        section = self.evaluation_section("## V2.15 Scheduled Automation Search-Gate Publish Decision Contract")
+        for phrase in (
+            "benchmarks/scheduled_publish_search_gate.py",
+            "search discoverability",
+            "no-op state",
+            "unexpected dirty surfaces",
+            "--push-after-update",
+            "python tools/search_memory.py",
+            "--health-check",
+            "python tools/sync_memory_archive.py --push",
+            "python tools/search_memory.py memory",
+            "deployment-local policy only",
+            "not a reusable release readiness gate",
+            "not used as answerability or archive content evidence",
+            "discoverable_archive_publish_ready",
+            "empty_archive_search_blocked",
+            "already_current_no_op",
+            "unexpected_dirty_surface_blocked",
+            "archive audit",
+            "sync dry-run publish intent",
+            "avoid an empty commit",
+            "unexpected non-archive surface",
+            "search_gate_pass_rate",
+            "search_blocked_count",
+            "no_op_no_empty_commit_count",
+            "unexpected_dirty_block_count",
+            "publish_intent_count",
+            "hand_stage_bypass_count",
+            "free_form_search_output_used_count",
+            "privacy_leak_count",
+            "not live GitHub availability",
+            "not live scheduler reliability",
+            "not live LLM prompt-following quality",
+            "not ranking quality",
+            "not vector search",
+            "not private archive quality",
+            "not public leaderboard parity",
+            "tools/run_quality_gates.py",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_records_v22_runtime_support_coverage_contract(self):
         section = self.evaluation_section("## V2.2 Runtime Support-Coverage Contract")
         for phrase in (

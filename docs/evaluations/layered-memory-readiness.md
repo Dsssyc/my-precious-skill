@@ -809,6 +809,33 @@ Aggregate metrics include `scheduler_prompt_contract_pass_rate`,
 
 This proves deterministic scheduled automation recovery behavior. It is not live scheduler reliability, not live LLM prompt-following quality, not GitHub availability, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
 
+## V2.15 Scheduled Automation Search-Gate Publish Decision Contract
+
+V2.15 adds `benchmarks/scheduled_publish_search_gate.py` to prove that a clean
+packaged deployment repository can classify scheduled publish decisions around
+search discoverability, no-op state, and unexpected dirty surfaces before a
+push is attempted. The gate renders an agent-native prompt with
+`--push-after-update`, verifies the prompt uses `python tools/search_memory.py --health-check` before `python tools/sync_memory_archive.py --push`, and checks
+that the prompt does not require a generic content query such as
+`python tools/search_memory.py memory`.
+
+The reusable release contract is deliberately narrow: `search_memory.py --health-check` is the required pre-sync archive searchability gate. Generic free-form content queries are deployment-local policy only; they are not a reusable release readiness gate and are not used as answerability or archive content evidence.
+
+The synthetic cases cover `discoverable_archive_publish_ready`,
+`empty_archive_search_blocked`, `already_current_no_op`, and
+`unexpected_dirty_surface_blocked`. The publish-ready case must pass readiness
+and search health after archive audit, then reach sync dry-run publish intent.
+The search-blocked case must pass archive audit and publish readiness but stop
+before sync publish intent when search health fails. The no-op case must avoid an empty commit or push intent.
+The dirty case must block on an unexpected non-archive surface before publish.
+
+Aggregate metrics include `search_gate_pass_rate`, `search_blocked_count`,
+`no_op_no_empty_commit_count`, `unexpected_dirty_block_count`,
+`publish_intent_count`, `hand_stage_bypass_count`,
+`free_form_search_output_used_count`, and `privacy_leak_count`.
+
+This proves deterministic scheduled publish decision classification around search/no-op/dirty blockers. It is not live GitHub availability, not live scheduler reliability, not live LLM prompt-following quality, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
