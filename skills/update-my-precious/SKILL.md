@@ -192,11 +192,27 @@ The updater should:
 
    This helper should stage only generated archive paths and refuse tool/script
    edits, unredacted key-like values, archive audit findings, or whitespace errors.
+   It also refuses publish-surface noise in generated `daily/` and
+   text-bearing `index/*.jsonl` fields; if that happens, run the repair helper
+   below and retry only after readiness passes.
    If it reports `README.md` or `tools/` changes, stop the archive publish path.
    Review and commit those reusable tool or documentation changes separately
    before rerunning archive sync.
 
 ## Backfill And Repair
+
+When `sync_memory_archive.py` or `audit_publish_readiness.py` reports
+publish-surface noise derived from structured session metadata, run the
+fail-closed repair helper before retrying sync:
+
+```bash
+python "$MEMORY_REPO/tools/repair_publish_surfaces.py" --memory-repo "$MEMORY_REPO" --apply
+python "$MEMORY_REPO/tools/audit_publish_readiness.py" --memory-repo "$MEMORY_REPO"
+```
+
+This edits only `sessions/**/meta.json`, regenerates derived publish surfaces,
+and emits aggregate counts only. If it reports `blocked`, stop and report the
+aggregate blocker instead of hand-editing `daily/` or `index/*.jsonl`.
 
 When search results are polluted by old generated summaries, run a deliberate
 rewrite pass instead of editing index files by hand. If the archive already has

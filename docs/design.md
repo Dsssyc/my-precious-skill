@@ -188,6 +188,11 @@ and JSONL indexes.
   aggregate-only authoring helper that appends pending private induction review
   decision skeletons without rendering candidate text, memory text, source
   paths, queries, raw refs, or transcripts.
+- `templates/agent-memory-repo/tools/repair_publish_surfaces.py`:
+  aggregate-only dry-run/apply helper that removes deterministic
+  publish-surface noise from structured session metadata, rebuilds derived
+  archive surfaces, and fails closed on malformed metadata or ambiguous scalar
+  text.
 - `templates/agent-memory-repo/tools/sync_memory_archive.py`: safe Git sync
   helper that stages only publish-safe archive paths (`INDEX.md`,
   `config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and

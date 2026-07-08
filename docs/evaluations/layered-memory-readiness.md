@@ -748,6 +748,36 @@ answer quality, private archive quality, GitHub availability, semantic ranking
 quality, vector search, ontology discovery, or public leaderboard parity. The
 command is stable and included in `tools/run_quality_gates.py`.
 
+## V2.13 Reusable Publish-Surface Repair Gate
+
+V2.13 adds `tools/repair_publish_surfaces.py` and
+`benchmarks/publish_surface_repair_gate.py` to prove that V2.12-style
+publish-surface failures can be repaired in a reusable packaged deployment
+repo without weakening `tools/audit_publish_readiness.py` or bypassing
+`tools/sync_memory_archive.py`. The helper scans only structured
+`sessions/**/meta.json` fields, emits aggregate counts only, and edits metadata
+only when the repair is deterministic.
+
+The synthetic gate reproduces command-progress, permission/sandbox chatter,
+raw-source reference, and noisy tag/fact/summary cases that flow into
+`daily/` and text-bearing `index/*.jsonl` publish surfaces. It verifies that
+dry-run reports stay aggregate-only, apply mode rebuilds derived surfaces
+through the updater, durable adjacent facts remain present, and publish
+readiness passes after repair.
+
+The gate also covers fail-closed boundaries: malformed metadata and ambiguous
+single-scalar text are not guessed or partially repaired. Aggregate metrics
+include `pre_repair_readiness_failure_count`,
+`post_repair_readiness_pass_count`, `repairable_apply_success_count`,
+`durable_fact_preservation_count`, `ambiguous_fail_closed_count`,
+`malformed_fail_closed_count`, and `privacy_leak_count`.
+
+This proves deterministic packaged publish-surface repair. It is not memory
+quality, not LLM answer quality, not ranking quality, not vector search, not
+ontology discovery, not GitHub availability, not private archive quality, and
+not public leaderboard parity. The command is stable and included in
+`tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

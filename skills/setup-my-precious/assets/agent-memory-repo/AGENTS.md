@@ -76,6 +76,13 @@ aggregate-only: archive-relative paths, categories, and counts, with no matched
 private text. Commit template or tool updates separately before running
 automatic archive sync.
 
+If readiness blocks on generated `daily/` or text-bearing `index/*.jsonl`
+noise derived from structured session metadata, run
+`python tools/repair_publish_surfaces.py --apply` before retrying sync. The
+repair helper edits only `sessions/**/meta.json`, regenerates derived archive
+surfaces through the updater, emits aggregate counts only, and fails closed on
+malformed metadata or ambiguous scalar text.
+
 When `config/projects.jsonl` is empty, the global runner should scan source
 records for project metadata and register discovered projects before updating.
 Disabled projects in `config/projects.jsonl` must stay disabled even if source

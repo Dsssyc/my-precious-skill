@@ -209,6 +209,7 @@ def agent_native_prompt(
             "- Daily records should contain only durable session summaries, durable decisions, and actual unresolved tasks already extracted by the updater.",
             "- Do not preserve command progress, dry-run/live-run status, permission or sandbox chatter, raw prompts, AGENTS/environment/policy blocks, raw source paths, raw refs, full queries, original secret values, or generic process narration as daily content.",
             "- If generated daily files or indexed summaries contain that noise, do not push. Report only the archive-relative path and concise aggregate reason; do not quote private content.",
+            "- If publish readiness blocks on structured metadata-derived noise, run `python tools/repair_publish_surfaces.py --apply`; it is fail-closed for malformed metadata or ambiguous scalar text. Rerun readiness/sync after repair, and stop if the helper reports `blocked`.",
             "",
             "Automation run note contract:",
             "- Keep automation run notes separate from generated daily archive files.",

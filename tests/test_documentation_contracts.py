@@ -73,7 +73,37 @@ class DocumentationContractTests(unittest.TestCase):
             "not ranking quality",
             "not vector search",
             "not ontology discovery",
+                "not public leaderboard parity",
+            ):
+            self.assert_contains(section, phrase)
+
+    def test_evaluation_doc_records_v213_publish_surface_repair_gate(self):
+        section = self.evaluation_section("## V2.13 Reusable Publish-Surface Repair Gate")
+        for phrase in (
+            "tools/repair_publish_surfaces.py",
+            "benchmarks/publish_surface_repair_gate.py",
+            "sessions/**/meta.json",
+            "aggregate counts only",
+            "dry-run reports stay aggregate-only",
+            "apply mode rebuilds derived surfaces",
+            "through the updater",
+            "durable adjacent facts remain present",
+            "malformed metadata",
+            "ambiguous",
+            "single-scalar text",
+            "pre_repair_readiness_failure_count",
+            "post_repair_readiness_pass_count",
+            "repairable_apply_success_count",
+            "durable_fact_preservation_count",
+            "ambiguous_fail_closed_count",
+            "malformed_fail_closed_count",
+            "privacy_leak_count",
+            "not LLM answer quality",
+            "not ranking quality",
+            "not vector search",
+            "ontology discovery",
             "not public leaderboard parity",
+            "tools/run_quality_gates.py",
         ):
             self.assert_contains(section, phrase)
 

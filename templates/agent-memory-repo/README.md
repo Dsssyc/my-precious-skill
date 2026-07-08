@@ -378,6 +378,18 @@ For a readiness-only check of the publish-facing generated surfaces:
 python tools/audit_publish_readiness.py --memory-repo .
 ```
 
+If readiness fails because `daily/` or text-bearing `index/*.jsonl` entries
+contain command progress, sandbox chatter, or raw-source references derived
+from structured session metadata, run the repair helper before retrying sync:
+
+```bash
+python tools/repair_publish_surfaces.py --memory-repo . --apply
+```
+
+The helper edits only `sessions/**/meta.json`, regenerates derived archive
+surfaces through the updater, and emits aggregate counts only. It fails closed
+on malformed metadata or ambiguous scalar text instead of guessing.
+
 The sync helper refuses to proceed when non-archive paths changed, when
 generated archive files still contain recognized key-like values, when the
 publish readiness audit finds command progress, prompt/environment blocks,
