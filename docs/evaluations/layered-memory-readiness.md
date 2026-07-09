@@ -1147,6 +1147,52 @@ diagnostics: `archive_search_tool_context_package_failure_count: 8`,
 `active_support_wrong_active_hit_count: 2`. This is observability evidence,
 not a private archive correctness claim and not a private archive repair.
 
+## V2.23 Archive-Bundled Search Tool Drift Repair
+
+V2.23 closes the deployment-tool drift exposed by V2.22. It adds a narrow
+setup-path repair contract:
+
+```bash
+python skills/setup-my-precious/scripts/setup_memory_archive.py \
+  --path /path/to/agent-memory \
+  --refresh-tools \
+  --skip-config
+```
+
+The repair command refreshes only reusable `tools/**` files from the bundled
+template. It does not rewrite archive data, indexes, source records, daily
+records, session summaries, or user-owned config. It also fails closed when a
+tool target resolves outside the archive, such as through a symlink.
+
+The release gate now includes:
+
+```bash
+python3 benchmarks/search_tool_drift_repair_gate.py
+```
+
+The gate constructs a clean packaged deployment repo, deliberately replaces the
+deployment repo's bundled `tools/search_memory.py` with a stale tool that cannot
+emit `report_kind: memory_recall_context_package`, runs the documented
+`--refresh-tools` repair command, and then verifies the deployment repo's own
+`tools/search_memory.py` can produce a package-first
+`--depth evidence --context-json` result. Template fallback is not used as
+post-repair success evidence.
+
+| metric | value |
+| --- | ---: |
+| `stale_search_tool_detected_count` | 1 |
+| `repair_attempt_count` | 2 |
+| `post_repair_context_package_success_count` | 1 |
+| `template_fallback_used_after_repair_count` | 0 |
+| `archive_data_mutation_count` | 0 |
+| `unsafe_repair_fail_closed_count` | 1 |
+| `privacy_leak_count` | 0 |
+
+This proves synthetic deployment search-tool drift detection and repair. It
+does not prove private archive correctness, private content repair, ranking
+quality, LLM answer quality, vector search, ontology discovery, or scheduler
+publish behavior.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

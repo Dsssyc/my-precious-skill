@@ -89,7 +89,21 @@ Ask only what is needed, one step at a time:
    A new empty archive may not have searchable memory records yet; this step only
    confirms the copied tool runs.
 
-7. If the user requests scheduling, first verify the archive command exists and runs manually.
+7. If an existing deployment repository has stale bundled tools, refresh only
+   the reusable tool files from this setup skill:
+
+   ```bash
+   python scripts/setup_memory_archive.py \
+     --path "$MEMORY_REPO" \
+     --refresh-tools \
+     --skip-config
+   ```
+
+   Use this for tool drift repair, not archive content repair. It must not
+   rewrite archive data, indexes, daily records, session summaries, source
+   records, or user-owned config. Do not use `--force` for this narrow repair.
+
+8. If the user requests scheduling, first verify the archive command exists and runs manually.
    Then render reviewable scheduler configuration:
 
    ```bash

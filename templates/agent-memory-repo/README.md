@@ -143,6 +143,25 @@ python tools/backfill_memory_archive.py \
 small repositories, but it can be slower on large shared source directories.
 Both modes are repair paths, not the normal incremental path.
 
+## Refresh Bundled Tools
+
+If this deployment repository's bundled `tools/search_memory.py` is stale and
+cannot emit a package-first recall context with
+`report_kind: memory_recall_context_package`, refresh reusable tool files from
+the installed setup skill:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --refresh-tools \
+  --skip-config
+```
+
+This command updates only `tools/**`. It preserves archive data, indexes,
+source records, daily records, session summaries, and user-owned config. Do not
+use `tools/sync_memory_archive.py` for tool refreshes; automatic archive sync
+intentionally refuses tool/script changes.
+
 ## Audit
 
 Check generated archive files for wrapper-field noise, first-person process

@@ -83,6 +83,22 @@ repair helper edits only `sessions/**/meta.json`, regenerates derived archive
 surfaces through the updater, emits aggregate counts only, and fails closed on
 malformed metadata or ambiguous scalar text.
 
+If `tools/search_memory.py "<query>" --depth evidence --context-json` cannot
+emit `report_kind: memory_recall_context_package` because the bundled archive
+tool is stale, refresh reusable tools from the installed setup skill instead
+of using archive sync:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --refresh-tools \
+  --skip-config
+```
+
+This repair updates only `tools/**`. It must not mutate archive data, indexes,
+source records, daily records, session summaries, or user-owned config. Commit
+tool refreshes separately from automatic archive sync.
+
 When `config/projects.jsonl` is empty, the global runner should scan source
 records for project metadata and register discovered projects before updating.
 Disabled projects in `config/projects.jsonl` must stay disabled even if source
