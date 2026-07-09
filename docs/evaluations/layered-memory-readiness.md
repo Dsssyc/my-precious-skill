@@ -1044,6 +1044,61 @@ discovery, private archive quality, public benchmark leaderboard parity, or a
 complete long-horizon governance system. The gate is deterministic and included
 in `tools/run_quality_gates.py`.
 
+## V2.21 Aggregate-Only Private Lifecycle Shadow Gate
+
+V2.21 adds `benchmarks/private_lifecycle_governance_shadow_gate.py` as a
+read-only lifecycle observability gate for the same governance surfaces that
+V2.20 made deterministic. The release gate uses only the public synthetic
+fixture mode:
+
+```bash
+python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
+```
+
+The runner can also be used as optional local dogfood against a private
+deployment archive:
+
+```bash
+python3 benchmarks/private_lifecycle_governance_shadow_gate.py \
+  --memory-repo /path/to/private-agent-memory \
+  --output /tmp/my-precious-private-lifecycle-shadow.json
+```
+
+The private mode is intentionally not part of `tools/run_quality_gates.py`.
+It may read structured archive indexes and use private memory text internally
+as `tools/search_memory.py --depth evidence --context-json` queries, but its
+report is aggregate-only. It does not render private queries, memory text,
+memory IDs, source paths, source content, or raw refs. Reports may be written
+only to stdout or an explicit `/tmp/...` path. If the archive-bundled search
+tool cannot emit a context package, the runner may fall back to this repo's
+template `search_memory.py`; only the fallback success count is rendered.
+
+The V2.21 synthetic fixture reported:
+
+| metric | value |
+| --- | ---: |
+| `private_lifecycle_relation_integrity_score` | 1.0 |
+| `private_inactive_search_suppression_sample_rate` | 1.0 |
+| `private_active_current_support_sample_rate` | 1.0 |
+| `private_context_package_parse_success_rate` | 1.0 |
+| `private_tombstone_marker_count` | 1 |
+| `private_stale_review_candidate_count` | 1 |
+| `private_support_ref_reachability_sample_rate` | 1.0 |
+| `private_review_queue_actionability_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+| `rendered_private_query_count` | 0 |
+| `rendered_memory_text_count` | 0 |
+| `rendered_source_path_count` | 0 |
+| `rendered_raw_ref_count` | 0 |
+
+This proves deterministic aggregate-only lifecycle observability for relation
+integrity, inactive search suppression, active/current context package support,
+support-ref reachability, stale review routing, tombstone markers, and review
+queue actionability. It does not prove private archive correctness by itself,
+private coverage completeness, LLM answer quality, ranking quality, vector
+search, ontology discovery, physical deletion, scheduler publication behavior,
+or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
