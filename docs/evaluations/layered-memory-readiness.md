@@ -962,6 +962,45 @@ synthetic command is stable and included in `tools/run_quality_gates.py`; the
 local live check is a deployment verification command and is not required for
 portable release gates.
 
+## V2.19 Reviewable Automatic Induction Consolidation Gate
+
+V2.19 adds `benchmarks/induction_consolidation_gate.py` as a packaged write-path
+gate for deterministic automatic induction consolidation. The gate creates a
+clean synthetic deployment archive, feeds synthetic source records through the
+copied `tools/update_memory_archive.py`, and scores only structured memory,
+review, and trace indexes. It does not use free-form summaries as
+answerability evidence.
+
+The gate proves four bounded behaviors: repeated durable facts consolidate into
+one active memory with multiple support refs; paraphrased durable facts merge
+only when deterministic normalized keys match; contradictory facts are
+preserved with evidence instead of silently overwriting each other; and process
+noise such as command status, prompt echo, approval/sandbox chatter, raw paths,
+and automation narration is rejected before active-memory promotion. Ambiguous
+scope narrowing is routed to induction review rather than becoming active
+current memory automatically.
+
+The V2.19 synthetic packaged run reported:
+
+| metric | value |
+| --- | ---: |
+| `induction_duplicate_merge_accuracy` | 1.0 |
+| `induction_paraphrase_merge_accuracy` | 1.0 |
+| `induction_contradiction_preservation_count` | 1 |
+| `induction_ambiguous_scope_review_count` | 1 |
+| `induction_process_noise_rejection_count` | 4 |
+| `induction_active_memory_precision` | 1.0 |
+| `induction_support_ref_coverage_rate` | 1.0 |
+| `review_routing_accuracy` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+This proves a narrow deterministic consolidation and review-routing contract
+for synthetic automatic induction. It does not prove live LLM induction
+quality, vector search, broad ranking behavior, ontology discovery,
+multi-principal governance, private archive quality, or public benchmark
+leaderboard parity. The gate is deterministic and included in
+`tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
@@ -3682,10 +3721,11 @@ decay/deletion behavior.
 ## Next Roadmap After The Minimum Slice
 
 1. Strengthen automatic induction.
-   Move from literal `Reusable fact:` extraction toward a reviewable
-   consolidation stage that can merge repeated facts, preserve contradictory
-   evidence, route ambiguous scope changes to review, and avoid process-noise
-   promotion.
+   V2.19 now gates the deterministic first slice: repeated/paraphrased
+   induction facts can merge, contradictions are preserved, ambiguous scope
+   narrowing routes to review, and process-noise promotion is blocked. The
+   remaining work is live LLM induction quality and richer long-horizon
+   consolidation, not another unbounded pile of convenience heuristics.
 
 2. Deepen lifecycle operations.
    Extend the semantic merge/refresh/deprecation path beyond the current review

@@ -198,7 +198,9 @@ TEST_STATUS_MEMORY_PATTERN = re.compile(
 )
 PROMPT_LIKE_QUOTED_MEMORY_PATTERN = re.compile(
     r"(?i)^\s*(?:quoted|raw)\s+(?:prompt|instruction|text)\b|"
-    r'"[^"]*\b(?:assistant|system|user)\s+must\b[^"]*"'
+    r"^\s*prompt\s+echo\b|"
+    r'"[^"]*\b(?:assistant|system|user)\s+must\b[^"]*"|'
+    r"\b(?:assistant|system|user)\s+must\b"
 )
 AUTOMATION_PERMISSION_CHATTER_PATTERN = re.compile(
     r"(?i)(?:"
@@ -210,7 +212,8 @@ AUTOMATION_PERMISSION_CHATTER_PATTERN = re.compile(
     r")"
 )
 DAILY_RUN_STATUS_PATTERN = re.compile(
-    r"(?i)\b(?:command\s+progress|dry[- ]?run|live[- ]?run|run\s+status)\b"
+    r"(?i)\b(?:command\s+progress|command\s+status|live[- ]?run|run\s+status)\b|"
+    r"\bscheduled\s+automation\b(?=.{0,80}\b(?:running|run|status|dry[- ]?run|push|publish)\b)"
 )
 DAILY_CONTRACT_NOISE_PATTERN = re.compile(
     r"(?i)(?:"
@@ -219,6 +222,7 @@ DAILY_CONTRACT_NOISE_PATTERN = re.compile(
     r"\b(?:records|source-records|sessions)/[^\s`)]+#[A-Za-z0-9_.:-]+"
     r")"
 )
+SECRET_LIKE_TOKEN_PATTERN = re.compile(r"[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]{2,})+")
 BROAD_GENERIC_MEMORY_WORDS = {
     "a",
     "and",
@@ -1150,6 +1154,12 @@ def is_non_durable_natural_memory_text(text: str) -> bool:
         return True
     if PROMPT_LIKE_QUOTED_MEMORY_PATTERN.search(compacted):
         return True
+    if is_automation_permission_chatter(compacted):
+        return True
+    if is_daily_run_status_text(compacted):
+        return True
+    if is_daily_contract_noise_text(compacted):
+        return True
     return is_broad_generic_memory_rule(compacted)
 
 
@@ -1158,6 +1168,8 @@ def is_low_signal_memory_text(text: str) -> bool:
     if not compacted:
         return True
     if ARCHIVE_SOURCE_PLACEHOLDER_PATTERN.fullmatch(compacted):
+        return True
+    if SECRET_LIKE_TOKEN_PATTERN.fullmatch(compacted.strip("` .:;")):
         return True
     if SOURCE_CITATION_LINE_PATTERN.fullmatch(compacted):
         return True
@@ -1235,6 +1247,13 @@ def strip_process_clauses(text: str) -> str:
     stripped = LOW_SIGNAL_PREFIX_PATTERN.sub("", stripped).strip()
     if re.fullmatch(r"[-*]?\s*\.\.\.", stripped):
         return ""
+    stripped = re.sub(
+        r"(?:\s+|^)\*\*(?:Commands?|Command Status|Tool Calls?)\*\*.*$",
+        "",
+        stripped,
+        flags=re.IGNORECASE,
+    ).strip()
+    stripped = re.sub(r"(?:\s+|^)Command Status\s*[-:].*$", "", stripped, flags=re.IGNORECASE).strip()
     if is_low_signal_memory_text(stripped):
         return ""
     if re.search(r"^using\s+[`$]?(?:using-|brainstorming|test-driven|systematic|update-my-precious)", stripped, re.IGNORECASE):
@@ -1290,13 +1309,6 @@ def strip_process_clauses(text: str) -> str:
     )
     for pattern in replacements:
         stripped = re.sub(pattern, lambda match: "。" if match.group(0).lstrip().startswith(("。", ".")) else "", stripped, flags=re.IGNORECASE)
-    stripped = re.sub(
-        r"\s+\*\*(?:Commands?|Command Status|Tool Calls?)\*\*.*$",
-        "",
-        stripped,
-        flags=re.IGNORECASE,
-    )
-    stripped = re.sub(r"\s+Command Status\s*[-:].*$", "", stripped, flags=re.IGNORECASE)
     return clip(stripped)
 
 

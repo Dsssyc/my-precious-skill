@@ -17,6 +17,12 @@ MEMORY_DEPRECATION_PATTERN = re.compile(
 
 TOKEN_SYNONYMS = {
     "anchors": "anchor",
+    "citation": "ref",
+    "citations": "ref",
+    "cite": "ref",
+    "cited": "ref",
+    "cites": "ref",
+    "citing": "ref",
     "evidences": "evidence",
     "keep": "preserve",
     "keeps": "preserve",
@@ -28,6 +34,10 @@ TOKEN_SYNONYMS = {
     "references": "ref",
     "reference": "ref",
     "refs": "ref",
+    "recall": "retrieval",
+    "recalled": "retrieval",
+    "recalling": "retrieval",
+    "recalls": "retrieval",
     "retain": "preserve",
     "retained": "preserve",
     "retains": "preserve",
@@ -35,6 +45,7 @@ TOKEN_SYNONYMS = {
     "retrieving": "retrieval",
     "retrieve": "retrieval",
     "retrieved": "retrieval",
+    "retrieves": "retrieval",
     "sources": "source",
 }
 SEMANTIC_STOPWORDS = {
