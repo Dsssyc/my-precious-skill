@@ -23,6 +23,13 @@ import update_memory_archive as updater
 
 REPORT_KIND = "publish_surface_repair_report"
 SEGMENT_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+|\n+")
+SUMMARY_FALLBACK_FIELDS = (
+    "user_intent",
+    "reusable_facts",
+    "decisions",
+    "unresolved_tasks",
+    "title",
+)
 
 
 @dataclass
@@ -193,6 +200,31 @@ def clean_value(value: object, field_name: object) -> CleanResult:
     return CleanResult(value=value)
 
 
+def clean_summary_fallback_text(value: object) -> str:
+    for text in readiness.iter_strings(value):
+        durable = updater.durable_memory_text(text)
+        if durable and not text_counts(durable, force_raw=False):
+            return durable
+    return ""
+
+
+def summary_fallback_from_metadata(
+    payload: dict[str, object],
+    field_results: dict[str, tuple[object, CleanResult]],
+) -> str:
+    results_by_normalized_key = {key.lower(): result for key, result in field_results.items()}
+    payload_by_normalized_key = {str(key).lower(): value for key, value in payload.items()}
+    for field_name in SUMMARY_FALLBACK_FIELDS:
+        if field_name in results_by_normalized_key:
+            value = results_by_normalized_key[field_name][1].value
+        else:
+            value = payload_by_normalized_key.get(field_name)
+        fallback = clean_summary_fallback_text(value)
+        if fallback:
+            return fallback
+    return ""
+
+
 def iter_meta_paths(memory_repo: Path) -> list[Path]:
     sessions = memory_repo / "sessions"
     if not sessions.exists():
@@ -222,11 +254,25 @@ def scan_repairs(memory_repo: Path) -> tuple[RepairStats, list[tuple[Path, dict[
             stats.malformed_meta_count += 1
             continue
         cleaned = dict(payload)
-        file_changed = False
+        field_results: dict[str, tuple[object, CleanResult]] = {}
         for key, value in payload.items():
             if not repairable_field(key):
                 continue
             result = clean_value(value, key)
+            field_results[str(key)] = (key, result)
+
+        for key_text, (key, result) in list(field_results.items()):
+            if str(key).lower() != "summary" or result.ambiguous_count == 0:
+                continue
+            fallback = summary_fallback_from_metadata(payload, field_results)
+            if not fallback:
+                continue
+            replacement = CleanResult(value=fallback, changed=True, scalar_fields_rewritten=1)
+            replacement.category_counts.update(result.category_counts)
+            field_results[key_text] = (key, replacement)
+
+        file_changed = False
+        for key, result in field_results.values():
             stats.category_counts.update(result.category_counts)
             stats.ambiguous_scalar_count += result.ambiguous_count
             stats.list_items_removed += result.list_items_removed

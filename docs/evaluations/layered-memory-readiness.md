@@ -864,6 +864,48 @@ Aggregate metrics include `search_health_pre_repair_pass_rate`,
 
 This proves deterministic closure for search-healthy content-noise repair. It is not live scheduler reliability, not live GitHub availability, not live LLM prompt-following quality, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
 
+## V2.17 Real Deployment Publish Readiness Closure
+
+V2.17 closes the observed deployment gap where archive audit and
+`search_memory.py --health-check` passed, but `sync_memory_archive.py --push`
+correctly refused to publish because generated publish-facing index fields
+still contained command-progress or permission/sandbox chatter. The reusable
+repair helper now handles a narrower deterministic case: a single-scalar
+`summary` value that is entirely noisy can be replaced only when the same
+structured `meta.json` record contains a clean durable fallback such as
+`user_intent`, `reusable_facts`, `decisions`, `unresolved_tasks`, or `title`.
+If no clean fallback exists, the repair still fails closed.
+
+`benchmarks/publish_surface_repair_gate.py` adds
+`fallback_summary_metadata_noise` to prove this exact failure class without
+rendering private memory text. The packaged gate now requires 3 pre-repair
+readiness failures, 2 post-repair readiness passes, 2 repairable apply
+successes, 2 durable-content preservation checks, 1 ambiguous fail-closed
+case, 1 malformed fail-closed case, and `privacy_leak_count=0`.
+
+A private deployment dogfood run on 2026-07-09 stayed aggregate-only and
+reported the following closure metrics after repair and sync:
+
+| metric | value |
+| --- | ---: |
+| `publish_readiness_status` | `passed` |
+| `publish_readiness_blocked_file_count` | 0 |
+| `command_progress_count` | 0 |
+| `permission_or_sandbox_count` | 0 |
+| `raw_source_reference_count` | 0 |
+| `privacy_leak_count` | 0 |
+| `archive_audit_passed` | true |
+| `search_health_memory_records` | 1444 |
+| `search_health_active_memory_records` | 1442 |
+| `sync_dry_run_status_after_publish` | `no_op` |
+
+This proves a real deployment publish-readiness closure for this failure
+class and keeps the reusable claim bounded. It is not live scheduler
+reliability, not live LLM prompt-following quality, not GitHub availability in
+general, not memory quality, not ranking quality, not vector search, not
+ontology discovery, not private archive quality, and not public leaderboard
+parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

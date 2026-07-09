@@ -190,6 +190,7 @@ def write_session(memory_repo: Path, case: RecoveryCase) -> None:
     elif case.kind == "ambiguous":
         meta.update(
             {
+                "user_intent": "",
                 "summary": (
                     "Durable scheduled recovery decision remains current while command status dry-run would push "
                     "PRIVATE_SCHEDULED_AMBIGUOUS_SENTINEL"

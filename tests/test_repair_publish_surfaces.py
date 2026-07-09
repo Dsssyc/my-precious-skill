@@ -177,6 +177,10 @@ class RepairPublishSurfacesTests(unittest.TestCase):
                 repo,
                 summary="Durable package-first recall remains current while command status dry-run would push",
             )
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["user_intent"] = ""
+            meta["reusable_facts"] = []
+            meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             rebuild(repo)
 
             result = repair(repo, apply=True)
@@ -188,6 +192,31 @@ class RepairPublishSurfacesTests(unittest.TestCase):
             self.assertFalse(report["metrics"]["rebuild_performed"])
             repaired_meta = json.loads(meta_path.read_text(encoding="utf-8"))
             self.assertIn("dry-run", repaired_meta["summary"])
+
+    def test_ambiguous_summary_uses_clean_metadata_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = setup_archive(Path(tmpdir))
+            meta_path = write_session(
+                repo,
+                summary="Command Status: dry-run would push PRIVATE_SUMMARY_SENTINEL",
+            )
+            rebuild(repo)
+            self.assertNotEqual(audit(repo).returncode, 0)
+
+            result = repair(repo, apply=True)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "repaired")
+            self.assertEqual(report["metrics"]["ambiguous_scalar_count"], 0)
+            self.assertGreaterEqual(report["metrics"]["scalar_fields_rewritten"], 1)
+            self.assertTrue(report["metrics"]["rebuild_performed"])
+            self.assertEqual(audit(repo).returncode, 0)
+            repaired_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            self.assertNotIn("PRIVATE_SUMMARY_SENTINEL", repaired_meta["summary"])
+            self.assertNotIn("dry-run", repaired_meta["summary"])
+            rendered = json.dumps(repaired_meta, sort_keys=True)
+            self.assertIn("Durable package-first recall remains current.", rendered)
 
     def test_malformed_metadata_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:

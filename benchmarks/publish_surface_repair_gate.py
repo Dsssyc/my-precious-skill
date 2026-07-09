@@ -118,6 +118,7 @@ def write_session(memory_repo: Path, case: GateCase) -> dict[str, str]:
         "unresolved_tasks": [],
         "explicit_memories": [],
     }
+    expected_durable_summary = "Durable launch decision remains current."
     if case.kind == "repairable":
         base_meta.update(
             {
@@ -134,13 +135,25 @@ def write_session(memory_repo: Path, case: GateCase) -> dict[str, str]:
                 "raw_prompts": ["raw prompt: PRIVATE_RAW_PROMPT_SENTINEL"],
             }
         )
+    elif case.kind == "fallback_summary":
+        expected_durable_summary = "Preserve durable synthetic publish-surface repair behavior."
+        base_meta.update(
+            {
+                "summary": "Command Status: dry-run would push after commit PRIVATE_SUMMARY_FALLBACK_SENTINEL",
+                "reusable_facts": [
+                    "Keep package-first recall as the current durable contract.",
+                ],
+                "tags": ["package-first"],
+            }
+        )
     elif case.kind == "ambiguous":
         base_meta.update(
             {
+                "user_intent": "",
                 "summary": (
                     "Durable launch decision remains current while command status dry-run would push after commit"
                 ),
-                "reusable_facts": ["Keep package-first recall as the current durable contract."],
+                "reusable_facts": [],
                 "tags": ["package-first"],
             }
         )
@@ -149,7 +162,7 @@ def write_session(memory_repo: Path, case: GateCase) -> dict[str, str]:
     write_json(session_dir / "meta.json", base_meta)
     return {
         "meta_path": "sessions/2026/07/08/synthetic/meta.json",
-        "durable_summary": "Durable launch decision remains current.",
+        "durable_summary": expected_durable_summary,
         "durable_fact": "Keep package-first recall as the current durable contract.",
         "durable_tag": "package-first",
     }
@@ -222,6 +235,7 @@ def run_repair(memory_repo: Path, stage: str, *, apply: bool, expect_success: bo
     combined = result.stdout + result.stderr
     private_markers = (
         "PRIVATE_REPAIR_SENTINEL",
+        "PRIVATE_SUMMARY_FALLBACK_SENTINEL",
         "PRIVATE_FACT_SENTINEL",
         "PRIVATE_TAG_SENTINEL",
         "PRIVATE_RAW_PROMPT_SENTINEL",
@@ -313,10 +327,10 @@ def build_report(case_results: list[dict[str, object]]) -> dict[str, object]:
         "privacy_leak_count": sum(int(case["privacy_leak_count"]) for case in case_results),
     }
     passed = (
-        metrics["pre_repair_readiness_failure_count"] == 2
-        and metrics["post_repair_readiness_pass_count"] == 1
-        and metrics["repairable_apply_success_count"] == 1
-        and metrics["durable_fact_preservation_count"] == 1
+        metrics["pre_repair_readiness_failure_count"] == 3
+        and metrics["post_repair_readiness_pass_count"] == 2
+        and metrics["repairable_apply_success_count"] == 2
+        and metrics["durable_fact_preservation_count"] == 2
         and metrics["ambiguous_fail_closed_count"] == 1
         and metrics["malformed_fail_closed_count"] == 1
         and metrics["privacy_leak_count"] == 0
@@ -344,6 +358,7 @@ def build_report(case_results: list[dict[str, object]]) -> dict[str, object]:
 def run_gate(root: Path) -> dict[str, object]:
     cases = [
         GateCase("repairable_metadata_noise", "repairable", True),
+        GateCase("fallback_summary_metadata_noise", "fallback_summary", True),
         GateCase("ambiguous_scalar_noise", "ambiguous", False),
         GateCase("malformed_metadata", "malformed", False),
     ]

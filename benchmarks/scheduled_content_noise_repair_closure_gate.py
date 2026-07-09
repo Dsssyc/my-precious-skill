@@ -233,6 +233,7 @@ def write_session(memory_repo: Path, *, kind: str, name: str) -> dict[str, str]:
         meta["tags"] = [DURABLE_TAG, "unit tests PRIVATE_CONTENT_NOISE_SENTINEL"]
         meta["raw_prompts"] = ["raw prompt: PRIVATE_CONTENT_NOISE_SENTINEL"]
     elif kind == "ambiguous":
+        meta["user_intent"] = ""
         meta["summary"] = (
             "Durable content noise closure remains current while command status dry-run would push "
             "PRIVATE_AMBIGUOUS_CONTENT_SENTINEL"
