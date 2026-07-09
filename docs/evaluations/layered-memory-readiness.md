@@ -906,6 +906,62 @@ general, not memory quality, not ranking quality, not vector search, not
 ontology discovery, not private archive quality, and not public leaderboard
 parity.
 
+## V2.18 Live Codex Automation Prompt Alignment Gate
+
+V2.18 closes the remaining scheduler configuration gap: the reusable
+agent-native prompt and the real Codex scheduled automation now both spell out
+the same publish-readiness, repair, recheck, sync dry-run, and sync-helper
+publish path. The previous live automation prompt already ran the updater,
+archive audit, search health check, and sync helper, but it did not explicitly
+run `python tools/audit_publish_readiness.py`, did not run
+`python tools/repair_publish_surfaces.py --apply` for repairable
+publish-surface blockers, and did not require a post-repair
+archive audit -> publish readiness -> search health -> sync dry-run chain.
+
+`benchmarks/live_automation_prompt_alignment_gate.py` validates the public
+synthetic prompt contract by rendering a clean packaged deployment repository
+with `tools/render_scheduler.py --backend agent-native --push-after-update`.
+It also supports a local live check with
+`--automation-config /Users/soku/.codex/automations/update-my-precious-memory/automation.toml`
+without rendering the automation prompt text. The gate includes negative
+prompts for missing publish-readiness coverage and raw git publish paths, so
+the release check rejects both stale scheduler contracts and prompts that
+bypass `tools/sync_memory_archive.py`.
+
+The live Codex automation was inspected and updated on 2026-07-09. The
+aggregate-only live alignment run reported:
+
+| metric | value |
+| --- | ---: |
+| `live_automation_contract_checked` | 1 |
+| `rendered_prompt_alignment_pass` | true |
+| `live_automation_alignment_pass` | true |
+| `publish_readiness_gate_present` | true |
+| `repair_step_present` | true |
+| `post_repair_recheck_present` | true |
+| `sync_dry_run_before_push_present` | true |
+| `sync_only_publish_path_present` | true |
+| `raw_git_publish_path_count` | 0 |
+| `private_archive_content_committed_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The aligned scheduled path is:
+update -> archive audit -> publish readiness -> repair only for deterministic
+repairable publish-surface blockers -> archive audit -> publish readiness ->
+`search_memory.py --health-check` -> `sync_memory_archive.py --dry-run --push`
+-> `sync_memory_archive.py --push`. Generic free-form content search output is
+not used as archive readiness evidence, and raw `git add`, `git commit`, or
+`git push` is not an allowed publish path.
+
+This proves deterministic scheduler prompt alignment and publish-path
+self-recovery coverage for the live Codex automation configuration. It does
+not prove live scheduler reliability, live GitHub availability, live LLM
+prompt-following quality, memory quality, ranking quality, vector search,
+ontology discovery, private archive quality, or public leaderboard parity. The
+synthetic command is stable and included in `tools/run_quality_gates.py`; the
+local live check is a deployment verification command and is not required for
+portable release gates.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

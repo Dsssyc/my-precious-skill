@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,8 @@ PRIVATE_MARKERS = (
     "PRIVATE_MALFORMED_CONTENT_SENTINEL",
     "/private/synthetic/content-noise-source.jsonl",
 )
+RAW_GIT_ACTION = re.compile(r"^\s*(?:\$\s*)?git\s+(?:add|commit|push)\b", re.IGNORECASE)
+RAW_GIT_PROSE = re.compile(r"\b(?:run|use|execute)\s+git\s+(?:add|commit|push)\b", re.IGNORECASE)
 
 DURABLE_SUMMARY = "Durable content-noise repair closure remains current."
 DURABLE_FACT = "Keep search health separate from content-noise readiness."
@@ -170,13 +173,20 @@ def prompt_contract_result(prompt: str, memory_repo: Path) -> dict[str, bool]:
     sync_command = "python tools/sync_memory_archive.py --push"
     health_index = prompt.find(health_command)
     sync_index = prompt.find(sync_command)
+    raw_git_publish_path = any(
+        (RAW_GIT_ACTION.search(line) or RAW_GIT_PROSE.search(line))
+        and "do not" not in line.lower()
+        and "don't" not in line.lower()
+        and "never" not in line.lower()
+        for line in prompt.splitlines()
+    )
     return {
         "single_working_directory": "Use exactly one working directory:" in prompt and str(memory_repo) in prompt,
         "health_check_before_sync": health_index != -1 and sync_index != -1 and health_index < sync_index,
         "generic_content_query_not_required": "python tools/search_memory.py memory" not in prompt,
         "sync_helper_used": sync_command in prompt,
         "repair_contract": "python tools/repair_publish_surfaces.py --apply" in prompt,
-        "no_hand_staging": "Do not hand-stage files" in prompt and "git add" not in prompt,
+        "no_hand_staging": "Do not hand-stage files" in prompt and not raw_git_publish_path,
     }
 
 

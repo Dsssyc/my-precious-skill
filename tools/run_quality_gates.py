@@ -31,6 +31,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_publish_recovery_gate.py",
     "benchmarks/scheduled_publish_search_gate.py",
     "benchmarks/scheduled_content_noise_repair_closure_gate.py",
+    "benchmarks/live_automation_prompt_alignment_gate.py",
     "benchmarks/e2e_induction_recall_benchmark.py",
     "benchmarks/updater_induction_benchmark.py",
     "benchmarks/layered_recall_benchmark.py",
@@ -120,6 +121,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "scheduled_content_noise_repair_closure",
             ("python3", "benchmarks/scheduled_content_noise_repair_closure_gate.py"),
+        ),
+        CheckSpec(
+            "live_automation_prompt_alignment",
+            ("python3", "benchmarks/live_automation_prompt_alignment_gate.py"),
         ),
         CheckSpec(
             "v1_readiness_core",

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,8 @@ PRIVATE_MARKERS = (
     "PRIVATE_SCHEDULED_AMBIGUOUS_SENTINEL",
     "/private/synthetic/scheduled-source.jsonl",
 )
+RAW_GIT_ACTION = re.compile(r"^\s*(?:\$\s*)?git\s+(?:add|commit|push)\b", re.IGNORECASE)
+RAW_GIT_PROSE = re.compile(r"\b(?:run|use|execute)\s+git\s+(?:add|commit|push)\b", re.IGNORECASE)
 
 
 def run_command(
@@ -120,11 +123,18 @@ def render_agent_native_prompt(memory_repo: Path, root: Path, name: str) -> str:
 def prompt_contract_result(prompt: str, memory_repo: Path) -> dict[str, bool]:
     health_index = prompt.find("python tools/search_memory.py --health-check")
     sync_index = prompt.find("python tools/sync_memory_archive.py --push")
+    raw_git_publish_path = any(
+        (RAW_GIT_ACTION.search(line) or RAW_GIT_PROSE.search(line))
+        and "do not" not in line.lower()
+        and "don't" not in line.lower()
+        and "never" not in line.lower()
+        for line in prompt.splitlines()
+    )
     return {
         "single_working_directory": "Use exactly one working directory:" in prompt and str(memory_repo) in prompt,
         "health_check_before_sync": health_index != -1 and sync_index != -1 and health_index < sync_index,
         "sync_helper_used": "python tools/sync_memory_archive.py --push" in prompt,
-        "no_hand_staging": "Do not hand-stage files" in prompt and "git add" not in prompt,
+        "no_hand_staging": "Do not hand-stage files" in prompt and not raw_git_publish_path,
         "repair_contract": (
             "python tools/repair_publish_surfaces.py --apply" in prompt
             and "publish readiness blocks" in prompt

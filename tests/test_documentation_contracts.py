@@ -228,6 +228,40 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v218_live_automation_prompt_alignment_gate(self):
+        section = self.evaluation_section("## V2.18 Live Codex Automation Prompt Alignment Gate")
+        for phrase in (
+            "benchmarks/live_automation_prompt_alignment_gate.py",
+            "--automation-config",
+            "tools/render_scheduler.py --backend agent-native --push-after-update",
+            "python tools/audit_publish_readiness.py",
+            "python tools/repair_publish_surfaces.py --apply",
+            "archive audit -> publish readiness -> search health -> sync dry-run",
+            "live_automation_contract_checked",
+            "rendered_prompt_alignment_pass",
+            "live_automation_alignment_pass",
+            "publish_readiness_gate_present",
+            "repair_step_present",
+            "post_repair_recheck_present",
+            "sync_dry_run_before_push_present",
+            "sync_only_publish_path_present",
+            "raw_git_publish_path_count",
+            "private_archive_content_committed_count",
+            "privacy_leak_count",
+            "raw `git add`, `git commit`, or",
+            "not prove live scheduler reliability",
+            "live GitHub availability",
+            "prompt-following quality",
+            "memory quality",
+            "ranking quality",
+            "vector search",
+            "ontology discovery",
+            "private archive quality",
+            "public leaderboard parity",
+            "tools/run_quality_gates.py",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_records_v22_runtime_support_coverage_contract(self):
         section = self.evaluation_section("## V2.2 Runtime Support-Coverage Contract")
         for phrase in (

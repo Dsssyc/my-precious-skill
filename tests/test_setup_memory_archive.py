@@ -490,8 +490,12 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn(str(target.resolve()), prompt)
             self.assertIn("--allow-redacted-secrets", prompt)
             self.assertIn("tools/sync_memory_archive.py --push", prompt)
+            self.assertIn("tools/sync_memory_archive.py --dry-run --push", prompt)
+            self.assertIn("python tools/audit_memory_archive.py", prompt)
+            self.assertIn("python tools/audit_publish_readiness.py", prompt)
             self.assertIn("python tools/search_memory.py --health-check", prompt)
             self.assertIn("tools/repair_publish_surfaces.py --apply", prompt)
+            self.assertIn("After any repair, rerun the complete publish chain before publishing", prompt)
             self.assertIn("fail-closed", prompt)
             self.assertNotIn("python tools/search_memory.py memory", prompt)
             self.assertIn("Daily record content contract", prompt)
@@ -508,6 +512,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Errors or blockers with actionable next step", prompt)
             self.assertIn("Keep automation run notes separate from generated daily archive files", prompt)
             self.assertIn("Do not hand-stage files", prompt)
+            self.assertIn("Do not use raw git add, git commit, or git push as the archive publish path", prompt)
 
     def test_render_scheduler_refuses_global_schedule_without_runner(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
