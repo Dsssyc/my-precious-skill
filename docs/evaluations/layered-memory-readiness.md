@@ -1001,6 +1001,49 @@ multi-principal governance, private archive quality, or public benchmark
 leaderboard parity. The gate is deterministic and included in
 `tools/run_quality_gates.py`.
 
+## V2.20 Long-Horizon Lifecycle Governance Gate
+
+V2.20 adds `benchmarks/lifecycle_governance_gate.py` as a packaged lifecycle
+governance gate for synthetic long-horizon archive histories. The gate creates
+a clean deployment archive, feeds synthetic source records through the copied
+`tools/update_memory_archive.py`, queries the copied `tools/search_memory.py`
+with context packages, and scores only structured memory, review, trace, and
+context-package outputs. It does not use free-form search output as
+answerability evidence.
+
+The V2.20 gate proves six bounded behaviors: refreshed memories supersede old
+support while default context packages answer from the active/current
+replacement rather than the old node; deprecated-only support abstains;
+explicit deletion is represented as a conservative `Deleted fact:` tombstone
+marker using existing inactive lifecycle links rather than physical deletion;
+related but non-equivalent partial conflicts route to review; isolated stale
+low-support automatic memories are lowered to low confidence and routed to
+memory review; and noisy multi-month prompt/progress/automation fragments do
+not become active memory.
+
+The V2.20 synthetic packaged run reported:
+
+| metric | value |
+| --- | ---: |
+| `lifecycle_refresh_accuracy` | 1.0 |
+| `lifecycle_deprecation_suppression_accuracy` | 1.0 |
+| `lifecycle_deletion_tombstone_accuracy` | 1.0 |
+| `lifecycle_partial_conflict_review_count` | 1 |
+| `lifecycle_decay_or_stale_review_routing_accuracy` | 1.0 |
+| `lifecycle_active_current_precision` | 1.0 |
+| `lifecycle_inactive_search_suppression_rate` | 1.0 |
+| `lifecycle_support_ref_coverage_rate` | 1.0 |
+| `lifecycle_noisy_history_rejection_count` | 4 |
+| `privacy_leak_count` | 0 |
+
+This proves deterministic packaged lifecycle governance for refresh,
+deprecation, tombstone deletion, inactive suppression, stale review routing,
+and noisy synthetic multi-month histories. It does not prove physical deletion,
+multi-principal ACL, live LLM memory judgment, vector search, ontology
+discovery, private archive quality, public benchmark leaderboard parity, or a
+complete long-horizon governance system. The gate is deterministic and included
+in `tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

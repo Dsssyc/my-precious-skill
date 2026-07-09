@@ -18,7 +18,7 @@ import re
 import shutil
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -43,6 +43,7 @@ from memory_consolidation import (
     normalize_memory_text,
     parse_memory_deprecation_text,
     parse_memory_refresh_text,
+    positive_int_value,
     semantic_relation_detail,
 )
 
@@ -118,6 +119,7 @@ INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "overlap_ratio",
 )
 MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
+STALE_LOW_SUPPORT_REVIEW_AGE_DAYS = 180
 NATURAL_FACT_SOURCE_LABELS = frozenset({"natural_user", "natural_assistant", "natural_record"})
 LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN = re.compile(
     r"(?i)\b(?:review\s+candidate|reviewable|reviewer\s+confirmation|before\s+(?:automatic\s+)?promotion|"
@@ -351,6 +353,7 @@ NOISE_MARKERS = (
     "</objective>",
     "## my request for codex:",
     "my request for codex:",
+    "automation narration",
 )
 NOISY_TAGS = {
     "agent-memory",
@@ -3647,6 +3650,88 @@ def compress_low_risk_review_candidates(candidates: list[dict], nodes_by_id: dic
     return [*passthrough, *compressed]
 
 
+def parse_memory_node_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def latest_memory_last_seen(nodes: list[dict]) -> datetime | None:
+    seen = [
+        parsed
+        for node in nodes
+        if (parsed := parse_memory_node_time(node.get("last_seen"))) is not None
+    ]
+    return max(seen) if seen else None
+
+
+def has_any_lifecycle_link(node: dict) -> bool:
+    return bool(
+        string_items(node.get("supersedes"))
+        or string_items(node.get("contradicts"))
+        or string_items(node.get("contradicted_by"))
+        or string_items(node.get("deprecates"))
+        or isinstance(node.get("superseded_by"), str)
+        or isinstance(node.get("deprecated_by"), str)
+    )
+
+
+def stale_low_support_review_candidate(node: dict, latest_seen: datetime) -> dict | None:
+    memory_id = safe_node_memory_id(node)
+    last_seen = parse_memory_node_time(node.get("last_seen"))
+    support_count = positive_int_value(node.get("support_count"))
+    confidence_before = str(node.get("confidence") or "")
+    if (
+        not memory_id
+        or node.get("source") != "automatic"
+        or node.get("persistence") != "normal"
+        or support_count != 1
+        or last_seen is None
+        or has_any_lifecycle_link(node)
+    ):
+        return None
+    age = latest_seen - last_seen
+    if age < timedelta(days=STALE_LOW_SUPPORT_REVIEW_AGE_DAYS):
+        return None
+    node["confidence"] = "low"
+    return {
+        "candidate_type": "stale_low_support_lifecycle",
+        "current_memory_id": memory_id,
+        "older_memory_id": "",
+        "review_subject": "stale_low_support_memory",
+        "review_subject_memory_id": memory_id,
+        "reason": "stale_low_support_memory_requires_review",
+        "recommended_action": "manual_review",
+        "current_last_seen": str(node.get("last_seen") or ""),
+        "latest_archive_last_seen": latest_seen.isoformat().replace("+00:00", "Z"),
+        "stale_age_days": age.days,
+        "support_count": support_count,
+        "confidence_before": confidence_before,
+        "recommended_confidence": "low",
+    }
+
+
+def stale_low_support_review_candidates(nodes: list[dict]) -> list[dict]:
+    latest_seen = latest_memory_last_seen(nodes)
+    if latest_seen is None:
+        return []
+    candidates = []
+    for node in nodes:
+        candidate = stale_low_support_review_candidate(node, latest_seen)
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
 def build_memory_review_candidates(nodes: list[dict]) -> list[dict]:
     candidates: list[dict] = []
     automatic_nodes = [node for node in nodes if node.get("source") == "automatic"]
@@ -3690,6 +3775,7 @@ def build_memory_review_candidates(nodes: list[dict]) -> list[dict]:
                 }
             )
     candidates = compress_low_risk_review_candidates(candidates, nodes_by_id)
+    candidates.extend(stale_low_support_review_candidates(automatic_nodes))
     return sorted(
         candidates,
         key=lambda item: (

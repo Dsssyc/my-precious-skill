@@ -104,6 +104,7 @@ python3 benchmarks/scheduled_publish_search_gate.py
 python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
 python3 benchmarks/induction_consolidation_gate.py
+python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
@@ -128,6 +129,7 @@ python3 -m py_compile \
   benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/live_automation_prompt_alignment_gate.py \
   benchmarks/induction_consolidation_gate.py \
+  benchmarks/lifecycle_governance_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \

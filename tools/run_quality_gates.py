@@ -33,6 +33,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_content_noise_repair_closure_gate.py",
     "benchmarks/live_automation_prompt_alignment_gate.py",
     "benchmarks/induction_consolidation_gate.py",
+    "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/e2e_induction_recall_benchmark.py",
     "benchmarks/updater_induction_benchmark.py",
     "benchmarks/layered_recall_benchmark.py",
@@ -130,6 +131,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "induction_consolidation",
             ("python3", "benchmarks/induction_consolidation_gate.py"),
+        ),
+        CheckSpec(
+            "lifecycle_governance",
+            ("python3", "benchmarks/lifecycle_governance_gate.py"),
         ),
         CheckSpec(
             "v1_readiness_core",
