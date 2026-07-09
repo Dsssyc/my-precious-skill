@@ -836,6 +836,34 @@ Aggregate metrics include `search_gate_pass_rate`, `search_blocked_count`,
 
 This proves deterministic scheduled publish decision classification around search/no-op/dirty blockers. It is not live GitHub availability, not live scheduler reliability, not live LLM prompt-following quality, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
 
+## V2.16 Search-Healthy Content-Noise Repair Closure Gate
+
+V2.16 adds `benchmarks/scheduled_content_noise_repair_closure_gate.py` to prove that a clean packaged deployment repository can close the scheduled publish loop when search health passes but publish-facing content still contains prompt/progress/usage/process noise. The gate renders an agent-native prompt with `--push-after-update`, checks `python tools/search_memory.py --health-check` before `python tools/sync_memory_archive.py --push`, verifies the prompt does not use free-form search output as answerability or archive-content evidence, and checks that it does not hand-stage files.
+
+The reusable contract is deliberately layered: search health passing is necessary but not sufficient for publish. The content-noise readiness gate must still block publish until the repository reaches the deterministic repair -> rebuild -> archive audit -> publish readiness -> search health -> sync dry-run chain.
+
+The synthetic cases cover `search_healthy_noise_repaired_publish_ready`,
+`search_healthy_ambiguous_noise_blocked`,
+`search_healthy_malformed_meta_blocked`,
+`clean_after_repair_no_empty_commit`, and `durable_content_preserved`.
+Repairable content noise must fail readiness before publish, repair through
+`tools/repair_publish_surfaces.py`, rebuild derived surfaces through the
+updater, pass archive audit/readiness/search health, and then reach sync
+dry-run publish intent. Ambiguous scalar noise and malformed metadata must fail
+closed before publish. A clean rerun after repair must avoid an empty commit or
+push intent. Durable facts, summaries, tags, and evidence refs must survive
+repair and rebuild.
+
+Aggregate metrics include `search_health_pre_repair_pass_rate`,
+`content_noise_block_count`, `repair_apply_success_count`,
+`post_repair_readiness_pass_count`, `post_repair_search_health_pass_count`,
+`post_repair_publish_intent_count`, `ambiguous_fail_closed_count`,
+`malformed_fail_closed_count`, `no_empty_commit_count`,
+`durable_content_preservation_count`, `hand_stage_bypass_count`,
+`free_form_search_output_used_count`, and `privacy_leak_count`.
+
+This proves deterministic closure for search-healthy content-noise repair. It is not live scheduler reliability, not live GitHub availability, not live LLM prompt-following quality, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

@@ -185,6 +185,49 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v216_content_noise_repair_closure_gate(self):
+        section = self.evaluation_section("## V2.16 Search-Healthy Content-Noise Repair Closure Gate")
+        for phrase in (
+            "benchmarks/scheduled_content_noise_repair_closure_gate.py",
+            "search health passing is necessary but not sufficient",
+            "content-noise readiness",
+            "repair -> rebuild -> archive audit -> publish readiness -> search health -> sync dry-run",
+            "--push-after-update",
+            "python tools/search_memory.py --health-check",
+            "python tools/sync_memory_archive.py --push",
+            "not use free-form search output",
+            "not hand-stage files",
+            "search_healthy_noise_repaired_publish_ready",
+            "search_healthy_ambiguous_noise_blocked",
+            "search_healthy_malformed_meta_blocked",
+            "clean_after_repair_no_empty_commit",
+            "durable_content_preserved",
+            "search_health_pre_repair_pass_rate",
+            "content_noise_block_count",
+            "repair_apply_success_count",
+            "post_repair_readiness_pass_count",
+            "post_repair_search_health_pass_count",
+            "post_repair_publish_intent_count",
+            "ambiguous_fail_closed_count",
+            "malformed_fail_closed_count",
+            "no_empty_commit_count",
+            "durable_content_preservation_count",
+            "hand_stage_bypass_count",
+            "free_form_search_output_used_count",
+            "privacy_leak_count",
+            "not live scheduler reliability",
+            "not live GitHub availability",
+            "not live LLM prompt-following quality",
+            "not memory quality",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not private archive quality",
+            "not public leaderboard parity",
+            "tools/run_quality_gates.py",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_records_v22_runtime_support_coverage_contract(self):
         section = self.evaluation_section("## V2.2 Runtime Support-Coverage Contract")
         for phrase in (
