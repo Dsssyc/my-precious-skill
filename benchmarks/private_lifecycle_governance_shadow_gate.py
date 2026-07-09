@@ -41,12 +41,32 @@ SYNTHETIC_FORBIDDEN_MARKERS = (
     "SYNTHETIC_V220_PRIVATE_TOKEN",
     "/Users/soku/private/lifecycle-source.jsonl",
 )
+ACTIVE_SUPPORT_FAILURE_COUNTERS = (
+    "active_support_expected_node_missing_count",
+    "active_support_package_unsupported_count",
+    "active_support_query_support_missing_count",
+    "active_support_summary_drill_missing_count",
+    "active_support_evidence_drill_missing_count",
+    "active_support_wrong_active_hit_count",
+    "archive_search_tool_context_package_failure_count",
+    "template_search_tool_fallback_success_count",
+    "unknown_privacy_preserved_failure_count",
+)
 
 
 def ratio(numerator: int | float, denominator: int | float) -> float:
     if denominator == 0:
         return 1.0
     return numerator / denominator
+
+
+def empty_active_support_failure_counts() -> dict[str, int]:
+    return {key: 0 for key in ACTIVE_SUPPORT_FAILURE_COUNTERS}
+
+
+def add_counts(target: dict[str, int], source: dict[str, int]) -> None:
+    for key, value in source.items():
+        target[key] = target.get(key, 0) + int(value)
 
 
 def safe_memory_id(value: object) -> str:
@@ -307,24 +327,46 @@ def load_context_package(repo: Path, query: str, python: str) -> tuple[dict[str,
 
 
 def package_supports_memory(package: dict[str, Any] | None, node: dict[str, Any]) -> bool:
+    return active_support_diagnosis(package, node)[0]
+
+
+def active_support_diagnosis(
+    package: dict[str, Any] | None,
+    node: dict[str, Any],
+) -> tuple[bool, dict[str, int]]:
+    counts = empty_active_support_failure_counts()
     if package is None:
-        return False
+        counts["unknown_privacy_preserved_failure_count"] += 1
+        return False, counts
     memory_id = safe_memory_id(node.get("memory_id"))
     if not memory_id:
-        return False
-    answerability = package.get("answerability")
-    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
-        return False
+        counts["active_support_expected_node_missing_count"] += 1
+        return False, counts
     hits = package.get("hits")
     if not isinstance(hits, list):
-        return False
+        counts["active_support_expected_node_missing_count"] += 1
+        return False, counts
+
+    answerability = package.get("answerability")
+    package_supported = isinstance(answerability, dict) and answerability.get("status") == "supported"
+
+    active_supported_hit_count = 0
     for hit in hits:
-        if not isinstance(hit, dict) or hit.get("memory_id") != memory_id:
+        if not isinstance(hit, dict):
             continue
         hit_answerability = hit.get("answerability")
-        query_support = hit.get("query_support")
-        return bool(
+        if (
             hit.get("active_current") is True
+            and isinstance(hit_answerability, dict)
+            and hit_answerability.get("status") == "supported"
+        ):
+            active_supported_hit_count += 1
+        if hit.get("memory_id") != memory_id:
+            continue
+        query_support = hit.get("query_support")
+        supported = bool(
+            package_supported
+            and hit.get("active_current") is True
             and isinstance(hit_answerability, dict)
             and hit_answerability.get("status") == "supported"
             and isinstance(query_support, dict)
@@ -334,7 +376,29 @@ def package_supports_memory(package: dict[str, Any] | None, node: dict[str, Any]
             and isinstance(hit.get("evidence_drill_paths"), list)
             and hit["evidence_drill_paths"]
         )
-    return False
+        if supported:
+            return True, counts
+        if not package_supported or not isinstance(hit_answerability, dict) or hit_answerability.get("status") != "supported":
+            counts["active_support_package_unsupported_count"] += 1
+        if hit.get("active_current") is not True:
+            counts["active_support_wrong_active_hit_count"] += 1
+        if not isinstance(query_support, dict) or query_support.get("status") != "supported":
+            counts["active_support_query_support_missing_count"] += 1
+        if not isinstance(hit.get("summary_drill_paths"), list) or not hit["summary_drill_paths"]:
+            counts["active_support_summary_drill_missing_count"] += 1
+        if not isinstance(hit.get("evidence_drill_paths"), list) or not hit["evidence_drill_paths"]:
+            counts["active_support_evidence_drill_missing_count"] += 1
+        if not any(counts.values()):
+            counts["unknown_privacy_preserved_failure_count"] += 1
+        return False, counts
+
+    if active_supported_hit_count:
+        counts["active_support_wrong_active_hit_count"] += 1
+    else:
+        counts["active_support_expected_node_missing_count"] += 1
+    if not package_supported:
+        counts["active_support_package_unsupported_count"] += 1
+    return False, counts
 
 
 def context_sample_metrics(
@@ -350,6 +414,7 @@ def context_sample_metrics(
     query_count = 0
     active_supported = 0
     inactive_suppressed = 0
+    failure_counts = empty_active_support_failure_counts()
     outcome_counts = {
         "parsed": 0,
         "parsed_fallback": 0,
@@ -364,7 +429,9 @@ def context_sample_metrics(
         query_count += 1
         outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
         parse_success += int(outcome in {"parsed", "parsed_fallback"})
-        active_supported += int(package_supports_memory(package, node))
+        supported, support_counts = active_support_diagnosis(package, node)
+        add_counts(failure_counts, support_counts)
+        active_supported += int(supported)
 
     for node in inactive_samples:
         text = str(node.get("text") or "")
@@ -374,10 +441,13 @@ def context_sample_metrics(
         parse_success += int(outcome in {"parsed", "parsed_fallback"})
         inactive_suppressed += int(not package_supports_memory(package, node))
 
+    failure_counts["archive_search_tool_context_package_failure_count"] = query_count - outcome_counts["parsed"]
+    failure_counts["template_search_tool_fallback_success_count"] = outcome_counts["parsed_fallback"]
     return {
         "parse_success_rate": ratio(parse_success, query_count),
         "active_support_rate": ratio(active_supported, len(active_samples)),
         "inactive_suppression_rate": ratio(inactive_suppressed, len(inactive_samples)),
+        "active_support_failure_counts": failure_counts,
         "query_count": query_count,
         "parse_failure_count": query_count - parse_success,
         "fallback_parse_success_count": outcome_counts["parsed_fallback"],
@@ -544,6 +614,7 @@ def build_gate_report(
         "rendered_source_path_count": 0,
         "rendered_raw_ref_count": 0,
     }
+    metrics.update(context_metrics["active_support_failure_counts"])
     failed = (
         update_failures > 0
         or relation_score < 1.0

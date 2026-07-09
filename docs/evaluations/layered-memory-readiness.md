@@ -1099,6 +1099,54 @@ private coverage completeness, LLM answer quality, ranking quality, vector
 search, ontology discovery, physical deletion, scheduler publication behavior,
 or public leaderboard parity.
 
+## V2.22 Aggregate-Only Active Support Failure Diagnosis
+
+V2.22 keeps the V2.21 private lifecycle shadow gate private-data-free while
+making active/current support failures actionable. The runner still emits only
+aggregate JSON, but it now separates a low
+`private_active_current_support_sample_rate` into fixed diagnosis counters:
+expected active node missing, package-level unsupported answerability,
+missing query support, missing summary/evidence drilldown, wrong active hit,
+archive-bundled search-tool context-package failure, template search-tool
+fallback success, and unknown privacy-preserved failure.
+
+The release gate remains synthetic and private-free:
+
+```bash
+python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
+```
+
+The V2.22 healthy synthetic fixture keeps the V2.21 metrics green and reports
+zero active-support failures:
+
+| metric | value |
+| --- | ---: |
+| `active_support_expected_node_missing_count` | 0 |
+| `active_support_package_unsupported_count` | 0 |
+| `active_support_query_support_missing_count` | 0 |
+| `active_support_summary_drill_missing_count` | 0 |
+| `active_support_evidence_drill_missing_count` | 0 |
+| `active_support_wrong_active_hit_count` | 0 |
+| `archive_search_tool_context_package_failure_count` | 0 |
+| `template_search_tool_fallback_success_count` | 0 |
+| `unknown_privacy_preserved_failure_count` | 0 |
+
+The public test fixture also covers two fail-closed cases: a deliberately
+broken archive-bundled search tool must be counted through aggregate fallback
+counters without rendering command output, and a deliberately corrupted active
+support node must produce nonzero support-failure counters without rendering
+the query, memory text, memory ID, source path, raw ref, or package body.
+
+An optional local private dogfood run after V2.22 stayed aggregate-only and
+reported `privacy_leak_count: 0`. It converted the previously opaque
+`private_active_current_support_sample_rate: 0.5` result into aggregate
+diagnostics: `archive_search_tool_context_package_failure_count: 8`,
+`template_search_tool_fallback_success_count: 8`,
+`active_support_expected_node_missing_count: 1`,
+`active_support_package_unsupported_count: 1`, and
+`active_support_wrong_active_hit_count: 2`. This is observability evidence,
+not a private archive correctness claim and not a private archive repair.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

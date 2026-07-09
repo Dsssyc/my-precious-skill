@@ -9,6 +9,17 @@ from pathlib import Path
 
 
 GATE_SCRIPT = Path("benchmarks/private_lifecycle_governance_shadow_gate.py").resolve()
+ACTIVE_SUPPORT_FAILURE_COUNTERS = (
+    "active_support_expected_node_missing_count",
+    "active_support_package_unsupported_count",
+    "active_support_query_support_missing_count",
+    "active_support_summary_drill_missing_count",
+    "active_support_evidence_drill_missing_count",
+    "active_support_wrong_active_hit_count",
+    "archive_search_tool_context_package_failure_count",
+    "template_search_tool_fallback_success_count",
+    "unknown_privacy_preserved_failure_count",
+)
 
 
 def load_gate_module():
@@ -57,6 +68,8 @@ class PrivateLifecycleGovernanceShadowGateTests(unittest.TestCase):
             self.assertEqual(metrics["rendered_memory_text_count"], 0)
             self.assertEqual(metrics["rendered_source_path_count"], 0)
             self.assertEqual(metrics["rendered_raw_ref_count"], 0)
+            for counter in ACTIVE_SUPPORT_FAILURE_COUNTERS:
+                self.assertEqual(metrics[counter], 0)
 
             combined = result.stdout + result.stderr
             for forbidden in (
@@ -83,6 +96,7 @@ class PrivateLifecycleGovernanceShadowGateTests(unittest.TestCase):
                             "memory_text_rendered": True,
                         },
                         "unsafe_memory_id": "mem_private_rendered_123",
+                        "unsafe_path": "/Users/example/private/archive/source-map.json",
                         "unsafe_text": "SYNTHETIC_V220_PRIVATE_TOKEN",
                     }
                 ),
@@ -109,6 +123,7 @@ class PrivateLifecycleGovernanceShadowGateTests(unittest.TestCase):
             combined = result.stdout + result.stderr
             self.assertNotIn("SYNTHETIC_V220_PRIVATE_TOKEN", combined)
             self.assertNotIn("mem_private_rendered_123", combined)
+            self.assertNotIn("/Users/example/private/archive/source-map.json", combined)
 
     def test_context_package_falls_back_to_template_tool_without_rendering_context(self):
         module = load_gate_module()
@@ -129,6 +144,64 @@ class PrivateLifecycleGovernanceShadowGateTests(unittest.TestCase):
             self.assertEqual(outcome, "parsed_fallback")
             self.assertIsInstance(package, dict)
             self.assertEqual(package["report_kind"], "memory_recall_context_package")
+
+            report = module.build_gate_report(
+                repo=gate_run.memory_repo,
+                mode="synthetic_fixture",
+                update_failures=0,
+                sample_limit=6,
+                python=sys.executable,
+            )
+            self.assertEqual(report["status"], "passed")
+            query_count = report["diagnostics"]["context_package_query_count"]
+            metrics = report["metrics"]
+            self.assertEqual(metrics["archive_search_tool_context_package_failure_count"], query_count)
+            self.assertEqual(metrics["template_search_tool_fallback_success_count"], query_count)
+            rendered = json.dumps(report, sort_keys=True)
+            self.assertNotIn("context package unsupported", rendered)
+            self.assertIsNone(re.search(r"\bmem_[A-Za-z0-9_.:-]+", rendered))
+
+    def test_corrupted_active_support_reports_aggregate_failure_category(self):
+        module = load_gate_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gate_run = module.lifecycle.run_packaged_update(Path(tmpdir))
+            memories_path = gate_run.memory_repo / "index/memories.jsonl"
+            rows = [
+                json.loads(line)
+                for line in memories_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            corrupted = False
+            for row in rows:
+                if row.get("text") == module.lifecycle.FRESH_ANCHOR:
+                    row["derived_from"] = []
+                    row["evidence_refs"] = []
+                    row["raw_refs"] = []
+                    corrupted = True
+                    break
+            self.assertTrue(corrupted)
+            memories_path.write_text(
+                "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+
+            report = module.build_gate_report(
+                repo=gate_run.memory_repo,
+                mode="synthetic_fixture",
+                update_failures=0,
+                sample_limit=6,
+                python=sys.executable,
+            )
+
+            self.assertEqual(report["status"], "failed")
+            metrics = report["metrics"]
+            self.assertGreater(metrics["active_support_package_unsupported_count"], 0)
+            self.assertGreater(metrics["active_support_summary_drill_missing_count"], 0)
+            self.assertGreater(metrics["active_support_evidence_drill_missing_count"], 0)
+            self.assertEqual(metrics["privacy_leak_count"], 0)
+            rendered = json.dumps(report, sort_keys=True)
+            self.assertNotIn(module.lifecycle.FRESH_ANCHOR, rendered)
+            self.assertIsNone(re.search(r"\bmem_[A-Za-z0-9_.:-]+", rendered))
 
     def test_output_path_outside_tmp_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
