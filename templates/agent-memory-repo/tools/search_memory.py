@@ -1136,6 +1136,17 @@ def read_text_if_safe(path: Path) -> str:
         return ""
 
 
+def source_map_has_anchor(source_map: dict[str, object], anchor_text: str) -> bool:
+    anchor_key = SOURCE_MAP_ANCHOR_ALIASES.get(anchor_text, anchor_text)
+    if anchor_key in source_map:
+        return True
+    anchors = source_map.get("evidence_source_anchors")
+    return isinstance(anchors, list) and any(
+        isinstance(row, dict) and row.get("source_anchor_id") == anchor_text
+        for row in anchors
+    )
+
+
 def source_map_is_reachable(repo: Path, path_text: str, anchor_text: str) -> bool:
     source_map_path = repo / path_text
     try:
@@ -1144,8 +1155,7 @@ def source_map_is_reachable(repo: Path, path_text: str, anchor_text: str) -> boo
         return False
     if not isinstance(source_map, dict):
         return False
-    anchor_key = SOURCE_MAP_ANCHOR_ALIASES.get(anchor_text, anchor_text)
-    if anchor_key and anchor_key not in source_map:
+    if anchor_text and not source_map_has_anchor(source_map, anchor_text):
         return False
     expected_self = source_map.get("source_map_path")
     if not isinstance(expected_self, str) or safe_repo_relative_path(repo, expected_self) != path_text:

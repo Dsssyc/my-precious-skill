@@ -70,6 +70,7 @@ INDUCTION_REVIEW_DECISION_REL_PATH = Path("reviews/induction_review_decisions.js
 SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
+SOURCE_ANCHOR_VERSION = 1
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
     "approve_supersedes",
     "approve_contradicts",
@@ -273,6 +274,9 @@ class SourceRecord:
 class MemoryEvent:
     kind: str
     text: str
+    line_number: int = 0
+    event_ordinal: int = 0
+    event_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -292,6 +296,8 @@ class MemoryCandidate:
     provenance: str = ""
     supersedes_texts: tuple[str, ...] = ()
     deprecates_texts: tuple[str, ...] = ()
+    evidence_quote_id: str = "ev_001"
+    source_anchor_id: str = ""
 
 
 NOISE_MARKERS = (
@@ -1484,11 +1490,94 @@ def event_has_reusable_fact_text(events: list[MemoryEvent], fact: str) -> bool:
     return False
 
 
+def source_text_key(text: str) -> str:
+    return normalize_memory_text(strip_reusable_fact_prefix(text)).lower()
+
+
+def source_event_for_text(events: list[MemoryEvent], text: str) -> MemoryEvent | None:
+    target = source_text_key(text)
+    if not target:
+        return None
+    for event in events:
+        candidates = {
+            source_text_key(event.text),
+            source_text_key(durable_memory_text(event.text)),
+        }
+        if target in candidates:
+            return event
+    for event in events:
+        if event.kind == "user" and source_text_key(natural_user_memory_fact(event.text)) == target:
+            return event
+    return None
+
+
+def evidence_quote_id_for_text(evidence: list[str], text: str) -> str:
+    target = source_text_key(text)
+    for index, evidence_text in enumerate(evidence, 1):
+        if source_text_key(evidence_text) == target:
+            return f"ev_{index:03d}"
+    return ""
+
+
+def evidence_source_entries(evidence: list[str], events: list[MemoryEvent]) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for index, evidence_text in enumerate(evidence, 1):
+        event = source_event_for_text(events, evidence_text)
+        if event is None or event.line_number <= 0 or event.event_ordinal <= 0 or not event.event_sha256:
+            continue
+        entries.append(
+            {
+                "quote_id": f"ev_{index:03d}",
+                "line_number": event.line_number,
+                "event_ordinal": event.event_ordinal,
+                "event_sha256": event.event_sha256,
+            }
+        )
+    return entries
+
+
+def explicit_source_event(events: list[MemoryEvent], explicit_text: str) -> MemoryEvent | None:
+    target = normalize_memory_text(explicit_text).lower()
+    for event in events:
+        if event.kind != "user":
+            continue
+        compacted = compact_whitespace(event.text)
+        if is_negated_explicit_memory_directive(compacted):
+            continue
+        for pattern in EXPLICIT_MEMORY_PATTERNS:
+            match = pattern.match(compacted)
+            if not match:
+                continue
+            candidate = clean_explicit_memory_text(normalize_memory_text(match.group("text")))
+            if candidate.lower() == target:
+                return event
+    return None
+
+
+def explicit_source_entries(explicit_memories: list[str], events: list[MemoryEvent]) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for index, explicit_text in enumerate(explicit_memories, 1):
+        event = explicit_source_event(events, explicit_text)
+        if event is None or event.line_number <= 0 or event.event_ordinal <= 0 or not event.event_sha256:
+            continue
+        entries.append(
+            {
+                "text": explicit_text,
+                "quote_id": f"ev_explicit_{index:03d}",
+                "line_number": event.line_number,
+                "event_ordinal": event.event_ordinal,
+                "event_sha256": event.event_sha256,
+            }
+        )
+    return entries
+
+
 def fact_source_entries(
     facts: list[str],
     events: list[MemoryEvent],
     natural_user_facts: list[str],
     retrieval_literals: list[str],
+    evidence: list[str],
 ) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     natural_user_keys = {normalize_memory_text(text).lower() for text in natural_user_facts}
@@ -1505,7 +1594,11 @@ def fact_source_entries(
             source = "explicit_reusable_fact"
         else:
             source = "natural_assistant"
-        entries.append({"text": fact, "source": source})
+        entry = {"text": fact, "source": source}
+        quote_id = evidence_quote_id_for_text(evidence, fact)
+        if quote_id:
+            entry["evidence_quote_id"] = quote_id
+        entries.append(entry)
     return entries
 
 
@@ -1609,12 +1702,72 @@ def events_from_value(value: object) -> list[MemoryEvent]:
     return [MemoryEvent("record", text)]
 
 
-def extract_source_events(path: Path, text: str) -> list[MemoryEvent]:
+def source_event_sha256(text: str) -> str:
+    normalized = compact_whitespace(text)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def jsonl_events_with_locators(text: str, hash_text: str | None = None) -> list[MemoryEvent]:
+    hash_lines = hash_text.splitlines() if hash_text is not None else []
+    events: list[MemoryEvent] = []
+    for line_number, raw_line in enumerate(text.splitlines(), 1):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            value = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        line_events = events_from_value(value)
+        hash_events: list[MemoryEvent] = []
+        if line_number <= len(hash_lines):
+            try:
+                hash_value = json.loads(hash_lines[line_number - 1].strip())
+            except json.JSONDecodeError:
+                hash_value = None
+            if hash_value is not None:
+                hash_events = events_from_value(hash_value)
+        for event_ordinal, event in enumerate(line_events, 1):
+            hash_text_value = (
+                hash_events[event_ordinal - 1].text
+                if event_ordinal <= len(hash_events)
+                else event.text
+            )
+            events.append(
+                MemoryEvent(
+                    event.kind,
+                    event.text,
+                    line_number,
+                    event_ordinal,
+                    source_event_sha256(hash_text_value),
+                )
+            )
+    return events
+
+
+def jsonl_contains_value(text: str) -> bool:
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        try:
+            json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        return True
+    return False
+
+
+def extract_source_events(path: Path, text: str, hash_text: str | None = None) -> list[MemoryEvent]:
     events: list[MemoryEvent] = []
     parsed_any = False
-    for value in iter_source_json_values(path, text):
-        parsed_any = True
-        events.extend(events_from_value(value))
+    if path.suffix == ".jsonl":
+        events = jsonl_events_with_locators(text, hash_text)
+        parsed_any = jsonl_contains_value(text)
+    else:
+        for value in iter_source_json_values(path, text):
+            parsed_any = True
+            events.extend(events_from_value(value))
     if not parsed_any:
         for line in text.splitlines():
             line = clip(line)
@@ -1628,7 +1781,15 @@ def extract_source_events(path: Path, text: str) -> list[MemoryEvent]:
         for piece in split_memory_text(event_text):
             text = strip_process_clauses(piece)
             if text and not is_noisy_text(text) and not is_process_update(text):
-                cleaned.append(MemoryEvent(event.kind, text))
+                cleaned.append(
+                    MemoryEvent(
+                        event.kind,
+                        text,
+                        event.line_number,
+                        event.event_ordinal,
+                        event.event_sha256,
+                    )
+                )
     return cleaned
 
 
@@ -1815,27 +1976,30 @@ def sentence_case_tail(text: str) -> str:
     return stripped[:1].lower() + stripped[1:]
 
 
+def natural_user_memory_fact(text: str) -> str:
+    if is_process_update(text):
+        return ""
+    compacted = compact_whitespace(strip_process_clauses(text))
+    if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
+        return ""
+    for pattern, template in NATURAL_USER_MEMORY_PATTERNS:
+        match = pattern.match(compacted)
+        if not match:
+            continue
+        tail = clean_explicit_memory_text(normalize_memory_text(match.group("text")))
+        tail = re.sub(r"(?i)^\s*that\s+", "", tail).strip()
+        if not tail or is_sensitive_explicit_memory_text(tail):
+            return ""
+        return durable_memory_text(template.format(text=sentence_case_tail(tail)))
+    return ""
+
+
 def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5) -> list[str]:
     facts: list[str] = []
     for text in event_texts(events, {"user"}):
-        if is_process_update(text):
-            continue
-        compacted = compact_whitespace(strip_process_clauses(text))
-        if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
-            continue
-        for pattern, template in NATURAL_USER_MEMORY_PATTERNS:
-            match = pattern.match(compacted)
-            if not match:
-                continue
-            tail = clean_explicit_memory_text(normalize_memory_text(match.group("text")))
-            tail = re.sub(r"(?i)^\s*that\s+", "", tail).strip()
-            if not tail or is_sensitive_explicit_memory_text(tail):
-                continue
-            fact = template.format(text=sentence_case_tail(tail))
-            durable = durable_memory_text(fact)
-            if durable and durable not in facts:
-                facts.append(durable)
-            break
+        fact = natural_user_memory_fact(text)
+        if fact and fact not in facts:
+            facts.append(fact)
         if len(facts) >= limit:
             break
     return facts
@@ -2127,11 +2291,12 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         "summary": summary,
         "context": context[:5],
         "facts": facts,
-        "fact_sources": fact_source_entries(facts, events, natural_user_facts, retrieval_literals),
+        "fact_sources": fact_source_entries(facts, events, natural_user_facts, retrieval_literals, evidence),
         "decisions": decisions,
         "problems": problems,
         "unresolved": unresolved,
         "evidence": evidence,
+        "evidence_sources": evidence_source_entries(evidence, events),
         "tags": extract_tags(project_name, [*retrieval_literals, *facts, *decisions, *problems, *unresolved, final_state]),
         "final_state": final_state or summary,
     }
@@ -2317,6 +2482,89 @@ def prune_empty_session_dirs(root: Path) -> None:
             path.rmdir()
 
 
+def source_anchor_id(source_record_sha256: str, row: dict[str, object]) -> str:
+    payload = "\n".join(
+        [
+            source_record_sha256,
+            str(row.get("line_number") or ""),
+            str(row.get("event_ordinal") or ""),
+            str(row.get("event_sha256") or ""),
+        ]
+    )
+    return f"srca_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
+
+
+def memory_candidate_source_entries(summary_data: dict[str, object], events: list[MemoryEvent]) -> list[dict[str, str]]:
+    evidence = summary_data.get("evidence")
+    if not isinstance(evidence, list):
+        return []
+    fact_sources = {
+        source_text_key(str(value.get("text") or "")): str(value.get("source") or "")
+        for value in summary_data.get("fact_sources") or []
+        if isinstance(value, dict)
+    }
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for text, _ in iter_memory_candidate_texts(summary_data):
+        key = source_text_key(text)
+        if not key or key in seen:
+            continue
+        quote_id = evidence_quote_id_for_text(evidence, text)
+        event = source_event_for_text(events, text)
+        if not quote_id or event is None:
+            continue
+        entry = {"text": text, "evidence_quote_id": quote_id}
+        source = fact_sources.get(key, "")
+        if source:
+            entry["source"] = source
+        entries.append(entry)
+        seen.add(key)
+    return entries
+
+
+def materialize_source_anchors(summary_data: dict[str, object], source_record_sha256: str) -> list[dict[str, object]]:
+    rows: list[object] = []
+    for key in ("evidence_sources", "explicit_sources"):
+        values = summary_data.get(key)
+        if isinstance(values, list):
+            rows.extend(values)
+    anchors: list[dict[str, object]] = []
+    for value in rows:
+        if not isinstance(value, dict):
+            continue
+        row = {
+            key: value[key]
+            for key in ("quote_id", "line_number", "event_ordinal", "event_sha256")
+            if key in value
+        }
+        row["source_anchor_id"] = source_anchor_id(source_record_sha256, row)
+        anchors.append(row)
+    anchor_by_quote = {
+        str(row["quote_id"]): str(row["source_anchor_id"])
+        for row in anchors
+        if isinstance(row.get("quote_id"), str) and isinstance(row.get("source_anchor_id"), str)
+    }
+    for key in ("fact_sources", "memory_candidate_sources"):
+        values = summary_data.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            quote_id = value.get("evidence_quote_id")
+            if isinstance(quote_id, str) and quote_id in anchor_by_quote:
+                value["source_anchor_id"] = anchor_by_quote[quote_id]
+    explicit_sources = summary_data.get("explicit_sources")
+    if isinstance(explicit_sources, list):
+        for value in explicit_sources:
+            if not isinstance(value, dict):
+                continue
+            quote_id = value.get("quote_id")
+            if isinstance(quote_id, str) and quote_id in anchor_by_quote:
+                value["source_anchor_id"] = anchor_by_quote[quote_id]
+    return anchors
+
+
 def write_record(
     memory_repo: Path,
     project_path: Path,
@@ -2334,9 +2582,11 @@ def write_record(
 
     source_text = read_record_text(record.path)
     redacted_text, redaction_counts = redact_text(source_text)
-    source_events = extract_source_events(record.path, redacted_text)
+    source_events = extract_source_events(record.path, redacted_text, source_text)
     summary_data = summarize_events(source_events, project_name)
     explicit_memories = extract_explicit_memory_texts(source_events)
+    summary_data["explicit_sources"] = explicit_source_entries(explicit_memories, source_events)
+    summary_data["memory_candidate_sources"] = memory_candidate_source_entries(summary_data, source_events)
     if not has_durable_summary_content(summary_data):
         shutil.rmtree(destination)
         return None
@@ -2387,6 +2637,7 @@ See `evidence.md` for short redacted snippets that support the summary.
 
     evidence_lines = summary_data["evidence"]
     evidence_body = render_evidence_body(evidence_lines, explicit_memories)
+    source_anchors = materialize_source_anchors(summary_data, record.sha256)
     evidence = (
         f"# Evidence: {title}\n\n"
         f"Source record: `{record.path}`\n"
@@ -2421,11 +2672,14 @@ See `evidence.md` for short redacted snippets that support the summary.
         "summary": summary_data["summary"],
         "reusable_facts": summary_data["facts"],
         "reusable_fact_sources": summary_data["fact_sources"],
+        "memory_candidate_sources": summary_data["memory_candidate_sources"],
         "tags": summary_data["tags"],
         "decisions": summary_data["decisions"],
         "explicit_memories": explicit_memories,
+        "explicit_memory_sources": summary_data["explicit_sources"],
         "unresolved_tasks": summary_data["unresolved"],
         "redaction_counts": redaction_counts,
+        "source_anchor_version": SOURCE_ANCHOR_VERSION,
     }
     source_map = {
         "source_record": str(record.path),
@@ -2440,6 +2694,8 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_map_path": str(rel_source_map),
         "contains_raw_transcript": False,
         "evidence_policy": "short_redacted_snippets",
+        "source_anchor_version": SOURCE_ANCHOR_VERSION,
+        "evidence_source_anchors": source_anchors,
     }
 
     redactions = "# Redactions\n\n"
@@ -2604,7 +2860,17 @@ def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
     evidence_path = str(row.get("evidence_path", ""))
     source_record = str(row.get("source_record", ""))
     source_map_path = str(row.get("source_map_path", ""))
-    raw_ref = raw_ref_for_source_fields(source_record, source_map_path, "explicit_memory")
+    source_detail = next(
+        (
+            value
+            for value in row.get("explicit_memory_sources") or []
+            if isinstance(value, dict) and normalize_memory_text(str(value.get("text") or "")) == text
+        ),
+        {},
+    )
+    evidence_quote_id = str(source_detail.get("quote_id") or "ev_explicit_001")
+    source_anchor = str(source_detail.get("source_anchor_id") or "explicit_memory")
+    raw_ref = raw_ref_for_source_fields(source_record, source_map_path, source_anchor)
     layer = "global"
     scope = "global"
     return {
@@ -2621,7 +2887,7 @@ def explicit_memory_node(text: str, row: dict[str, object]) -> dict:
         "first_seen": source_updated_at,
         "last_seen": source_updated_at,
         "derived_from": [summary_path] if summary_path else [],
-        "evidence_refs": [{"path": evidence_path, "quote_id": "ev_explicit_001"}] if evidence_path else [],
+        "evidence_refs": [{"path": evidence_path, "quote_id": evidence_quote_id}] if evidence_path else [],
         "raw_refs": [raw_ref] if raw_ref else [],
         "supersedes": [],
         "superseded_by": None,
@@ -2722,18 +2988,42 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
         tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
         summary_path = str(row.get("summary_path", ""))
         evidence_path = str(row.get("evidence_path", ""))
-        fact_sources = {}
+        fact_sources: dict[str, dict[str, str]] = {}
         for item in row.get("reusable_fact_sources") or []:
             if not isinstance(item, dict):
                 continue
             text = normalize_memory_text(str(item.get("text") or ""))
             source = str(item.get("source") or "")
             if text and source:
-                fact_sources[text.lower()] = source
+                fact_sources[text.lower()] = {
+                    "source": source,
+                    "evidence_quote_id": str(item.get("evidence_quote_id") or ""),
+                    "source_anchor_id": str(item.get("source_anchor_id") or ""),
+                }
+        candidate_sources: dict[str, dict[str, str]] = {}
+        for item in row.get("memory_candidate_sources") or []:
+            if not isinstance(item, dict):
+                continue
+            text = source_text_key(str(item.get("text") or ""))
+            if not text:
+                continue
+            candidate_sources[text] = {
+                "source": str(item.get("source") or ""),
+                "evidence_quote_id": str(item.get("evidence_quote_id") or ""),
+                "source_anchor_id": str(item.get("source_anchor_id") or ""),
+            }
         if not summary_path or not evidence_path:
             continue
         for text, rationale in iter_memory_candidate_texts(row):
-            provenance = fact_sources.get(normalize_memory_text(text).lower(), "")
+            source_detail = candidate_sources.get(source_text_key(text)) or fact_sources.get(
+                normalize_memory_text(text).lower(),
+                {},
+            )
+            if row.get("source_anchor_version") == SOURCE_ANCHOR_VERSION and (
+                not source_detail.get("evidence_quote_id") or not source_detail.get("source_anchor_id")
+            ):
+                continue
+            provenance = source_detail.get("source", "")
             text, supersedes_texts = parse_memory_refresh_text(text, is_noisy_text)
             text, deprecates_texts = parse_memory_deprecation_text(text, is_noisy_text)
             if deprecates_texts:
@@ -2757,20 +3047,36 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     provenance=provenance,
                     supersedes_texts=supersedes_texts,
                     deprecates_texts=deprecates_texts,
+                    evidence_quote_id=source_detail.get("evidence_quote_id", "") or "ev_001",
+                    source_anchor_id=source_detail.get("source_anchor_id", ""),
                 )
             )
     return candidates
 
 
-def evidence_ref_for_path(memory_repo: Path | None, path: str) -> dict[str, str] | None:
+def evidence_ref_for_path(
+    memory_repo: Path | None,
+    path: str,
+    quote_id: str = "ev_001",
+) -> dict[str, str] | None:
     if not path:
         return None
-    quote_id = "ev_001"
+    if not quote_id:
+        return None
     if memory_repo is not None:
         evidence_path = archive_ref_path(memory_repo, path)
         if evidence_path is None or not evidence_quote_id_exists(evidence_path, quote_id):
             return None
     return {"path": path, "quote_id": quote_id}
+
+
+def evidence_ref_for_candidate(memory_repo: Path | None, candidate: MemoryCandidate) -> dict[str, str] | None:
+    return evidence_ref_for_path(memory_repo, candidate.evidence_path, candidate.evidence_quote_id)
+
+
+def raw_ref_for_candidate(candidate: MemoryCandidate) -> dict[str, str] | None:
+    anchor = candidate.source_anchor_id or "source_record"
+    return raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, anchor)
 
 
 def is_natural_memory_candidate(candidate: MemoryCandidate) -> bool:
@@ -2849,14 +3155,10 @@ def natural_induction_review_candidate_row(
         "derived_from": [candidate.summary_path] if archive_relative_ref_exists(memory_repo, candidate.summary_path) else [],
         "evidence_refs": [
             ref
-            for ref in [evidence_ref_for_path(memory_repo, candidate.evidence_path)]
+            for ref in [evidence_ref_for_candidate(memory_repo, candidate)]
             if ref is not None
         ],
-        "raw_refs": [
-            ref
-            for ref in [raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, "source_record")]
-            if ref is not None
-        ],
+        "raw_refs": [ref for ref in [raw_ref_for_candidate(candidate)] if ref is not None],
     }
     if related is not None:
         row["related_candidate_text_sha256"] = natural_candidate_text_sha256(related.text)
@@ -3018,22 +3320,17 @@ def build_memory_nodes_and_induction_review_candidates(
         scope = memory_scope(layer, first)
         seen_times = sorted(candidate.source_updated_at for candidate in candidates if candidate.source_updated_at)
         derived_from = sorted({candidate.summary_path for candidate in candidates if candidate.summary_path})
-        evidence_refs = [
-            ref
-            for path in sorted({candidate.evidence_path for candidate in candidates if candidate.evidence_path})
-            if (ref := evidence_ref_for_path(memory_repo, path)) is not None
-        ]
-        raw_refs = [
-            raw_ref
-            for source_record, source_map_path in sorted(
-                {
-                    (candidate.source_record, candidate.source_map_path)
-                    for candidate in candidates
-                    if candidate.source_record or candidate.source_map_path
-                }
-            )
-            if (raw_ref := raw_ref_for_source_fields(source_record, source_map_path, "source_record")) is not None
-        ]
+        evidence_refs_by_key: dict[tuple[str, str], dict[str, str]] = {}
+        raw_refs_by_key: dict[tuple[str, str], dict[str, str]] = {}
+        for candidate in candidates:
+            evidence_ref = evidence_ref_for_candidate(memory_repo, candidate)
+            if evidence_ref is not None:
+                evidence_refs_by_key[(evidence_ref["path"], evidence_ref["quote_id"])] = evidence_ref
+            raw_ref = raw_ref_for_candidate(candidate)
+            if raw_ref is not None:
+                raw_refs_by_key[(raw_ref["path"], raw_ref["anchor"])] = raw_ref
+        evidence_refs = [evidence_refs_by_key[key] for key in sorted(evidence_refs_by_key)]
+        raw_refs = [raw_refs_by_key[key] for key in sorted(raw_refs_by_key)]
         confidence = "high" if len(candidates) >= 2 or layer == "global" else "medium"
         tags = sorted({tag for candidate in candidates for tag in candidate.tags if tag} | {first.topic})
         nodes.append(

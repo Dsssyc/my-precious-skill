@@ -1401,6 +1401,84 @@ LLM induction or answer quality, vector retrieval, automatic ontology
 discovery, multi-principal governance, official benchmark parity, or solved
 long-term decay and deletion policy.
 
+## V2.29 Exact Evidence-To-Original-Event Drilldown Gate
+
+V2.29 closes the first bounded L0 source-event gap without putting source
+content into the normal recall package. The updater now preserves physical
+JSONL line number, per-line event ordinal, and normalized event hash. Generated
+evidence quotes receive opaque source anchors, and versioned source maps bind
+each quote to its exact locator while storing no raw event text. Automatic,
+explicit, consolidated, and lifecycle memories retain their exact evidence and
+source pairs.
+
+The source preview is a separate machine-readable operation. The agent first
+uses copied deployment search with `--depth source --context-json`, selects one
+exact `source_ref_id` from a supported active/current hit, and then invokes:
+
+```bash
+python tools/resolve_memory_source.py "<query>" \
+  --repo /path/to/agent-memory \
+  --source-ref-id "src_<exact-id>" \
+  --allow-source-root /path/to/authorized/source-root \
+  --authorize-source-preview \
+  --preview-json
+```
+
+The resolver emits `report_kind: memory_source_preview_package`. Before it
+returns one bounded redacted preview, it re-runs the copied source-depth context
+package, verifies active/current query support and exact-ref membership, checks
+lexical and resolved root containment plus symlink components, validates the
+whole source-record SHA-256, loads only the anchored JSONL line/event, and
+validates the event hash. It accepts no `all` selector. Missing authorization
+and every unsupported, stale, malformed, escaped, tampered, unsupported-format,
+or legacy state returns no preview.
+
+The deterministic packaged gate is:
+
+```bash
+python3 benchmarks/authorized_original_source_gate.py
+```
+
+It initializes a clean deployment archive and feeds exactly eight external
+synthetic JSONL source records containing 32 events through the copied updater
+and its real induction/consolidation path. No final memory node, evidence file,
+source map, or index is prewritten. Cases cover a supporting fact after an
+unrelated first event, two cross-project paraphrases with distinct sources, an
+explicit non-first event, current versus superseded source events, authorized
+and default-denied access, no-hit, inactive-only, wrong ref, root and symlink
+escape, source and event hash mismatch, unsupported format, malformed context,
+legacy source map, and a secret-bearing event whose safe text remains visible
+after redaction.
+
+Two independent runs completed in 4.924 and 4.891 seconds. Their reports were
+identical after removing `runtime_seconds`, so the gate was added to
+`tools/run_quality_gates.py`. Aggregate metrics were:
+
+| metric | result |
+| --- | ---: |
+| `source_context_package_parse_success_rate` | 1.0 |
+| `source_preview_package_parse_success_rate` | 1.0 |
+| `source_anchor_assignment_accuracy` | 1.0 |
+| `memory_evidence_quote_fidelity_rate` | 1.0 |
+| `authorized_original_event_resolution_rate` | 1.0 |
+| `default_source_content_block_rate` | 1.0 |
+| `unsupported_source_rejection_rate` | 1.0 |
+| `inactive_source_rejection_rate` | 1.0 |
+| `source_integrity_failure_block_rate` | 1.0 |
+| `legacy_source_map_fail_closed_rate` | 1.0 |
+| `source_preview_redaction_accuracy` | 1.0 |
+| `wrong_event_preview_count` | 0 |
+| `unredacted_secret_count` | 0 |
+| `raw_path_leak_count` | 0 |
+| `raw_ref_leak_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+V2.29 proves bounded generic JSONL event resolution in a clean packaged
+deployment after package-first support validation. It does not prove arbitrary
+transcript-format support, private production correctness, bulk source access,
+multi-principal authorization, LLM answer or induction quality, ranking
+quality, vector search, ontology discovery, or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

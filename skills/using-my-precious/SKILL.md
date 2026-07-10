@@ -100,18 +100,45 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    use `source_refs` status metadata from supported active/current hits; do not
    use free-form source-depth output as source reachability evidence. This
    renders safe source ref status metadata (`source_ref_id`, `status`, and
-   `reason`) rather than raw source content. If the user explicitly asks for a
-   raw-source check, request only a short redacted preview and include the
-   separate authorization confirmation flag:
+   `reason`) rather than raw source content.
+
+   A source preview is a separate, explicitly authorized operation after the
+   package decision. Select exactly one `source_ref_id` from a supported
+   active/current hit, use the explicitly allowed external source root, and
+   invoke the resolver:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
+   python "$MEMORY_REPO/tools/resolve_memory_source.py" "<query>" \
+     --repo "$MEMORY_REPO" \
+     --source-ref-id "src_<exact-id>" \
+     --allow-source-root "/path/to/authorized/source-root" \
+     --authorize-source-preview \
+     --preview-json
    ```
+
+   Require `report_kind: memory_source_preview_package` and `status: resolved`
+   before using its bounded redacted `preview`. Missing authorization, no-hit,
+   inactive-only support, a wrong ref, malformed context, path/root or symlink
+   escape, source/event hash mismatch, unsupported format, and legacy source
+   maps must return no preview. The resolver does not accept `all`, does not
+   copy source records into the archive, and must not be bypassed by reading a
+   source-map path directly.
 
 6. If the deployment repo has no search tool, use the bundled script:
 
    ```bash
    python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO" --depth evidence --context-json
+   ```
+
+   If the deployment repo has no resolver but does have a compatible copied
+   search/updater pair, the bundled resolver may be used with the same exact-ref
+   and authorization contract:
+
+   ```bash
+   python scripts/resolve_memory_source.py "<query>" --repo "$MEMORY_REPO" \
+     --source-ref-id "src_<exact-id>" \
+     --allow-source-root "/path/to/authorized/source-root" \
+     --authorize-source-preview --preview-json
    ```
 
 7. Read `why:` and `drill:` lines. Prefer high-level memories with strong
@@ -141,7 +168,8 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
 ## Privacy Rules
 
-- Do not read raw transcripts unless the user explicitly asks and the archive marks them safe to inspect.
+- Do not read source events unless the user explicitly asks and the exact-ref
+  resolver returns an authorized, integrity-verified, bounded redacted preview.
 - Do not paste raw chat transcripts into explicit memory capture; explicit
   capture accepts a short fact through agent-neutral JSONL.
 - Do not expose secrets, credentials, cookies, private keys, or unredacted customer data.
@@ -162,5 +190,8 @@ Expected deployment repositories expose:
 - `index/unresolved.jsonl` for open follow-up tasks.
 - `sessions/YYYY/MM/DD/<session>/summary.md` for per-session summaries.
 - `sessions/YYYY/MM/DD/<session>/evidence.md` for supporting excerpts.
+- `sessions/YYYY/MM/DD/<session>/source-map.json` for versioned quote-to-source
+  locator metadata without raw event text.
+- `tools/resolve_memory_source.py` for exact-ref authorized JSONL event preview.
 
 Read `references/archive-format.md` when implementing or debugging a compatible archive.

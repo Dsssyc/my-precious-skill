@@ -64,6 +64,46 @@ def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
 
 
 class SearchMemoryTests(unittest.TestCase):
+    def test_source_map_reachability_accepts_versioned_source_anchor(self):
+        search_memory = load_search_memory_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            entry = repo / "sessions/2026/07/11/source-anchor"
+            entry.mkdir(parents=True)
+            (entry / "summary.md").write_text("Synthetic summary.\n", encoding="utf-8")
+            (entry / "evidence.md").write_text("ev_002: Synthetic evidence.\n", encoding="utf-8")
+            relative = "sessions/2026/07/11/source-anchor/source-map.json"
+            (entry / "source-map.json").write_text(
+                json.dumps(
+                    {
+                        "source_map_path": relative,
+                        "summary_path": "sessions/2026/07/11/source-anchor/summary.md",
+                        "evidence_path": "sessions/2026/07/11/source-anchor/evidence.md",
+                        "source_anchor_version": 1,
+                        "evidence_source_anchors": [
+                            {
+                                "quote_id": "ev_002",
+                                "source_anchor_id": "srca_0123456789abcdef",
+                                "line_number": 3,
+                                "event_ordinal": 1,
+                                "event_sha256": "a" * 64,
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            reachable = search_memory.source_map_is_reachable(
+                repo,
+                relative,
+                "srca_0123456789abcdef",
+            )
+
+        self.assertTrue(reachable)
+
     def test_context_package_prioritizes_active_memory_over_support_artifacts(self):
         search_memory = load_search_memory_module()
         memory_hit = search_memory.Hit(

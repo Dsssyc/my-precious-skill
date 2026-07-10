@@ -38,13 +38,26 @@ python tools/search_memory.py "<query>" --depth evidence
 Use `--depth source` only when source reachability is needed and the user has
 explicitly asked for it. The command reports safe source ref metadata
 (`source_ref_id`, `status`, and `reason`); it does not print raw source content
-or copy raw transcripts into the archive. A short redacted raw-source snippet
-requires both an explicit preview target and a separate authorization
-confirmation:
+or copy raw transcripts into the archive. To resolve an external source event,
+first select exactly one ref from a supported active/current source-depth
+context package, then use the separate resolver with an explicitly allowed
+source root and authorization:
 
 ```bash
-python tools/search_memory.py "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
+python tools/search_memory.py "<query>" --depth source --context-json
+python tools/resolve_memory_source.py "<query>" \
+  --repo "$PWD" \
+  --source-ref-id "src_<exact-id>" \
+  --allow-source-root /path/to/authorized/source-root \
+  --authorize-source-preview \
+  --preview-json
 ```
+
+The resolver returns `memory_source_preview_package` and fails closed without a
+preview for missing authorization, unsupported or inactive-only support, wrong
+refs, malformed packages, escaped paths or symlinks, source/event hash
+mismatch, unsupported formats, and legacy source maps. It does not accept
+`all`; source records remain outside this repository.
 Use `--preferred-scope global|domain|project` when the current task has an
 explicit memory layer but cross-layer fallback should remain possible.
 

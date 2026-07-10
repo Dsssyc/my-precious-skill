@@ -46,6 +46,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertTrue((target / "AGENTS.md").exists())
             self.assertTrue((target / "config/projects.jsonl").exists())
             self.assertTrue((target / "tools/search_memory.py").exists())
+            self.assertTrue((target / "tools/resolve_memory_source.py").exists())
             self.assertTrue((target / "tools/update_memory_archive.py").exists())
             self.assertTrue((target / "tools/capture_explicit_memory.py").exists())
             self.assertTrue((target / "tools/run_memory_updates.py").exists())

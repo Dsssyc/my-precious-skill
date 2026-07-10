@@ -442,6 +442,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             {
                 "text": "The user prefers benchmark review summaries to lead with quantified risks before implementation notes.",
                 "source": "natural_user",
+                "evidence_quote_id": "ev_001",
             },
             summary["fact_sources"],
         )
@@ -2518,6 +2519,192 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             for ref in node["evidence_refs"]:
                 self.assertIn(f"{ref['path']}#{ref['quote_id']}", search_result.stdout)
 
+    def test_update_memory_archive_binds_automatic_memory_to_matching_source_event(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "source-records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            fact = "Original event provenance should bind to the exact supporting event."
+            decision = "Decision: Bind exact decision provenance to its supporting event."
+            record = source_dir / "later-event.jsonl"
+            record.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"role": "user", "content": "Record a durable provenance rule."}),
+                        json.dumps(
+                            {
+                                "role": "assistant",
+                                "content": "Decision: An unrelated first evidence quote should remain a distractor.",
+                            }
+                        ),
+                        json.dumps({"role": "assistant", "content": f"Reusable fact: {fact}"}),
+                        json.dumps({"role": "assistant", "content": decision}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(record, "2026-07-11T10:00:00Z")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--source-agent",
+                    "synthetic-agent",
+                    "--rewrite-existing",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            indexed_rows = self.load_index_jsonl(memory_repo, "index/memories.jsonl")
+            node = next(row for row in indexed_rows if row.get("text") == fact)
+            self.assertEqual(len(node["evidence_refs"]), 1)
+            self.assertEqual(node["evidence_refs"][0]["quote_id"], "ev_003")
+            decision_node = next(row for row in indexed_rows if row.get("text") == decision)
+            self.assertEqual(decision_node["evidence_refs"][0]["quote_id"], "ev_002")
+
+            source_map_path = next((memory_repo / "sessions").glob("**/source-map.json"))
+            source_map = json.loads(source_map_path.read_text(encoding="utf-8"))
+            self.assertEqual(source_map["source_anchor_version"], 1)
+            anchors = {row["quote_id"]: row for row in source_map["evidence_source_anchors"]}
+            target_anchor = anchors["ev_003"]
+            self.assertEqual(target_anchor["line_number"], 3)
+            self.assertEqual(target_anchor["event_ordinal"], 1)
+            self.assertRegex(target_anchor["event_sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(target_anchor["source_anchor_id"], r"^srca_[0-9a-f]{16}$")
+            self.assertEqual(
+                node["raw_refs"],
+                [
+                    {
+                        "path": source_map["source_map_path"],
+                        "anchor": target_anchor["source_anchor_id"],
+                    }
+                ],
+            )
+            decision_anchor = anchors["ev_002"]
+            self.assertEqual(decision_anchor["line_number"], 4)
+            self.assertEqual(
+                decision_node["raw_refs"],
+                [{"path": source_map["source_map_path"], "anchor": decision_anchor["source_anchor_id"]}],
+            )
+
+    def test_update_memory_archive_binds_explicit_memory_to_directive_source_event(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "source-records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            explicit_text = "Exact explicit event anchors must survive source drilldown."
+            record = source_dir / "explicit-later-event.jsonl"
+            record.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"role": "user", "content": "Review explicit memory provenance."}),
+                        json.dumps(
+                            {
+                                "role": "assistant",
+                                "content": "Decision: An unrelated evidence quote remains a distractor.",
+                            }
+                        ),
+                        json.dumps({"role": "user", "content": f"Remember this: {explicit_text}"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(record, "2026-07-11T11:00:00Z")
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(update_script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--source-agent",
+                    "synthetic-agent",
+                    "--rewrite-existing",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            indexed_rows = self.load_index_jsonl(memory_repo, "index/memories.jsonl")
+            node = next(row for row in indexed_rows if row.get("text") == explicit_text)
+            self.assertEqual(node["source"], "explicit")
+            self.assertEqual(node["evidence_refs"][0]["quote_id"], "ev_explicit_001")
+
+            source_map_path = next((memory_repo / "sessions").glob("**/source-map.json"))
+            source_map = json.loads(source_map_path.read_text(encoding="utf-8"))
+            anchors = {row["quote_id"]: row for row in source_map["evidence_source_anchors"]}
+            self.assertIn("ev_explicit_001", anchors)
+            explicit_anchor = anchors["ev_explicit_001"]
+            self.assertEqual(explicit_anchor["line_number"], 3)
+            self.assertEqual(explicit_anchor["event_ordinal"], 1)
+            self.assertEqual(
+                node["raw_refs"],
+                [{"path": source_map["source_map_path"], "anchor": explicit_anchor["source_anchor_id"]}],
+            )
+
+    def test_natural_user_preference_keeps_original_user_event_anchor(self):
+        module = load_update_module()
+        source_text = "I prefer benchmark summaries to lead with quantified risks."
+        source_hash = module.source_event_sha256(source_text)
+        events = [module.MemoryEvent("user", source_text, 1, 1, source_hash)]
+
+        summary = module.summarize_events(events, "synthetic-preference")
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        expected_fact = "The user prefers benchmark summaries to lead with quantified risks."
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        anchor = next(row for row in anchors if row["quote_id"] == source["evidence_quote_id"])
+        self.assertEqual(anchor["line_number"], 1)
+        self.assertEqual(anchor["event_ordinal"], 1)
+        self.assertEqual(anchor["event_sha256"], source_hash)
+        self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
+
     def test_build_memory_nodes_skips_automatic_candidates_without_summary_or_evidence(self):
         module = load_update_module()
         rows = [
@@ -3146,9 +3333,15 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 "ev_001:",
                 (memory_repo / expected_evidence).read_text(encoding="utf-8"),
             )
+            source_map = json.loads((memory_repo / expected_source_map).read_text(encoding="utf-8"))
+            source_anchor = next(
+                row["source_anchor_id"]
+                for row in source_map["evidence_source_anchors"]
+                if row["quote_id"] == "ev_001"
+            )
             self.assertEqual(
                 automatic_node["raw_refs"],
-                [{"path": expected_source_map, "anchor": "source_record"}],
+                [{"path": expected_source_map, "anchor": source_anchor}],
             )
             meta = json.loads((memory_repo / Path(automatic_node["derived_from"][0]).parent / "meta.json").read_text(encoding="utf-8"))
             self.assertEqual(meta["source_map_path"], expected_source_map)

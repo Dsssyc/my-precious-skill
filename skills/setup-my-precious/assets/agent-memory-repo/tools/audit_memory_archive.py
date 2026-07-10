@@ -743,7 +743,15 @@ def source_map_anchor_exists(path: Path, anchor: str) -> bool:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
     anchor_key = SOURCE_MAP_ANCHOR_ALIASES.get(anchor, anchor)
-    return isinstance(value, dict) and anchor_key in value
+    if not isinstance(value, dict):
+        return False
+    if anchor_key in value:
+        return True
+    anchors = value.get("evidence_source_anchors")
+    return isinstance(anchors, list) and any(
+        isinstance(row, dict) and row.get("source_anchor_id") == anchor
+        for row in anchors
+    )
 
 
 def is_positive_int(value: object) -> bool:
