@@ -1193,6 +1193,62 @@ does not prove private archive correctness, private content repair, ranking
 quality, LLM answer quality, vector search, ontology discovery, or scheduler
 publish behavior.
 
+## V2.25 Active Current Support Root-Cause Closure Gate
+
+V2.25 addresses the remaining post-V2.24 active/current support question
+without editing private archive content. V2.24 proved that the real deployment
+search tool no longer needs template fallback to emit
+`memory_recall_context_package`; the remaining private shadow failures were in
+active/current support classification rather than deployment-tool drift.
+
+The new public gate is:
+
+```bash
+python3 benchmarks/active_support_recall_closure_gate.py
+```
+
+It creates a clean packaged deployment archive, writes private-data-free
+synthetic memory rows, invokes the copied deployment repo search tool with
+`--depth evidence --context-json`, parses only
+`report_kind: memory_recall_context_package`, and reuses the same
+`active_support_diagnosis` recipe as the private lifecycle shadow gate. It does
+not use free-form search output as answerability evidence.
+
+The fixture covers four public cases:
+
+- supported active/current memory with package, hit, query support, summary
+  drilldown, and evidence drilldown all supported;
+- expected active node missing while another active supported hit is present;
+- expected active node present but package/hit answerability unsupported; and
+- expected active node missing with an unsupported no-hit package.
+
+The gate reports:
+
+| metric | value |
+| --- | ---: |
+| `active_support_synthetic_case_pass_rate` | 1.0 |
+| `active_support_context_package_parse_success_rate` | 1.0 |
+| `active_support_expected_node_missing_reproduction_count` | 1 |
+| `active_support_package_unsupported_reproduction_count` | 2 |
+| `active_support_wrong_active_hit_reproduction_count` | 1 |
+| `active_support_repair_success_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+An optional aggregate-only private dogfood run after V2.25 kept the V2.24
+tool-drift repair green: `archive_search_tool_context_package_failure_count: 0`,
+`template_search_tool_fallback_success_count: 0`,
+`private_context_package_parse_success_rate: 1.0`, and
+`privacy_leak_count: 0`. It still reported active-support failures through
+aggregate counters, including expected-node-missing, package-unsupported, and
+wrong-active-hit counts. Because the public synthetic closure gate passes, this
+classifies the remaining private shadow failure as a private archive content or
+sampling follow-up, not as a proven reusable search-tool or diagnosis bug.
+
+This proves public synthetic coverage for the active-support failure taxonomy
+and the aggregate diagnosis path. It does not prove private archive
+correctness, private content repair, ranking quality, LLM answer quality,
+vector search, ontology discovery, or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
