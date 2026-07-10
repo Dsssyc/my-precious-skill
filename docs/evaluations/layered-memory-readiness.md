@@ -1249,6 +1249,60 @@ and the aggregate diagnosis path. It does not prove private archive
 correctness, private content repair, ranking quality, LLM answer quality,
 vector search, ontology discovery, or public leaderboard parity.
 
+## V2.27 Reviewed Automatic Memory Publish Gate
+
+V2.27 closes the packaged publication mismatch between updater-generated
+automatic memory layers and the intentionally narrow default sync boundary.
+The default command still rejects automatic memory files. The only opt-in is
+`--include-reviewed-memory-nodes`, which adds exactly
+`memories/global.jsonl`, `memories/domains.jsonl`, and
+`memories/projects.jsonl`; it does not allow the whole `memories/` directory,
+review inputs, source-stream registries, tools, docs, or scheduler state.
+
+The public synthetic gate is:
+
+```bash
+python3 benchmarks/reviewed_automatic_memory_publish_gate.py
+```
+
+It initializes a fresh packaged archive for every case and uses a local bare
+Git remote for a real commit-and-push lifecycle. Reviewed mode runs changed-path
+and key-like scans, archive and publish-readiness audits, memory/index parity,
+lifecycle and evidence-reference checks, source drilldown checks, search health,
+and candidate cached-diff validation before publication. Dry-run uses a temporary
+Git index, so it exercises staged validation without changing the real index.
+
+The gate reports:
+
+| metric | value |
+| --- | ---: |
+| `default_mode_automatic_memory_rejection_rate` | 1.0 |
+| `reviewed_mode_safe_dry_run_pass_rate` | 1.0 |
+| `reviewed_mode_live_push_success_rate` | 1.0 |
+| `reviewed_mode_exact_stage_scope_rate` | 1.0 |
+| `reviewed_mode_exact_add_pathspec_rate` | 1.0 |
+| `reviewed_mode_dry_run_index_preservation_rate` | 1.0 |
+| `reviewed_mode_unsafe_rejection_accuracy` | 1.0 |
+| `reviewed_mode_index_parity_rejection_count` | 1 |
+| `reviewed_mode_lifecycle_rejection_count` | 1 |
+| `reviewed_mode_content_noise_rejection_count` | 1 |
+| `reviewed_mode_publish_readiness_rejection_count` | 1 |
+| `reviewed_mode_secret_rejection_count` | 1 |
+| `reviewed_mode_unexpected_path_rejection_count` | 5 |
+| `privacy_leak_count` | 0 |
+
+The unsafe cases cover index mismatch, broken lifecycle/evidence references,
+automatic-memory noise, a key-like value without rendering it, search-health
+failure, publish-readiness-only noise, and separate review/tool/source-stream/
+unapproved-memory-sibling/other unexpected paths. The safe dry-run case seeds a
+pre-existing staged blob and verifies that the real Git index is byte-identical
+after candidate validation.
+
+This proves deterministic packaged staged-path, audit, commit, and push closure
+for an explicitly reviewed automatic-memory mode. It does not prove LLM answer
+quality, ranking quality, vector search, ontology discovery, or public
+leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

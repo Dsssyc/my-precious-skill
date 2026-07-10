@@ -37,6 +37,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
     "benchmarks/search_tool_drift_repair_gate.py",
     "benchmarks/active_support_recall_closure_gate.py",
+    "benchmarks/reviewed_automatic_memory_publish_gate.py",
     "benchmarks/e2e_induction_recall_benchmark.py",
     "benchmarks/updater_induction_benchmark.py",
     "benchmarks/layered_recall_benchmark.py",
@@ -150,6 +151,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "active_support_recall_closure",
             ("python3", "benchmarks/active_support_recall_closure_gate.py"),
+        ),
+        CheckSpec(
+            "reviewed_automatic_memory_publish",
+            ("python3", "benchmarks/reviewed_automatic_memory_publish_gate.py"),
         ),
         CheckSpec(
             "v1_readiness_core",

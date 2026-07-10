@@ -64,10 +64,15 @@ active without a replacement. Search should prefer the current fact after
 replacement; the old fact is superseded rather than deleted, and provenance
 remains traceable through memory lifecycle links and evidence drilldown.
 
-`tools/sync_memory_archive.py` stages only `INDEX.md`, `config/projects.jsonl`,
-`index/`, `daily/`, `memories/explicit.jsonl`, and `sessions/`. It refuses
-unexpected files such as tool/script edits, automatic memory/review node files,
-and source-stream registry changes. It also runs
+By default, `tools/sync_memory_archive.py` stages only `INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+`sessions/`. It refuses unexpected files such as tool/script edits, automatic
+memory/review node files, and source-stream registry changes. After deterministic
+archive, readiness, search-health, lifecycle, evidence, and index-parity review,
+`--include-reviewed-memory-nodes` may explicitly add only
+`memories/global.jsonl`, `memories/domains.jsonl`, and
+`memories/projects.jsonl`; it does not change the default boundary or allow the
+whole `memories/` directory. The helper also runs
 `tools/audit_publish_readiness.py` before staging to reject command progress,
 prompt/environment blocks, permission/sandbox chatter, raw source paths/raw
 refs/full queries, secret-like values, and generic automation narration in

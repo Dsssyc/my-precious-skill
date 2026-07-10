@@ -391,6 +391,21 @@ After an update, commit and optionally push generated archive changes:
 python tools/sync_memory_archive.py --push
 ```
 
+The default command continues to reject automatic memory layer files. To
+publish only the three updater-generated layers after deterministic review,
+opt in explicitly:
+
+```bash
+python tools/sync_memory_archive.py --include-reviewed-memory-nodes --push
+```
+
+This mode adds exactly `memories/global.jsonl`, `memories/domains.jsonl`, and
+`memories/projects.jsonl`. It still rejects the rest of `memories/`, all
+`reviews/`, source-stream registry changes, tools, docs, scheduler state, and
+other unexpected paths. Before dry-run or publication it requires archive,
+publish-readiness, search-health, lifecycle/reference, evidence drilldown, and
+memory-index parity checks to pass, then validates the candidate staged diff.
+
 For a readiness-only check of the publish-facing generated surfaces:
 
 ```bash
@@ -417,10 +432,11 @@ values, or generic automation narration in `daily/` or text-bearing indexed
 summary fields, when archive audit finds low-quality index text, or when
 `git diff --cached --check` fails. The readiness report is aggregate-only:
 archive-relative paths, categories, and counts, without matched snippets or
-private text. Expected publish-safe archive paths are limited to `INDEX.md`,
+private text. Default publish-safe archive paths are limited to `INDEX.md`,
 `config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
-`sessions/`. Automatic memory node files, review decisions, source-stream
-registries, tools, and docs must be handled outside automatic archive sync.
+`sessions/`. The explicit reviewed mode adds only the three automatic memory
+layer files named above. Review decisions, source-stream registries, tools, and
+docs remain outside automatic archive sync in both modes.
 
 ## Archive Data
 
