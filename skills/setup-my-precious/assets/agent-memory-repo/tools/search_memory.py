@@ -2099,6 +2099,12 @@ def context_answerability(hits: list[dict[str, object]], inactive_match_count: i
     }
 
 
+def context_package_hits(hits: list[Hit], limit: int) -> list[Hit]:
+    memory_hits = [hit for hit in hits if hit.memory_id]
+    support_hits = [hit for hit in hits if not hit.memory_id]
+    return [*memory_hits, *support_hits][:limit]
+
+
 def build_context_package(
     *,
     repo: Path,
@@ -2115,7 +2121,7 @@ def build_context_package(
 ) -> dict[str, object]:
     context_hits = [
         context_hit(repo, hit, rank, depth, query_tokens)
-        for rank, hit in enumerate(hits[:limit], 1)
+        for rank, hit in enumerate(context_package_hits(hits, limit), 1)
     ]
     return {
         "report_kind": "memory_recall_context_package",

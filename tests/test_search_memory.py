@@ -64,6 +64,51 @@ def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
 
 
 class SearchMemoryTests(unittest.TestCase):
+    def test_context_package_prioritizes_active_memory_over_support_artifacts(self):
+        search_memory = load_search_memory_module()
+        memory_hit = search_memory.Hit(
+            path=Path("index/memories.jsonl/mem_high_support"),
+            score=100,
+            source="memory",
+            why=[],
+            memory_id="mem_high_support",
+            layer="domain",
+            scope="domain:synthetic",
+            topic="high-support-handoff",
+            drill_paths=(
+                "sessions/2026/01/10/high-support/summary.md",
+                "sessions/2026/01/10/high-support/evidence.md",
+            ),
+            matched_tokens=("prioritymarker",),
+        )
+        support_hits = [
+            search_memory.Hit(
+                path=Path(f"sessions/2026/01/10/support-{index}/summary.md"),
+                score=1000 - index,
+                source="index",
+                why=[],
+                matched_tokens=("prioritymarker",),
+            )
+            for index in range(5)
+        ]
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query="prioritymarker",
+            query_tokens=["prioritymarker"],
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[*support_hits, memory_hit],
+            inactive_match_count=0,
+        )
+
+        self.assertEqual(package["hits"][0]["memory_id"], "mem_high_support")
+        self.assertEqual(package["answerability"]["status"], "supported")
+
     def test_prune_low_relative_memory_hits_requires_99_percent_floor(self):
         search_memory = load_search_memory_module()
         top = search_memory.Hit(path=Path("top"), score=1000, source="memory", why=[])

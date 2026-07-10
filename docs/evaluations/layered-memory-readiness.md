@@ -1303,6 +1303,104 @@ for an explicitly reviewed automatic-memory mode. It does not prove LLM answer
 quality, ranking quality, vector search, ontology discovery, or public
 leaderboard parity.
 
+## V2.28 Bounded Long-Horizon Event-Boundary Memory Gate
+
+V2.28 adds the first bounded packaged stress gate over hundreds of event
+boundaries and multiple incremental epochs:
+
+```bash
+python3 benchmarks/long_horizon_memory_stress_gate.py
+```
+
+The gate creates a clean archive through the setup script and processes exactly
+240 synthetic session records as six monthly epochs of 40 records. The workload
+uses 12 project contexts, three archive domains, and two explicit non-project
+source partitions. Each epoch runs the copied updater and its induction and
+consolidation path before checkpoint recall. The final epoch is replayed without
+new input to gate idempotence. No final memory node is preseeded.
+
+The narratives cover cross-project support merge, paraphrase consolidation, a
+three-generation supersession chain, pending conflict review followed by an
+explicit approval, deprecation, 204 similar one-session distractors split
+between temporary local decisions and process-log updates, and a sticky
+explicit memory captured from a source event. The 16 checkpoint cases contain
+nine answer cases and seven abstention cases, including a post-resolution probe
+that requires the older
+conflicting preference to remain unsupported. Answerability comes only
+from copied deployment `search_memory.py` calls using
+`--depth evidence --context-json`; answer cases additionally verify memory,
+session, evidence, and source-ref depth packages.
+
+The fail-first harness initially reported
+`long_horizon_lifecycle_reciprocity_rate=0.6666666666666666` while every runtime
+behavior metric passed. Inspection showed an oracle error: under the accepted
+clean-cut contract, the final generation supersedes both prior generations and
+both inactive nodes point directly to that unique current node. The harness had
+incorrectly required the oldest node to retain the already-inactive intermediate
+successor. Correcting that expectation required no updater, consolidation, or
+search implementation change.
+
+The expanded 24-support cross-project case then reproduced a separate generic
+package handoff defect. Before the runtime fix, the active memory remained in
+the underlying memory collector's top five but was displaced from a
+`--limit 5` context package by higher-scoring session/index/markdown support
+artifacts. The fail-first report had
+`long_horizon_checkpoint_answer_accuracy=0.875` and
+`long_horizon_active_current_recall_at_5=0.7777777777777778`; lifecycle, index,
+replay, noise, and privacy gates still passed. The bounded fix prioritizes
+active memory hits only while constructing the machine-readable context
+package. Human-readable search ordering is unchanged. The search tool was then
+synchronized across the template, setup asset, and read-path skill copy.
+
+Two independent final runs passed in 37.789828 and 37.808815 seconds. Their JSON
+reports were identical after removing `runtime_seconds`. Final metrics were:
+
+| metric group | result |
+| --- | ---: |
+| ingest, checkpoint decision, abstention, active-current recall | 1.0 |
+| stale suppression, cross-project generalization, paraphrase consolidation | 1.0 |
+| noise rejection, explicit-memory survival, idempotent replay | 1.0 |
+| session, evidence, and source-ref drilldown | 1.0 |
+| lifecycle reciprocity, index parity, context-package parsing | 1.0 |
+| `duplicate_active_memory_count` | 0 |
+| `unexpected_active_memory_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The gate is deterministic, completes well below its 180-second limit, and is
+not duplicative of the smaller lifecycle fixtures, so it is part of
+`tools/run_quality_gates.py`.
+
+The required aggregate-only private shadow command was also run on 2026-07-10
+with `--sample-limit 24`. Against the pre-fix deployed search tool, it returned
+`privacy_leak_count=0`, context-package parsing 1.0, inactive suppression 1.0,
+lifecycle relation integrity 1.0, and support-ref reachability 1.0, but did not
+pass overall. Active-current support was `0.7083333333333334`, with seven
+expected-node-missing and seven package-unsupported samples. An aggregate-only
+diagnosis found all seven expected nodes in the memory collector's top five and
+in context packages at limit 50. Running the same shadow against the fixed
+repository template produced active-current support 1.0 and zeroed all six
+active-support failure counters, isolating deployment-tool drift rather than a
+private-content defect.
+
+After an explicitly approved tool-only deployment, the private repository's
+`tools/search_memory.py` was synchronized byte-for-byte with the fixed template.
+No memory record, index, session, source record, automation, scheduler, or
+publish configuration changed. The deployed search health check, archive audit,
+and publish-readiness audit passed. The exact deployed private shadow then
+returned active-current support 1.0, context-package parsing 1.0, inactive
+suppression 1.0, lifecycle relation integrity 1.0, review actionability 1.0,
+and support-ref reachability 1.0. All active-support failure counters and
+`privacy_leak_count` were zero. Neither run rendered a private query, memory
+text, ID, source path, raw ref, or source content. This closes deployed-runtime
+drift only; the aggregate shadow still does not establish private archive
+content correctness or answer quality.
+
+V2.28 proves bounded deterministic packaged behavior over 240 synthetic event
+boundaries. It does not prove production scale, high-cardinality users, live
+LLM induction or answer quality, vector retrieval, automatic ontology
+discovery, multi-principal governance, official benchmark parity, or solved
+long-term decay and deletion policy.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

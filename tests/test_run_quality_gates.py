@@ -89,6 +89,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(
             any("benchmarks/reviewed_automatic_memory_publish_gate.py" in command for command in commands)
         )
+        self.assertTrue(any("benchmarks/long_horizon_memory_stress_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/v1_readiness_gate.py --run-packaged" in command for command in commands))
         self.assertTrue(
             any("benchmarks/v1_readiness_gate.py --run-packaged --require-answer" in command for command in commands)
@@ -113,6 +114,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/search_tool_drift_repair_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/active_support_recall_closure_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/reviewed_automatic_memory_publish_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/long_horizon_memory_stress_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/audit_publish_readiness.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/repair_publish_surfaces.py", module.PY_COMPILE_TARGETS)
 

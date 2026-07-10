@@ -105,6 +105,7 @@ python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
 python3 benchmarks/induction_consolidation_gate.py
 python3 benchmarks/lifecycle_governance_gate.py
+python3 benchmarks/long_horizon_memory_stress_gate.py
 python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
 python3 benchmarks/search_tool_drift_repair_gate.py
 python3 benchmarks/active_support_recall_closure_gate.py
@@ -134,6 +135,7 @@ python3 -m py_compile \
   benchmarks/live_automation_prompt_alignment_gate.py \
   benchmarks/induction_consolidation_gate.py \
   benchmarks/lifecycle_governance_gate.py \
+  benchmarks/long_horizon_memory_stress_gate.py \
   benchmarks/private_lifecycle_governance_shadow_gate.py \
   benchmarks/search_tool_drift_repair_gate.py \
   benchmarks/active_support_recall_closure_gate.py \
