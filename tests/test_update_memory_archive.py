@@ -2899,6 +2899,235 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
             self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
 
+    def test_update_memory_archive_reconciles_replaced_explicit_support_bundle(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            fact = "Prefer evidence-bound regeneration over unsupported archive references."
+            source = source_dir / "replace-explicit.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": f"Please remember: {fact}"}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-07-10T10:00:00Z")
+            update_command = [
+                sys.executable,
+                str(memory_repo / "tools/update_memory_archive.py"),
+                "--memory-repo",
+                str(memory_repo),
+                "--source-dir",
+                str(source_dir),
+                "--project-path",
+                str(project_path),
+                "--project",
+                "synthetic-regeneration",
+            ]
+            subprocess.run(update_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            first_node = json.loads(
+                (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )
+            old_summary = first_node["derived_from"][0]
+            old_evidence = first_node["evidence_refs"][0]["path"]
+            old_raw = first_node["raw_refs"][0]["path"]
+
+            source.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"role": "user", "content": f"Please remember: {fact}"}),
+                        json.dumps(
+                            {
+                                "role": "assistant",
+                                "content": "Decision: regenerated memories retain only current support bundles.",
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-07-11T10:00:00Z")
+            subprocess.run(update_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            second_node = json.loads(
+                (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )
+            self.assertNotIn(old_summary, second_node["derived_from"])
+            self.assertNotIn(old_evidence, [ref["path"] for ref in second_node["evidence_refs"]])
+            self.assertNotIn(old_raw, [ref["path"] for ref in second_node["raw_refs"]])
+            self.assertEqual(second_node["support_count"], 1)
+            self.assertEqual(len(second_node["evidence_refs"]), 1)
+            self.assertFalse((memory_repo / old_summary).exists())
+
+            audit = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
+
+            stable_explicit = (memory_repo / "memories/explicit.jsonl").read_bytes()
+            stable_index = (memory_repo / "index/memories.jsonl").read_bytes()
+            subprocess.run(update_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertEqual((memory_repo / "memories/explicit.jsonl").read_bytes(), stable_explicit)
+            self.assertEqual((memory_repo / "index/memories.jsonl").read_bytes(), stable_index)
+
+    def test_update_memory_archive_refuses_orphaned_sticky_explicit_memory(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            fact = "Prefer fail-closed sticky memory support."
+            source = source_dir / "orphan-explicit.jsonl"
+            source.write_text(
+                json.dumps({"role": "user", "content": f"Please remember: {fact}"}) + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-07-10T10:00:00Z")
+            update_command = [
+                sys.executable,
+                str(memory_repo / "tools/update_memory_archive.py"),
+                "--memory-repo",
+                str(memory_repo),
+                "--source-dir",
+                str(source_dir),
+                "--project-path",
+                str(project_path),
+                "--project",
+                "synthetic-regeneration",
+            ]
+            subprocess.run(update_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            source.write_text(
+                json.dumps({"role": "assistant", "content": "Decision: unrelated durable archive behavior remains."})
+                + "\n",
+                encoding="utf-8",
+            )
+            set_mtime(source, "2026-07-11T10:00:00Z")
+            result = subprocess.run(
+                update_command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to persist orphaned explicit memory support", combined)
+            self.assertNotIn(fact, combined)
+            self.assertNotIn(str(source), combined)
+            self.assertIn(fact, (memory_repo / "memories/explicit.jsonl").read_text(encoding="utf-8"))
+
+    def test_durable_daily_text_clips_without_breaking_markdown_structure(self):
+        module = load_update_module()
+        boundary_cases = [
+            "A" * 239,
+            "B" * 240,
+            "C" * 241,
+            "持久记忆" * 70,
+            "Durable regeneration keeps **supported memory evidence and current source anchors** " * 6,
+        ]
+
+        for source_text in boundary_cases:
+            with self.subTest(length=len(source_text)):
+                rendered = module.durable_daily_text(source_text)
+                self.assertTrue(rendered)
+                self.assertLessEqual(len(rendered), 240)
+                self.assertFalse(module.has_unbalanced_markdown_emphasis(rendered))
+                self.assertFalse(module.is_incomplete_memory_fragment(rendered))
+
+        emphasized = boundary_cases[-1]
+        rendered = module.durable_daily_text(emphasized)
+        self.assertIn("Durable regeneration keeps", rendered)
+        self.assertIn("supported memory evidence", rendered)
+
+    def test_reconcile_explicit_memory_support_removes_complete_invalid_bundles(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            bundles = {
+                "valid": ("ev_valid", "anchor_valid"),
+                "bad-evidence": ("ev_actual", "anchor_evidence"),
+                "bad-anchor": ("ev_anchor", "anchor_actual"),
+            }
+            for name, (quote_id, anchor) in bundles.items():
+                entry_dir = memory_repo / f"sessions/2026/07/11/{name}"
+                entry_dir.mkdir(parents=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {name}.\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text(f"{quote_id}: Evidence for {name}.\n", encoding="utf-8")
+                (entry_dir / "source-map.json").write_text(
+                    json.dumps({"evidence_source_anchors": [{"source_anchor_id": anchor}]}) + "\n",
+                    encoding="utf-8",
+                )
+
+            node = {
+                "source": "explicit",
+                "support_count": 3,
+                "derived_from": [
+                    f"sessions/2026/07/11/{name}/summary.md"
+                    for name in bundles
+                ],
+                "evidence_refs": [
+                    {"path": "sessions/2026/07/11/valid/evidence.md", "quote_id": "ev_valid"},
+                    {"path": "sessions/2026/07/11/bad-evidence/evidence.md", "quote_id": "ev_missing"},
+                    {"path": "sessions/2026/07/11/bad-anchor/evidence.md", "quote_id": "ev_anchor"},
+                ],
+                "raw_refs": [
+                    {"path": "sessions/2026/07/11/valid/source-map.json", "anchor": "anchor_valid"},
+                    {
+                        "path": "sessions/2026/07/11/bad-evidence/source-map.json",
+                        "anchor": "anchor_evidence",
+                    },
+                    {"path": "sessions/2026/07/11/bad-anchor/source-map.json", "anchor": "anchor_missing"},
+                ],
+            }
+
+            reconciled = module.reconcile_explicit_memory_support(memory_repo, node)
+
+            self.assertEqual(reconciled["support_count"], 1)
+            self.assertEqual(
+                reconciled["derived_from"],
+                ["sessions/2026/07/11/valid/summary.md"],
+            )
+            self.assertEqual(
+                reconciled["evidence_refs"],
+                [{"path": "sessions/2026/07/11/valid/evidence.md", "quote_id": "ev_valid"}],
+            )
+            self.assertEqual(
+                reconciled["raw_refs"],
+                [{"path": "sessions/2026/07/11/valid/source-map.json", "anchor": "anchor_valid"}],
+            )
+
     def test_update_memory_archive_refreshes_automatic_memory_with_supersession_links(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
@@ -3385,6 +3614,16 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 "superseded_by": None,
                 "tags": ["agent-workflow", "synthetic"],
             }
+            support_dir = memory_repo / "sessions/synthetic"
+            support_dir.mkdir(parents=True)
+            (support_dir / "summary.md").write_text(
+                "Summary supporting the preserved explicit memory.\n",
+                encoding="utf-8",
+            )
+            (support_dir / "evidence.md").write_text(
+                "ev_explicit_001: Evidence supporting the preserved explicit memory.\n",
+                encoding="utf-8",
+            )
             (memory_repo / "memories/explicit.jsonl").write_text(
                 json.dumps(explicit_node, sort_keys=True) + "\n",
                 encoding="utf-8",

@@ -1090,6 +1090,28 @@ def clip(text: str, limit: int = 240) -> str:
     return text[: limit - 3].rstrip() + "..."
 
 
+def clip_daily_text(text: str, limit: int = 240) -> str:
+    compacted = compact_whitespace(text)
+    if len(compacted) <= limit:
+        return compacted
+
+    def bounded(value: str) -> str:
+        prefix = value[: limit - 3].rstrip()
+        sentence_boundary = max(prefix.rfind(mark) for mark in ("。", "！", "？", ".", "!", "?", ";", "；"))
+        if sentence_boundary >= limit // 2:
+            prefix = prefix[: sentence_boundary + 1].rstrip()
+        else:
+            word_boundary = prefix.rfind(" ")
+            if word_boundary >= limit // 2:
+                prefix = prefix[:word_boundary].rstrip()
+        return prefix + "..."
+
+    rendered = bounded(compacted)
+    if has_unbalanced_markdown_emphasis(rendered):
+        rendered = bounded(compacted.replace("**", ""))
+    return rendered
+
+
 def focus_high_value_title_text(text: str, limit: int = 120) -> str:
     cleaned = compact_title_phrase(text)
     if len(cleaned) <= limit or not HIGH_VALUE_TITLE_PATTERN.search(cleaned):
@@ -3448,6 +3470,101 @@ def load_existing_explicit_memory_nodes(memory_repo: Path) -> list[dict]:
     return nodes
 
 
+def session_support_bundle(path_text: object) -> str | None:
+    if not isinstance(path_text, str) or not path_text.startswith("sessions/"):
+        return None
+    path = Path(path_text)
+    if len(path.parts) < 2:
+        return None
+    return path.parent.as_posix()
+
+
+def source_map_ref_anchor_exists(path: Path, anchor: object) -> bool:
+    if not isinstance(anchor, str) or not anchor.strip():
+        return False
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(value, dict):
+        return False
+    anchor_key = "source_record" if anchor == "explicit_memory" else anchor
+    if anchor_key in value:
+        return True
+    anchors = value.get("evidence_source_anchors")
+    return isinstance(anchors, list) and any(
+        isinstance(row, dict) and row.get("source_anchor_id") == anchor
+        for row in anchors
+    )
+
+
+def reconcile_explicit_memory_support(memory_repo: Path, node: dict) -> dict:
+    reconciled = dict(node)
+    invalid_bundles: set[str] = set()
+
+    derived_from = node.get("derived_from", [])
+    if isinstance(derived_from, list):
+        for ref in derived_from:
+            bundle = session_support_bundle(ref)
+            if bundle is not None and archive_ref_path(memory_repo, str(ref)) is None:
+                invalid_bundles.add(bundle)
+
+    evidence_refs = node.get("evidence_refs", [])
+    if isinstance(evidence_refs, list):
+        for ref in evidence_refs:
+            if not isinstance(ref, dict):
+                continue
+            path_text = ref.get("path")
+            bundle = session_support_bundle(path_text)
+            if bundle is None:
+                continue
+            path = archive_ref_path(memory_repo, str(path_text))
+            quote_id = ref.get("quote_id")
+            if path is None or not isinstance(quote_id, str) or not evidence_quote_id_exists(path, quote_id):
+                invalid_bundles.add(bundle)
+
+    raw_refs = node.get("raw_refs", [])
+    if isinstance(raw_refs, list):
+        for ref in raw_refs:
+            if not isinstance(ref, dict):
+                continue
+            path_text = ref.get("path")
+            bundle = session_support_bundle(path_text)
+            if bundle is None:
+                continue
+            path = archive_ref_path(memory_repo, str(path_text))
+            if path is None or (path.name == "source-map.json" and not source_map_ref_anchor_exists(path, ref.get("anchor"))):
+                invalid_bundles.add(bundle)
+
+    if isinstance(derived_from, list):
+        reconciled["derived_from"] = [
+            ref for ref in derived_from if session_support_bundle(ref) not in invalid_bundles
+        ]
+    if isinstance(evidence_refs, list):
+        reconciled["evidence_refs"] = [
+            ref
+            for ref in evidence_refs
+            if session_support_bundle(ref.get("path") if isinstance(ref, dict) else None) not in invalid_bundles
+        ]
+    if isinstance(raw_refs, list):
+        reconciled["raw_refs"] = [
+            ref
+            for ref in raw_refs
+            if session_support_bundle(ref.get("path") if isinstance(ref, dict) else None) not in invalid_bundles
+        ]
+
+    valid_evidence = reconciled.get("evidence_refs", [])
+    if isinstance(valid_evidence, list) and valid_evidence:
+        support_keys = {
+            session_support_bundle(ref.get("path"))
+            or f"{ref.get('path', '')}#{ref.get('quote_id', '')}"
+            for ref in valid_evidence
+            if isinstance(ref, dict)
+        }
+        reconciled["support_count"] = len(support_keys)
+    return reconciled
+
+
 def memory_node_sort_key(node: dict) -> tuple[bool, str, str, str, str]:
     return (
         node.get("source") != "automatic",
@@ -3500,7 +3617,23 @@ def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -
         add_node(node, prefer_same_content=False)
     for node in nodes:
         add_node(node, prefer_same_content=True)
-    return sorted(by_id.values(), key=memory_node_sort_key)
+    reconciled = [
+        reconcile_explicit_memory_support(memory_repo, node)
+        if node.get("source") == "explicit"
+        else node
+        for node in by_id.values()
+    ]
+    orphaned = [
+        node
+        for node in reconciled
+        if node.get("source") == "explicit" and not node.get("evidence_refs")
+    ]
+    if orphaned:
+        raise SystemExit(
+            "Refusing to persist orphaned explicit memory support: "
+            f"count={len(orphaned)}"
+        )
+    return sorted(reconciled, key=memory_node_sort_key)
 
 
 def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
@@ -4438,7 +4571,7 @@ def durable_daily_text(text: object) -> str:
         or is_daily_contract_noise_text(compacted)
     ):
         return ""
-    return clip(compacted)
+    return clip_daily_text(compacted)
 
 
 def is_automation_permission_chatter(text: str) -> bool:

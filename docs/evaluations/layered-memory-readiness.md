@@ -1549,6 +1549,64 @@ It also does not prove batch or production-wide migration safety,
 actual private deployment, public benchmark parity, LLM answer or induction quality, ranking
 quality, vector search, ontology discovery, or multi-principal governance.
 
+## V2.31 Archive Regeneration Reference-Closure Gate
+
+V2.31 closes two archive-regeneration failures observed by the deployment
+workflow without weakening the archive auditor. Replacing a source record can
+delete its old session package while an existing sticky explicit memory still
+contains the old summary, evidence, and source-map references. Daily rendering
+can also clip a combined summary inside a Markdown emphasis span, producing an
+incomplete durable index line.
+
+The updater now reconciles archive-internal explicit-memory provenance after
+existing and newly generated nodes have been merged. A failed component
+invalidates its complete session support bundle; valid memory-ID lifecycle
+links and non-session reference policy remain unchanged. Support counts are
+rederived from surviving evidence bundles. If reconciliation leaves an
+explicit memory without evidence, the updater exits with a bounded aggregate
+diagnostic instead of silently deleting or persisting the node.
+
+Daily records use a dedicated bounded clipper. It prefers sentence or word
+boundaries and removes Markdown emphasis markers before clipping when the
+normal boundary would leave an unbalanced span. The global clip behavior and
+the audit categories remain unchanged.
+
+The deterministic packaged gate is:
+
+```bash
+python3 benchmarks/archive_regeneration_closure_gate.py
+```
+
+It creates two independent pairs of clean synthetic deployment repositories.
+Each successful case performs a source update, creates an explicit lifecycle
+link through the copied updater, replaces the source package, reruns the copied
+updater, and then executes packaged archive audit, search health, reviewed sync
+dry-run, and an idempotent replay. A separate case removes the only support for
+a sticky explicit memory and requires a fail-closed result. The two structured
+reports are identical.
+
+| metric | result |
+| --- | ---: |
+| `regeneration_bundle_reconciliation_accuracy` | 1.0 |
+| `stale_derived_ref_count` | 0 |
+| `stale_evidence_ref_count` | 0 |
+| `stale_raw_ref_count` | 0 |
+| `support_count_consistency_rate` | 1.0 |
+| `lifecycle_link_retention_rate` | 1.0 |
+| `orphan_explicit_fail_closed_accuracy` | 1.0 |
+| `daily_structure_safe_clip_accuracy` | 1.0 |
+| `daily_durable_fact_retention_rate` | 1.0 |
+| `post_regeneration_archive_audit_pass_rate` | 1.0 |
+| `post_regeneration_search_health_pass_rate` | 1.0 |
+| `reviewed_sync_dry_run_pass_rate` | 1.0 |
+| `idempotent_replay_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+V2.31 proves reference and daily-render closure for supported synthetic
+packaged regeneration. It does not prove whole-repository transaction rollback,
+private deployment correctness or recovery, LLM summarization quality, ranking
+quality, vector search, ontology discovery, or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

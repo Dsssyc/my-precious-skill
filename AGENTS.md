@@ -99,6 +99,7 @@ python3 benchmarks/query_support_recall_gate.py
 python3 benchmarks/progressive_source_drilldown_gate.py
 python3 benchmarks/authorized_original_source_gate.py
 python3 benchmarks/legacy_source_anchor_upgrade_gate.py
+python3 benchmarks/archive_regeneration_closure_gate.py
 python3 benchmarks/scope_arbitration_gate.py
 python3 benchmarks/scope_answer_handoff_gate.py
 python3 benchmarks/generated_answer_scope_adapter_gate.py
@@ -131,6 +132,7 @@ python3 -m py_compile \
   benchmarks/progressive_source_drilldown_gate.py \
   benchmarks/authorized_original_source_gate.py \
   benchmarks/legacy_source_anchor_upgrade_gate.py \
+  benchmarks/archive_regeneration_closure_gate.py \
   benchmarks/scope_arbitration_gate.py \
   benchmarks/scope_answer_handoff_gate.py \
   benchmarks/generated_answer_scope_adapter_gate.py \

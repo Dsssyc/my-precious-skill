@@ -25,6 +25,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/progressive_source_drilldown_gate.py",
     "benchmarks/authorized_original_source_gate.py",
     "benchmarks/legacy_source_anchor_upgrade_gate.py",
+    "benchmarks/archive_regeneration_closure_gate.py",
     "benchmarks/scope_arbitration_gate.py",
     "benchmarks/scope_answer_handoff_gate.py",
     "benchmarks/generated_answer_scope_adapter_gate.py",
@@ -112,6 +113,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "legacy_source_anchor_upgrade",
             ("python3", "benchmarks/legacy_source_anchor_upgrade_gate.py"),
+        ),
+        CheckSpec(
+            "archive_regeneration_closure",
+            ("python3", "benchmarks/archive_regeneration_closure_gate.py"),
         ),
         CheckSpec("scope_arbitration", ("python3", "benchmarks/scope_arbitration_gate.py")),
         CheckSpec("scope_answer_handoff", ("python3", "benchmarks/scope_answer_handoff_gate.py")),
