@@ -263,16 +263,21 @@ def has_symlink_component(root: Path, relative: Path) -> bool:
 
 def allowed_source_path(source_record: str, allow_root: Path) -> tuple[Path | None, str]:
     lexical = lexical_absolute_path(source_record)
+    lexical_root = lexical_absolute_path(str(allow_root))
     try:
-        relative = lexical.relative_to(allow_root)
+        relative = lexical.relative_to(lexical_root)
     except ValueError:
         return None, "source_root_escape"
-    if has_symlink_component(allow_root, relative):
+    if has_symlink_component(lexical_root, relative):
         return None, "symlink_escape"
     try:
+        resolved_root = lexical_root.resolve(strict=True)
         resolved = lexical.resolve(strict=True)
-        resolved.relative_to(allow_root)
-    except (OSError, ValueError):
+    except OSError:
+        return None, "source_record_unavailable"
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError:
         return None, "source_root_escape"
     if not resolved.is_file():
         return None, "source_record_unavailable"

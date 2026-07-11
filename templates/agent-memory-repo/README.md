@@ -128,6 +128,33 @@ If `source-dir` contains records from multiple projects, add
 `--require-project-metadata` so records without explicit project path metadata
 are skipped.
 
+## Upgrade Legacy Source Anchors
+
+Legacy entries remain usable for summary and evidence recall, but exact source
+preview fails closed with `legacy_source_anchor_unavailable`. Upgrade one
+authorized external JSONL record without re-summarizing it:
+
+```bash
+python tools/upgrade_source_anchors.py \
+  --memory-repo . \
+  --source-record /path/to/authorized/source.jsonl \
+  --allow-source-root /path/to/authorized \
+  --dry-run \
+  --report-json
+```
+
+After reviewing an `eligible` aggregate report, replace `--dry-run` with
+`--apply`. Apply is single-record, requires an exact archived source hash,
+updates provenance fields only, uses optimistic concurrency, and rolls back
+exact bytes if replacement, archive audit, or search health fails. Add
+`--allow-redacted-secrets` only after explicit review; source content and secret
+values are never emitted by the report.
+
+Omit `--source-record` only for a bounded, read-only readiness scan with
+`--scan-limit`. Readiness is not batch migration or deployment approval. Use
+`backfill_memory_archive.py` only when summary/evidence regeneration is the
+intended repair; it is not a provenance-only source-anchor upgrade.
+
 Repair old generated summaries for a project by replacing existing entries for
 the same source records:
 

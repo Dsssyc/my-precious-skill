@@ -75,6 +75,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any("benchmarks/query_support_recall_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/progressive_source_drilldown_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/authorized_original_source_gate.py" in command for command in commands))
+        self.assertTrue(any("benchmarks/legacy_source_anchor_upgrade_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/scope_arbitration_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/scope_answer_handoff_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/generated_answer_scope_adapter_gate.py" in command for command in commands))
@@ -103,6 +104,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/query_support_recall_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/progressive_source_drilldown_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/authorized_original_source_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/legacy_source_anchor_upgrade_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/scope_arbitration_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/scope_answer_handoff_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/generated_answer_scope_adapter_gate.py", module.PY_COMPILE_TARGETS)
@@ -120,6 +122,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("templates/agent-memory-repo/tools/audit_publish_readiness.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/repair_publish_surfaces.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/resolve_memory_source.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("templates/agent-memory-repo/tools/upgrade_source_anchors.py", module.PY_COMPILE_TARGETS)
         self.assertIn("skills/using-my-precious/scripts/resolve_memory_source.py", module.PY_COMPILE_TARGETS)
 
     def test_passing_gate_returns_aggregate_scorecards(self):

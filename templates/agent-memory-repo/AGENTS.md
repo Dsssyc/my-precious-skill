@@ -104,6 +104,16 @@ This repair updates only `tools/**`. It must not mutate archive data, indexes,
 source records, daily records, session summaries, or user-owned config. Commit
 tool refreshes separately from automatic archive sync.
 
+When a legacy entry is searchable but exact source preview returns
+`legacy_source_anchor_unavailable`, do not use backfill merely to add anchors.
+Run `tools/upgrade_source_anchors.py` with one explicit `--source-record`, an
+explicit `--allow-source-root`, `--dry-run`, and `--report-json`. Apply only
+after the aggregate report is `eligible` and the user authorizes that one
+record. The command must remain provenance-only, hash-exact, transactional, and
+aggregate-only. A dry run without `--source-record` and with `--scan-limit` is
+readiness evidence only; it is not permission for batch migration or private
+deployment. Never add an archive-wide apply loop around this command.
+
 When `config/projects.jsonl` is empty, the global runner should scan source
 records for project metadata and register discovered projects before updating.
 Disabled projects in `config/projects.jsonl` must stay disabled even if source

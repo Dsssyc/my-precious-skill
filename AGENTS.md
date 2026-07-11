@@ -98,6 +98,7 @@ python3 benchmarks/using_my_precious_runtime_gate.py
 python3 benchmarks/query_support_recall_gate.py
 python3 benchmarks/progressive_source_drilldown_gate.py
 python3 benchmarks/authorized_original_source_gate.py
+python3 benchmarks/legacy_source_anchor_upgrade_gate.py
 python3 benchmarks/scope_arbitration_gate.py
 python3 benchmarks/scope_answer_handoff_gate.py
 python3 benchmarks/generated_answer_scope_adapter_gate.py
@@ -129,6 +130,7 @@ python3 -m py_compile \
   benchmarks/query_support_recall_gate.py \
   benchmarks/progressive_source_drilldown_gate.py \
   benchmarks/authorized_original_source_gate.py \
+  benchmarks/legacy_source_anchor_upgrade_gate.py \
   benchmarks/scope_arbitration_gate.py \
   benchmarks/scope_answer_handoff_gate.py \
   benchmarks/generated_answer_scope_adapter_gate.py \
@@ -172,6 +174,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
   templates/agent-memory-repo/tools/resolve_memory_source.py \
+  templates/agent-memory-repo/tools/upgrade_source_anchors.py \
   templates/agent-memory-repo/tools/generate_answer_records.py \
   templates/agent-memory-repo/tools/induction_consolidation_audit.py \
   templates/agent-memory-repo/tools/shadow_eval_memory_archive.py \

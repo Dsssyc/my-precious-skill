@@ -1479,6 +1479,76 @@ transcript-format support, private production correctness, bulk source access,
 multi-principal authorization, LLM answer or induction quality, ranking
 quality, vector search, ontology discovery, or public leaderboard parity.
 
+## V2.30 Transactional Legacy Source-Anchor Upgrade Gate
+
+V2.30 adds a safe migration path for entries created before V2.29. Existing
+backfill first removes and regenerates an archive entry, so it cannot establish
+semantic parity or exact rollback for an anchor-only migration. The new copied
+deployment tool, `tools/upgrade_source_anchors.py`, instead reconstructs
+provenance from the unchanged evidence quote and external JSONL source event.
+It does not re-run summarization or induction.
+
+Focused fail-first evidence confirms the distinction: when existing backfill
+has removed the selected entry and its mocked `write_record()` returns `None`,
+the command returns success with the old entry still absent. That behavior is
+valid evidence that backfill is not the transactional migration primitive; it
+is not changed by V2.30.
+
+Dry run and apply both emit
+`report_kind: memory_source_anchor_upgrade_package`. Apply accepts exactly one
+source record, requires an exact archived source SHA-256 plus lexical and
+canonical root containment, and rejects zero or multiple event matches. The only
+allowed changes are source-anchor version/mappings, corresponding meta anchor
+IDs, and matching memory raw-ref anchors. Every replacement is prepared before
+mutation; target hashes are rechecked; archive audit and search health run
+after replacement; any failure restores original bytes and modes.
+
+The deterministic packaged gate is:
+
+```bash
+python3 benchmarks/legacy_source_anchor_upgrade_gate.py
+```
+
+It creates exactly six external synthetic JSONL records with 24 events, uses
+the copied updater to generate real summaries, evidence, source maps, memory
+nodes, and indexes, then removes provenance fields only to create the legacy
+fixture. Cases cover a non-first automatic fact, natural-user transformation,
+non-first explicit memory, incremental cross-project paraphrase sources,
+current and superseded nodes, secret redaction policy, already-current replay,
+missing/drifted/malformed sources, root and symlink escape, malformed source
+map, absent and ambiguous quotes, stale target fingerprints, mid-transaction
+failure, and post-audit rollback.
+
+Two independent runs completed in 5.983 and 5.937 seconds. Reports were
+identical after removing `runtime_seconds`, so the gate was added to
+`tools/run_quality_gates.py`. Every deterministic rate below was `1.0`:
+
+| metric group | metrics |
+| --- | --- |
+| package and eligibility | `legacy_upgrade_package_parse_success_rate`, `legacy_upgrade_eligibility_accuracy` |
+| binding and semantic parity | `legacy_exact_binding_accuracy`, `legacy_memory_id_parity_rate`, `legacy_memory_text_hash_parity_rate`, `legacy_evidence_quote_parity_rate`, `legacy_lifecycle_parity_rate`, `legacy_support_count_parity_rate` |
+| apply and resolver | `legacy_safe_apply_success_rate`, `legacy_post_upgrade_resolver_success_rate`, `legacy_idempotent_replay_rate`, `legacy_already_current_noop_rate` |
+| transaction safety | `legacy_transaction_rollback_rate`, `legacy_post_audit_rollback_rate`, `legacy_optimistic_concurrency_rejection_rate` |
+| fail-closed policy | `legacy_source_hash_drift_rejection_rate`, `legacy_missing_source_rejection_rate`, `legacy_unsafe_path_rejection_rate`, `legacy_ambiguous_binding_rejection_rate`, `legacy_secret_policy_accuracy` |
+
+`unexpected_semantic_change_count`, `partial_upgrade_count`,
+`wrong_event_preview_count`, `unredacted_secret_count`,
+`raw_path_leak_count`, `raw_ref_leak_count`, and `privacy_leak_count` were all
+zero.
+
+The 2026-07-11 aggregate-only private readiness scan sampled 24 legacy entries
+without installing or applying a private tool. Twenty-three were eligible and
+one was rejected as `ambiguous_evidence_event_binding`; the eligible sample
+contained 86 exact quote bindings. The private repository Git status hash was
+unchanged before and after the scan. This is readiness evidence only and not permission to migrate;
+it is also not proof of private content correctness.
+
+V2.30 proves bounded, single-record, provenance-only migration for supported
+JSONL in a clean packaged deployment. It does not prove arbitrary transcript formats.
+It also does not prove batch or production-wide migration safety,
+actual private deployment, public benchmark parity, LLM answer or induction quality, ranking
+quality, vector search, ontology discovery, or multi-principal governance.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

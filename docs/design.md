@@ -405,6 +405,24 @@ are rendered as `[unsafe-source-ref]` instead of being printed verbatim. Unsafe
 memory metadata fields are rendered as `[unsafe-field]` so archive records
 cannot inject extra output lines.
 
+Legacy source maps without `source_anchor_version: 1` remain valid for summary
+and evidence recall but are unavailable for original-event preview. Their
+upgrade path is provenance-only: parse existing evidence quote IDs and text,
+uniquely bind each quote to a physical event in the unchanged external JSONL
+record, then add `evidence_source_anchors`, matching meta anchor IDs, and exact
+memory raw-ref anchors. Memory IDs/text, lifecycle, support counts,
+summary/evidence paths and prose, session identity, timestamps, and source hash
+must remain byte- or value-identical as applicable.
+
+`upgrade_source_anchors.py` applies at most one source record per invocation.
+It requires lexical and canonical source-root containment, no nested symlink,
+an exact archived source SHA-256, and unique event binding. It prepares all
+replacement files before mutation, rechecks target hashes, replaces in a
+deterministic order, and runs archive audit plus search health. Any stale
+fingerprint, write failure, audit failure, or health failure restores original
+bytes and modes. Archive-wide dry-run scanning is aggregate-only and bounded;
+batch apply and private deployment remain separate future operations.
+
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:
 

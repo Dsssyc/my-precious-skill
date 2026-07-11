@@ -333,6 +333,29 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v230_transactional_legacy_upgrade_gate(self):
+        section = self.evaluation_section("## V2.30 Transactional Legacy Source-Anchor Upgrade Gate")
+        for phrase in (
+            "tools/upgrade_source_anchors.py",
+            "benchmarks/legacy_source_anchor_upgrade_gate.py",
+            "exact archived source SHA-256",
+            "restores original bytes and modes",
+            "exactly six external synthetic JSONL records with 24 events",
+            "legacy_upgrade_package_parse_success_rate",
+            "legacy_exact_binding_accuracy",
+            "legacy_transaction_rollback_rate",
+            "legacy_post_audit_rollback_rate",
+            "legacy_optimistic_concurrency_rejection_rate",
+            "partial_upgrade_count",
+            "privacy_leak_count",
+            "readiness evidence only",
+            "not permission to migrate",
+            "does not prove arbitrary transcript formats",
+            "actual private deployment",
+            "public benchmark parity",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_evaluation_doc_preserves_bounded_claim_language(self):
         for phrase in (
             "private archive",

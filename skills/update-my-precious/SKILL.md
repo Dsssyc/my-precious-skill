@@ -199,6 +199,48 @@ The updater should:
    Review and commit those reusable tool or documentation changes separately
    before rerunning archive sync.
 
+## Legacy Source-Anchor Upgrade
+
+When a legacy entry remains searchable but `resolve_memory_source.py` returns
+`legacy_source_anchor_unavailable`, use the deployment repository's dedicated
+provenance-only upgrader. Do not use backfill for this purpose: backfill
+re-summarizes the source and can change memory or evidence semantics.
+
+Dry-run one explicitly selected external JSONL source record first:
+
+```bash
+python "$MEMORY_REPO/tools/upgrade_source_anchors.py" \
+  --memory-repo "$MEMORY_REPO" \
+  --source-record "$SOURCE_RECORD" \
+  --allow-source-root "$SOURCE_RECORD_DIR" \
+  --dry-run \
+  --report-json
+```
+
+Apply only after the aggregate report returns `eligible` and the user has
+authorized that one record:
+
+```bash
+python "$MEMORY_REPO/tools/upgrade_source_anchors.py" \
+  --memory-repo "$MEMORY_REPO" \
+  --source-record "$SOURCE_RECORD" \
+  --allow-source-root "$SOURCE_RECORD_DIR" \
+  --apply \
+  --report-json
+```
+
+The tool requires the archived and current source SHA-256 to match, uniquely
+binds every existing evidence quote to one physical JSONL event, changes only
+versioned provenance fields, rechecks target fingerprints, and rolls back exact
+bytes if replacement, archive audit, or search health fails. Secret-bearing
+records remain blocked unless `--allow-redacted-secrets` is explicitly added.
+Reports are aggregate-only and must not render source paths, memory IDs, quote
+text, source content, raw refs, secrets, or scheduler state.
+
+A dry run without `--source-record` is a bounded readiness scan only. It may
+sample legacy entries with `--scan-limit`, but it is not authorization for
+batch migration or private deployment. Apply remains single-record.
+
 ## Backfill And Repair
 
 When `sync_memory_archive.py` or `audit_publish_readiness.py` reports
