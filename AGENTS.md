@@ -116,10 +116,22 @@ python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixtu
 python3 benchmarks/search_tool_drift_repair_gate.py
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
+python3 benchmarks/public_induction_recall_gate.py --offline-fixture
 python3 benchmarks/active_support_recall_closure_gate.py
 python3 benchmarks/reviewed_automatic_memory_publish_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+```
+
+Run the external LongMemEval source-to-induction measurement only with a
+downloaded dataset and generated archives outside this repository:
+
+```bash
+python3 benchmarks/public_induction_recall_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --work-dir /tmp/my-precious-public-induction-run \
+  --report-file /tmp/my-precious-public-induction-report.json
 ```
 
 Compile bundled scripts when implementation code changes:
@@ -151,6 +163,7 @@ python3 -m py_compile \
   benchmarks/search_tool_drift_repair_gate.py \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
+  benchmarks/public_induction_recall_gate.py \
   benchmarks/active_support_recall_closure_gate.py \
   benchmarks/reviewed_automatic_memory_publish_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \

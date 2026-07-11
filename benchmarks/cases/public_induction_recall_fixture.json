@@ -1,0 +1,93 @@
+[
+  {
+    "question_id": "fixture_user",
+    "question_type": "single-session-user",
+    "question": "Which instrument does the user practice?",
+    "answer": "Cello",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["gold-user"],
+    "haystack_dates": ["2026/01/01 (Thu) 09:00"],
+    "haystack_sessions": [[{"role": "user", "content": "I practice the cello every evening.", "has_answer": true}]],
+    "answer_session_ids": ["gold-user"]
+  },
+  {
+    "question_id": "fixture_assistant",
+    "question_type": "single-session-assistant",
+    "question": "Which museum did the assistant recommend?",
+    "answer": "The city history museum",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["gold-assistant"],
+    "haystack_dates": ["2026/01/02 (Fri) 09:00"],
+    "haystack_sessions": [[{"role": "assistant", "content": "The city history museum fits that request.", "has_answer": true}]],
+    "answer_session_ids": ["gold-assistant"]
+  },
+  {
+    "question_id": "fixture_preference",
+    "question_type": "single-session-preference",
+    "question": "How does the user prefer reports to begin?",
+    "answer": "With quantified risks",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["gold-preference"],
+    "haystack_dates": ["2026/01/03 (Sat) 09:00"],
+    "haystack_sessions": [[{"role": "user", "content": "I prefer reports to begin with quantified risks.", "has_answer": true}]],
+    "answer_session_ids": ["gold-preference"]
+  },
+  {
+    "question_id": "fixture_temporal",
+    "question_type": "temporal-reasoning",
+    "question": "When was the appointment?",
+    "answer": "Tuesday morning",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["gold-temporal"],
+    "haystack_dates": ["2026/01/04 (Sun) 09:00"],
+    "haystack_sessions": [[{"role": "assistant", "content": "The appointment is Tuesday morning.", "has_answer": true}]],
+    "answer_session_ids": ["gold-temporal"]
+  },
+  {
+    "question_id": "fixture_update",
+    "question_type": "knowledge-update",
+    "question": "Which train is current?",
+    "answer": "The express train",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["gold-update"],
+    "haystack_dates": ["2026/01/05 (Mon) 09:00"],
+    "haystack_sessions": [[{"role": "user", "content": "The current choice is the express train.", "has_answer": true}]],
+    "answer_session_ids": ["gold-update"]
+  },
+  {
+    "question_id": "fixture_multi",
+    "question_type": "multi-session",
+    "question": "What combined plan was chosen?",
+    "answer": "Walk and take the ferry",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["gold-multi-a", "gold-multi-b"],
+    "haystack_dates": ["2026/01/06 (Tue) 09:00", "2026/01/07 (Wed) 09:00"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "We can walk to the harbor.", "has_answer": true}],
+      [{"role": "assistant", "content": "Then take the ferry across.", "has_answer": true}]
+    ],
+    "answer_session_ids": ["gold-multi-a", "gold-multi-b"]
+  },
+  {
+    "question_id": "fixture_abs_one_abs",
+    "question_type": "single-session-user",
+    "question": "Which telescope did the user buy?",
+    "answer": "I do not know",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["filler-abs-one"],
+    "haystack_dates": ["2026/01/01 (Thu) 08:00"],
+    "haystack_sessions": [[{"role": "user", "content": "The sky was clear last night."}]],
+    "answer_session_ids": []
+  },
+  {
+    "question_id": "fixture_abs_two_abs",
+    "question_type": "multi-session",
+    "question": "Where was the missing parcel delivered?",
+    "answer": "I do not know",
+    "question_date": "2026/01/08 (Thu) 10:00",
+    "haystack_session_ids": ["filler-abs-two"],
+    "haystack_dates": ["2026/01/02 (Fri) 08:00"],
+    "haystack_sessions": [[{"role": "assistant", "content": "No parcel was discussed."}]],
+    "answer_session_ids": []
+  }
+]
