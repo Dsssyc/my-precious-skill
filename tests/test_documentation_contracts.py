@@ -1,4 +1,5 @@
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -25,6 +26,25 @@ class DocumentationContractTests(unittest.TestCase):
     def assert_contains(self, haystack: str, needle: str):
         if needle not in haystack:
             self.fail(f"missing documentation contract phrase: {needle!r}")
+
+    def test_tracked_reusable_files_exclude_user_specific_identity(self):
+        blocked_tokens = (
+            "/Users/" + "soku",
+            "Dsssyc/" + "agent-memory",
+        )
+        tracked = subprocess.check_output(["git", "ls-files", "-z"], text=True).split("\0")
+        offenders: list[str] = []
+        for relative in tracked:
+            if not relative:
+                continue
+            path = Path(relative)
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if any(token in text for token in blocked_tokens):
+                offenders.append(relative)
+        self.assertEqual([], offenders, f"user-specific identity leaked into tracked files: {offenders}")
 
     def evaluation_section(self, heading: str) -> str:
         self.assert_contains(self.evaluation, heading)

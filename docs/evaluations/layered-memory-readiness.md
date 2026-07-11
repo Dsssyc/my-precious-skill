@@ -922,7 +922,7 @@ archive audit -> publish readiness -> search health -> sync dry-run chain.
 synthetic prompt contract by rendering a clean packaged deployment repository
 with `tools/render_scheduler.py --backend agent-native --push-after-update`.
 It also supports a local live check with
-`--automation-config /Users/soku/.codex/automations/update-my-precious-memory/automation.toml`
+`--automation-config /Users/example/.codex/automations/update-my-precious-memory/automation.toml`
 without rendering the automation prompt text. The gate includes negative
 prompts for missing publish-readiness coverage and raw git publish paths, so
 the release check rejects both stale scheduler contracts and prompts that

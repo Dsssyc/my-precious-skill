@@ -105,7 +105,7 @@ class AuditPublishReadinessTests(unittest.TestCase):
             self.assertEqual(report["blocked_paths"][0]["path"], "index/sessions.jsonl")
 
     def test_index_content_raw_source_and_query_noise_blocks_structured_text_only(self):
-        sentinel = "/Users/soku/private/source-record.jsonl"
+        sentinel = "/Users/example/private/source-record.jsonl"
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
             write_jsonl(
@@ -114,7 +114,7 @@ class AuditPublishReadinessTests(unittest.TestCase):
                     {
                         "summary": f"raw source path: {sentinel}",
                         "full_query": "synthetic full query should not be indexed",
-                        "project_path": "/Users/soku/allowed-as-structured-metadata",
+                        "project_path": "/Users/example/allowed-as-structured-metadata",
                     }
                 ],
             )
@@ -124,7 +124,7 @@ class AuditPublishReadinessTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             combined = result.stdout + result.stderr
             self.assertNotIn(sentinel, combined)
-            self.assertNotIn("/Users/soku/allowed-as-structured-metadata", combined)
+            self.assertNotIn("/Users/example/allowed-as-structured-metadata", combined)
             report = json.loads(result.stdout)
             self.assertEqual(report["category_counts"]["raw_source_reference"], 2)
 

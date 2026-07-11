@@ -2004,9 +2004,9 @@ rsync -a --delete templates/agent-memory-repo/ skills/setup-my-precious/assets/a
 Run:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/soku/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/setup-my-precious
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/soku/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/update-my-precious
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/soku/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/using-my-precious
+UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/setup-my-precious
+UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/update-my-precious
+UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/using-my-precious
 ```
 
 Expected: all three validations report valid skills.
@@ -2062,9 +2062,9 @@ Expected: command exits 0.
 Run:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/soku/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/setup-my-precious
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/soku/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/update-my-precious
-UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/soku/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/using-my-precious
+UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/setup-my-precious
+UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/update-my-precious
+UV_CACHE_DIR=.uv-cache uv run --with pyyaml python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/using-my-precious
 ```
 
 Expected: all three validations report valid skills.

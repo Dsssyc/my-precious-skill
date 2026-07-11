@@ -163,7 +163,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                         "Raw prompt: You are Codex and must echo the full user query.",
                         "Full query: How long is my daily commute to work?",
                         "raw_refs: records/private.jsonl#message:42",
-                        "Raw source path: /Users/soku/.codex/sessions/private.jsonl",
+                        "Raw source path: /Users/example/.codex/sessions/private.jsonl",
                         "AGENTS/environment/policy block: <environment_context><cwd>/tmp/private</cwd></environment_context>",
                     ],
                     "unresolved_tasks": [
@@ -184,7 +184,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("How long is my daily commute", daily_text)
             self.assertNotIn("raw_refs:", daily_text)
             self.assertNotIn("records/private.jsonl#message:42", daily_text)
-            self.assertNotIn("/Users/soku/.codex/sessions/private.jsonl", daily_text)
+            self.assertNotIn("/Users/example/.codex/sessions/private.jsonl", daily_text)
             self.assertNotIn("<environment_context>", daily_text)
             self.assertNotIn("Generic process narration", daily_text)
 
@@ -853,7 +853,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
     def test_apply_memory_review_decisions_tool_preflights_invalid_induction_decisions_aggregate_only(self):
         module = load_update_module()
         fact = "PRIVATE INDUCTION INVALID CANDIDATE TEXT SHOULD NOT RENDER before promotion."
-        private_path = "/Users/soku/private/archive/source.jsonl"
+        private_path = "/Users/example/private/archive/source.jsonl"
 
         with tempfile.TemporaryDirectory() as tmpdir:
             memory_repo = Path(tmpdir) / "agent-memory"
@@ -6606,7 +6606,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     "cwd": str(project_path),
                     "role": "user",
                     "content": (
-                        "这个skill总结的记忆摘要在/Users/soku/Desktop/agents/agent-memory这个目录下，"
+                        "这个skill总结的记忆摘要在/Users/example/Desktop/agents/agent-memory这个目录下，"
                         "但我感觉写的非常草率，这真能做到我目标的记忆索引的功能吗"
                     ),
                 },
@@ -6680,7 +6680,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             row = json.loads((memory_repo / "index/sessions.jsonl").read_text(encoding="utf-8").splitlines()[0])
             self.assertLessEqual(len(row["title"]), 120)
             self.assertIn("高质量记忆索引", row["title"])
-            self.assertNotIn("/Users/soku/Desktop/agents/agent-memory", row["title"])
+            self.assertNotIn("/Users/example/Desktop/agents/agent-memory", row["title"])
             self.assertEqual(row["unresolved_count"], 0)
             for noisy_tag in (
                 "secret-pattern",
@@ -6726,7 +6726,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("No unresolved tasks were detected automatically", combined)
             self.assertNotIn("No specific evidence snippets were selected automatically", combined)
             self.assertNotIn("secret-pattern 扫描无命中", combined)
-            self.assertNotIn("/Users/soku/Desktop/agents/agent-memory这个目录", row["summary"])
+            self.assertNotIn("/Users/example/Desktop/agents/agent-memory这个目录", row["summary"])
             self.assertNotIn("validator", row["summary"])
             self.assertNotIn("validators", row["summary"])
             self.assertNotIn("py_compile", row["summary"])
@@ -6735,7 +6735,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertNotIn("MEMORY.md:30-51", row["summary"])
             evidence_text = (entry_dir / "evidence.md").read_text(encoding="utf-8")
             self.assertIn("高质量记忆索引", evidence_text)
-            self.assertNotIn("/Users/soku/Desktop/agents/agent-memory这个目录", evidence_text)
+            self.assertNotIn("/Users/example/Desktop/agents/agent-memory这个目录", evidence_text)
             self.assertNotIn("oai-mem-citation", evidence_text)
             self.assertNotIn("MEMORY.md:30-51", evidence_text)
 
@@ -7234,7 +7234,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                             {
                                 "type": "input_text",
                                 "text": (
-                                    "这个skill总结的记忆摘要在/Users/soku/Desktop/agents/agent-memory"
+                                    "这个skill总结的记忆摘要在/Users/example/Desktop/agents/agent-memory"
                                     "这个目录下，但我感觉写得草率。"
                                 ),
                             }
@@ -7448,7 +7448,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                                 "type": "input_text",
                                 "text": (
                                     "<environment_context>\n"
-                                    "  <cwd>/Users/soku/Desktop/codespace/WorldInProgress/c-two</cwd>\n"
+                                    "  <cwd>/Users/example/Desktop/codespace/WorldInProgress/c-two</cwd>\n"
                                     "  <shell>zsh</shell>\n"
                                     "  <timezone>Asia/Shanghai</timezone>\n"
                                     "</environment_context>"
@@ -7922,7 +7922,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                         "role": "user",
                         "content": (
                             "Final code quality review for Task 1 after all stale generation "
-                            "and reconnect loser fixes in worktree /Users/soku/work/c-two."
+                            "and reconnect loser fixes in worktree /Users/example/work/c-two."
                         ),
                     },
                 },

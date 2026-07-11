@@ -39,7 +39,7 @@ SYNTHETIC_FORBIDDEN_MARKERS = (
     "V220 refresh routing keeps legacy",
     "V220 deleted lifecycle policy",
     "SYNTHETIC_V220_PRIVATE_TOKEN",
-    "/Users/soku/private/lifecycle-source.jsonl",
+    "/Users/example/private/lifecycle-source.jsonl",
 )
 ACTIVE_SUPPORT_FAILURE_COUNTERS = (
     "active_support_expected_node_missing_count",

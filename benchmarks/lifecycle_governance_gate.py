@@ -59,7 +59,7 @@ NOISE_MARKERS = (
     "automation narration says",
 )
 PRIVATE_LEAK_MARKERS = (
-    "/Users/soku/private/lifecycle-source.jsonl",
+    "/Users/example/private/lifecycle-source.jsonl",
     "SYNTHETIC_V220_PRIVATE_TOKEN",
 )
 
@@ -192,7 +192,7 @@ def synthetic_records() -> list[dict[str, Any]]:
             "2026-07-03T09:00:00Z",
             (
                 "Reusable fact: prompt echo requested saving "
-                "/Users/soku/private/lifecycle-source.jsonl into archive memory."
+                "/Users/example/private/lifecycle-source.jsonl into archive memory."
             ),
         ),
         make_record(

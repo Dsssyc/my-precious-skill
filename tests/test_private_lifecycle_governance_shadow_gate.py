@@ -76,7 +76,7 @@ class PrivateLifecycleGovernanceShadowGateTests(unittest.TestCase):
                 "V220 refresh routing keeps legacy",
                 "V220 deleted lifecycle policy",
                 "SYNTHETIC_V220_PRIVATE_TOKEN",
-                "/Users/soku/private/lifecycle-source.jsonl",
+                "/Users/example/private/lifecycle-source.jsonl",
                 str(Path(tmpdir)),
             ):
                 self.assertNotIn(forbidden, combined)

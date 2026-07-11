@@ -136,18 +136,18 @@ def write_noisy_index_prompt_environment(repo: Path) -> list[str]:
 
 
 def write_noisy_index_source_path_and_query(repo: Path) -> list[str]:
-    sentinel = "/Users/soku/private/synthetic-source-record.jsonl"
+    sentinel = "/Users/example/private/synthetic-source-record.jsonl"
     write_jsonl(
         repo / "index/sessions.jsonl",
         [
             {
                 "summary": f"raw source path: {sentinel}",
                 "full_query": "synthetic private query should not be indexed",
-                "project_path": "/Users/soku/structured-project-path-not-scanned",
+                "project_path": "/Users/example/structured-project-path-not-scanned",
             }
         ],
     )
-    return [sentinel, "/Users/soku/structured-project-path-not-scanned"]
+    return [sentinel, "/Users/example/structured-project-path-not-scanned"]
 
 
 def write_noisy_daily_secret_like(repo: Path) -> list[str]:

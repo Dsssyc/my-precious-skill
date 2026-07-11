@@ -380,7 +380,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             entry_dir.mkdir(parents=True)
             (entry_dir / "summary.md").write_text(
                 (
-                    "# Session: 这个skill总结的记忆摘要在/Users/soku/Desktop/agents/agent-memory这个目录下\n"
+                    "# Session: 这个skill总结的记忆摘要在/Users/example/Desktop/agents/agent-memory这个目录下\n"
                     "## Decisions Made\n"
                     "- No decisions were detected automatically.\n"
                     "## Unresolved Tasks\n"
@@ -403,7 +403,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (memory_repo / "index/sessions.jsonl").write_text(
-                '{"title":"# Files mentioned by the user: /Users/soku/.codex/attachments/pasted-text.txt",'
+                '{"title":"# Files mentioned by the user: /Users/example/.codex/attachments/pasted-text.txt",'
                 '"summary_path":"sessions/2026/05/14/weak-index/summary.md"}\n',
                 encoding="utf-8",
             )
@@ -2681,7 +2681,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
 
             daily_dir = memory_repo / "daily/2026"
             daily_dir.mkdir(parents=True)
-            private_path = "/Users/soku/.codex/sessions/private-source.jsonl"
+            private_path = "/Users/example/.codex/sessions/private-source.jsonl"
             private_query = "How long is my daily commute to work?"
             raw_ref = "records/private.jsonl#message:42"
             (daily_dir / "2026-07-01.md").write_text(
@@ -2777,7 +2777,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                     '{"title":"Rule porter dry-run migration preview",'
                     '"summary":"Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration.",'
                     '"reusable_facts":["Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration."],'
-                    '"source_record":"/Users/soku/.codex/sessions/rollout.jsonl",'
+                    '"source_record":"/Users/example/.codex/sessions/rollout.jsonl",'
                     '"summary_path":"sessions/2026/05/14/durable-dry-run/summary.md"}\n'
                 ),
                 encoding="utf-8",

@@ -129,7 +129,7 @@ def write_session(memory_repo: Path, case: GateCase) -> dict[str, str]:
                 "reusable_facts": [
                     "Keep package-first recall as the current durable contract.",
                     "Approval policy is currently never. PRIVATE_FACT_SENTINEL",
-                    "raw source path: /Users/soku/private/source-record.jsonl",
+                    "raw source path: /Users/example/private/source-record.jsonl",
                 ],
                 "tags": ["package-first", "unit tests PRIVATE_TAG_SENTINEL"],
                 "raw_prompts": ["raw prompt: PRIVATE_RAW_PROMPT_SENTINEL"],
@@ -239,7 +239,7 @@ def run_repair(memory_repo: Path, stage: str, *, apply: bool, expect_success: bo
         "PRIVATE_FACT_SENTINEL",
         "PRIVATE_TAG_SENTINEL",
         "PRIVATE_RAW_PROMPT_SENTINEL",
-        "/Users/soku/private/source-record.jsonl",
+        "/Users/example/private/source-record.jsonl",
     )
     if any(marker in combined for marker in private_markers):
         raise GateFailure(stage, "rendered_private_text", result.returncode)
@@ -261,7 +261,7 @@ def assert_meta_preserved(memory_repo: Path, expected: dict[str, str]) -> None:
         "PRIVATE_FACT_SENTINEL",
         "PRIVATE_TAG_SENTINEL",
         "PRIVATE_RAW_PROMPT_SENTINEL",
-        "/Users/soku/private/source-record.jsonl",
+        "/Users/example/private/source-record.jsonl",
         "dry-run",
         "Approval policy",
         "unit tests",

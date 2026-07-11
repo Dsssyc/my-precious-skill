@@ -75,7 +75,7 @@ def write_session(repo: Path, *, summary: str) -> Path:
             "reusable_facts": [
                 "Durable package-first recall remains current.",
                 "Approval policy is currently never PRIVATE_FACT_SENTINEL.",
-                "raw source path: /Users/soku/private/source-record.jsonl",
+                "raw source path: /Users/example/private/source-record.jsonl",
             ],
             "tags": ["package-first", "unit tests PRIVATE_TAG_SENTINEL"],
             "raw_prompts": ["raw prompt: PRIVATE_RAW_SENTINEL"],
@@ -149,7 +149,7 @@ class RepairPublishSurfacesTests(unittest.TestCase):
                 "PRIVATE_FACT_SENTINEL",
                 "PRIVATE_TAG_SENTINEL",
                 "PRIVATE_RAW_SENTINEL",
-                "/Users/soku/private/source-record.jsonl",
+                "/Users/example/private/source-record.jsonl",
                 str(meta_path),
             ):
                 self.assertNotIn(marker, combined)
@@ -168,7 +168,7 @@ class RepairPublishSurfacesTests(unittest.TestCase):
             self.assertNotIn("dry-run", rendered)
             self.assertNotIn("Approval policy", rendered)
             self.assertNotIn("unit tests", rendered)
-            self.assertNotIn("/Users/soku/private/source-record.jsonl", rendered)
+            self.assertNotIn("/Users/example/private/source-record.jsonl", rendered)
 
     def test_ambiguous_scalar_fails_closed_without_rebuild(self):
         with tempfile.TemporaryDirectory() as tmpdir:
