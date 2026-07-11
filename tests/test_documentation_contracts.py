@@ -402,6 +402,32 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v235_three_layer_distribution_preflight(self):
+        section = self.evaluation_section(
+            "## V2.35 Three-Layer Distribution And Scheduled Parity Preflight Closure"
+        )
+        for phrase in (
+            "benchmarks/three_layer_distribution_preflight_gate.py",
+            "benchmarks/live_automation_prompt_alignment_gate.py",
+            "source -> installed skills -> private deployment",
+            "source_installed_parity_detection_accuracy",
+            "installed_deployment_parity_detection_accuracy",
+            "preflight_blocks_update_accuracy",
+            "current_preflight_allows_update_accuracy",
+            "live_source_installed_skill_parity_rate",
+            "live_installed_deployment_bundle_parity_rate",
+            "live_preflight_idempotent_rate",
+            "live_automation_prompt_alignment_rate",
+            "live_archive_mutation_count",
+            "live_unexpected_tool_change_count",
+            "privacy_leak_count",
+            "does not prove scheduler reliability",
+            "does not prove network reliability",
+            "does not prove future archive-update reliability",
+            "never installs or refreshes tools",
+        ):
+            self.assert_contains(section, phrase)
+
     def test_setup_contract_checks_bundle_before_refresh(self):
         check_position = self.skill_contracts.index("--check-tools")
         refresh_position = self.skill_contracts.index("--refresh-tools")

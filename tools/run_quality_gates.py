@@ -40,6 +40,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
     "benchmarks/search_tool_drift_repair_gate.py",
     "benchmarks/runtime_tool_bundle_parity_gate.py",
+    "benchmarks/three_layer_distribution_preflight_gate.py",
     "benchmarks/active_support_recall_closure_gate.py",
     "benchmarks/reviewed_automatic_memory_publish_gate.py",
     "benchmarks/long_horizon_memory_stress_gate.py",
@@ -172,6 +173,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "runtime_tool_bundle_parity",
             ("python3", "benchmarks/runtime_tool_bundle_parity_gate.py"),
+        ),
+        CheckSpec(
+            "three_layer_distribution_preflight",
+            ("python3", "benchmarks/three_layer_distribution_preflight_gate.py"),
         ),
         CheckSpec(
             "active_support_recall_closure",

@@ -1659,6 +1659,64 @@ It does not prove vector search.
 It does not prove ontology discovery.
 It does not prove public leaderboard parity.
 
+## V2.35 Three-Layer Distribution And Scheduled Parity Preflight Closure
+
+V2.35 consumes the merged V2.34 interface without changing installable skills
+or runtime templates. It makes the release boundary explicit as
+`source -> installed skills -> private deployment`: merged source is installed
+through a reviewed, rollback-capable copy; the installed setup skill then
+checks and repairs only its source-owned deployment tools; scheduled automation
+checks parity before updater execution and never installs or refreshes tools.
+
+`benchmarks/three_layer_distribution_preflight_gate.py` models all three layers
+in public-data-free temporary directories. It detects stale installed skills,
+missing/stale and unsafe deployment tools, malformed or wrong-contract reports,
+nonzero exits, and non-`current` states. Every rejected case leaves the fake
+updater untouched. Explicit repair occurs outside the scheduled harness, after
+which two identical `current` reports allow one updater marker. The gate runs
+twice and requires identical aggregate evidence and a valid deterministic
+bundle hash.
+
+| synthetic metric | result |
+| --- | ---: |
+| `source_installed_parity_detection_accuracy` | 1.0 |
+| `installed_deployment_parity_detection_accuracy` | 1.0 |
+| `stale_installed_rejection_accuracy` | 1.0 |
+| `drifted_deployment_rejection_accuracy` | 1.0 |
+| `unsafe_deployment_rejection_accuracy` | 1.0 |
+| `malformed_preflight_rejection_accuracy` | 1.0 |
+| `preflight_blocks_update_accuracy` | 1.0 |
+| `current_preflight_allows_update_accuracy` | 1.0 |
+| `preflight_idempotence_rate` | 1.0 |
+| `archive_preservation_rate` | 1.0 |
+| `extra_tool_preservation_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+`benchmarks/live_automation_prompt_alignment_gate.py` additionally requires the
+real automation contract to place `--check-tools --report-json` before updater
+execution, describe fail-closed handling, retain the existing audit and reviewed
+sync chain, and reject updater-before-preflight or executable auto-refresh
+prompts. Aggregate-only local closure produced the following evidence without
+recording paths, prompt text, hashes, or private archive content:
+
+| live metric | result |
+| --- | ---: |
+| `live_source_installed_skill_parity_rate` | 1.0 |
+| `live_installed_deployment_bundle_parity_rate` | 1.0 |
+| `live_preflight_current_rate` | 1.0 |
+| `live_preflight_idempotent_rate` | 1.0 |
+| `live_automation_prompt_alignment_rate` | 1.0 |
+| `live_archive_mutation_count` | 0 |
+| `live_unexpected_tool_change_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+V2.35 proves explicit local three-layer distribution and a deterministic
+scheduled prompt preflight contract. It does not prove scheduler reliability.
+It does not prove network reliability.
+It does not prove future archive-update reliability, automatic release discovery, private memory quality, LLM quality,
+ranking quality, vector search, ontology discovery, or public leaderboard
+parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
