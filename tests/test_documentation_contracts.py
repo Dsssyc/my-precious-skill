@@ -658,6 +658,37 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v236_public_induction_inconclusive_result(self):
+        section = self.evaluation_section(
+            "## V2.36 Public Conversation Source-To-Induction Recall Evidence Gate"
+        )
+        for phrase in (
+            "public_induction_recall_gate.py",
+            "LongMemEval cleaned S",
+            "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+            "4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7",
+            "`status: failed`",
+            "`readiness_status: inconclusive`",
+            "40/40",
+            "34/40",
+            "1912/1912",
+            "120/120",
+            "13/30",
+            "0/13",
+            "10/10",
+            "process_update",
+            "gold-label ingestion count is 0",
+            "direct synthetic archive injection count is 0",
+            "not LLM answer quality",
+            "not official LongMemEval leaderboard parity",
+            "not vector search quality",
+            "not ontology discovery",
+            "not private archive quality",
+            "not multi-principal governance",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

@@ -1717,6 +1717,135 @@ It does not prove future archive-update reliability, automatic release discovery
 ranking quality, vector search, ontology discovery, or public leaderboard
 parity.
 
+## V2.36 Public Conversation Source-To-Induction Recall Evidence Gate
+
+V2.36 adds `benchmarks/public_induction_recall_gate.py`. Unlike the existing
+public adapter, this gate does not generate external memory nodes from
+question/answer rows. It reads LongMemEval conversations outside the repository,
+keeps benchmark questions and gold labels in the scorer, writes each haystack
+session as one role/content-only source record, creates one clean packaged
+deployment per selected question, runs the copied updater and audit, and
+consumes session-, evidence-, and source-depth context packages. Evidence-depth
+packages are the only answer-or-abstain source. The session baseline uses the
+same copied search module's structured `Hit.path` because privacy-safe session
+packages intentionally do not render L1 paths.
+
+The offline schema-compatible fixture is included in the canonical quality gate:
+
+```bash
+python3 benchmarks/public_induction_recall_gate.py --offline-fixture
+```
+
+The external run used the official LongMemEval cleaned S file pinned to source
+commit `98d7416c24c778c2fee6e6f3006e7a073259d48f`:
+
+```text
+https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json
+```
+
+The downloaded file remained outside this repository. Its SHA-256 was
+`d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442`.
+The input contained 500 rows. Fixed seed `my-precious-v236` selected five
+positive cases from each of the six official non-abstention question types plus
+ten abstention cases. The 40-case selection fingerprint was
+`4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7`.
+Those cases contained 1,912 haystack sessions.
+
+The external command used `/tmp` only for the downloaded input, generated
+archives, and aggregate report:
+
+```bash
+python3 benchmarks/public_induction_recall_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --seed my-precious-v236 \
+  --positive-per-type 5 \
+  --abstention-count 10 \
+  --work-dir /tmp/my-precious-public-induction-run \
+  --report-file /tmp/my-precious-public-induction-report.json
+```
+
+The final aggregate report SHA-256 was
+`eb101f6c38356dcdf3c1fa2bb9817c20666b2aab7309ab84b91b40fa4b44c271`.
+It returned `status: failed` and
+`readiness_status: inconclusive`. This is an accepted bounded negative result,
+not a passing public gate.
+
+Structural and ingestion evidence:
+
+| metric | numerator / denominator | rate or count |
+| --- | ---: | ---: |
+| deterministic case selection | 1/1 | 1.0 |
+| source-record conversion | 1912/1912 | 1.0 |
+| session-boundary preservation | 1912/1912 | 1.0 |
+| role preservation | 1912/1912 | 1.0 |
+| timestamp preservation | 1912/1912 | 1.0 |
+| packaged setup success | 40/40 | 1.0 |
+| updater success | 40/40 | 1.0 |
+| archive audit success | 34/40 | 0.85 |
+| context-package parse success | 120/120 | 1.0 |
+| automatic-memory yield | 40/40 | 1.0 |
+| active memory nodes | count | 6280 |
+| induction review candidates | count | 58 |
+| inactive memory nodes | count | 0 |
+| gold-label ingestion count | count | 0 |
+| answer-field ingestion count | count | 0 |
+| synthetic memory-marker injection count | count | 0 |
+| direct synthetic archive injection count | count | 0 |
+| free-form answerability use count | count | 0 |
+| privacy leak count | count | 0 |
+
+The gold-label ingestion count is 0; direct synthetic archive injection count is 0.
+Questions, answers, case IDs, memory IDs, memory text, source
+content, source paths, raw refs, and context-package payloads were not rendered
+in the aggregate report.
+
+The six audit failures were deterministic `category=process_update` findings in
+generated archive surfaces. Aggregate distribution was one knowledge-update
+case, two single-session-preference cases, one single-session-user case, and two
+temporal-reasoning cases. Findings occurred across generated summary, evidence,
+daily, session-index, decision-index, and memory-index files. This shows that
+some natural conversation wording is promoted into content that the existing
+coding-agent archive audit classifies as process noise. V2.36 does not change
+production induction or audit heuristics to hide that result.
+
+Recall and decision evidence:
+
+| metric | numerator / denominator | rate |
+| --- | ---: | ---: |
+| L1 gold-session recall at 5 | 13/30 | 0.4333333333 |
+| induced gold provenance recall at 1 | 0/30 | 0.0 |
+| induced gold provenance recall at 5 | 0/30 | 0.0 |
+| induction provenance retention at 5 | 0/13 | 0.0 |
+| supported-decision precision | 0/0 | 0.0 |
+| abstention accuracy | 10/10 | 1.0 |
+| malformed-package fail closed | 1/1 | 1.0 |
+| missing-package fail closed | 1/1 | 1.0 |
+| inactive-only rejection | 1/1 | 1.0 |
+| superseded-only rejection | 1/1 | 1.0 |
+
+Only 13/30 positive cases were baseline-retrievable, below the predeclared
+minimum of 20, so the run is `inconclusive` rather than a performance `no_go`.
+No evidence package produced a supported answer decision, so supported-decision
+precision has a zero denominator. The 10/10 abstention result therefore shows
+fail-closed behavior, not useful positive-answer coverage. Evidence and source
+anchor reachability also had zero supported-hit denominators; their vacuous
+rate values are not positive readiness evidence. The meaningful retention
+result is 0/13 on baseline-retrievable positives.
+
+V2.36 proves that a label-isolated public conversation harness can execute the
+real packaged setup, updater, audit, and structured context-package paths and
+produce an aggregate negative result without leaking public case material. It
+also falsifies the stronger claim that the current automatic-induction path is
+ready for this bounded LongMemEval natural-conversation slice.
+
+It is not LLM answer quality. It is not official LongMemEval leaderboard parity.
+It is not vector search quality. It is not ontology discovery. It is not private archive quality.
+It is not multi-principal governance. Any follow-up should be
+a separate bounded goal that first chooses which observed blocker to study:
+coding-agent process-noise audit compatibility, L1 public-query retrieval, or
+natural-conversation induction support. V2.36 does not implement those changes.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

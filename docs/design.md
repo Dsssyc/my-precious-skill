@@ -103,6 +103,11 @@ and JSONL indexes.
   benchmark that drives setup, updater, generated memory indexes, layered
   recall scoring, and the copied search script without rendering private case
   details.
+- `benchmarks/public_induction_recall_gate.py`: bounded LongMemEval
+  source-to-induction benchmark that keeps questions and gold evidence labels
+  outside updater-visible source records, drives one clean packaged deployment
+  per selected question, and reports aggregate provenance-retention and
+  abstention decisions from context packages.
 - `benchmarks/source_stream_registry_benchmark.py`: synthetic aggregate-only
   benchmark that drives setup, `config/source_streams.jsonl`, the real global
   runner, generated memory indexes, layered recall scoring, and source-policy
@@ -765,6 +770,25 @@ the converter can also build a temporary synthetic archive from the converted
 cases with `--build-synthetic-archive`; that archive is then scored by the same
 layered recall benchmark and `--fail-under` quality gates as packaged synthetic
 cases.
+
+The public induction recall gate has a separate contract from that converter.
+It deterministically selects a bounded, stratified LongMemEval cleaned S sample
+and writes every haystack session as one source record while preserving only
+the original role/content turns and timestamp. Benchmark questions, answers,
+question types, `has_answer` flags, and answer-session labels remain in the
+scorer and are never written to updater-visible records. Each selected question
+uses an isolated archive produced by the packaged setup script, the copied
+updater, archive audit, and copied search implementation. Session-depth context
+packages prove the CLI path is consumable; the scorer uses the same copied
+search module's structured `Hit.path` because privacy-safe session packages do
+not render L1 paths. Evidence-depth context packages remain the sole
+answer-or-abstain source. Public runs render aggregate counts, metric
+numerators/denominators, question-type failure buckets, dataset/source hashes,
+and a `go`, `no_go`, or `inconclusive` readiness status. The downloaded dataset,
+generated archives, questions, answers, case IDs, source paths, context package
+payloads, and memory text stay outside this repository and outside the report.
+The fast `--offline-fixture` mode tests only this harness contract and is the
+only mode included in the canonical offline quality gate.
 
 The generated-answer benchmark has a packaged synthetic fixture with two
 positive answer cases and one abstention case. `v1_readiness_gate.py
