@@ -89,19 +89,43 @@ Ask only what is needed, one step at a time:
    A new empty archive may not have searchable memory records yet; this step only
    confirms the copied tool runs.
 
-7. If an existing deployment repository has stale bundled tools, refresh only
-   the reusable tool files from this setup skill:
+7. Before updater, audit, search, or sync work in an existing deployment,
+   check the complete reusable runtime tool bundle against this setup skill:
+
+   ```bash
+   python scripts/setup_memory_archive.py \
+     --path "$MEMORY_REPO" \
+     --check-tools \
+     --report-json \
+     --skip-config
+   ```
+
+   `current` is the only safe no-op result. If the report is `drifted`, first
+   review a non-mutating repair plan, then refresh only the missing or stale
+   source-owned tool files:
 
    ```bash
    python scripts/setup_memory_archive.py \
      --path "$MEMORY_REPO" \
      --refresh-tools \
+     --dry-run \
+     --report-json \
      --skip-config
    ```
 
-   Use this for tool drift repair, not archive content repair. It must not
-   rewrite archive data, indexes, daily records, session summaries, source
-   records, or user-owned config. Do not use `--force` for this narrow repair.
+   ```bash
+   python scripts/setup_memory_archive.py \
+     --path "$MEMORY_REPO" \
+     --refresh-tools \
+     --report-json \
+     --skip-config
+   ```
+
+   Re-run `--check-tools` and require `current`. Use this for tool drift repair,
+   not archive content repair. It must preserve matching tools, extra
+   user-owned tools, archive data, indexes, daily records, session summaries,
+   source records, and user-owned config. A `blocked` result requires manual
+   investigation. Do not use `--force` for this narrow repair.
 
 8. If the user requests scheduling, first verify the archive command exists and runs manually.
    Then render reviewable scheduler configuration:

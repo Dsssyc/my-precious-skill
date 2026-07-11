@@ -88,21 +88,42 @@ repair helper edits only `sessions/**/meta.json`, regenerates derived archive
 surfaces through the updater, emits aggregate counts only, and fails closed on
 malformed metadata or ambiguous scalar text.
 
-If `tools/search_memory.py "<query>" --depth evidence --context-json` cannot
-emit `report_kind: memory_recall_context_package` because the bundled archive
-tool is stale, refresh reusable tools from the installed setup skill instead
-of using archive sync:
+Before updater, audit, search, or sync work, check the full reusable runtime
+tool bundle from the installed setup skill instead of using archive sync:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --check-tools \
+  --report-json \
+  --skip-config
+```
+
+If the status is `drifted`, review a dry run before applying repair:
 
 ```bash
 python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
   --path . \
   --refresh-tools \
+  --dry-run \
+  --report-json \
   --skip-config
 ```
 
-This repair updates only `tools/**`. It must not mutate archive data, indexes,
-source records, daily records, session summaries, or user-owned config. Commit
-tool refreshes separately from automatic archive sync.
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --refresh-tools \
+  --report-json \
+  --skip-config
+```
+
+Require a subsequent `--check-tools` result of `current`. This repair updates
+only missing or stale source-owned files under `tools/**`; it preserves matching
+and extra user-owned tools and must not mutate archive data, indexes, source
+records, daily records, session summaries, or user-owned config. Treat
+`blocked` as a hard stop. Commit tool refreshes separately from automatic
+archive sync.
 
 When a legacy entry is searchable but exact source preview returns
 `legacy_source_anchor_unavailable`, do not use backfill merely to add anchors.

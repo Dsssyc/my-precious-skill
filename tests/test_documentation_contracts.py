@@ -376,6 +376,37 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
 
+    def test_evaluation_doc_records_v234_runtime_tool_bundle_parity_gate(self):
+        section = self.evaluation_section("## V2.34 Runtime Tool-Bundle Parity And Fail-Closed Repair Gate")
+        for phrase in (
+            "benchmarks/runtime_tool_bundle_parity_gate.py",
+            "--check-tools",
+            "--refresh-tools",
+            "runtime_bundle_report_parse_success_rate",
+            "runtime_bundle_post_refresh_parity_rate",
+            "runtime_bundle_archive_preservation_rate",
+            "runtime_bundle_extra_tool_preservation_rate",
+            "runtime_bundle_unsafe_target_rejection_rate",
+            "post_refresh_reviewed_sync_dry_run_pass_rate",
+            "absolute_path_leak_count",
+            "privacy_leak_count",
+            "not prove that an installed skill is the latest GitHub release",
+            "not prove live private deployment correctness",
+            "not prove automatic code deployment",
+            "not prove scheduler reliability",
+            "not prove LLM quality",
+            "not prove ranking quality",
+            "not prove vector search",
+            "not prove ontology discovery",
+            "not prove public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+
+    def test_setup_contract_checks_bundle_before_refresh(self):
+        check_position = self.skill_contracts.index("--check-tools")
+        refresh_position = self.skill_contracts.index("--refresh-tools")
+        self.assertLess(check_position, refresh_position)
+
     def test_evaluation_doc_preserves_bounded_claim_language(self):
         for phrase in (
             "private archive",

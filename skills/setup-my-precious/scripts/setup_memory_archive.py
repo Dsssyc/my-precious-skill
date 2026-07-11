@@ -8,11 +8,15 @@ optionally initialize Git and create a private GitHub repository via gh.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -20,6 +24,15 @@ TEMPLATE_DIR = SKILL_DIR / "assets" / "agent-memory-repo"
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 TEMPLATE_SKIP_DIRS = {"__pycache__"}
 TEMPLATE_SKIP_SUFFIXES = {".pyc"}
+TOOL_BUNDLE_REPORT_KIND = "runtime_tool_bundle_parity"
+TOOL_BUNDLE_REPORT_VERSION = 1
+
+
+class ToolBundleInspection(NamedTuple):
+    report: dict[str, object]
+    missing: tuple[str, ...]
+    stale: tuple[str, ...]
+    unsafe: tuple[str, ...]
 
 
 def run(command: list[str], cwd: Path | None = None, dry_run: bool = False) -> None:
@@ -134,24 +147,227 @@ def ensure_safe_tool_destinations(target: Path) -> None:
             raise SystemExit(f"Refusing to write unsafe tool path: {destination}")
 
 
-def refresh_tool_files(target: Path, dry_run: bool) -> int:
+def has_symlink_component(target: Path, destination: Path) -> bool:
+    try:
+        relative = destination.relative_to(target)
+    except ValueError:
+        return True
+    current = target
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def bundle_sha256(entries: list[tuple[str, bytes]]) -> str:
+    digest = hashlib.sha256()
+    for relative, content in sorted(entries):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def extra_target_tool_count(target: Path, expected: set[str]) -> int:
+    tools_dir = target / "tools"
+    if not tools_dir.is_dir() or tools_dir.is_symlink():
+        return 0
+    extras = 0
+    for path in tools_dir.rglob("*"):
+        relative = path.relative_to(target)
+        if TEMPLATE_SKIP_DIRS.intersection(relative.parts) or path.suffix in TEMPLATE_SKIP_SUFFIXES:
+            continue
+        if (path.is_file() or path.is_symlink()) and relative.as_posix() not in expected:
+            extras += 1
+    return extras
+
+
+def inspect_tool_bundle(target: Path, *, action: str, changed_tool_count: int = 0) -> ToolBundleInspection:
     ensure_template()
     if not target.is_dir():
         raise SystemExit(f"target archive does not exist: {target}")
     files = tool_template_files()
     if not files:
         raise SystemExit(f"template tools directory is empty: {TEMPLATE_DIR / 'tools'}")
-    if dry_run:
-        print(f"dry-run: refresh {len(files)} tool files from {TEMPLATE_DIR / 'tools'} -> {target / 'tools'}")
-        return len(files)
-    ensure_safe_tool_destinations(target)
+
+    source_entries: list[tuple[str, bytes]] = []
+    target_entries: list[tuple[str, bytes]] = []
+    matching: list[str] = []
+    missing: list[str] = []
+    stale: list[str] = []
+    unsafe: list[str] = []
+    expected = set(files)
+
     for relative in files:
         source = TEMPLATE_DIR / relative
+        source_content = source.read_bytes()
+        source_entries.append((relative, source_content))
         destination = target / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-    print(f"Tool files refreshed: {len(files)}")
-    return len(files)
+        destination_exists = destination.exists() or destination.is_symlink()
+        destination_unsafe = (
+            has_symlink_component(target, destination)
+            or not is_safe_target_path(target, destination)
+            or (destination_exists and not destination.is_file())
+        )
+        if destination_unsafe:
+            unsafe.append(relative)
+            target_entries.append((relative, b"<unsafe>"))
+            continue
+        if not destination.is_file():
+            missing.append(relative)
+            target_entries.append((relative, b"<missing>"))
+            continue
+        target_content = destination.read_bytes()
+        target_entries.append((relative, target_content))
+        if target_content == source_content:
+            matching.append(relative)
+        else:
+            stale.append(relative)
+
+    status = "blocked" if unsafe else ("current" if not missing and not stale else "drifted")
+    report: dict[str, object] = {
+        "report_kind": TOOL_BUNDLE_REPORT_KIND,
+        "report_version": TOOL_BUNDLE_REPORT_VERSION,
+        "action": action,
+        "status": status,
+        "source_bundle_sha256": bundle_sha256(source_entries),
+        "target_bundle_sha256": bundle_sha256(target_entries),
+        "expected_tool_count": len(files),
+        "matching_tool_count": len(matching),
+        "missing_tool_count": len(missing),
+        "stale_tool_count": len(stale),
+        "changed_tool_count": changed_tool_count,
+        "unsafe_target_count": len(unsafe),
+        "extra_target_tool_count": extra_target_tool_count(target, expected),
+        "privacy_leak_count": 0,
+        "privacy": {
+            "aggregate_only": True,
+            "absolute_paths_rendered": False,
+            "file_contents_rendered": False,
+            "archive_text_rendered": False,
+        },
+        "claim_boundary": (
+            "tool parity against this setup skill's bundled reusable runtime only; "
+            "not latest-release discovery, live deployment correctness, or automatic code publishing"
+        ),
+    }
+    return ToolBundleInspection(
+        report=report,
+        missing=tuple(missing),
+        stale=tuple(stale),
+        unsafe=tuple(unsafe),
+    )
+
+
+def prepare_tool_copy(source: Path, destination: Path) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+    os.close(descriptor)
+    temp_path = Path(temp_name)
+    try:
+        shutil.copy2(source, temp_path)
+        return temp_path
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def replace_tool_files_transactionally(target: Path, changed: tuple[str, ...]) -> tuple[bool, bool]:
+    prepared: dict[str, Path] = {}
+    backups: dict[str, Path | None] = {}
+    applied: list[str] = []
+    try:
+        for relative in changed:
+            destination = target / relative
+            prepared[relative] = prepare_tool_copy(TEMPLATE_DIR / relative, destination)
+            if destination.exists():
+                backups[relative] = prepare_tool_copy(destination, destination)
+            else:
+                backups[relative] = None
+
+        for relative in changed:
+            destination = target / relative
+            os.replace(prepared[relative], destination)
+            applied.append(relative)
+        return True, True
+    except OSError:
+        rollback_succeeded = True
+        for relative in reversed(applied):
+            destination = target / relative
+            backup = backups.get(relative)
+            try:
+                if backup is None:
+                    destination.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, destination)
+            except OSError:
+                rollback_succeeded = False
+        return False, rollback_succeeded
+    finally:
+        for temp_path in (*prepared.values(), *(path for path in backups.values() if path is not None)):
+            temp_path.unlink(missing_ok=True)
+
+
+def refresh_tool_files(target: Path, dry_run: bool) -> tuple[dict[str, object], int]:
+    action = "refresh_dry_run" if dry_run else "refresh"
+    before = inspect_tool_bundle(target, action=action)
+    if before.unsafe:
+        return before.report, 1
+    if not before.missing and not before.stale:
+        return before.report, 0
+    if dry_run:
+        report = dict(before.report)
+        report["status"] = "repairable"
+        return report, 0
+
+    changed = (*before.missing, *before.stale)
+    replaced, rollback_succeeded = replace_tool_files_transactionally(target, changed)
+    if not replaced:
+        failed = inspect_tool_bundle(target, action=action)
+        report = dict(failed.report)
+        report["status"] = "blocked"
+        remaining_drift = len(failed.missing) + len(failed.stale)
+        report["changed_tool_count"] = (
+            0 if rollback_succeeded else max(0, len(changed) - remaining_drift)
+        )
+        report["reason"] = "tool_replace_failed" if rollback_succeeded else "tool_rollback_failed"
+        return report, 1
+
+    after = inspect_tool_bundle(target, action=action, changed_tool_count=len(changed))
+    report = dict(after.report)
+    if after.unsafe or after.missing or after.stale:
+        report["status"] = "blocked"
+        return report, 1
+    report["status"] = "refreshed"
+    return report, 0
+
+
+def print_tool_bundle_report(report: dict[str, object], *, report_json: bool) -> None:
+    if report_json:
+        print(json.dumps(report, sort_keys=True))
+        return
+    status = str(report["status"])
+    if status == "blocked":
+        unsafe_count = int(report["unsafe_target_count"])
+        if unsafe_count:
+            print(f"Refusing to write unsafe tool path: count={unsafe_count}", file=sys.stderr)
+        else:
+            print(f"Tool bundle repair blocked: {report.get('reason', 'post_refresh_parity_failed')}", file=sys.stderr)
+        return
+    if status == "refreshed":
+        print(f"Tool files refreshed: {report['changed_tool_count']}")
+    elif status == "repairable":
+        print(
+            "dry-run: tool bundle repairable "
+            f"missing={report['missing_tool_count']} stale={report['stale_tool_count']}"
+        )
+    else:
+        print(
+            f"Tool bundle status: {status} "
+            f"matching={report['matching_tool_count']}/{report['expected_tool_count']}"
+        )
 
 
 def stage_template_files(target: Path, dry_run: bool) -> None:
@@ -257,10 +473,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--private", action="store_true", default=True, help="Create a private GitHub repo")
     parser.add_argument("--public", action="store_true", help="Create a public GitHub repo instead")
     parser.add_argument("--force", action="store_true", help="Merge template files into a non-empty directory")
-    parser.add_argument(
+    tool_action = parser.add_mutually_exclusive_group()
+    tool_action.add_argument(
         "--refresh-tools",
         action="store_true",
         help="Refresh only bundled reusable tool files in an existing archive",
+    )
+    tool_action.add_argument(
+        "--check-tools",
+        action="store_true",
+        help="Check whether an existing archive has the complete bundled runtime tool set",
+    )
+    parser.add_argument(
+        "--report-json",
+        action="store_true",
+        help="Emit a structured aggregate report for --check-tools or --refresh-tools",
     )
     parser.add_argument(
         "--allow-existing-history",
@@ -280,12 +507,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.mode == "github" and not args.github_repo:
         raise SystemExit("--github-repo is required when --mode github")
-    if args.refresh_tools and args.mode == "github":
-        raise SystemExit("--refresh-tools only supports --mode local")
+    if (args.refresh_tools or args.check_tools) and args.mode == "github":
+        raise SystemExit("--check-tools and --refresh-tools only support --mode local")
+    if args.report_json and not (args.refresh_tools or args.check_tools):
+        raise SystemExit("--report-json requires --check-tools or --refresh-tools")
+    if args.check_tools:
+        inspection = inspect_tool_bundle(target, action="check")
+        print_tool_bundle_report(inspection.report, report_json=args.report_json)
+        return 0 if inspection.report["status"] == "current" else 1
     if args.refresh_tools:
-        refresh_tool_files(target, args.dry_run)
-        print(f"Archive tools ready: {target}")
-        return 0
+        report, returncode = refresh_tool_files(target, args.dry_run)
+        print_tool_bundle_report(report, report_json=args.report_json)
+        if not args.report_json and returncode == 0:
+            print(f"Archive tools ready: {target}")
+        return returncode
     if args.mode == "github":
         ensure_safe_github_history(target, args.allow_existing_history)
 
