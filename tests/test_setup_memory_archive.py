@@ -399,6 +399,346 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Refusing to write unsafe tool path:", result.stdout + result.stderr)
             self.assertEqual(outside_tool.read_text(encoding="utf-8"), "outside stays unchanged\n")
 
+    def test_check_tools_reports_clean_bundle_without_absolute_paths(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--check-tools",
+                    "--report-json",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["report_kind"], "runtime_tool_bundle_parity")
+            self.assertEqual(report["action"], "check")
+            self.assertEqual(report["status"], "current")
+            self.assertEqual(report["expected_tool_count"], report["matching_tool_count"])
+            self.assertEqual(report["missing_tool_count"], 0)
+            self.assertEqual(report["stale_tool_count"], 0)
+            self.assertEqual(report["changed_tool_count"], 0)
+            self.assertEqual(report["unsafe_target_count"], 0)
+            self.assertEqual(report["source_bundle_sha256"], report["target_bundle_sha256"])
+            self.assertEqual(report["privacy_leak_count"], 0)
+            self.assertNotIn(str(root), result.stdout)
+
+    def test_check_tools_detects_missing_and_stale_tools_without_mutation(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stale = target / "tools/search_memory.py"
+            missing = target / "tools/audit_memory_archive.py"
+            stale.write_text("print('stale sentinel')\n", encoding="utf-8")
+            missing.unlink()
+            before = stale.read_bytes()
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--check-tools",
+                    "--report-json",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "drifted")
+            self.assertEqual(report["missing_tool_count"], 1)
+            self.assertEqual(report["stale_tool_count"], 1)
+            self.assertEqual(report["matching_tool_count"], report["expected_tool_count"] - 2)
+            self.assertEqual(report["changed_tool_count"], 0)
+            self.assertNotEqual(report["source_bundle_sha256"], report["target_bundle_sha256"])
+            self.assertEqual(stale.read_bytes(), before)
+            self.assertFalse(missing.exists())
+            self.assertNotIn("stale sentinel", result.stdout)
+            self.assertNotIn(str(root), result.stdout)
+
+    def test_refresh_tools_dry_run_is_repairable_and_non_mutating(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            stale = target / "tools/search_memory.py"
+            missing = target / "tools/audit_memory_archive.py"
+            extra = target / "tools/user_adapter.py"
+            stale.write_text("print('stale sentinel')\n", encoding="utf-8")
+            missing.unlink()
+            extra.write_text("print('user owned')\n", encoding="utf-8")
+            before = {path: path.read_bytes() for path in (stale, extra)}
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--refresh-tools",
+                    "--dry-run",
+                    "--report-json",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["action"], "refresh_dry_run")
+            self.assertEqual(report["status"], "repairable")
+            self.assertEqual(report["missing_tool_count"], 1)
+            self.assertEqual(report["stale_tool_count"], 1)
+            self.assertEqual(report["changed_tool_count"], 0)
+            self.assertEqual(report["extra_target_tool_count"], 1)
+            self.assertEqual(stale.read_bytes(), before[stale])
+            self.assertEqual(extra.read_bytes(), before[extra])
+            self.assertFalse(missing.exists())
+
+    def test_refresh_tools_repairs_only_owned_bundle_and_is_idempotent(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        source_tools = Path("skills/setup-my-precious/assets/agent-memory-repo/tools").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            protected = {
+                "INDEX.md": "# User archive index\n",
+                "config/projects.jsonl": '{"project":"user-owned"}\n',
+                "index/memories.jsonl": '{"memory_id":"user-owned"}\n',
+                "daily/2026/2026-07-11.md": "# User daily\n",
+                "memories/explicit.jsonl": '{"memory_id":"explicit"}\n',
+                "sessions/2026/07/11/session/summary.md": "# User summary\n",
+                "records/source.jsonl": '{"role":"user"}\n',
+                "sources/source.jsonl": '{"role":"user"}\n',
+                "reviews/review.jsonl": '{"decision":"keep"}\n',
+            }
+            for relative, content in protected.items():
+                path = target / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            archive_before = {relative: (target / relative).read_bytes() for relative in protected}
+
+            stale = target / "tools/search_memory.py"
+            missing = target / "tools/audit_memory_archive.py"
+            matching = target / "tools/render_scheduler.py"
+            extra = target / "tools/user_adapter.py"
+            stale.write_text("print('stale sentinel')\n", encoding="utf-8")
+            stale.chmod(0o600)
+            missing.unlink()
+            extra.write_text("print('user owned')\n", encoding="utf-8")
+            matching_mtime = matching.stat().st_mtime_ns
+            extra_before = extra.read_bytes()
+
+            first = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--refresh-tools",
+                    "--report-json",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            report = json.loads(first.stdout)
+            self.assertEqual(report["status"], "refreshed")
+            self.assertEqual(report["changed_tool_count"], 2)
+            self.assertEqual(report["matching_tool_count"], report["expected_tool_count"])
+            self.assertEqual(report["missing_tool_count"], 0)
+            self.assertEqual(report["stale_tool_count"], 0)
+            self.assertEqual(report["source_bundle_sha256"], report["target_bundle_sha256"])
+            self.assertEqual(report["extra_target_tool_count"], 1)
+            self.assertEqual(stale.read_bytes(), (source_tools / "search_memory.py").read_bytes())
+            self.assertEqual(missing.read_bytes(), (source_tools / "audit_memory_archive.py").read_bytes())
+            self.assertEqual(stat.S_IMODE(stale.stat().st_mode), stat.S_IMODE((source_tools / "search_memory.py").stat().st_mode))
+            self.assertEqual(matching.stat().st_mtime_ns, matching_mtime)
+            self.assertEqual(extra.read_bytes(), extra_before)
+            for relative, content in archive_before.items():
+                self.assertEqual((target / relative).read_bytes(), content)
+
+            second = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--refresh-tools",
+                    "--report-json",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(second.returncode, 0, second.stderr)
+            second_report = json.loads(second.stdout)
+            self.assertEqual(second_report["status"], "current")
+            self.assertEqual(second_report["changed_tool_count"], 0)
+
+    def test_check_and_refresh_tools_fail_closed_for_unsafe_symlink(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            outside = root / "outside-search.py"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            outside.write_text("outside stays unchanged\n", encoding="utf-8")
+            search = target / "tools/search_memory.py"
+            search.unlink()
+            search.symlink_to(outside)
+
+            for action in ("--check-tools", "--refresh-tools"):
+                with self.subTest(action=action):
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(script),
+                            "--path",
+                            str(target),
+                            action,
+                            "--report-json",
+                            "--skip-config",
+                        ],
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    report = json.loads(result.stdout)
+                    self.assertEqual(report["status"], "blocked")
+                    self.assertEqual(report["unsafe_target_count"], 1)
+                    self.assertEqual(report["changed_tool_count"], 0)
+                    self.assertEqual(outside.read_text(encoding="utf-8"), "outside stays unchanged\n")
+                    self.assertNotIn(str(root), result.stdout)
+
+    def test_check_and_refresh_tools_are_mutually_exclusive(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(Path(tmpdir) / "agent-memory"),
+                    "--check-tools",
+                    "--refresh-tools",
+                    "--report-json",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not allowed with argument", result.stderr)
+
+    def test_refresh_tools_rolls_back_partial_replace_failure(self):
+        module = load_setup_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template = root / "template"
+            target = root / "agent-memory"
+            (template / "tools").mkdir(parents=True)
+            (target / "tools").mkdir(parents=True)
+            for name in ("first.py", "second.py"):
+                (template / "tools" / name).write_text(f"print('new {name}')\n", encoding="utf-8")
+                (target / "tools" / name).write_text(f"print('old {name}')\n", encoding="utf-8")
+            before = {
+                name: (target / "tools" / name).read_bytes()
+                for name in ("first.py", "second.py")
+            }
+
+            original_template = module.TEMPLATE_DIR
+            original_replace = module.os.replace
+            replace_count = 0
+
+            def fail_second_replace(source, destination):
+                nonlocal replace_count
+                replace_count += 1
+                if replace_count == 2:
+                    raise OSError("synthetic replace failure")
+                return original_replace(source, destination)
+
+            module.TEMPLATE_DIR = template
+            module.os.replace = fail_second_replace
+            try:
+                report, returncode = module.refresh_tool_files(target, dry_run=False)
+            finally:
+                module.TEMPLATE_DIR = original_template
+                module.os.replace = original_replace
+
+            self.assertNotEqual(returncode, 0)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "tool_replace_failed")
+            self.assertEqual(report["changed_tool_count"], 0)
+            for name, content in before.items():
+                self.assertEqual((target / "tools" / name).read_bytes(), content)
+
     def test_render_scheduler_generates_reviewable_launchd_plist(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 

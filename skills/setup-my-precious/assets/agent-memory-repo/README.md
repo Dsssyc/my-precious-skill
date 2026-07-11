@@ -185,21 +185,44 @@ Both modes are repair paths, not the normal incremental path.
 
 ## Refresh Bundled Tools
 
-If this deployment repository's bundled `tools/search_memory.py` is stale and
-cannot emit a package-first recall context with
-`report_kind: memory_recall_context_package`, refresh reusable tool files from
-the installed setup skill:
+Before updater, audit, search, or sync work, compare this deployment repository's
+complete reusable runtime tool bundle with the installed setup skill:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --check-tools \
+  --report-json \
+  --skip-config
+```
+
+`current` is the only no-op result. For `drifted`, review the repair plan first:
 
 ```bash
 python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
   --path . \
   --refresh-tools \
+  --dry-run \
+  --report-json \
   --skip-config
 ```
 
-This command updates only `tools/**`. It preserves archive data, indexes,
-source records, daily records, session summaries, and user-owned config. Do not
-use `tools/sync_memory_archive.py` for tool refreshes; automatic archive sync
+Then apply the narrow repair and require a subsequent `--check-tools` report to
+return `current`:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --refresh-tools \
+  --report-json \
+  --skip-config
+```
+
+This command repairs only missing or stale source-owned files under `tools/**`.
+It preserves matching files, extra user-owned tools, archive data, indexes,
+source records, daily records, session summaries, and user-owned config. A
+`blocked` result requires manual investigation. Do not use
+`tools/sync_memory_archive.py` for tool refreshes; automatic archive sync
 intentionally refuses tool/script changes.
 
 ## Audit

@@ -1607,6 +1607,58 @@ packaged regeneration. It does not prove whole-repository transaction rollback,
 private deployment correctness or recovery, LLM summarization quality, ranking
 quality, vector search, ontology discovery, or public leaderboard parity.
 
+## V2.34 Runtime Tool-Bundle Parity And Fail-Closed Repair Gate
+
+V2.34 adds `benchmarks/runtime_tool_bundle_parity_gate.py` and a structured
+full-bundle contract to `setup_memory_archive.py`. The setup script's bundled
+`assets/agent-memory-repo/tools/` directory is the source of truth for this
+comparison. `--check-tools --report-json` reports deterministic SHA-256 bundle
+identities and exits nonzero for missing, stale, or unsafe expected tools.
+`--refresh-tools --dry-run --report-json` reports `repairable` without mutation;
+live `--refresh-tools` replaces only missing or stale source-owned files,
+preserves matching and extra user-owned tools, verifies post-refresh parity,
+and fails closed on unsafe targets or replacement failure.
+
+The packaged gate creates clean synthetic deployments twice. In each repair
+case it makes two tools stale, removes two tools, adds an extra user tool,
+preserves synthetic archive-side data, and exercises check, dry-run, refresh,
+post-check, idempotent replay, packaged update, archive audit, search health,
+and reviewed sync dry-run. A separate symlink case must be rejected before the
+first write. The two aggregate reports must be identical.
+
+| metric | result |
+| --- | ---: |
+| `runtime_bundle_report_parse_success_rate` | 1.0 |
+| `runtime_bundle_clean_detection_accuracy` | 1.0 |
+| `runtime_bundle_drift_detection_accuracy` | 1.0 |
+| `runtime_bundle_missing_detection_accuracy` | 1.0 |
+| `runtime_bundle_stale_detection_accuracy` | 1.0 |
+| `runtime_bundle_refresh_success_rate` | 1.0 |
+| `runtime_bundle_post_refresh_parity_rate` | 1.0 |
+| `runtime_bundle_archive_preservation_rate` | 1.0 |
+| `runtime_bundle_extra_tool_preservation_rate` | 1.0 |
+| `runtime_bundle_unsafe_target_rejection_rate` | 1.0 |
+| `runtime_bundle_idempotent_refresh_rate` | 1.0 |
+| `post_refresh_packaged_update_success_rate` | 1.0 |
+| `post_refresh_archive_audit_pass_rate` | 1.0 |
+| `post_refresh_search_health_pass_rate` | 1.0 |
+| `post_refresh_reviewed_sync_dry_run_pass_rate` | 1.0 |
+| `absolute_path_leak_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+V2.34 proves deterministic parity checking and archive-preserving repair
+against the setup script's bundled reusable tools.
+
+It does not prove that an installed skill is the latest GitHub release.
+It does not prove live private deployment correctness.
+It does not prove automatic code deployment.
+It does not prove scheduler reliability.
+It does not prove LLM quality.
+It does not prove ranking quality.
+It does not prove vector search.
+It does not prove ontology discovery.
+It does not prove public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
