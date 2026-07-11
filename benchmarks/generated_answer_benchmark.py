@@ -41,6 +41,11 @@ SENSITIVE_OUTPUT_PATTERN = re.compile(
     r")"
 )
 TOKEN_F1_PASS_THRESHOLD = 0.8
+UNSAFE_HANDOFF_KEY_PATTERN = re.compile(
+    r"(?i)(?:raw[_-]?refs?|raw[_-]?transcript|source[_-]?paths?|source[_-]?refs?|"
+    r"source[_-]?content|scheduler[_-]?state|private[_-]?paths?)"
+)
+LOCAL_PRIVATE_PATH_PATTERN = re.compile(r"(?:^|[\s\"'])/(?:Users|home|var/folders)/[^\s\"']+|(?:^|[\s\"'])~[/\\]")
 
 
 def iter_jsonl(path: Path) -> Iterable[tuple[int, object]]:
@@ -122,8 +127,8 @@ def load_cases(path: Path) -> list[dict[str, Any]]:
     return cases
 
 
-def load_answers(path: Path) -> tuple[dict[str, str], Counter[str], list[str]]:
-    answers: dict[str, str] = {}
+def load_answers(path: Path) -> tuple[dict[str, dict[str, Any]], Counter[str], list[str]]:
+    answers: dict[str, dict[str, Any]] = {}
     duplicates: Counter[str] = Counter()
     answer_case_ids: list[str] = []
     for line_no, value in iter_jsonl(path):
@@ -135,7 +140,7 @@ def load_answers(path: Path) -> tuple[dict[str, str], Counter[str], list[str]]:
         if case_id in answers:
             duplicates[case_id] += 1
             continue
-        answers[case_id] = generated_answer
+        answers[case_id] = dict(value, generated_answer=generated_answer)
     return answers, duplicates, answer_case_ids
 
 
@@ -207,11 +212,115 @@ def ratio(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
+def answer_record_handoff(answer_record: dict[str, Any] | None) -> dict[str, Any] | None:
+    if answer_record is None:
+        return None
+    handoff = answer_record.get("answer_handoff")
+    return handoff if isinstance(handoff, dict) else None
+
+
+def nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def iter_handoff_strings(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from iter_handoff_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_handoff_strings(item)
+
+
+def handoff_contains_unsafe_key(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for key, item in value.items():
+        if isinstance(key, str) and UNSAFE_HANDOFF_KEY_PATTERN.search(key) and item not in (None, "", [], {}):
+            return True
+        if handoff_contains_unsafe_key(item):
+            return True
+    return False
+
+
+def handoff_privacy_leak(handoff: dict[str, Any] | None) -> bool:
+    if handoff is None:
+        return False
+    if handoff_contains_unsafe_key(handoff):
+        return True
+    for text in iter_handoff_strings(handoff):
+        if SENSITIVE_OUTPUT_PATTERN.search(text) or LOCAL_PRIVATE_PATH_PATTERN.search(text):
+            return True
+    privacy_leak_count = nonnegative_int(handoff.get("privacy_leak_count"))
+    return bool(privacy_leak_count and privacy_leak_count > 0)
+
+
+def support_refs_cover_answer(handoff: dict[str, Any] | None) -> bool:
+    if handoff is None or handoff.get("abstained") is True:
+        return False
+    support_refs = handoff.get("support_refs")
+    if not isinstance(support_refs, list):
+        return False
+    for support_ref in support_refs:
+        if not isinstance(support_ref, dict):
+            continue
+        memory_id = support_ref.get("memory_id")
+        summary_paths = support_ref.get("summary_paths")
+        evidence_refs = support_ref.get("evidence_refs")
+        if (
+            isinstance(memory_id, str)
+            and memory_id.strip()
+            and isinstance(summary_paths, list)
+            and any(isinstance(path, str) and path.strip() for path in summary_paths)
+            and isinstance(evidence_refs, list)
+            and any(isinstance(ref, str) and ref.strip() for ref in evidence_refs)
+        ):
+            return True
+    return False
+
+
+def handoff_context_package(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
+    if handoff is None:
+        return None
+    package = handoff.get("context_package")
+    return package if isinstance(package, dict) else None
+
+
+def context_package_parse_success(package: dict[str, Any] | None) -> bool:
+    return bool(
+        package
+        and package.get("report_kind") == "memory_recall_context_package"
+        and package.get("parse_success") is True
+        and package.get("answerability_status") in {"supported", "unsupported"}
+    )
+
+
+def handoff_unsupported_claim_count(handoff: dict[str, Any] | None) -> int:
+    if handoff is None:
+        return 0
+    value = nonnegative_int(handoff.get("unsupported_claim_count"))
+    return value if value is not None else 1
+
+
+def handoff_inactive_memory_answer_count(handoff: dict[str, Any] | None) -> int:
+    if handoff is None:
+        return 0
+    value = nonnegative_int(handoff.get("inactive_memory_answer_count"))
+    inactive_count = value if value is not None else 1
+    if handoff.get("active_memory_only") is not True and handoff.get("abstained") is not True:
+        inactive_count = max(inactive_count, 1)
+    return inactive_count
+
+
 def evaluate_case(
     *,
     ordinal: int,
     case: dict[str, Any],
-    answer: str | None,
+    answer_record: dict[str, Any] | None,
     duplicate_answer: bool,
     cases_path: Path,
 ) -> dict[str, Any]:
@@ -220,18 +329,35 @@ def evaluate_case(
     expected_abstain = case.get("expected_abstain") is True
     reference_answers = text_list(case, "reference_answer", cases_path, line_no)
     forbidden_patterns = compile_forbidden_patterns(case, cases_path, line_no)
-    missing_answer = answer is None
+    missing_answer = answer_record is None
     failed_checks: list[str] = []
     exact_hit = False
     normalized_hit = False
     token_f1 = 0.0
     abstention_hit = False
     leak = False
+    handoff = answer_record_handoff(answer_record)
+    handoff_present = handoff is not None
+    handoff_support_covered = support_refs_cover_answer(handoff)
+    handoff_abstained = bool(handoff and handoff.get("abstained") is True)
+    handoff_unsupported_claims = handoff_unsupported_claim_count(handoff)
+    handoff_inactive_answers = handoff_inactive_memory_answer_count(handoff)
+    context_package = handoff_context_package(handoff)
+    context_package_present = context_package is not None
+    context_parse_success = context_package_parse_success(context_package)
+    context_status = context_package.get("answerability_status") if context_package else ""
+    context_reason = context_package.get("answerability_reason") if context_package else ""
+    context_supported = context_parse_success and context_status == "supported"
+    context_unsupported = context_parse_success and context_status == "unsupported"
+    context_inactive_rejection = context_unsupported and context_reason == "no_active_current_support"
 
     if missing_answer:
         failed_checks.append("missing_generated_answer")
     else:
+        answer = str(answer_record["generated_answer"])
         leak = privacy_leak(answer, forbidden_patterns)
+        handoff_leak = handoff_privacy_leak(handoff)
+        leak = leak or handoff_leak
         if leak:
             failed_checks.append("privacy_boundary")
         if expected_abstain:
@@ -258,6 +384,16 @@ def evaluate_case(
         "source_benchmark": optional_text(case, "source_benchmark", cases_path, line_no),
         "expected_abstain": expected_abstain,
         "generated_answer_present": not missing_answer,
+        "answer_handoff_present": handoff_present,
+        "answer_handoff_support_covered": handoff_support_covered,
+        "answer_handoff_abstained": handoff_abstained,
+        "context_package_present": context_package_present,
+        "context_package_parse_success": context_parse_success,
+        "context_package_supported": context_supported,
+        "context_package_unsupported": context_unsupported,
+        "context_package_inactive_rejection": context_inactive_rejection,
+        "unsupported_claim_count": handoff_unsupported_claims,
+        "inactive_memory_answer_count": handoff_inactive_answers,
         "duplicate_answer": duplicate_answer,
         "answer_exact_match": exact_hit,
         "answer_normalized_match": normalized_hit,
@@ -292,7 +428,7 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
             evaluate_case(
                 ordinal=ordinal,
                 case=case,
-                answer=answers.get(case_id),
+                answer_record=answers.get(case_id),
                 duplicate_answer=duplicate_case_counts[case_id] > 0,
                 cases_path=cases_path,
             )
@@ -324,11 +460,42 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
     normalized_hits = sum(1 for detail in positive_details if detail["answer_normalized_match"])
     token_f1_total = sum(float(detail["answer_token_f1"]) for detail in positive_details)
     abstention_hits = sum(1 for detail in abstain_details if detail["abstention_hit"])
+    answer_handoff_present_count = sum(1 for detail in details if detail["answer_handoff_present"])
+    answer_handoff_supported_case_count = sum(
+        1
+        for detail in positive_details
+        if detail["answer_handoff_support_covered"] and not detail["answer_handoff_abstained"]
+    )
+    answer_handoff_abstain_case_count = sum(
+        1 for detail in abstain_details if detail["answer_handoff_abstained"]
+    )
+    context_package_present_count = sum(1 for detail in details if detail["context_package_present"])
+    context_package_parse_success_count = sum(1 for detail in details if detail["context_package_parse_success"])
+    context_package_supported_case_count = sum(
+        1
+        for detail in positive_details
+        if detail["context_package_supported"]
+        and detail["answer_handoff_support_covered"]
+        and not detail["answer_handoff_abstained"]
+    )
+    context_package_abstain_case_count = sum(
+        1
+        for detail in abstain_details
+        if detail["context_package_unsupported"] and detail["answer_handoff_abstained"]
+    )
+    context_package_inactive_rejection_count = sum(
+        1 for detail in details if detail["context_package_inactive_rejection"] and detail["answer_handoff_abstained"]
+    )
+    unsupported_claim_count = sum(int(detail["unsupported_claim_count"]) for detail in details)
+    inactive_memory_answer_count = sum(int(detail["inactive_memory_answer_count"]) for detail in details)
 
     report: dict[str, Any] = {
         "report_kind": "generated_answer_benchmark",
         "report_version": 1,
-        "claim_boundary": "offline generated-answer grading only; no model generation or semantic equivalence claim",
+        "claim_boundary": (
+            "offline generated-answer grading plus deterministic answer handoff audit; "
+            "no model generation or semantic equivalence claim"
+        ),
         "cases": total_cases,
         "answer_cases": len(answer_case_ids),
         "positive_cases": len(positive_details),
@@ -342,6 +509,29 @@ def evaluate(cases_path: Path, answers_path: Path, details_path: Path | None) ->
         "answer_normalized_match_rate": ratio(normalized_hits, len(positive_details)),
         "answer_token_f1": ratio(token_f1_total, len(positive_details)),
         "abstention_accuracy": ratio(abstention_hits, len(abstain_details)),
+        "answer_handoff_present_rate": ratio(answer_handoff_present_count, total_cases),
+        "answer_handoff_support_coverage_rate": ratio(
+            answer_handoff_supported_case_count,
+            len(positive_details),
+        ),
+        "answer_handoff_supported_case_count": answer_handoff_supported_case_count,
+        "answer_handoff_abstain_case_count": answer_handoff_abstain_case_count,
+        "context_package_handoff_present_rate": ratio(context_package_present_count, total_cases),
+        "context_package_parse_success_rate": ratio(context_package_parse_success_count, total_cases),
+        "context_package_support_coverage_rate": ratio(
+            context_package_supported_case_count,
+            len(positive_details),
+        ),
+        "context_package_abstention_accuracy": ratio(
+            context_package_abstain_case_count,
+            len(abstain_details),
+        ),
+        "context_package_supported_case_count": context_package_supported_case_count,
+        "context_package_abstain_case_count": context_package_abstain_case_count,
+        "context_package_parse_failure_count": total_cases - context_package_parse_success_count,
+        "context_package_inactive_rejection_count": context_package_inactive_rejection_count,
+        "unsupported_claim_count": unsupported_claim_count,
+        "inactive_memory_answer_count": inactive_memory_answer_count,
         "privacy_boundary_pass_rate": ratio(privacy_hits, total_cases),
         "privacy_leak_count": total_cases - privacy_hits,
         "failed_case_count": failed_case_count,

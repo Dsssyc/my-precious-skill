@@ -63,6 +63,42 @@ Use `--rewrite-existing` only for deliberate backfill/repair runs; it rebuilds
 matching source records and replaces older archive entries for the same
 archive scope/source partition/source record.
 
+## Explicit Capture Rule
+
+Automatic induction is the default memory behavior for ordinary source
+records. When the user or governing prompt explicitly says to remember,
+force-save, or distill a short fact, use the deployment repository's
+`tools/capture_explicit_memory.py` explicit capture path instead of waiting for
+ordinary summarization.
+
+The explicit capture adapter consumes agent-neutral JSONL. Each row should
+contain a short fact in `text` plus optional `layer`, `scope`, and `source`
+fields:
+
+```jsonl
+{"text":"Prefer evidence-bound memories over unsupported recollection.","layer":"global","scope":"global","source":"explicit_request"}
+```
+
+Do not paste raw chat transcripts, message arrays, source content, tool logs,
+or automation run notes into this adapter. It creates evidence-bound support
+files and writes `source: explicit` sticky memory nodes; raw transcript fields
+are refused.
+
+When the user explicitly corrects or retracts an earlier explicit memory, use
+the same adapter's explicit revision path. Use `operation: replace` with
+`replaces_memory_id` for a new current fact, or `operation: withdraw` with
+`deprecates_memory_id` when the old fact should stop being active without a
+replacement:
+
+```jsonl
+{"operation":"replace","text":"Prefer the current fact.","replaces_memory_id":"mem_old_fact"}
+{"operation":"withdraw","text":"Withdraw the obsolete fact.","deprecates_memory_id":"mem_old_fact"}
+```
+
+Search should prefer the current fact after a replacement. The old fact is
+superseded rather than deleted, and provenance remains traceable through memory
+lifecycle links and evidence drilldown.
+
 The updater should:
 
 - read the latest archived timestamp from `index/sessions.jsonl` and `sessions/**/meta.json`
@@ -156,11 +192,69 @@ The updater should:
 
    This helper should stage only generated archive paths and refuse tool/script
    edits, unredacted key-like values, archive audit findings, or whitespace errors.
+   It also refuses publish-surface noise in generated `daily/` and
+   text-bearing `index/*.jsonl` fields; if that happens, run the repair helper
+   below and retry only after readiness passes.
    If it reports `README.md` or `tools/` changes, stop the archive publish path.
    Review and commit those reusable tool or documentation changes separately
    before rerunning archive sync.
 
+## Legacy Source-Anchor Upgrade
+
+When a legacy entry remains searchable but `resolve_memory_source.py` returns
+`legacy_source_anchor_unavailable`, use the deployment repository's dedicated
+provenance-only upgrader. Do not use backfill for this purpose: backfill
+re-summarizes the source and can change memory or evidence semantics.
+
+Dry-run one explicitly selected external JSONL source record first:
+
+```bash
+python "$MEMORY_REPO/tools/upgrade_source_anchors.py" \
+  --memory-repo "$MEMORY_REPO" \
+  --source-record "$SOURCE_RECORD" \
+  --allow-source-root "$SOURCE_RECORD_DIR" \
+  --dry-run \
+  --report-json
+```
+
+Apply only after the aggregate report returns `eligible` and the user has
+authorized that one record:
+
+```bash
+python "$MEMORY_REPO/tools/upgrade_source_anchors.py" \
+  --memory-repo "$MEMORY_REPO" \
+  --source-record "$SOURCE_RECORD" \
+  --allow-source-root "$SOURCE_RECORD_DIR" \
+  --apply \
+  --report-json
+```
+
+The tool requires the archived and current source SHA-256 to match, uniquely
+binds every existing evidence quote to one physical JSONL event, changes only
+versioned provenance fields, rechecks target fingerprints, and rolls back exact
+bytes if replacement, archive audit, or search health fails. Secret-bearing
+records remain blocked unless `--allow-redacted-secrets` is explicitly added.
+Reports are aggregate-only and must not render source paths, memory IDs, quote
+text, source content, raw refs, secrets, or scheduler state.
+
+A dry run without `--source-record` is a bounded readiness scan only. It may
+sample legacy entries with `--scan-limit`, but it is not authorization for
+batch migration or private deployment. Apply remains single-record.
+
 ## Backfill And Repair
+
+When `sync_memory_archive.py` or `audit_publish_readiness.py` reports
+publish-surface noise derived from structured session metadata, run the
+fail-closed repair helper before retrying sync:
+
+```bash
+python "$MEMORY_REPO/tools/repair_publish_surfaces.py" --memory-repo "$MEMORY_REPO" --apply
+python "$MEMORY_REPO/tools/audit_publish_readiness.py" --memory-repo "$MEMORY_REPO"
+```
+
+This edits only `sessions/**/meta.json`, regenerates derived publish surfaces,
+and emits aggregate counts only. If it reports `blocked`, stop and report the
+aggregate blocker instead of hand-editing `daily/` or `index/*.jsonl`.
 
 When search results are polluted by old generated summaries, run a deliberate
 rewrite pass instead of editing index files by hand. If the archive already has

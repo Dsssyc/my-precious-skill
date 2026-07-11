@@ -4,6 +4,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import benchmarks.private_generated_answer_dogfood_gate as dogfood_gate
 
 
 SCRIPT = Path("benchmarks/private_generated_answer_dogfood_gate.py").resolve()
@@ -157,6 +160,191 @@ class PrivateGeneratedAnswerDogfoodGateTests(unittest.TestCase):
             self.assertEqual(payload["status"], "failed")
             self.assertIn({"reason": "unsafe_work_dir"}, payload["failures"])
             self.assertNotIn(str(generic_work_dir), result.stdout + result.stderr)
+
+    def test_cleanup_preserves_unowned_files_in_dogfood_work_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            repo.mkdir()
+            case_output = repo / ".tmp" / "generated-answer-dogfood" / "cases.jsonl"
+            case_output.parent.mkdir(parents=True)
+            case_output.write_text("{}\n", encoding="utf-8")
+
+            work_dir = root / "my_precious_generated_answer_dogfood"
+            work_dir.mkdir()
+            answer_records = work_dir / "answer_records.jsonl"
+            answer_report = work_dir / "answer_report.json"
+            sentinel = work_dir / "not-owned-by-dogfood.txt"
+            answer_records.write_text("{}\n", encoding="utf-8")
+            answer_report.write_text("{}\n", encoding="utf-8")
+            sentinel.write_text("keep me\n", encoding="utf-8")
+
+            cleaned = dogfood_gate.cleanup_success_artifacts(
+                repo,
+                case_output,
+                work_dir,
+                generated_paths=(answer_records, answer_report),
+            )
+
+            self.assertTrue(cleaned)
+            self.assertFalse(case_output.exists())
+            self.assertFalse(answer_records.exists())
+            self.assertFalse(answer_report.exists())
+            self.assertTrue(sentinel.exists())
+
+    def test_run_gate_propagates_handoff_metrics_to_aggregate_report_and_readiness(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo = root / "agent-memory"
+            self.init_repo(repo)
+            commands: list[tuple[str, list[str]]] = []
+
+            def fake_capture(name: str, command: list[str]) -> dict:
+                commands.append((name, command))
+                if name == "case author dry-run":
+                    return {
+                        "selected_case_count": 2,
+                        "positive_case_count": 1,
+                        "abstain_case_count": 1,
+                        "would_write_count": 2,
+                    }
+                if name == "case author write":
+                    return {
+                        "candidate_memory_count": 3,
+                        "selected_case_count": 2,
+                        "positive_case_count": 1,
+                        "abstain_case_count": 1,
+                        "written_count": 2,
+                        "skip_counts": {"inactive_memory": 1},
+                        "source_benchmarks": {"MyPreciousPrivateDogfood": 2},
+                        "case_origins": {"private_dogfood": 2},
+                    }
+                if name == "case audit":
+                    return {
+                        "cases": 2,
+                        "positive_cases": 1,
+                        "abstain_cases": 1,
+                        "answer_scorable_case_rate": 1.0,
+                        "positive_without_reference_answer": 0,
+                        "privacy_leak_count": 0,
+                        "unsafe_aggregate_identifier_count": 0,
+                        "source_benchmarks": {"MyPreciousPrivateDogfood": 2},
+                        "case_origins": {"private_dogfood": 2},
+                    }
+                if name == "answer record adapter":
+                    return {
+                        "cases": 2,
+                        "answers_written": 2,
+                        "memory_answer_count": 1,
+                        "abstention_answer_count": 1,
+                        "answer_handoff_supported_case_count": 1,
+                        "answer_handoff_abstain_case_count": 1,
+                        "answer_handoff_support_coverage_rate": 1.0,
+                        "unsupported_claim_count": 0,
+                        "inactive_memory_answer_count": 0,
+                        "privacy_leak_count": 0,
+                        "no_hit_count": 1,
+                        "unsupported_hit_count": 0,
+                        "source_benchmarks": {"MyPreciousPrivateDogfood": 2},
+                        "case_origins": {"private_dogfood": 2},
+                    }
+                if name == "v1 readiness gate":
+                    return {
+                        "overall_status": "extended_evidence_ready",
+                        "scorecard": {"required_dimensions": 6, "required_passed": 6},
+                        "dimensions": {
+                            "generated_answer_eval": {"status": "passed"},
+                            "real_archive_shadow_eval": {"status": "passed"},
+                        },
+                    }
+                raise AssertionError(f"unexpected JSON capture step: {name}")
+
+            def fake_to_file(name: str, command: list[str], output: Path) -> dict:
+                commands.append((name, command))
+                if name == "generated-answer benchmark":
+                    payload = {
+                        "report_kind": "generated_answer_benchmark",
+                        "cases": 2,
+                        "positive_cases": 1,
+                        "abstain_cases": 1,
+                        "case_pass_rate": 1.0,
+                        "answer_scorable_case_rate": 1.0,
+                        "abstention_accuracy": 1.0,
+                        "answer_normalized_match_rate": 1.0,
+                        "answer_handoff_present_rate": 1.0,
+                        "answer_handoff_support_coverage_rate": 1.0,
+                        "answer_handoff_supported_case_count": 1,
+                        "answer_handoff_abstain_case_count": 1,
+                        "unsupported_claim_count": 0,
+                        "inactive_memory_answer_count": 0,
+                        "privacy_leak_count": 0,
+                        "failed_case_count": 0,
+                        "missing_answer_count": 0,
+                        "duplicate_answer_count": 0,
+                        "unknown_answer_count": 0,
+                        "positive_without_reference_answer": 0,
+                        "source_benchmarks": {"MyPreciousPrivateDogfood": 2},
+                        "case_origins": {"private_dogfood": 2},
+                    }
+                elif name == "shadow evaluation":
+                    payload = {
+                        "report_kind": "real_archive_shadow_evaluation",
+                        "metrics": {
+                            "memory_recall_at_5": 1.0,
+                            "privacy_boundary_pass_rate": 1.0,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected JSON file step: {name}")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+                return payload
+
+            args = dogfood_gate.parse_args(
+                [
+                    "--memory-repo",
+                    str(repo),
+                    "--work-dir",
+                    str(root / "my_precious_generated_answer_dogfood"),
+                    "--limit",
+                    "1",
+                    "--abstain-limit",
+                    "1",
+                ]
+            )
+            with mock.patch.object(dogfood_gate, "run_json_capture", side_effect=fake_capture):
+                with mock.patch.object(dogfood_gate, "run_json_to_file", side_effect=fake_to_file):
+                    report, exit_code = dogfood_gate.run_gate(args)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["status"], "passed")
+            self.assertEqual(report["answer_benchmark"]["answer_handoff_present_rate"], 1.0)
+            self.assertEqual(report["answer_benchmark"]["answer_handoff_support_coverage_rate"], 1.0)
+            self.assertEqual(report["answer_benchmark"]["answer_handoff_supported_case_count"], 1)
+            self.assertEqual(report["answer_benchmark"]["answer_handoff_abstain_case_count"], 1)
+            self.assertEqual(report["answer_benchmark"]["unsupported_claim_count"], 0)
+            self.assertEqual(report["answer_benchmark"]["inactive_memory_answer_count"], 0)
+            self.assertEqual(report["answer_benchmark"]["privacy_leak_count"], 0)
+            self.assertEqual(report["answer_benchmark"]["source_benchmarks"], {"MyPreciousPrivateDogfood": 2})
+            self.assertEqual(report["answer_benchmark"]["case_origins"], {"private_dogfood": 2})
+            self.assertTrue(report["cleanup_success"])
+            self.assertTrue(report["privacy"]["aggregate_only"])
+            self.assertFalse(report["privacy"]["memory_ids_rendered"])
+            self.assertFalse(report["privacy"]["source_paths_rendered"])
+            self.assertFalse(report["privacy"]["raw_refs_rendered"])
+
+            benchmark_command = next(command for name, command in commands if name == "generated-answer benchmark")
+            readiness_command = next(command for name, command in commands if name == "v1 readiness gate")
+            self.assertIn("answer_handoff_present_rate=1.0", benchmark_command)
+            self.assertIn("answer_handoff_support_coverage_rate=1.0", benchmark_command)
+            self.assertIn("answer_handoff_supported_case_count=1", benchmark_command)
+            self.assertIn("answer_handoff_abstain_case_count=1", benchmark_command)
+            self.assertIn("unsupported_claim_count=0", benchmark_command)
+            self.assertIn("inactive_memory_answer_count=0", benchmark_command)
+            self.assertIn("--require-answer-source-benchmark", readiness_command)
+            self.assertIn("MyPreciousPrivateDogfood", readiness_command)
+            self.assertIn("--require-answer-case-origin", readiness_command)
+            self.assertIn("private_dogfood", readiness_command)
 
 
 if __name__ == "__main__":

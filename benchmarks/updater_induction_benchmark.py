@@ -38,6 +38,7 @@ SENSITIVE_OUTPUT_RE = re.compile(
     r"\bAKIA[0-9A-Z]{16}\b"
     r")"
 )
+CONTEXT_REPORT_KIND = "memory_recall_context_package"
 FALSE_PROMOTION_REASON_METRICS = {
     "ephemeral_status": "ephemeral_status",
     "hypothetical": "hypothetical",
@@ -122,6 +123,14 @@ class CaseScore:
     evidence_hits: int = 0
     source_ref_cases: int = 0
     source_ref_hits: int = 0
+    consolidated_duplicate_cases: int = 0
+    consolidated_duplicate_hits: int = 0
+    consolidated_support_cases: int = 0
+    consolidated_support_hits: int = 0
+    consolidated_evidence_cases: int = 0
+    consolidated_evidence_hits: int = 0
+    post_consolidation_recall_cases: int = 0
+    post_consolidation_recall_hits: int = 0
     lifecycle_cases: int = 0
     lifecycle_hits: int = 0
     memory_id_provenance_cases: int = 0
@@ -461,6 +470,137 @@ def raw_refs_policy_pass(memory_repo: Path, node: dict[str, Any]) -> bool:
         if not (memory_repo / path_text).is_file():
             return False
     return True
+
+
+def consolidation_expected_texts(expected: dict[str, Any]) -> list[str]:
+    text = str(expected.get("text") or "").strip()
+    if not text:
+        raise SystemExit("expected_consolidations entries must include text")
+    duplicate_texts = expected.get("duplicate_texts") or []
+    if not isinstance(duplicate_texts, list):
+        raise SystemExit("expected_consolidations duplicate_texts must be a list")
+    texts = [text]
+    for duplicate in duplicate_texts:
+        duplicate_text = str(duplicate or "").strip()
+        if duplicate_text:
+            texts.append(duplicate_text)
+    return texts
+
+
+def consolidation_nodes(nodes: list[dict[str, Any]], expected: dict[str, Any]) -> list[dict[str, Any]]:
+    source = str(expected.get("source") or "automatic")
+    expected_texts = set(consolidation_expected_texts(expected))
+    return [
+        node
+        for node in nodes
+        if node.get("source") == source and isinstance(node.get("text"), str) and node["text"] in expected_texts
+    ]
+
+
+def consolidation_primary_node(nodes: list[dict[str, Any]], expected: dict[str, Any]) -> dict[str, Any] | None:
+    matches = consolidation_nodes(nodes, expected)
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def support_merge_hit(node: dict[str, Any] | None, expected: dict[str, Any]) -> bool:
+    if node is None:
+        return False
+    min_support_count = int(expected.get("min_support_count") or 0)
+    if min_support_count and node_int(node, "support_count") < min_support_count:
+        return False
+    min_derived_from = int(expected.get("min_derived_from") or 0)
+    if min_derived_from and node_list_len(node, "derived_from") < min_derived_from:
+        return False
+    return True
+
+
+def load_context_package(memory_repo: Path, query: str) -> tuple[CommandResult, dict[str, Any] | None]:
+    result = run_command(
+        [
+            sys.executable,
+            str(memory_repo / "tools/search_memory.py"),
+            query,
+            "--repo",
+            str(memory_repo),
+            "--limit",
+            "5",
+            "--depth",
+            "evidence",
+            "--context-json",
+        ]
+    )
+    if result.returncode != 0:
+        return result, None
+    try:
+        package = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return result, None
+    if not isinstance(package, dict) or package.get("report_kind") != CONTEXT_REPORT_KIND:
+        return result, None
+    return result, package
+
+
+def context_package_supports_node(package: dict[str, Any] | None, node: dict[str, Any] | None) -> bool:
+    if package is None or node is None:
+        return False
+    memory_id = node.get("memory_id")
+    if not isinstance(memory_id, str) or not memory_id:
+        return False
+    answerability = package.get("answerability")
+    if not isinstance(answerability, dict) or answerability.get("status") != "supported":
+        return False
+    hits = package.get("hits")
+    if not isinstance(hits, list):
+        return False
+    for hit in hits:
+        if not isinstance(hit, dict) or hit.get("memory_id") != memory_id:
+            continue
+        hit_answerability = hit.get("answerability")
+        query_support = hit.get("query_support")
+        return bool(
+            hit.get("active_current") is True
+            and isinstance(hit_answerability, dict)
+            and hit_answerability.get("status") == "supported"
+            and isinstance(query_support, dict)
+            and query_support.get("status") == "supported"
+            and isinstance(hit.get("summary_drill_paths"), list)
+            and hit["summary_drill_paths"]
+            and isinstance(hit.get("evidence_drill_paths"), list)
+            and hit["evidence_drill_paths"]
+        )
+    return False
+
+
+def score_consolidation_expectations(
+    case: dict[str, Any],
+    memory_repo: Path,
+    nodes: list[dict[str, Any]],
+    command_outputs: list[CommandResult],
+) -> Counter:
+    score = Counter()
+    for expected in case.get("expected_consolidations") or []:
+        if not isinstance(expected, dict):
+            raise SystemExit("expected_consolidations entries must be objects")
+        node = consolidation_primary_node(nodes, expected)
+
+        score["duplicate_cases"] += 1
+        score["duplicate_hits"] += int(node is not None)
+
+        score["support_cases"] += 1
+        score["support_hits"] += int(support_merge_hit(node, expected))
+
+        score["evidence_cases"] += 1
+        score["evidence_hits"] += int(node is not None and evidence_retained(memory_repo, node, expected))
+
+        query = str(expected.get("recall_query") or expected.get("text") or "").strip()
+        if query:
+            result, package = load_context_package(memory_repo, query)
+            command_outputs.append(result)
+            score["recall_cases"] += 1
+            score["recall_hits"] += int(context_package_supports_node(package, node))
+    return score
 
 
 def natural_candidate_text_sha256(text: str) -> str:
@@ -947,6 +1087,7 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         if apply_result.returncode != 0:
             unexpected_update_failure = True
         nodes = load_nodes(memory_repo)
+    consolidation_quality = score_consolidation_expectations(case, memory_repo, nodes, command_outputs)
     leaked = privacy_leaked(case, command_outputs, memory_repo)
     induction_decision_quality = score_induction_review_decisions(memory_repo, nodes, case)
 
@@ -992,6 +1133,14 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
         review_hits=natural_quality["review_hits"],
         noise_cases=natural_quality["noise_cases"],
         noise_hits=natural_quality["noise_hits"],
+        consolidated_duplicate_cases=consolidation_quality["duplicate_cases"],
+        consolidated_duplicate_hits=consolidation_quality["duplicate_hits"],
+        consolidated_support_cases=consolidation_quality["support_cases"],
+        consolidated_support_hits=consolidation_quality["support_hits"],
+        consolidated_evidence_cases=consolidation_quality["evidence_cases"],
+        consolidated_evidence_hits=consolidation_quality["evidence_hits"],
+        post_consolidation_recall_cases=consolidation_quality["recall_cases"],
+        post_consolidation_recall_hits=consolidation_quality["recall_hits"],
         automatic_node_count=sum(1 for node in nodes if node.get("source") == "automatic"),
     )
     if case.get("expected_redaction") is True:
@@ -1052,6 +1201,10 @@ def score_case(case: dict[str, Any], run_root: Path, setup_script: Path) -> Case
             score.induction_hits == score.induction_cases,
             score.layer_hits == score.layer_cases,
             score.evidence_hits == score.evidence_cases,
+            score.consolidated_duplicate_hits == score.consolidated_duplicate_cases,
+            score.consolidated_support_hits == score.consolidated_support_cases,
+            score.consolidated_evidence_hits == score.consolidated_evidence_cases,
+            score.post_consolidation_recall_hits == score.post_consolidation_recall_cases,
             score.source_ref_hits == score.source_ref_cases,
             score.lifecycle_hits == score.lifecycle_cases,
             score.memory_id_provenance_hits == score.memory_id_provenance_cases,
@@ -1174,6 +1327,14 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         totals["layer_hits"] += score.layer_hits
         totals["evidence_cases"] += score.evidence_cases
         totals["evidence_hits"] += score.evidence_hits
+        totals["consolidated_duplicate_cases"] += score.consolidated_duplicate_cases
+        totals["consolidated_duplicate_hits"] += score.consolidated_duplicate_hits
+        totals["consolidated_support_cases"] += score.consolidated_support_cases
+        totals["consolidated_support_hits"] += score.consolidated_support_hits
+        totals["consolidated_evidence_cases"] += score.consolidated_evidence_cases
+        totals["consolidated_evidence_hits"] += score.consolidated_evidence_hits
+        totals["post_consolidation_recall_cases"] += score.post_consolidation_recall_cases
+        totals["post_consolidation_recall_hits"] += score.post_consolidation_recall_hits
         totals["source_ref_cases"] += score.source_ref_cases
         totals["source_ref_hits"] += score.source_ref_hits
         totals["lifecycle_cases"] += score.lifecycle_cases
@@ -1248,6 +1409,30 @@ def build_report(cases: list[dict[str, Any]], scores: list[CaseScore], fingerpri
         "conflict_review_rate": ratio(
             totals["conflict_review_hits"],
             totals["conflict_review_cases"],
+        ),
+        "contradiction_review_routing_rate": ratio(
+            totals["conflict_review_hits"],
+            totals["conflict_review_cases"],
+        ),
+        "scope_shift_review_routing_rate": ratio(
+            totals["scope_change_review_hits"],
+            totals["scope_change_review_cases"],
+        ),
+        "consolidated_duplicate_suppression_rate": ratio(
+            totals["consolidated_duplicate_hits"],
+            totals["consolidated_duplicate_cases"],
+        ),
+        "consolidated_support_merge_rate": ratio(
+            totals["consolidated_support_hits"],
+            totals["consolidated_support_cases"],
+        ),
+        "consolidated_evidence_retention_rate": ratio(
+            totals["consolidated_evidence_hits"],
+            totals["consolidated_evidence_cases"],
+        ),
+        "post_consolidation_recall_at_5": ratio(
+            totals["post_consolidation_recall_hits"],
+            totals["post_consolidation_recall_cases"],
         ),
         "cross_project_generalization_rate": ratio(
             totals["cross_project_generalization_hits"],

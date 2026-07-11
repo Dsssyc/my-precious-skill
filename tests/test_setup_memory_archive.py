@@ -46,9 +46,13 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertTrue((target / "AGENTS.md").exists())
             self.assertTrue((target / "config/projects.jsonl").exists())
             self.assertTrue((target / "tools/search_memory.py").exists())
+            self.assertTrue((target / "tools/resolve_memory_source.py").exists())
             self.assertTrue((target / "tools/update_memory_archive.py").exists())
+            self.assertTrue((target / "tools/capture_explicit_memory.py").exists())
             self.assertTrue((target / "tools/run_memory_updates.py").exists())
             self.assertTrue((target / "tools/render_scheduler.py").exists())
+            self.assertTrue((target / "tools/audit_publish_readiness.py").exists())
+            self.assertTrue((target / "tools/repair_publish_surfaces.py").exists())
             self.assertTrue((target / "tools/sync_memory_archive.py").exists())
             self.assertTrue((target / "schemas/session_summary.schema.json").exists())
             self.assertIn("Archive ready:", result.stdout)
@@ -310,6 +314,91 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             finally:
                 module.TEMPLATE_DIR = old_template
 
+    def test_refresh_tools_repairs_search_tool_without_mutating_archive_data(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            protected_files = {
+                "INDEX.md": "# User archive index\n",
+                "config/projects.jsonl": '{"project":"user-owned"}\n',
+                "index/memories.jsonl": '{"memory_id":"mem_user_owned","text":"user-owned memory"}\n',
+                "sessions/2026/07/09/session/summary.md": "# User summary\n",
+                "daily/2026/2026-07-09.md": "# User daily\n",
+            }
+            for relative, content in protected_files.items():
+                path = target / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+
+            stale_search = "import json\nprint(json.dumps({'report_kind': 'legacy_search_results'}))\n"
+            (target / "tools/search_memory.py").write_text(stale_search, encoding="utf-8")
+            before = {relative: (target / relative).read_text(encoding="utf-8") for relative in protected_files}
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--refresh-tools",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Tool files refreshed:", result.stdout)
+            self.assertNotEqual((target / "tools/search_memory.py").read_text(encoding="utf-8"), stale_search)
+            for relative, content in before.items():
+                self.assertEqual((target / relative).read_text(encoding="utf-8"), content)
+
+    def test_refresh_tools_refuses_symlinked_tool_target_outside_archive(self):
+        script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            target = root / "agent-memory"
+            outside_tool = root / "outside-search.py"
+            subprocess.run(
+                [sys.executable, str(script), "--path", str(target), "--mode", "local", "--skip-config"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            outside_tool.write_text("outside stays unchanged\n", encoding="utf-8")
+            (target / "tools/search_memory.py").unlink()
+            (target / "tools/search_memory.py").symlink_to(outside_tool)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--path",
+                    str(target),
+                    "--refresh-tools",
+                    "--skip-config",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing to write unsafe tool path:", result.stdout + result.stderr)
+            self.assertEqual(outside_tool.read_text(encoding="utf-8"), "outside stays unchanged\n")
+
     def test_render_scheduler_generates_reviewable_launchd_plist(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -487,7 +576,13 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn(str(target.resolve()), prompt)
             self.assertIn("--allow-redacted-secrets", prompt)
             self.assertIn("tools/sync_memory_archive.py --push", prompt)
+            self.assertIn("tools/sync_memory_archive.py --dry-run --push", prompt)
+            self.assertIn("python tools/audit_memory_archive.py", prompt)
+            self.assertIn("python tools/audit_publish_readiness.py", prompt)
             self.assertIn("python tools/search_memory.py --health-check", prompt)
+            self.assertIn("tools/repair_publish_surfaces.py --apply", prompt)
+            self.assertIn("After any repair, rerun the complete publish chain before publishing", prompt)
+            self.assertIn("fail-closed", prompt)
             self.assertNotIn("python tools/search_memory.py memory", prompt)
             self.assertIn("Daily record content contract", prompt)
             self.assertIn("daily/YYYY/YYYY-MM-DD.md", prompt)
@@ -503,6 +598,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Errors or blockers with actionable next step", prompt)
             self.assertIn("Keep automation run notes separate from generated daily archive files", prompt)
             self.assertIn("Do not hand-stage files", prompt)
+            self.assertIn("Do not use raw git add, git commit, or git push as the archive publish path", prompt)
 
     def test_render_scheduler_refuses_global_schedule_without_runner(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

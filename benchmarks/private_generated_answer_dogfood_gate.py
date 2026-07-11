@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 PUBLIC_REPO = Path(__file__).resolve().parents[1]
@@ -180,27 +179,48 @@ def run_json_to_file(name: str, command: list[str], output: Path) -> dict[str, A
     return read_json_file(output)
 
 
-def cleanup_success_artifacts(repo: Path, case_output: Path, work_dir: Path) -> bool:
+def remove_empty_ancestors(path: Path, stop: Path) -> None:
+    current = path.resolve(strict=False)
+    stop_resolved = stop.resolve(strict=False)
+    while current != stop_resolved and current.is_relative_to(stop_resolved):
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def cleanup_success_artifacts(
+    repo: Path,
+    case_output: Path,
+    work_dir: Path,
+    *,
+    generated_paths: Iterable[Path] = (),
+) -> bool:
+    generated_path_list = list(generated_paths)
     try:
-        if case_output.exists():
-            case_output.unlink()
+        for path in [case_output, *generated_path_list]:
+            if path.exists():
+                path.unlink()
         tmp_root = repo.resolve() / ".tmp"
-        parent = case_output.parent
-        while parent.resolve(strict=False).is_relative_to(tmp_root) and parent != tmp_root:
-            try:
-                parent.rmdir()
-            except OSError:
-                break
-            parent = parent.parent
+        remove_empty_ancestors(case_output.parent, tmp_root)
         if tmp_root.exists():
             try:
                 tmp_root.rmdir()
             except OSError:
                 pass
-        shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir_resolved = work_dir.resolve(strict=False)
+        for path in generated_path_list:
+            parent = path.parent
+            if parent.resolve(strict=False).is_relative_to(work_dir_resolved):
+                remove_empty_ancestors(parent, work_dir_resolved)
+        try:
+            work_dir.rmdir()
+        except OSError:
+            pass
     except OSError:
         return False
-    return not case_output.exists() and not work_dir.exists()
+    return not case_output.exists() and all(not path.exists() for path in generated_path_list)
 
 
 def readiness_dimension_statuses(report: dict[str, Any]) -> dict[str, str]:
@@ -240,6 +260,7 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     answer_report_path = work_dir / "answer_report.json"
     answer_details = work_dir / "details.jsonl"
     shadow_report_path = work_dir / "shadow_report.json"
+    generated_artifacts = (answer_records, answer_report_path, answer_details, shadow_report_path)
 
     python = args.python
     try:
@@ -328,6 +349,26 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 "answer_scorable_case_rate=1.0",
                 "--fail-under",
                 "abstention_accuracy=1.0",
+                "--fail-under",
+                "answer_handoff_present_rate=1.0",
+                "--fail-under",
+                "answer_handoff_support_coverage_rate=1.0",
+                "--fail-under",
+                "answer_handoff_supported_case_count=1",
+                "--fail-under",
+                "answer_handoff_abstain_case_count=1",
+                "--fail-under",
+                "context_package_handoff_present_rate=1.0",
+                "--fail-under",
+                "context_package_parse_success_rate=1.0",
+                "--fail-under",
+                "context_package_support_coverage_rate=1.0",
+                "--fail-under",
+                "context_package_abstention_accuracy=1.0",
+                "--fail-under",
+                "context_package_supported_case_count=1",
+                "--fail-under",
+                "context_package_abstain_case_count=1",
                 "--fail-over",
                 "privacy_leak_count=0",
                 "--fail-over",
@@ -340,6 +381,12 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 "unknown_answer_count=0",
                 "--fail-over",
                 "positive_without_reference_answer=0",
+                "--fail-over",
+                "unsupported_claim_count=0",
+                "--fail-over",
+                "inactive_memory_answer_count=0",
+                "--fail-over",
+                "context_package_parse_failure_count=0",
             ],
             answer_report_path,
         )
@@ -388,10 +435,20 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             }
         )
         if args.cleanup_on_failure:
-            report["cleanup_success"] = cleanup_success_artifacts(repo, case_output, work_dir)
+            report["cleanup_success"] = cleanup_success_artifacts(
+                repo,
+                case_output,
+                work_dir,
+                generated_paths=generated_artifacts,
+            )
         return report, 1
 
-    cleanup_success = cleanup_success_artifacts(repo, case_output, work_dir)
+    cleanup_success = cleanup_success_artifacts(
+        repo,
+        case_output,
+        work_dir,
+        generated_paths=generated_artifacts,
+    )
     final_preflight = preflight_report(repo, case_output)
     report.update(
         {
@@ -434,6 +491,19 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                     "answers_written",
                     "memory_answer_count",
                     "abstention_answer_count",
+                    "answer_handoff_supported_case_count",
+                    "answer_handoff_abstain_case_count",
+                    "answer_handoff_support_coverage_rate",
+                    "context_package_parse_success_count",
+                    "context_package_parse_failure_count",
+                    "context_package_supported_case_count",
+                    "context_package_abstain_case_count",
+                    "context_package_support_coverage_rate",
+                    "context_package_abstention_accuracy",
+                    "context_package_inactive_rejection_count",
+                    "unsupported_claim_count",
+                    "inactive_memory_answer_count",
+                    "privacy_leak_count",
                     "no_hit_count",
                     "unsupported_hit_count",
                     "source_benchmarks",
@@ -450,6 +520,20 @@ def run_gate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                     "answer_scorable_case_rate",
                     "abstention_accuracy",
                     "answer_normalized_match_rate",
+                    "answer_handoff_present_rate",
+                    "answer_handoff_support_coverage_rate",
+                    "answer_handoff_supported_case_count",
+                    "answer_handoff_abstain_case_count",
+                    "context_package_handoff_present_rate",
+                    "context_package_parse_success_rate",
+                    "context_package_support_coverage_rate",
+                    "context_package_abstention_accuracy",
+                    "context_package_supported_case_count",
+                    "context_package_abstain_case_count",
+                    "context_package_parse_failure_count",
+                    "context_package_inactive_rejection_count",
+                    "unsupported_claim_count",
+                    "inactive_memory_answer_count",
                     "privacy_leak_count",
                     "failed_case_count",
                     "missing_answer_count",

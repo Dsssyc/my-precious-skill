@@ -51,10 +51,47 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
                     {
                         "case_id": "positive_case",
                         "generated_answer": "Use layered recall for durable preferences.",
+                        "answer_handoff": {
+                            "contract_version": 1,
+                            "abstained": False,
+                            "active_memory_only": True,
+                            "support_refs": [
+                                {
+                                    "memory_id": "positive_memory",
+                                    "summary_paths": ["sessions/synthetic/positive/summary.md"],
+                                    "evidence_refs": ["sessions/synthetic/positive/evidence.md#ev_001"],
+                                }
+                            ],
+                            "unsupported_claim_count": 0,
+                            "inactive_memory_answer_count": 0,
+                            "privacy_leak_count": 0,
+                            "context_package": {
+                                "report_kind": "memory_recall_context_package",
+                                "parse_success": True,
+                                "answerability_status": "supported",
+                                "answerability_reason": "active_current_memory_support",
+                            },
+                        },
                     },
                     {
                         "case_id": "abstain_case",
                         "generated_answer": "There is not enough information in memory to answer.",
+                        "answer_handoff": {
+                            "contract_version": 1,
+                            "abstained": True,
+                            "abstain_reason": "no_supported_memory_hit",
+                            "active_memory_only": True,
+                            "support_refs": [],
+                            "unsupported_claim_count": 0,
+                            "inactive_memory_answer_count": 0,
+                            "privacy_leak_count": 0,
+                            "context_package": {
+                                "report_kind": "memory_recall_context_package",
+                                "parse_success": True,
+                                "answerability_status": "unsupported",
+                                "answerability_reason": "no_recall_hits",
+                            },
+                        },
                     },
                 ],
             )
@@ -98,6 +135,20 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
             self.assertEqual(payload["answer_exact_match_rate"], 1.0)
             self.assertEqual(payload["answer_normalized_match_rate"], 1.0)
             self.assertEqual(payload["abstention_accuracy"], 1.0)
+            self.assertEqual(payload["answer_handoff_present_rate"], 1.0)
+            self.assertEqual(payload["answer_handoff_support_coverage_rate"], 1.0)
+            self.assertEqual(payload["answer_handoff_supported_case_count"], 1)
+            self.assertEqual(payload["answer_handoff_abstain_case_count"], 1)
+            self.assertEqual(payload["context_package_handoff_present_rate"], 1.0)
+            self.assertEqual(payload["context_package_parse_success_rate"], 1.0)
+            self.assertEqual(payload["context_package_support_coverage_rate"], 1.0)
+            self.assertEqual(payload["context_package_abstention_accuracy"], 1.0)
+            self.assertEqual(payload["context_package_supported_case_count"], 1)
+            self.assertEqual(payload["context_package_abstain_case_count"], 1)
+            self.assertEqual(payload["context_package_parse_failure_count"], 0)
+            self.assertEqual(payload["context_package_inactive_rejection_count"], 0)
+            self.assertEqual(payload["unsupported_claim_count"], 0)
+            self.assertEqual(payload["inactive_memory_answer_count"], 0)
             self.assertEqual(payload["privacy_leak_count"], 0)
             self.assertEqual(payload["failed_case_count"], 0)
             self.assertTrue(payload["privacy"]["aggregate_only"])
@@ -147,19 +198,158 @@ class GeneratedAnswerBenchmarkTests(unittest.TestCase):
 
         payload = json.loads(result.stdout)
         self.assertEqual(payload["report_kind"], "generated_answer_benchmark")
-        self.assertEqual(payload["cases"], 3)
-        self.assertEqual(payload["positive_cases"], 2)
-        self.assertEqual(payload["abstain_cases"], 1)
-        self.assertEqual(payload["reference_answer_cases"], 3)
-        self.assertEqual(payload["answer_scorable_cases"], 3)
+        self.assertEqual(payload["cases"], 5)
+        self.assertEqual(payload["positive_cases"], 3)
+        self.assertEqual(payload["abstain_cases"], 2)
+        self.assertEqual(payload["reference_answer_cases"], 5)
+        self.assertEqual(payload["answer_scorable_cases"], 5)
         self.assertEqual(payload["positive_without_reference_answer"], 0)
         self.assertEqual(payload["answer_scorable_case_rate"], 1.0)
-        self.assertEqual(payload["source_benchmarks"], {"MyPreciousGeneratedAnswerSynthetic": 3})
-        self.assertEqual(payload["case_origins"], {"packaged_generated_answer_fixture": 3})
+        self.assertEqual(payload["source_benchmarks"], {"MyPreciousGeneratedAnswerSynthetic": 5})
+        self.assertEqual(payload["case_origins"], {"packaged_generated_answer_fixture": 5})
         self.assertEqual(payload["case_pass_rate"], 1.0)
         self.assertEqual(payload["answer_normalized_match_rate"], 1.0)
         self.assertEqual(payload["abstention_accuracy"], 1.0)
+        self.assertEqual(payload["answer_handoff_present_rate"], 1.0)
+        self.assertEqual(payload["answer_handoff_support_coverage_rate"], 1.0)
+        self.assertEqual(payload["answer_handoff_supported_case_count"], 3)
+        self.assertEqual(payload["answer_handoff_abstain_case_count"], 2)
+        self.assertEqual(payload["context_package_handoff_present_rate"], 1.0)
+        self.assertEqual(payload["context_package_parse_success_rate"], 1.0)
+        self.assertEqual(payload["context_package_support_coverage_rate"], 1.0)
+        self.assertEqual(payload["context_package_abstention_accuracy"], 1.0)
+        self.assertEqual(payload["context_package_supported_case_count"], 3)
+        self.assertEqual(payload["context_package_abstain_case_count"], 2)
+        self.assertEqual(payload["context_package_parse_failure_count"], 0)
+        self.assertEqual(payload["context_package_inactive_rejection_count"], 1)
+        self.assertEqual(payload["unsupported_claim_count"], 0)
+        self.assertEqual(payload["inactive_memory_answer_count"], 0)
         self.assertEqual(payload["privacy_leak_count"], 0)
+
+    def test_handoff_metrics_fail_when_support_refs_are_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cases = self.write_jsonl(
+                root,
+                "cases.jsonl",
+                [
+                    {
+                        "case_id": "positive_case",
+                        "query": "QUERY SHOULD STAY PRIVATE",
+                        "category": "answer_positive",
+                        "reference_answer": "Keep answers grounded.",
+                    }
+                ],
+            )
+            answers = self.write_jsonl(
+                root,
+                "answers.jsonl",
+                [
+                    {
+                        "case_id": "positive_case",
+                        "generated_answer": "Keep answers grounded.",
+                        "answer_handoff": {
+                            "contract_version": 1,
+                            "abstained": False,
+                            "active_memory_only": True,
+                            "support_refs": [],
+                            "unsupported_claim_count": 0,
+                            "inactive_memory_answer_count": 0,
+                            "privacy_leak_count": 0,
+                        },
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--cases",
+                    str(cases),
+                    "--answers",
+                    str(answers),
+                    "--fail-under",
+                    "answer_handoff_support_coverage_rate=1.0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["answer_handoff_present_rate"], 1.0)
+            self.assertEqual(payload["answer_handoff_support_coverage_rate"], 0.0)
+            self.assertEqual(payload["answer_handoff_supported_case_count"], 0)
+            self.assertIn("answer_handoff_support_coverage_rate", result.stderr)
+
+    def test_handoff_privacy_scan_rejects_raw_refs_and_local_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cases = self.write_jsonl(
+                root,
+                "cases.jsonl",
+                [
+                    {
+                        "case_id": "positive_case",
+                        "query": "QUERY SHOULD STAY PRIVATE",
+                        "category": "answer_positive",
+                        "reference_answer": "Keep answers grounded.",
+                    }
+                ],
+            )
+            answers = self.write_jsonl(
+                root,
+                "answers.jsonl",
+                [
+                    {
+                        "case_id": "positive_case",
+                        "generated_answer": "Keep answers grounded.",
+                        "answer_handoff": {
+                            "contract_version": 1,
+                            "abstained": False,
+                            "active_memory_only": True,
+                            "support_refs": [
+                                {
+                                    "memory_id": "positive_memory",
+                                    "summary_paths": ["/Users/private/archive/summary.md"],
+                                    "evidence_refs": ["sessions/synthetic/positive/evidence.md#ev_001"],
+                                    "raw_refs": ["records/private.jsonl#message:1"],
+                                }
+                            ],
+                            "unsupported_claim_count": 0,
+                            "inactive_memory_answer_count": 0,
+                            "privacy_leak_count": 0,
+                        },
+                    }
+                ],
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--cases",
+                    str(cases),
+                    "--answers",
+                    str(answers),
+                    "--fail-over",
+                    "privacy_leak_count=0",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["privacy_leak_count"], 1)
+            rendered = result.stdout + result.stderr
+            self.assertNotIn("/Users/private/archive/summary.md", rendered)
+            self.assertNotIn("records/private.jsonl#message:1", rendered)
 
     def test_reports_failures_without_rendering_sensitive_answer_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:

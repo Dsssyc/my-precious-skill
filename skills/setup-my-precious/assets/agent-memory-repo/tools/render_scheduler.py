@@ -188,6 +188,23 @@ def agent_native_prompt(
     if allow_redacted_secrets:
         update_command.append("--allow-redacted-secrets")
 
+    archive_audit_command = ["python", "tools/audit_memory_archive.py", "--memory-repo", str(memory_repo)]
+    publish_readiness_command = [
+        "python",
+        "tools/audit_publish_readiness.py",
+        "--memory-repo",
+        str(memory_repo),
+    ]
+    repair_command = [
+        "python",
+        "tools/repair_publish_surfaces.py",
+        "--memory-repo",
+        str(memory_repo),
+        "--apply",
+    ]
+    sync_dry_run_command = ["python", "tools/sync_memory_archive.py", "--dry-run"]
+    if push:
+        sync_dry_run_command.append("--push")
     sync_command = ["python", "tools/sync_memory_archive.py"]
     if push:
         sync_command.append("--push")
@@ -201,14 +218,30 @@ def agent_native_prompt(
             "",
             "Run:",
             shlex.join(update_command),
+            "",
+            "Then run the publish-readiness checks from the same repository:",
+            shlex.join(archive_audit_command),
+            shlex.join(publish_readiness_command),
+            "",
+            "If publish readiness fails only because repairable generated publish surfaces are noisy, run:",
+            shlex.join(repair_command),
+            "",
+            "After any repair, rerun the complete publish chain before publishing:",
+            shlex.join(archive_audit_command),
+            shlex.join(publish_readiness_command),
             "python tools/search_memory.py --health-check",
+            shlex.join(sync_dry_run_command),
+            "",
+            "If the sync dry-run passes and reports expected archive changes, run:",
             shlex.join(sync_command),
+            "If the sync dry-run reports no expected archive changes, report that the archive is already current and do not create an empty commit.",
             "",
             "Daily record content contract:",
             "- Treat generated daily/YYYY/YYYY-MM-DD.md files as durable memory indexes, not automation run logs.",
             "- Daily records should contain only durable session summaries, durable decisions, and actual unresolved tasks already extracted by the updater.",
             "- Do not preserve command progress, dry-run/live-run status, permission or sandbox chatter, raw prompts, AGENTS/environment/policy blocks, raw source paths, raw refs, full queries, original secret values, or generic process narration as daily content.",
             "- If generated daily files or indexed summaries contain that noise, do not push. Report only the archive-relative path and concise aggregate reason; do not quote private content.",
+            "- If publish readiness blocks on structured metadata-derived noise, run `python tools/repair_publish_surfaces.py --apply`; it is fail-closed for malformed metadata or ambiguous scalar text. Rerun readiness/sync after repair, and stop if the helper reports `blocked`.",
             "",
             "Automation run note contract:",
             "- Keep automation run notes separate from generated daily archive files.",
@@ -219,6 +252,7 @@ def agent_native_prompt(
             "Do not upload raw transcripts.",
             "Do not report or reproduce original secret values.",
             "Do not hand-stage files; use tools/sync_memory_archive.py for commit and push safety.",
+            "Do not use raw git add, git commit, or git push as the archive publish path.",
             "If any command refuses to continue, stop and report the failing command and summarized error only.",
             "",
         ]

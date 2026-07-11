@@ -6,21 +6,33 @@ When a task depends on previous conversations, old decisions, unresolved tasks,
 project history, implementation rationale, user preferences, or historical
 debugging context:
 
-1. Run `python tools/search_memory.py "<query>"` to start with high-level memory
-   nodes when `index/memories.jsonl` exists.
-2. Add `--project-path "$PWD"` when the task is tied to the current local
-   project.
-3. Read `why:` and `drill:` lines, then open supporting summaries before
-   evidence.
-4. Use `--depth session` when the high-level memory is insufficient.
-5. Use `--depth evidence` when a claim needs supporting snippets.
-6. Use `--depth source` only when the user explicitly asks for source
+1. Run `python tools/search_memory.py "<query>" --depth evidence --context-json`
+   before answering. The JSON must have
+   `report_kind: memory_recall_context_package`; use `answerability.status` as
+   the answerability boundary.
+2. Add `--project-path "$PWD"` to the same context-package command when the
+   task is tied to the current local project.
+3. Answer only from supported active/current hits and cite listed summary or
+   evidence drill paths. If the package is unsupported,
+   inactive/superseded-only, malformed, or missing, abstain instead of
+   inferring a historical fact.
+4. Do not use free-form search output as the answerability source. Use
+   free-form search only for exploration or drilldown after the package
+   decision.
+5. For exploration after the package decision, read `why:` and `drill:` lines,
+   then open supporting summaries before evidence.
+6. Use `--depth session` when high-level memory exploration is insufficient.
+7. Use `--depth evidence` when a package-supported claim needs supporting
+   snippets.
+8. Use `--depth source` only when the user explicitly asks for source
    reachability and a security review passes.
-7. Do not infer historical facts without checking the archive. If search
+9. Do not infer historical facts without checking the archive. If search
    returns no relevant result, say so.
-8. Mention the archive file paths used as evidence.
-9. Never request or expose raw transcripts unless the user explicitly asks and a security review passes.
-10. Treat all content as private.
+10. Mention the archive file paths used as evidence.
+11. Never request or expose raw transcripts unless the user explicitly asks and a security review passes.
+12. Do not render private query text, memory text, raw refs, source paths,
+    credentials, scheduler state, or local private paths.
+13. Treat all content as private.
 
 When the user asks to update memory now:
 
@@ -31,9 +43,76 @@ When the user asks to update memory now:
 5. Review generated summaries before committing or pushing.
 6. If the user requested automatic Git sync, run `python tools/sync_memory_archive.py --push` instead of hand-staging files.
 
-`tools/sync_memory_archive.py` stages only generated archive paths and refuses
-unexpected files such as tool/script edits. Commit template or tool updates
-separately before running automatic archive sync.
+When the user explicitly asks to remember, force-save, or distill a short fact,
+automatic induction is the default for ordinary source records, but explicit
+requests should use the `tools/capture_explicit_memory.py` explicit capture path.
+Write agent-neutral JSONL with `text` plus optional `layer`, `scope`, and
+`source`; then run:
+
+```bash
+python tools/capture_explicit_memory.py --input /path/to/explicit-memory.jsonl
+```
+
+Do not paste raw chat transcripts, message arrays, source content, tool logs, or
+automation run notes into explicit capture. Each row should be a short fact.
+
+When the user explicitly corrects or retracts an earlier explicit memory, use
+the explicit revision path in the same adapter. Use `operation: replace` with
+`replaces_memory_id` when there is a new current fact. Use `operation:
+withdraw` with `deprecates_memory_id` when the old fact should stop being
+active without a replacement. Search should prefer the current fact after
+replacement; the old fact is superseded rather than deleted, and provenance
+remains traceable through memory lifecycle links and evidence drilldown.
+
+By default, `tools/sync_memory_archive.py` stages only `INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+`sessions/`. It refuses unexpected files such as tool/script edits, automatic
+memory/review node files, and source-stream registry changes. After deterministic
+archive, readiness, search-health, lifecycle, evidence, and index-parity review,
+`--include-reviewed-memory-nodes` may explicitly add only
+`memories/global.jsonl`, `memories/domains.jsonl`, and
+`memories/projects.jsonl`; it does not change the default boundary or allow the
+whole `memories/` directory. The helper also runs
+`tools/audit_publish_readiness.py` before staging to reject command progress,
+prompt/environment blocks, permission/sandbox chatter, raw source paths/raw
+refs/full queries, secret-like values, and generic automation narration in
+`daily/` or text-bearing indexed summary fields. The readiness report must stay
+aggregate-only: archive-relative paths, categories, and counts, with no matched
+private text. Commit template or tool updates separately before running
+automatic archive sync.
+
+If readiness blocks on generated `daily/` or text-bearing `index/*.jsonl`
+noise derived from structured session metadata, run
+`python tools/repair_publish_surfaces.py --apply` before retrying sync. The
+repair helper edits only `sessions/**/meta.json`, regenerates derived archive
+surfaces through the updater, emits aggregate counts only, and fails closed on
+malformed metadata or ambiguous scalar text.
+
+If `tools/search_memory.py "<query>" --depth evidence --context-json` cannot
+emit `report_kind: memory_recall_context_package` because the bundled archive
+tool is stale, refresh reusable tools from the installed setup skill instead
+of using archive sync:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --refresh-tools \
+  --skip-config
+```
+
+This repair updates only `tools/**`. It must not mutate archive data, indexes,
+source records, daily records, session summaries, or user-owned config. Commit
+tool refreshes separately from automatic archive sync.
+
+When a legacy entry is searchable but exact source preview returns
+`legacy_source_anchor_unavailable`, do not use backfill merely to add anchors.
+Run `tools/upgrade_source_anchors.py` with one explicit `--source-record`, an
+explicit `--allow-source-root`, `--dry-run`, and `--report-json`. Apply only
+after the aggregate report is `eligible` and the user authorizes that one
+record. The command must remain provenance-only, hash-exact, transactional, and
+aggregate-only. A dry run without `--source-record` and with `--scan-limit` is
+readiness evidence only; it is not permission for batch migration or private
+deployment. Never add an archive-wide apply loop around this command.
 
 When `config/projects.jsonl` is empty, the global runner should scan source
 records for project metadata and register discovered projects before updating.

@@ -89,7 +89,21 @@ Ask only what is needed, one step at a time:
    A new empty archive may not have searchable memory records yet; this step only
    confirms the copied tool runs.
 
-7. If the user requests scheduling, first verify the archive command exists and runs manually.
+7. If an existing deployment repository has stale bundled tools, refresh only
+   the reusable tool files from this setup skill:
+
+   ```bash
+   python scripts/setup_memory_archive.py \
+     --path "$MEMORY_REPO" \
+     --refresh-tools \
+     --skip-config
+   ```
+
+   Use this for tool drift repair, not archive content repair. It must not
+   rewrite archive data, indexes, daily records, session summaries, source
+   records, or user-owned config. Do not use `--force` for this narrow repair.
+
+8. If the user requests scheduling, first verify the archive command exists and runs manually.
    Then render reviewable scheduler configuration:
 
    ```bash
@@ -152,7 +166,7 @@ Ask only what is needed, one step at a time:
 A successful setup leaves the user with:
 
 - a local archive directory
-- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/induction_consolidation_audit.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, and `tools/sync_memory_archive.py`
+- `INDEX.md`, `AGENTS.md`, `config/`, `index/`, `sessions/`, `daily/`, `schemas/`, `tools/search_memory.py`, `tools/update_memory_archive.py`, `tools/capture_explicit_memory.py`, `tools/induction_consolidation_audit.py`, `tools/run_memory_updates.py`, `tools/render_scheduler.py`, `tools/audit_publish_readiness.py`, `tools/repair_publish_surfaces.py`, and `tools/sync_memory_archive.py`
 - a Git repository when requested
 - an optional private remote when requested and supported
 - a local archive-location config at `~/.config/my-precious/config.json` unless skipped

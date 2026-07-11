@@ -44,6 +44,73 @@ def write_memory_node_provenance(memory_repo, slug, quote_id="ev_001"):
 
 
 class AuditMemoryArchiveTests(unittest.TestCase):
+    def test_audit_accepts_versioned_source_map_anchor(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+        audit_script = Path("templates/agent-memory-repo/tools/audit_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            entry_rel = "sessions/2026/07/11/versioned-source-anchor"
+            entry = memory_repo / entry_rel
+            entry.mkdir(parents=True)
+            (entry / "summary.md").write_text("Versioned source anchor summary.\n", encoding="utf-8")
+            (entry / "evidence.md").write_text("ev_002: Versioned source anchor evidence.\n", encoding="utf-8")
+            source_map_rel = f"{entry_rel}/source-map.json"
+            (entry / "source-map.json").write_text(
+                json.dumps(
+                    {
+                        "source_record": str(root / "source-records/session.jsonl"),
+                        "source_record_sha256": "b" * 64,
+                        "summary_path": f"{entry_rel}/summary.md",
+                        "evidence_path": f"{entry_rel}/evidence.md",
+                        "source_map_path": source_map_rel,
+                        "source_anchor_version": 1,
+                        "evidence_source_anchors": [
+                            {
+                                "quote_id": "ev_002",
+                                "source_anchor_id": "srca_0123456789abcdef",
+                                "line_number": 3,
+                                "event_ordinal": 1,
+                                "event_sha256": "a" * 64,
+                            }
+                        ],
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (memory_repo / "index/memories.jsonl").write_text(
+                json.dumps(
+                    valid_memory_node(
+                        memory_id="mem_versioned_source_anchor",
+                        derived_from=[f"{entry_rel}/summary.md"],
+                        evidence_refs=[{"path": f"{entry_rel}/evidence.md", "quote_id": "ev_002"}],
+                        raw_refs=[{"path": source_map_rel, "anchor": "srca_0123456789abcdef"}],
+                    ),
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(audit_script), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_audit_memory_archive_flags_noise_and_secrets_without_leaking_values(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -313,7 +380,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             entry_dir.mkdir(parents=True)
             (entry_dir / "summary.md").write_text(
                 (
-                    "# Session: 这个skill总结的记忆摘要在/Users/soku/Desktop/agents/agent-memory这个目录下\n"
+                    "# Session: 这个skill总结的记忆摘要在/Users/example/Desktop/agents/agent-memory这个目录下\n"
                     "## Decisions Made\n"
                     "- No decisions were detected automatically.\n"
                     "## Unresolved Tasks\n"
@@ -336,7 +403,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (memory_repo / "index/sessions.jsonl").write_text(
-                '{"title":"# Files mentioned by the user: /Users/soku/.codex/attachments/pasted-text.txt",'
+                '{"title":"# Files mentioned by the user: /Users/example/.codex/attachments/pasted-text.txt",'
                 '"summary_path":"sessions/2026/05/14/weak-index/summary.md"}\n',
                 encoding="utf-8",
             )
@@ -2598,6 +2665,53 @@ class AuditMemoryArchiveTests(unittest.TestCase):
             self.assertIn("category=low_signal", combined)
             self.assertIn("sessions/2026/06/12/wrapper-status/summary.md", combined)
 
+    def test_audit_memory_archive_flags_noisy_daily_without_leaking_content(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            daily_dir = memory_repo / "daily/2026"
+            daily_dir.mkdir(parents=True)
+            private_path = "/Users/example/.codex/sessions/private-source.jsonl"
+            private_query = "How long is my daily commute to work?"
+            raw_ref = "records/private.jsonl#message:42"
+            (daily_dir / "2026-07-01.md").write_text(
+                (
+                    "# Agent Memory Daily Summary: 2026-07-01\n\n"
+                    "## Durable Sessions\n\n"
+                    "- project: [session](sessions/2026/07/01/noisy/summary.md)\n"
+                    "  - Raw prompt: You are Codex and must echo the user request.\n"
+                    f"  - Full query: {private_query}\n"
+                    f"  - raw_refs: {raw_ref}\n"
+                    f"  - Raw source path: {private_path}\n"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            combined = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("daily/2026/2026-07-01.md", combined)
+            self.assertIn("category=daily_contract_noise", combined)
+            self.assertNotIn(private_path, combined)
+            self.assertNotIn(private_query, combined)
+            self.assertNotIn(raw_ref, combined)
+
     def test_audit_memory_archive_flags_incomplete_fragments_and_broken_markdown(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -2663,7 +2777,7 @@ class AuditMemoryArchiveTests(unittest.TestCase):
                     '{"title":"Rule porter dry-run migration preview",'
                     '"summary":"Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration.",'
                     '"reusable_facts":["Decision: use `npx rule-porter --from copilot --to agents-md --dry-run` to preview migration."],'
-                    '"source_record":"/Users/soku/.codex/sessions/rollout.jsonl",'
+                    '"source_record":"/Users/example/.codex/sessions/rollout.jsonl",'
                     '"summary_path":"sessions/2026/05/14/durable-dry-run/summary.md"}\n'
                 ),
                 encoding="utf-8",

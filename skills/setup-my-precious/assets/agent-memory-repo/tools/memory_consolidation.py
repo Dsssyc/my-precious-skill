@@ -10,14 +10,25 @@ MEMORY_REFRESH_PATTERN = re.compile(
     r"(?i)^\s*(?:updated|refresh(?:ed)?|replacement|replace(?:d)?|superseding)\s+fact\s*[:\uFF1A]\s*"
     r"(?P<old>.+?)\s*(?:=>|->|\u2192)\s*(?P<new>.+)$"
 )
+MEMORY_DELETION_PATTERN = re.compile(
+    r"(?i)^\s*(?:delete(?:d)?|remove(?:d)?|retire(?:d)?)\s+fact\s*[:\uFF1A]\s*"
+    r"(?P<old>.+)$"
+)
 MEMORY_DEPRECATION_PATTERN = re.compile(
-    r"(?i)^\s*(?:deprecat(?:e|ed|ing)|delete(?:d)?|remove(?:d)?|retire(?:d)?)\s+fact\s*[:\uFF1A]\s*"
+    r"(?i)^\s*deprecat(?:e|ed|ing)\s+fact\s*[:\uFF1A]\s*"
     r"(?P<old>.+)$"
 )
 
 TOKEN_SYNONYMS = {
     "anchors": "anchor",
+    "citation": "ref",
+    "citations": "ref",
+    "cite": "ref",
+    "cited": "ref",
+    "cites": "ref",
+    "citing": "ref",
     "evidences": "evidence",
+    "keep": "preserve",
     "keeps": "preserve",
     "kept": "preserve",
     "keeping": "preserve",
@@ -27,6 +38,10 @@ TOKEN_SYNONYMS = {
     "references": "ref",
     "reference": "ref",
     "refs": "ref",
+    "recall": "retrieval",
+    "recalled": "retrieval",
+    "recalling": "retrieval",
+    "recalls": "retrieval",
     "retain": "preserve",
     "retained": "preserve",
     "retains": "preserve",
@@ -34,6 +49,7 @@ TOKEN_SYNONYMS = {
     "retrieving": "retrieval",
     "retrieve": "retrieval",
     "retrieved": "retrieval",
+    "retrieves": "retrieval",
     "sources": "source",
 }
 SEMANTIC_STOPWORDS = {
@@ -142,6 +158,14 @@ def parse_memory_deprecation_text(
     text: str,
     reject_text: Callable[[str], bool] | None = None,
 ) -> tuple[str, tuple[str, ...]]:
+    deletion_match = MEMORY_DELETION_PATTERN.match(text)
+    if deletion_match:
+        old_text = normalize_memory_text(deletion_match.group("old"))
+        if not old_text:
+            return text, ()
+        if reject_text and reject_text(old_text):
+            return text, ()
+        return f"Deleted fact: {old_text}", (old_text,)
     match = MEMORY_DEPRECATION_PATTERN.match(text)
     if not match:
         return text, ()

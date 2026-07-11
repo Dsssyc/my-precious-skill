@@ -11,30 +11,53 @@ The conclusion is intentionally narrow: the current benchmark set provides
 repeatable local quality gates for retrieval, layer-path drilldown,
 source-reference reachability, broad lexical noise resistance, stale
 suppression, lifecycle-link reciprocity, abstention, privacy-boundary behavior,
-updater-driven automatic induction on synthetic archives, and end-to-end
-induction-to-recall behavior on synthetic source records, plus explicit
-non-project source stream registry updates on synthetic archives. It is not a direct
-leaderboard score against public long-memory systems such as MemPalace,
-LongMemEval, LoCoMo, Memora, or RULER-style long-context retrieval tests.
+updater-driven automatic induction on synthetic archives, end-to-end
+induction-to-recall behavior on synthetic source records, explicit non-project
+source stream registry updates on synthetic archives, clean-room packaged
+lifecycle setup/update/search/audit with self-maintenance safeguards, and
+deterministic source-grounded answer handoff records, plus agent-facing recall
+context packaging and consumption for supported answer versus abstain
+decisions, including packaged explicit-memory capture/revision/withdrawal
+governance checks, packaged progressive source-drilldown consumption,
+packaged scope arbitration across global/domain/project memory layers, and
+packaged scope-aware answer-handoff consumption. It is
+not a direct leaderboard score
+against public long-memory systems such as MemPalace, LongMemEval, LoCoMo,
+Memora, or RULER-style long-context retrieval tests.
 
 ## V1 Readiness Gate
 
-`benchmarks/v1_readiness_gate.py` is the convergence entrypoint for this
-evaluation. It aggregates existing JSON reports without rendering queries,
-memory text, source paths, raw refs, private probe cases, or forbidden-pattern
-text. The gate requires four packaged synthetic dimensions:
+`benchmarks/v1_readiness_gate.py` is the memory-readiness convergence
+entrypoint for this evaluation. It aggregates existing JSON reports without
+rendering queries, memory text, source paths, raw refs, private probe cases, or
+forbidden-pattern text. The current packaged gate requires five core synthetic
+dimensions:
 
 - layered recall and drilldown;
 - updater-driven automatic induction;
-- end-to-end induction-to-recall; and
-- explicit non-project source stream registry update plus layered recall.
+- end-to-end induction-to-recall;
+- explicit non-project source stream registry update plus layered recall; and
+- clean-room packaged lifecycle setup/update/search/audit
+  (`packaged_lifecycle`).
+
+The current packaged core command,
+`python3 benchmarks/v1_readiness_gate.py --run-packaged`, reports required 5/5.
+The current packaged generated-answer command,
+`python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer`,
+reports required 6/6.
 
 When those required dimensions pass, the gate reports
 `overall_status: core_synthetic_ready`. That status is deliberately bounded: it
 means the core synthetic evidence is green, not that the full
-non-project-boundary v1 target, automatic source discovery, public leaderboard
-parity, generated-answer accuracy, or long-horizon multi-principal governance
-has been proven.
+non-project-boundary v1 target, private archive behavior, automatic source
+discovery, public leaderboard parity, live model answer quality, automatic
+ontology discovery, or long-horizon multi-principal governance has been proven.
+
+Repo release verification is a separate contract. `tools/run_quality_gates.py`
+is the canonical repo-local release gate; it runs skill validation, packaged
+lifecycle, packaged v1 readiness with and without generated-answer evidence,
+unit tests, Python compilation, template sync checks, and diff hygiene while
+emitting aggregate-only JSON.
 
 Optional report inputs extend the evidence surface without changing the privacy
 boundary:
@@ -53,11 +76,16 @@ boundary:
   local private probe set should be a required readiness gate for the run.
 - `--answer-report` accepts an offline generated-answer aggregate report. When
   `--run-packaged --require-answer` is used without an answer report, the gate
-  runs the packaged synthetic generated-answer fixture automatically. This is
-  synthetic dogfood evidence for the grading path, not proof of live model
-  answer quality. Answer reports must include aggregate `source_benchmarks` and
-  `case_origins`; metric-only generated-answer JSON is rejected because it
-  cannot prove which benchmark or dogfood stream produced the answers.
+  builds the packaged synthetic generated-answer archive, runs the extractive
+  answer-record adapter, and grades the generated `answer_handoff` records.
+  This is deterministic answer handoff evidence for the grading path, not live
+  model answer quality. Answer reports must include aggregate
+  `source_benchmarks`, `case_origins`, `answer_handoff_present_rate`,
+  `answer_handoff_support_coverage_rate`, supported/abstention handoff counts,
+  `unsupported_claim_count`, and `inactive_memory_answer_count`; metric-only
+  or answer-text-only generated-answer JSON is rejected because it cannot prove
+  which benchmark stream produced the answers or whether the answers were
+  grounded in active/current memory evidence.
 
 The strongest recorded local gate below combines a private real-archive
 aggregate shadow report with the 100-case converted LongMemEval public-adapter
@@ -72,26 +100,38 @@ The packaged generated-answer gate can be included in local convergence runs:
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
 
-The current packaged generated-answer fixture has 3 cases: 2 positive answer
-cases and 1 abstention case. It reports `case_pass_rate: 1.0`,
+The current packaged generated-answer fixture has 5 cases: 3 positive answer
+cases and 2 abstention cases, including one inactive-only support rejection.
+It reports `case_pass_rate: 1.0`,
 `answer_normalized_match_rate: 1.0`, `answer_token_f1: 1.0`,
 `abstention_accuracy: 1.0`, `privacy_leak_count: 0`,
 `missing_answer_count: 0`, `duplicate_answer_count: 0`, and
-`unknown_answer_count: 0`. It also carries
-`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 3` and
-`case_origins.packaged_generated_answer_fixture: 3`, satisfying the answer
-provenance gate without rendering queries, generated answers, or reference
-answers.
+`unknown_answer_count: 0`. It also reports
+`answer_handoff_present_rate: 1.0`,
+`answer_handoff_support_coverage_rate: 1.0`,
+`answer_handoff_supported_case_count: 3`,
+`answer_handoff_abstain_case_count: 2`,
+`context_package_parse_success_rate: 1.0`,
+`context_package_support_coverage_rate: 1.0`,
+`context_package_abstention_accuracy: 1.0`,
+`context_package_inactive_rejection_count: 1`,
+`unsupported_claim_count: 0`, and `inactive_memory_answer_count: 0`. It carries
+`source_benchmarks.MyPreciousGeneratedAnswerSynthetic: 5` and
+`case_origins.packaged_generated_answer_fixture: 5`, satisfying the answer
+provenance and source-grounded handoff gates without rendering queries,
+generated answers, reference answers, source paths, or raw refs.
 
 The deployment template also includes an extractive
 `tools/generate_answer_records.py` adapter for producing answer-record JSONL
 from memory search hits. Its own report is aggregate-only: it includes case
-count, answer records written, memory-answer count, abstention count, no-hit
-count, source benchmark counts, case-origin counts, and privacy flags without
-rendering queries, generated answers, reference answers, source paths, or raw
-refs. This proves the answer-record production path can be wired into the
-offline grader, but it remains extractive evidence rather than live model
-answer quality.
+count, answer records written, memory-answer count, abstention count, answer
+handoff support coverage, no-hit count, source benchmark counts, case-origin
+counts, and privacy flags without rendering queries, generated answers,
+reference answers, source paths, or raw refs. Each non-abstention
+`answer_handoff` carries `support_refs` to active/current memory, summary, and
+evidence layers; unsupported or inactive-only cases abstain. This proves the
+answer-record production path can be wired into the offline grader, but it
+remains extractive evidence rather than live model answer quality.
 
 The current packaged source-stream registry fixture has 1 case and 1
 metadata-free source record. It reports `source_stream_update_rate: 1.0`,
@@ -109,6 +149,150 @@ declare `aggregate_only: true` and no rendered case details, memory text,
 source content, source paths, or raw refs. A report with green source-stream
 metrics but missing or unsafe privacy flags is rejected.
 
+## V1.3 Self-Maintenance Lifecycle Gate
+
+V1.3 is not a new retrieval capability. It is a self-maintenance lifecycle
+contract added after an automation review showed that scheduled archive updates
+can fail for operational reasons even when recall benchmarks remain green.
+
+The public synthetic self-maintenance fixture now runs inside
+`benchmarks/packaged_lifecycle_gate.py`. It creates one ordinary local source
+record and two scheduled automation source records marked with
+`thread_source=automation`. The update path must archive only the ordinary
+durable source record. The automation records are present in the source
+fixture, but they must not produce archive session entries, memory nodes, daily
+durable entries, or search indexes.
+
+The packaged lifecycle report exposes only aggregate contract metrics:
+
+| metric | expected value |
+| --- | ---: |
+| automation_source_records=2 | true |
+| automation_session_entries=0 | true |
+| automation_memory_nodes=0 | true |
+| automation_daily_noise_hits=0 | true |
+| automation_index_noise_hits=0 | true |
+| search_health_check | passed |
+| sync_dry_run | passed |
+
+The automation gate contract is explicit: `search_memory.py --health-check` is
+the readiness check for archive searchability. A generic `search_memory.py memory`
+content query is not a readiness check and must not block or permit publication.
+The scheduled prompt rendered by `render_scheduler.py` also keeps automation run
+notes separate from generated daily archive files and routes any publish step
+through `sync_memory_archive.py` rather than hand-staging files.
+
+Private dogfood for this contract must stay aggregate-only private dogfood:
+audit status, search health status, clean/dirty status, and counts of archived
+automation-thread entries or automation-run noise are allowed. Private source
+text, source paths, queries, memory IDs, raw refs, and automation transcript
+content are not part of this public readiness record.
+
+## V1.4 Explicit Memory Capture Contract
+
+V1.4 is an explicit memory capture contract. It is not a new ranking capability,
+not generated-answer quality, and not long-horizon ontology or governance.
+
+The deployment template now includes `capture_explicit_memory.py`, a minimal
+runtime adapter for explicit memory requests. Automatic induction remains the
+default behavior for ordinary source records. When a user or governing prompt
+explicitly asks to remember, force-save, or distill a short fact, the adapter
+accepts agent-neutral JSONL input with `text`, optional `layer`, optional
+`scope`, and optional `source`. It creates evidence-bound support files, calls
+the existing explicit-memory updater path, and writes sticky `source: explicit`
+memory nodes.
+
+The adapter contract is that raw transcript fields are refused, along with
+message arrays, raw source content, tool logs, and automation run notes. The
+public packaged lifecycle gate covers
+one accepted short fact and one refused raw-transcript-shaped input. Its
+readiness output stays aggregate-only through the `explicit_capture` metrics:
+
+| metric | expected value |
+| --- | ---: |
+| adapter_input_records=1 | true |
+| captured_memory_nodes=1 | true |
+| rejected_raw_transcript_records=1 | true |
+| search_hit_count=1 | true |
+| privacy_leak_count=0 | true |
+
+The sync helper publish boundary is deliberately narrow: `memories/explicit.jsonl`
+is allowed so user-forced memories can be published through the safe sync path,
+while automatic memory node files and review files remain outside automatic sync.
+
+## V1.5 Explicit Memory Revision And Conflict Contract
+
+V1.5 is an explicit memory revision contract. It is not a general long-horizon governance system, not a new ranking capability, and not generated-answer quality.
+
+The deployment template keeps `capture_explicit_memory.py` as the single
+runtime adapter for explicit memory requests, and extends its agent-neutral
+JSONL input with bounded operations. `operation: replace` uses
+`replaces_memory_id` to mark an old explicit memory as superseded by the new
+current fact. `operation: withdraw` uses `deprecates_memory_id` to retire an
+old explicit memory without inventing a replacement fact. In both cases the old
+fact is not deleted; the old fact is superseded and retains evidence
+traceability through the existing memory lifecycle links and drilldown paths.
+The contract phrase is explicit: old fact is not deleted.
+The old fact is superseded and retains evidence traceability.
+
+Search default behavior must prefer the current fact. A stale replaced fact and
+a withdrawn fact must not appear as active default memory hits, while source
+and evidence drilldown for the current replacement remains reachable. Raw
+transcript fields, message arrays, source content, tool logs, automation run
+notes, and unsafe revision target identifiers remain refused.
+
+The public packaged lifecycle gate covers one accepted replace operation and
+one accepted withdraw operation. Its readiness output stays aggregate-only
+through the `explicit_revision` metrics:
+
+| metric | expected value |
+| --- | ---: |
+| explicit_revision_input_records=2 | true |
+| explicit_revision_superseded_records=1 | true |
+| explicit_revision_deprecated_records=1 | true |
+| current_fact_search_hit_count=1 | true |
+| stale_fact_default_search_hit_count=0 | true |
+| withdrawn_fact_default_search_hit_count=0 | true |
+| revision_evidence_reachability_count=2 | true |
+| privacy_leak_count=0 | true |
+
+## V1.6 Source-Grounded Answer Handoff Contract
+
+V1.6 is a deterministic answer handoff contract. It is not live model answer quality,
+not semantic generation, not a ranking overhaul, and not a general long-horizon
+governance system.
+
+The read path now has a bounded extractive answer-record adapter:
+`tools/generate_answer_records.py` searches layered memory nodes, uses only
+active/current memory hits, and writes private answer records with an
+`answer_handoff` object. A non-abstention handoff must carry `support_refs`
+that connect the answer to memory, summary, and evidence layers. If support is
+missing, if only inactive lifecycle memory matches, or if the candidate answer
+would violate the privacy boundary, the adapter must abstain instead of
+fabricating an answer.
+
+The public packaged generated-answer fixture covers supported answers,
+abstain behavior, multi-hop summary/evidence reachability through `support_refs`,
+privacy boundary checks, and currentness when an old stale fact has been
+superseded by an active/current memory. The readiness gate keeps the output
+aggregate-only and requires these metrics:
+
+| metric | expected value |
+| --- | ---: |
+| answer_handoff_present_rate | 1.0 |
+| answer_handoff_support_coverage_rate | 1.0 |
+| answer_handoff_supported_case_count | >= 1 |
+| answer_handoff_abstain_case_count | >= 1 |
+| unsupported_claim_count=0 | true |
+| inactive_memory_answer_count=0 | true |
+| privacy_leak_count=0 | true |
+
+The handoff privacy rule is intentionally stricter than ordinary answer text
+grading: benchmark reports must not render queries, generated answers,
+reference answers, memory text, source paths, raw refs, raw transcripts,
+scheduler state, credentials, or local private paths. This makes V1.6 useful as
+an answer handoff audit, but it still does not claim live model answer quality.
+
 Run the packaged convergence gate locally with:
 
 ```bash
@@ -124,6 +308,1304 @@ python3 benchmarks/v1_readiness_gate.py \
   --e2e-report /tmp/e2e.json \
   --source-stream-report /tmp/source-stream.json
 ```
+
+## V1.7 Private Aggregate Dogfood Gate
+
+V1.7 is a private aggregate dogfood gate for the V1.6 answer handoff
+contract. It is not a public benchmark, not live model answer quality, not a
+ranking overhaul, and not automatic ontology or long-horizon governance.
+
+`benchmarks/private_generated_answer_dogfood_gate.py` now has public synthetic
+coverage for the private dogfood wrapper path. The wrapper is allowed to expose
+only aggregate counts, rates, pass/fail status, and generic failure reasons.
+`v1_readiness_gate.py` normalizes the wrapper's nested generated-answer report
+and requires the same handoff metrics as V1.6:
+`answer_handoff_present_rate`, `answer_handoff_support_coverage_rate`,
+supported/abstention handoff counts, `unsupported_claim_count=0`,
+`inactive_memory_answer_count=0`, and `privacy_leak_count=0`.
+
+The private dogfood wrapper privacy block is now a readiness contract of its
+own. In addition to ordinary answer-report privacy flags, the gate rejects a
+private dogfood wrapper unless `private_paths_rendered`, `memory_text_rendered`,
+`memory_ids_rendered`, `source_paths_rendered`, and `raw_refs_rendered` are all
+false. This keeps private queries, answers, memory IDs, source paths, raw refs,
+and source text out of the reusable repository's evidence stream.
+
+The private runner also only deletes known dogfood-generated artifacts during
+cleanup. It removes the temporary case file and the known aggregate work files,
+then removes now-empty dogfood directories. It does not recursively delete
+arbitrary files that merely happen to be inside the configured work directory.
+This makes cleanup evidence stronger without weakening the existing fail-closed
+preflight for dirty private `eval/` and `.tmp/` artifacts.
+
+The V1.7 evidence is still bounded. A safe real private archive run can report
+aggregate metrics for deployment confidence, but the reusable repository's
+claim is that the private dogfood orchestration enforces the V1.6
+source-grounded handoff and privacy contract. It does not store private cases,
+private answers, raw transcripts, source paths, raw refs, scheduler logs, or
+archive data.
+
+## V1.8 Agent-Facing Recall Context Package
+
+V1.8 adds an agent-facing recall context package to the read path. The
+`search_memory.py --context-json` mode emits
+`report_kind: memory_recall_context_package` with query metadata,
+active/current hit currentness, rank, layer and scope, why signals, summary and
+evidence drill paths, source-ref status metadata when requested, privacy flags,
+and top-level `answerability.status`.
+
+This is a packaging and answerability contract, not live model answer quality,
+not a ranking overhaul, and not automatic ontology or governance discovery. The
+package lets a future agent decide supported answer versus abstain without
+parsing free-form search output. Supported means active/current memory support
+with summary or evidence drilldown. Unsupported covers no hits, related context
+without active/current support, or only inactive/superseded support.
+
+The privacy boundary is part of the evidence. The context package must not
+render memory text, raw transcript text, raw refs, raw source content, local private paths,
+credentials, or scheduler state. It may render archive-relative summary and
+evidence drill paths and aggregate source-ref status identifiers.
+
+## V1.9 Context-Package Consumption Gate
+
+V1.9 proves that the answerability adapter consumes
+`memory_recall_context_package` as the machine-readable read-path handoff. The
+generated-answer adapter calls `search_memory.py --context-json`, parses the
+package, and records a privacy-safe `context_package` handoff block for every
+answer record. Supported answers require a supported active/current package hit
+whose package `matched:` metadata covers the query support tokens and whose
+summary/evidence support refs are present. Unsupported packages, missing token
+coverage, inactive-only support, or malformed packages fail closed to abstain.
+
+`generated_answer_benchmark.py` now reports context-package consumption
+metrics: `context_package_handoff_present_rate`,
+`context_package_parse_success_rate`, `context_package_support_coverage_rate`,
+`context_package_abstention_accuracy`,
+`context_package_supported_case_count`,
+`context_package_abstain_case_count`,
+`context_package_parse_failure_count`, and
+`context_package_inactive_rejection_count`. `v1_readiness_gate.py` requires the
+rate/count metrics when generated-answer evidence is required.
+
+The V1.9 evidence remains bounded. It proves deterministic context-package
+consumption for supported versus abstain decisions. It is not live LLM answer quality,
+not ranking quality, not vector search, not automatic ontology discovery, and
+not public leaderboard parity. The package and benchmark reports must stay
+aggregate/privacy-safe: no memory text, raw transcript text, raw source
+content, raw refs, local private paths, credentials, scheduler state, private queries,
+generated answers, or reference answers are rendered in the readiness output.
+
+## V2.0 Runtime Skill Consumption Contract
+
+V2.0 moves context-package consumption into the runtime instructions for the
+`using-my-precious` read-path skill and the deployment repository guidance. An
+agent answering a historical memory question should first request
+`memory_recall_context_package` with `--depth evidence --context-json`, then
+use `answerability.status` and per-hit support metadata as the decision
+boundary. Do not use free-form search output as the answerability source.
+Free-form search remains useful only for exploration or drilldown after the
+package decision.
+
+The agent-facing decision recipe is deliberately small:
+
+| package state | action |
+| --- | --- |
+| supported package -> answer | Answer only from supported active/current hits with `query_support.status: supported` plus summary and evidence drill paths. |
+| unsupported package -> abstain | Say the archive has no supported memory for the requested fact. |
+| inactive/superseded-only package -> abstain | Treat stale-only support as insufficient unless a current replacement is separately supported. |
+| malformed or missing package -> abstain | Fail closed rather than deriving answerability from free-form text. |
+
+This is a runtime skill consumption contract, not live LLM answer quality, not vector search,
+not ranking quality, and not automatic ontology discovery. The same privacy
+boundary applies at the skill layer: no private query text, memory text, raw refs,
+raw source content, source paths, credentials, scheduler state, or local private paths
+should be rendered in answers, skill examples, benchmark reports, or reusable
+repository artifacts.
+
+## V2.1 Packaged Runtime Consumption Gate
+
+V2.1 adds `benchmarks/using_my_precious_runtime_gate.py` to prove that the
+package-first read path is executable from a clean packaged deployment repo,
+not only documented in the reusable skill. The gate installs the packaged
+template through the setup script, writes synthetic public memory rows into the
+deployment repo, invokes that repo's copied `tools/search_memory.py` with
+`--depth evidence --context-json`, parses
+`report_kind: memory_recall_context_package`, and applies the documented
+runtime decision recipe without using free-form search output as the
+answerability source.
+
+The synthetic cases are intentionally small: supported active/current memory
+with summary and evidence drill paths answers; unsupported/no-hit packages
+abstain; inactive/superseded-only support abstains; malformed packages fail
+closed to abstain. The gate reports only aggregate metrics:
+`runtime_context_package_parse_success_rate`,
+`runtime_supported_decision_accuracy`, `runtime_abstention_accuracy`,
+`runtime_inactive_rejection_count`, `runtime_malformed_fail_closed_count`, and
+`privacy_leak_count`.
+
+This proves packaged runtime consumption of context packages. It is not LLM answer quality,
+not ranking quality, not vector search, not ontology discovery,
+and not public leaderboard parity. It also does not expand governance,
+embeddings, ranking, or live-answer generation. The command is stable and
+synthetic, so it is included in `tools/run_quality_gates.py` as part of the
+repo-local release gate.
+
+## V2.2 Runtime Support-Coverage Contract
+
+V2.2 tightens the supported package boundary. `memory_recall_context_package`
+hits now include per-hit `query_support` metadata derived from existing
+token-coverage signals. A hit is answerable only when it is active/current,
+has summary and evidence drill paths, and has
+`query_support.status: supported`. Active/current drillable hits with weak or
+partial query coverage are unsupported near-misses and must abstain.
+
+`benchmarks/using_my_precious_runtime_gate.py` now keeps the V2.1 supported,
+unsupported/no-hit, inactive/superseded-only, and malformed cases, and adds
+weak-active and same-topic near-miss hard negatives. The gate reports
+`runtime_support_coverage_accuracy`,
+`runtime_weak_active_rejection_count`,
+`runtime_near_miss_abstention_accuracy`,
+`runtime_supported_decision_accuracy`, `runtime_abstention_accuracy`,
+`runtime_context_package_parse_success_rate`, and `privacy_leak_count`.
+
+This proves deterministic support-coverage decision reliability for the
+package-first runtime contract. It is not ranking quality, not LLM answer quality,
+not vector search, not ontology discovery, and not public leaderboard parity.
+
+## V2.3 Query-Support-Aware Hard-Negative Recall Gate
+
+V2.3 adds `benchmarks/query_support_recall_gate.py` to quantify the
+query-support boundary under hard-negative recall conditions. The gate builds a
+small synthetic public archive, invokes `search_memory.py` with
+`--limit 5 --depth evidence --context-json`, parses
+`report_kind: memory_recall_context_package`, and treats
+`query_support`, lifecycle status, and summary/evidence drill paths as the
+only answerability source. Free-form search output is not used.
+
+The synthetic cases cover supported active/current memory, same-topic wrong-scope
+near miss, weak active/current support, broad lexical overlap,
+inactive/superseded-only support, unsupported/no-hit abstention, and malformed
+package fail-closed behavior. The gate reports aggregate metrics:
+`supported_context_recall_at_5`, `answerable_precision_at_5`,
+`query_support_boundary_pass_rate`, `weak_support_rejection_count`,
+`scope_mixed_noise_at_5`, `inactive_lifecycle_rejection_count`,
+`runtime_abstention_accuracy`, and `privacy_leak_count`.
+
+The V2.3 synthetic baseline passes with
+`supported_context_recall_at_5=1.0`, `answerable_precision_at_5=1.0`,
+`query_support_boundary_pass_rate=1.0`, `weak_support_rejection_count=2`,
+`scope_mixed_noise_at_5=0.0`, `inactive_lifecycle_rejection_count=1`,
+`runtime_abstention_accuracy=1.0`, and `privacy_leak_count=0`. It also records
+`scope_mixed_related_hit_count_at_5=1` to show that a wrong-scope related hit
+can still be observed in top-k while remaining outside the answerable surface.
+
+This proves query-support-aware hard-negative recall diagnostics for context
+packages. It is not live LLM answer quality, not vector search quality, not public
+benchmark status, not public leaderboard parity, not automatic ontology discovery,
+and not solved long-horizon memory decay.
+
+## V2.4 Packaged Induction Consolidation Gate
+
+V2.4 extends `benchmarks/updater_induction_benchmark.py` to prove that the
+packaged write path can consolidate repeated and paraphrased automatic induction facts
+in a synthetic deployment archive. The gate creates synthetic
+source records, runs the packaged updater, verifies that same-fact paraphrases
+produce one current memory node, checks merged support/evidence refs, and then
+recalls that consolidated memory through the copied `search_memory.py` with
+`--limit 5 --depth evidence --context-json`. The post-consolidation recall
+check parses `report_kind: memory_recall_context_package` and uses
+`answerability.status`, per-hit `query_support.status`, and summary/evidence
+drill paths as the only answerability source.
+
+The synthetic cases also keep the negative write-path boundary in view:
+contradictory facts route to induction review, scope narrowing/broadening
+ambiguity routes to induction review, and repeated process/status noise remains
+rejected rather than promoted. The gate reports aggregate metrics:
+`consolidated_duplicate_suppression_rate`,
+`consolidated_support_merge_rate`,
+`consolidated_evidence_retention_rate`,
+`contradiction_review_routing_rate`,
+`scope_shift_review_routing_rate`, `process_noise_rejection_rate`,
+`post_consolidation_recall_at_5`, and `privacy_leak_count`.
+
+This proves packaged synthetic induction consolidation behavior. It is not LLM summarization quality,
+not vector search, not ontology discovery, not full human memory modeling,
+not multi-month decay, not deletion policy, and not private archive quality.
+The command is stable and non-duplicative because it extends the existing
+updater benchmark already included in `tools/run_quality_gates.py`.
+
+## V2.5 Packaged Explicit Memory Governance Gate
+
+V2.5 extends `benchmarks/packaged_lifecycle_gate.py` to prove that explicit
+memory capture, replace, and withdraw operations in a clean packaged
+deployment repo preserve the package-first runtime contract. The gate uses the
+packaged `capture_explicit_memory.py` adapter to create synthetic explicit
+facts, then invokes the copied deployment `tools/search_memory.py` with
+`--depth evidence --context-json` and parses
+`report_kind: memory_recall_context_package`. Free-form search output is not
+used as answerability evidence.
+
+The synthetic cases cover one current explicit fact that must answer through a
+supported active/current context package, one replaced legacy fact that must
+abstain, one withdrawn obsolete fact that must abstain, duplicate explicit
+inputs that must not create extra active/current nodes, and conflict, unsafe
+target, and unknown target inputs that must fail closed. The gate reports
+aggregate metrics:
+`explicit_context_package_parse_success_rate`,
+`explicit_current_fact_answerability_rate`,
+`explicit_replaced_fact_abstention_rate`,
+`explicit_withdrawn_fact_abstention_rate`,
+`explicit_revision_link_integrity_rate`,
+`explicit_bulk_duplicate_suppression_rate`,
+`explicit_conflict_fail_closed_count`,
+`explicit_unsafe_target_refusal_count`,
+`explicit_unknown_target_refusal_count`, and `privacy_leak_count`.
+
+V2.5 also tightens context-package query support for lifecycle qualifiers such
+as `legacy`, `obsolete`, `retired`, `deprecated`, `superseded`, `withdrawn`,
+and `inactive`. An active/current replacement cannot answer a query for a
+legacy or withdrawn fact merely because it shares broad topic words. This
+proves packaged explicit-memory governance consumption of context packages.
+It is not LLM answer quality, ranking quality, vector search, ontology
+discovery, public leaderboard parity, or a complete long-horizon governance
+system. The command is stable and already runs through the packaged lifecycle
+gate included in `tools/run_quality_gates.py`.
+
+## V2.6 Packaged Progressive Source Drilldown Gate
+
+V2.6 adds `benchmarks/progressive_source_drilldown_gate.py` to prove that the
+package-first read path can consume progressive source drilldown metadata from
+a clean packaged deployment repo. The gate installs the packaged template,
+writes synthetic public memory rows and source anchors, then invokes the
+copied deployment `tools/search_memory.py` with both
+`--depth evidence --context-json` and `--depth source --context-json`. It
+parses `report_kind: memory_recall_context_package` and uses only context
+package fields for answer, drill, block, and abstain decisions. Free-form
+search output is not used as source reachability evidence.
+
+The synthetic cases cover a supported answer at evidence depth, a supported
+source drilldown at source depth, a high-level memory derived from lower
+support memory with multi-hop source-ref resolution, an evidence-only memory
+that must not satisfy an original-source request, inactive/superseded
+source-only support that must abstain, unsafe raw/source refs that must block,
+and malformed packages that must fail closed. The gate reports aggregate
+metrics:
+`source_context_package_parse_success_rate`,
+`source_drilldown_decision_accuracy`,
+`memory_to_summary_drilldown_rate`,
+`summary_to_evidence_drilldown_rate`,
+`evidence_to_source_ref_reachability_rate`,
+`memory_graph_multihop_source_resolution_rate`,
+`evidence_only_original_source_rejection_count`,
+`inactive_source_rejection_count`, `unsafe_source_ref_block_count`,
+`raw_source_content_default_block_rate`, and `privacy_leak_count`.
+
+This proves packaged progressive source drilldown consumption of context
+packages. It does not prove raw transcript ingestion, private archive quality,
+LLM answer quality, vector search, ranking quality, ontology discovery, or a
+source browser UI. Raw source content remains blocked by default; source-depth
+context packages render source-ref status metadata rather than raw source
+content. The command is stable and included in `tools/run_quality_gates.py`.
+
+## V2.7 Packaged Scope Arbitration And Override Gate
+
+V2.7 adds `benchmarks/scope_arbitration_gate.py` to prove that the
+package-first read path can consume context-package layer and scope metadata
+from a clean packaged deployment repo when deciding whether to answer or
+abstain. The gate installs the packaged template, writes synthetic public
+global/domain/project memory rows, then invokes the copied deployment
+`tools/search_memory.py` with `--depth evidence --context-json` plus
+`--project-path` and `--preferred-scope` where applicable. It parses
+`report_kind: memory_recall_context_package` and uses only context package
+fields for answerability and scope arbitration. Free-form search output is not
+used as answerability evidence.
+
+The synthetic cases cover global foundational fallback, domain-preferred
+support across projects, current project support overriding broader memory,
+same-topic wrong-project support that must abstain, stale broad support that
+must abstain after supersession, missing project context for project-only
+support, unsupported no-hit packages, and malformed packages that fail closed.
+The gate reports aggregate metrics:
+`scope_context_package_parse_success_rate`,
+`global_fallback_answerability_rate`, `domain_preference_accuracy`,
+`project_override_accuracy`, `wrong_project_rejection_count`,
+`broad_stale_rejection_count`,
+`missing_project_context_abstention_accuracy`,
+`scope_arbitration_decision_accuracy`,
+`scope_mixed_related_hit_count_at_5`, and `privacy_leak_count`.
+
+This proves packaged scope arbitration and override decision behavior for
+context packages. It does not prove LLM answer quality, vector search,
+embedding-store readiness, ranking overhaul, ontology discovery, private
+archive quality, or public leaderboard parity. The command is stable and
+included in `tools/run_quality_gates.py`.
+
+## V2.8 Packaged Scope-Aware Answer Handoff Gate
+
+V2.8 adds `benchmarks/scope_answer_handoff_gate.py` to prove that the
+package-first answer handoff path can consume scope-arbitrated context-package
+metadata from a clean packaged deployment repo. The gate installs the packaged
+template, writes synthetic public global/domain/project memory rows, then
+invokes the copied deployment `tools/search_memory.py` with
+`--depth evidence --context-json` plus `--project-path` and
+`--preferred-scope` where applicable. It parses
+`report_kind: memory_recall_context_package` and builds deterministic
+answer-or-abstain handoff decisions only from context package fields and
+summary/evidence `support_refs`. Free-form search output is not used as
+answerability evidence.
+
+The synthetic cases cover global foundational answer handoff, domain-preferred
+answer handoff, current project override handoff, same-topic wrong-project
+support that must abstain, project-only support without project context that
+must abstain, stale broad support that must abstain after supersession,
+unsupported no-hit packages, and malformed packages that fail closed. The gate
+reports aggregate metrics:
+`scope_handoff_context_package_parse_success_rate`,
+`scope_handoff_supported_answer_accuracy`,
+`scope_handoff_abstention_accuracy`,
+`scope_handoff_support_ref_coverage_rate`,
+`scope_handoff_project_override_accuracy`,
+`scope_handoff_wrong_project_rejection_count`,
+`scope_handoff_missing_project_context_rejection_count`,
+`scope_handoff_stale_broad_rejection_count`,
+`scope_handoff_malformed_fail_closed_count`, `unsupported_claim_count`, and
+`privacy_leak_count`.
+
+This proves packaged scope-aware answer handoff consumption for context
+packages. It does not prove live LLM answer quality, semantic equivalence,
+ranking overhaul, vector search, ontology discovery, private archive quality,
+or public leaderboard parity. The command is stable and included in
+`tools/run_quality_gates.py`.
+
+## V2.9 Packaged Generated-Answer Adapter Scope Contract Gate
+
+V2.9 adds `benchmarks/generated_answer_scope_adapter_gate.py` to prove that the
+scope-aware package-first contract is consumed by the real packaged
+`tools/generate_answer_records.py` adapter, not only by the focused V2.8
+handoff helper. The gate installs a clean packaged deployment repo, writes
+synthetic public global/domain/project memory rows and synthetic answer cases,
+then invokes the copied deployment `tools/generate_answer_records.py`. The
+adapter reads case-level `preferred_scope` and `project_path`, passes them into
+the copied `tools/search_memory.py --depth evidence --context-json`, parses
+`report_kind: memory_recall_context_package`, and writes deterministic
+answer-or-abstain records from the context-package handoff metadata and
+summary/evidence `support_refs`. Free-form search output is not used as
+answerability evidence.
+
+The synthetic cases cover global current support, domain-preferred support,
+current project override support, same-topic wrong-project rejection, project
+support without project context rejection, stale broader support rejection
+after supersession, unsupported no-hit packages, and malformed package
+fail-closed behavior. The gate reports aggregate metrics:
+`adapter_context_package_parse_success_rate`,
+`adapter_scope_supported_answer_accuracy`,
+`adapter_scope_abstention_accuracy`,
+`adapter_scope_support_ref_coverage_rate`,
+`adapter_project_override_accuracy`,
+`adapter_wrong_project_rejection_count`,
+`adapter_missing_project_context_rejection_count`,
+`adapter_stale_broad_rejection_count`,
+`adapter_malformed_fail_closed_count`,
+`adapter_scope_field_pass_through_rate`, `unsupported_claim_count`, and
+`privacy_leak_count`.
+
+This proves packaged generated-answer adapter consumption of the scope-aware
+context-package contract. It does not prove live LLM answer quality, semantic
+ranking quality, vector search, ontology discovery, private archive quality, or
+public leaderboard parity. The command is stable and included in
+`tools/run_quality_gates.py`.
+
+## V2.10 Deterministic Automation Publish Readiness Gate
+
+V2.10 adds `benchmarks/automation_publish_readiness_gate.py` to prove that a
+clean packaged deployment repository can distinguish safe automatic publish
+intent from publish-blocking generated noise before `sync_memory_archive.py`
+commits or pushes. The packaged repo now includes
+`tools/audit_publish_readiness.py`, which scans only publish-facing generated
+surfaces under `daily/` and text-bearing fields in `index/*.jsonl`. The audit
+reports archive-relative paths, categories, and counts only; it does not render
+matched snippets, memory text, source paths, raw refs, full queries, or secret
+values.
+
+The sync helper runs this readiness audit after the existing key-like value
+scan and before the archive audit or Git staging. Clean daily and indexed
+summary surfaces can reach `sync_memory_archive.py --dry-run --push` publish
+intent. Noisy daily/indexed surfaces fail closed before staging, committing, or
+pushing.
+
+The synthetic cases cover clean daily records, clean indexed summaries, daily
+command-progress noise, indexed prompt/environment noise, indexed raw source
+path/full-query noise, and secret-like values. The gate reports aggregate
+metrics including `publish_readiness_clean_pass_rate`,
+`publish_readiness_noise_rejection_rate`, `sync_clean_publish_intent_count`,
+`sync_noisy_block_count`, `automation_noise_rejection_count`,
+`raw_source_reference_rejection_count`, `secret_like_rejection_count`,
+`aggregate_only_report_count`, and `privacy_leak_count`.
+
+This proves deterministic packaged automation publish readiness and
+pre-commit/pre-push fail-closed behavior. It does not prove memory quality, LLM
+answer quality, private archive quality, GitHub availability, semantic ranking
+quality, vector search, ontology discovery, or public leaderboard parity. The
+command is stable and included in `tools/run_quality_gates.py`.
+
+## V2.13 Reusable Publish-Surface Repair Gate
+
+V2.13 adds `tools/repair_publish_surfaces.py` and
+`benchmarks/publish_surface_repair_gate.py` to prove that V2.12-style
+publish-surface failures can be repaired in a reusable packaged deployment
+repo without weakening `tools/audit_publish_readiness.py` or bypassing
+`tools/sync_memory_archive.py`. The helper scans only structured
+`sessions/**/meta.json` fields, emits aggregate counts only, and edits metadata
+only when the repair is deterministic.
+
+The synthetic gate reproduces command-progress, permission/sandbox chatter,
+raw-source reference, and noisy tag/fact/summary cases that flow into
+`daily/` and text-bearing `index/*.jsonl` publish surfaces. It verifies that
+dry-run reports stay aggregate-only, apply mode rebuilds derived surfaces
+through the updater, durable adjacent facts remain present, and publish
+readiness passes after repair.
+
+The gate also covers fail-closed boundaries: malformed metadata and ambiguous
+single-scalar text are not guessed or partially repaired. Aggregate metrics
+include `pre_repair_readiness_failure_count`,
+`post_repair_readiness_pass_count`, `repairable_apply_success_count`,
+`durable_fact_preservation_count`, `ambiguous_fail_closed_count`,
+`malformed_fail_closed_count`, and `privacy_leak_count`.
+
+This proves deterministic packaged publish-surface repair. It is not memory
+quality, not LLM answer quality, not ranking quality, not vector search, not
+ontology discovery, not GitHub availability, not private archive quality, and
+not public leaderboard parity. The command is stable and included in
+`tools/run_quality_gates.py`.
+
+## V2.14 Scheduled Automation Recovery Drill
+
+V2.14 adds `benchmarks/scheduled_publish_recovery_gate.py` to prove that the
+agent-native scheduled automation prompt and packaged deployment runtime can
+execute the publish-surface recovery sequence deterministically. The gate
+creates clean packaged repositories through setup tooling, renders an
+agent-native prompt with `--push-after-update`, verifies the prompt contract,
+then runs synthetic recovery cases without live scheduler or LLM execution.
+
+The prompt contract checks that the rendered automation instructions use the
+memory repository as the only working directory, run
+`python tools/search_memory.py --health-check` before
+`python tools/sync_memory_archive.py --push`, rely on the sync helper instead of hand staging,
+invoke `python tools/repair_publish_surfaces.py --apply` only
+for publish readiness blocks, and stop when the repair helper reports
+`blocked`.
+
+The synthetic cases cover `repairable_metadata_noise`,
+`ambiguous_scalar_noise`, and `malformed_metadata`. Repairable metadata noise
+must block sync dry-run before staging, repair successfully, pass readiness,
+and then reach sync dry-run publish intent. Ambiguous scalar noise and
+malformed metadata must fail closed and never reach publish intent.
+
+Aggregate metrics include `scheduler_prompt_contract_pass_rate`,
+`pre_repair_sync_block_count`, `repair_apply_success_count`,
+`post_repair_publish_intent_count`, `ambiguous_fail_closed_count`,
+`malformed_fail_closed_count`, `hand_stage_bypass_count`, and
+`privacy_leak_count`.
+
+This proves deterministic scheduled automation recovery behavior. It is not live scheduler reliability, not live LLM prompt-following quality, not GitHub availability, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
+
+## V2.15 Scheduled Automation Search-Gate Publish Decision Contract
+
+V2.15 adds `benchmarks/scheduled_publish_search_gate.py` to prove that a clean
+packaged deployment repository can classify scheduled publish decisions around
+search discoverability, no-op state, and unexpected dirty surfaces before a
+push is attempted. The gate renders an agent-native prompt with
+`--push-after-update`, verifies the prompt uses `python tools/search_memory.py --health-check` before `python tools/sync_memory_archive.py --push`, and checks
+that the prompt does not require a generic content query such as
+`python tools/search_memory.py memory`.
+
+The reusable release contract is deliberately narrow: `search_memory.py --health-check` is the required pre-sync archive searchability gate. Generic free-form content queries are deployment-local policy only; they are not a reusable release readiness gate and are not used as answerability or archive content evidence.
+
+The synthetic cases cover `discoverable_archive_publish_ready`,
+`empty_archive_search_blocked`, `already_current_no_op`, and
+`unexpected_dirty_surface_blocked`. The publish-ready case must pass readiness
+and search health after archive audit, then reach sync dry-run publish intent.
+The search-blocked case must pass archive audit and publish readiness but stop
+before sync publish intent when search health fails. The no-op case must avoid an empty commit or push intent.
+The dirty case must block on an unexpected non-archive surface before publish.
+
+Aggregate metrics include `search_gate_pass_rate`, `search_blocked_count`,
+`no_op_no_empty_commit_count`, `unexpected_dirty_block_count`,
+`publish_intent_count`, `hand_stage_bypass_count`,
+`free_form_search_output_used_count`, and `privacy_leak_count`.
+
+This proves deterministic scheduled publish decision classification around search/no-op/dirty blockers. It is not live GitHub availability, not live scheduler reliability, not live LLM prompt-following quality, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
+
+## V2.16 Search-Healthy Content-Noise Repair Closure Gate
+
+V2.16 adds `benchmarks/scheduled_content_noise_repair_closure_gate.py` to prove that a clean packaged deployment repository can close the scheduled publish loop when search health passes but publish-facing content still contains prompt/progress/usage/process noise. The gate renders an agent-native prompt with `--push-after-update`, checks `python tools/search_memory.py --health-check` before `python tools/sync_memory_archive.py --push`, verifies the prompt does not use free-form search output as answerability or archive-content evidence, and checks that it does not hand-stage files.
+
+The reusable contract is deliberately layered: search health passing is necessary but not sufficient for publish. The content-noise readiness gate must still block publish until the repository reaches the deterministic repair -> rebuild -> archive audit -> publish readiness -> search health -> sync dry-run chain.
+
+The synthetic cases cover `search_healthy_noise_repaired_publish_ready`,
+`search_healthy_ambiguous_noise_blocked`,
+`search_healthy_malformed_meta_blocked`,
+`clean_after_repair_no_empty_commit`, and `durable_content_preserved`.
+Repairable content noise must fail readiness before publish, repair through
+`tools/repair_publish_surfaces.py`, rebuild derived surfaces through the
+updater, pass archive audit/readiness/search health, and then reach sync
+dry-run publish intent. Ambiguous scalar noise and malformed metadata must fail
+closed before publish. A clean rerun after repair must avoid an empty commit or
+push intent. Durable facts, summaries, tags, and evidence refs must survive
+repair and rebuild.
+
+Aggregate metrics include `search_health_pre_repair_pass_rate`,
+`content_noise_block_count`, `repair_apply_success_count`,
+`post_repair_readiness_pass_count`, `post_repair_search_health_pass_count`,
+`post_repair_publish_intent_count`, `ambiguous_fail_closed_count`,
+`malformed_fail_closed_count`, `no_empty_commit_count`,
+`durable_content_preservation_count`, `hand_stage_bypass_count`,
+`free_form_search_output_used_count`, and `privacy_leak_count`.
+
+This proves deterministic closure for search-healthy content-noise repair. It is not live scheduler reliability, not live GitHub availability, not live LLM prompt-following quality, not memory quality, not ranking quality, not vector search, not ontology discovery, not private archive quality, and not public leaderboard parity. The command is stable and included in `tools/run_quality_gates.py`.
+
+## V2.17 Real Deployment Publish Readiness Closure
+
+V2.17 closes the observed deployment gap where archive audit and
+`search_memory.py --health-check` passed, but `sync_memory_archive.py --push`
+correctly refused to publish because generated publish-facing index fields
+still contained command-progress or permission/sandbox chatter. The reusable
+repair helper now handles a narrower deterministic case: a single-scalar
+`summary` value that is entirely noisy can be replaced only when the same
+structured `meta.json` record contains a clean durable fallback such as
+`user_intent`, `reusable_facts`, `decisions`, `unresolved_tasks`, or `title`.
+If no clean fallback exists, the repair still fails closed.
+
+`benchmarks/publish_surface_repair_gate.py` adds
+`fallback_summary_metadata_noise` to prove this exact failure class without
+rendering private memory text. The packaged gate now requires 3 pre-repair
+readiness failures, 2 post-repair readiness passes, 2 repairable apply
+successes, 2 durable-content preservation checks, 1 ambiguous fail-closed
+case, 1 malformed fail-closed case, and `privacy_leak_count=0`.
+
+A private deployment dogfood run on 2026-07-09 stayed aggregate-only and
+reported the following closure metrics after repair and sync:
+
+| metric | value |
+| --- | ---: |
+| `publish_readiness_status` | `passed` |
+| `publish_readiness_blocked_file_count` | 0 |
+| `command_progress_count` | 0 |
+| `permission_or_sandbox_count` | 0 |
+| `raw_source_reference_count` | 0 |
+| `privacy_leak_count` | 0 |
+| `archive_audit_passed` | true |
+| `search_health_memory_records` | 1444 |
+| `search_health_active_memory_records` | 1442 |
+| `sync_dry_run_status_after_publish` | `no_op` |
+
+This proves a real deployment publish-readiness closure for this failure
+class and keeps the reusable claim bounded. It is not live scheduler
+reliability, not live LLM prompt-following quality, not GitHub availability in
+general, not memory quality, not ranking quality, not vector search, not
+ontology discovery, not private archive quality, and not public leaderboard
+parity.
+
+## V2.18 Live Codex Automation Prompt Alignment Gate
+
+V2.18 closes the remaining scheduler configuration gap: the reusable
+agent-native prompt and the real Codex scheduled automation now both spell out
+the same publish-readiness, repair, recheck, sync dry-run, and sync-helper
+publish path. The previous live automation prompt already ran the updater,
+archive audit, search health check, and sync helper, but it did not explicitly
+run `python tools/audit_publish_readiness.py`, did not run
+`python tools/repair_publish_surfaces.py --apply` for repairable
+publish-surface blockers, and did not require a post-repair
+archive audit -> publish readiness -> search health -> sync dry-run chain.
+
+`benchmarks/live_automation_prompt_alignment_gate.py` validates the public
+synthetic prompt contract by rendering a clean packaged deployment repository
+with `tools/render_scheduler.py --backend agent-native --push-after-update`.
+It also supports a local live check with
+`--automation-config /Users/example/.codex/automations/update-my-precious-memory/automation.toml`
+without rendering the automation prompt text. The gate includes negative
+prompts for missing publish-readiness coverage and raw git publish paths, so
+the release check rejects both stale scheduler contracts and prompts that
+bypass `tools/sync_memory_archive.py`.
+
+The live Codex automation was inspected and updated on 2026-07-09. The
+aggregate-only live alignment run reported:
+
+| metric | value |
+| --- | ---: |
+| `live_automation_contract_checked` | 1 |
+| `rendered_prompt_alignment_pass` | true |
+| `live_automation_alignment_pass` | true |
+| `publish_readiness_gate_present` | true |
+| `repair_step_present` | true |
+| `post_repair_recheck_present` | true |
+| `sync_dry_run_before_push_present` | true |
+| `sync_only_publish_path_present` | true |
+| `raw_git_publish_path_count` | 0 |
+| `private_archive_content_committed_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The aligned scheduled path is:
+update -> archive audit -> publish readiness -> repair only for deterministic
+repairable publish-surface blockers -> archive audit -> publish readiness ->
+`search_memory.py --health-check` -> `sync_memory_archive.py --dry-run --push`
+-> `sync_memory_archive.py --push`. Generic free-form content search output is
+not used as archive readiness evidence, and raw `git add`, `git commit`, or
+`git push` is not an allowed publish path.
+
+This proves deterministic scheduler prompt alignment and publish-path
+self-recovery coverage for the live Codex automation configuration. It does
+not prove live scheduler reliability, live GitHub availability, live LLM
+prompt-following quality, memory quality, ranking quality, vector search,
+ontology discovery, private archive quality, or public leaderboard parity. The
+synthetic command is stable and included in `tools/run_quality_gates.py`; the
+local live check is a deployment verification command and is not required for
+portable release gates.
+
+## V2.19 Reviewable Automatic Induction Consolidation Gate
+
+V2.19 adds `benchmarks/induction_consolidation_gate.py` as a packaged write-path
+gate for deterministic automatic induction consolidation. The gate creates a
+clean synthetic deployment archive, feeds synthetic source records through the
+copied `tools/update_memory_archive.py`, and scores only structured memory,
+review, and trace indexes. It does not use free-form summaries as
+answerability evidence.
+
+The gate proves four bounded behaviors: repeated durable facts consolidate into
+one active memory with multiple support refs; paraphrased durable facts merge
+only when deterministic normalized keys match; contradictory facts are
+preserved with evidence instead of silently overwriting each other; and process
+noise such as command status, prompt echo, approval/sandbox chatter, raw paths,
+and automation narration is rejected before active-memory promotion. Ambiguous
+scope narrowing is routed to induction review rather than becoming active
+current memory automatically.
+
+The V2.19 synthetic packaged run reported:
+
+| metric | value |
+| --- | ---: |
+| `induction_duplicate_merge_accuracy` | 1.0 |
+| `induction_paraphrase_merge_accuracy` | 1.0 |
+| `induction_contradiction_preservation_count` | 1 |
+| `induction_ambiguous_scope_review_count` | 1 |
+| `induction_process_noise_rejection_count` | 4 |
+| `induction_active_memory_precision` | 1.0 |
+| `induction_support_ref_coverage_rate` | 1.0 |
+| `review_routing_accuracy` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+This proves a narrow deterministic consolidation and review-routing contract
+for synthetic automatic induction. It does not prove live LLM induction
+quality, vector search, broad ranking behavior, ontology discovery,
+multi-principal governance, private archive quality, or public benchmark
+leaderboard parity. The gate is deterministic and included in
+`tools/run_quality_gates.py`.
+
+## V2.20 Long-Horizon Lifecycle Governance Gate
+
+V2.20 adds `benchmarks/lifecycle_governance_gate.py` as a packaged lifecycle
+governance gate for synthetic long-horizon archive histories. The gate creates
+a clean deployment archive, feeds synthetic source records through the copied
+`tools/update_memory_archive.py`, queries the copied `tools/search_memory.py`
+with context packages, and scores only structured memory, review, trace, and
+context-package outputs. It does not use free-form search output as
+answerability evidence.
+
+The V2.20 gate proves six bounded behaviors: refreshed memories supersede old
+support while default context packages answer from the active/current
+replacement rather than the old node; deprecated-only support abstains;
+explicit deletion is represented as a conservative `Deleted fact:` tombstone
+marker using existing inactive lifecycle links rather than physical deletion;
+related but non-equivalent partial conflicts route to review; isolated stale
+low-support automatic memories are lowered to low confidence and routed to
+memory review; and noisy multi-month prompt/progress/automation fragments do
+not become active memory.
+
+The V2.20 synthetic packaged run reported:
+
+| metric | value |
+| --- | ---: |
+| `lifecycle_refresh_accuracy` | 1.0 |
+| `lifecycle_deprecation_suppression_accuracy` | 1.0 |
+| `lifecycle_deletion_tombstone_accuracy` | 1.0 |
+| `lifecycle_partial_conflict_review_count` | 1 |
+| `lifecycle_decay_or_stale_review_routing_accuracy` | 1.0 |
+| `lifecycle_active_current_precision` | 1.0 |
+| `lifecycle_inactive_search_suppression_rate` | 1.0 |
+| `lifecycle_support_ref_coverage_rate` | 1.0 |
+| `lifecycle_noisy_history_rejection_count` | 4 |
+| `privacy_leak_count` | 0 |
+
+This proves deterministic packaged lifecycle governance for refresh,
+deprecation, tombstone deletion, inactive suppression, stale review routing,
+and noisy synthetic multi-month histories. It does not prove physical deletion,
+multi-principal ACL, live LLM memory judgment, vector search, ontology
+discovery, private archive quality, public benchmark leaderboard parity, or a
+complete long-horizon governance system. The gate is deterministic and included
+in `tools/run_quality_gates.py`.
+
+## V2.21 Aggregate-Only Private Lifecycle Shadow Gate
+
+V2.21 adds `benchmarks/private_lifecycle_governance_shadow_gate.py` as a
+read-only lifecycle observability gate for the same governance surfaces that
+V2.20 made deterministic. The release gate uses only the public synthetic
+fixture mode:
+
+```bash
+python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
+```
+
+The runner can also be used as optional local dogfood against a private
+deployment archive:
+
+```bash
+python3 benchmarks/private_lifecycle_governance_shadow_gate.py \
+  --memory-repo /path/to/private-agent-memory \
+  --output /tmp/my-precious-private-lifecycle-shadow.json
+```
+
+The private mode is intentionally not part of `tools/run_quality_gates.py`.
+It may read structured archive indexes and use private memory text internally
+as `tools/search_memory.py --depth evidence --context-json` queries, but its
+report is aggregate-only. It does not render private queries, memory text,
+memory IDs, source paths, source content, or raw refs. Reports may be written
+only to stdout or an explicit `/tmp/...` path. If the archive-bundled search
+tool cannot emit a context package, the runner may fall back to this repo's
+template `search_memory.py`; only the fallback success count is rendered.
+
+The V2.21 synthetic fixture reported:
+
+| metric | value |
+| --- | ---: |
+| `private_lifecycle_relation_integrity_score` | 1.0 |
+| `private_inactive_search_suppression_sample_rate` | 1.0 |
+| `private_active_current_support_sample_rate` | 1.0 |
+| `private_context_package_parse_success_rate` | 1.0 |
+| `private_tombstone_marker_count` | 1 |
+| `private_stale_review_candidate_count` | 1 |
+| `private_support_ref_reachability_sample_rate` | 1.0 |
+| `private_review_queue_actionability_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+| `rendered_private_query_count` | 0 |
+| `rendered_memory_text_count` | 0 |
+| `rendered_source_path_count` | 0 |
+| `rendered_raw_ref_count` | 0 |
+
+This proves deterministic aggregate-only lifecycle observability for relation
+integrity, inactive search suppression, active/current context package support,
+support-ref reachability, stale review routing, tombstone markers, and review
+queue actionability. It does not prove private archive correctness by itself,
+private coverage completeness, LLM answer quality, ranking quality, vector
+search, ontology discovery, physical deletion, scheduler publication behavior,
+or public leaderboard parity.
+
+## V2.22 Aggregate-Only Active Support Failure Diagnosis
+
+V2.22 keeps the V2.21 private lifecycle shadow gate private-data-free while
+making active/current support failures actionable. The runner still emits only
+aggregate JSON, but it now separates a low
+`private_active_current_support_sample_rate` into fixed diagnosis counters:
+expected active node missing, package-level unsupported answerability,
+missing query support, missing summary/evidence drilldown, wrong active hit,
+archive-bundled search-tool context-package failure, template search-tool
+fallback success, and unknown privacy-preserved failure.
+
+The release gate remains synthetic and private-free:
+
+```bash
+python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
+```
+
+The V2.22 healthy synthetic fixture keeps the V2.21 metrics green and reports
+zero active-support failures:
+
+| metric | value |
+| --- | ---: |
+| `active_support_expected_node_missing_count` | 0 |
+| `active_support_package_unsupported_count` | 0 |
+| `active_support_query_support_missing_count` | 0 |
+| `active_support_summary_drill_missing_count` | 0 |
+| `active_support_evidence_drill_missing_count` | 0 |
+| `active_support_wrong_active_hit_count` | 0 |
+| `archive_search_tool_context_package_failure_count` | 0 |
+| `template_search_tool_fallback_success_count` | 0 |
+| `unknown_privacy_preserved_failure_count` | 0 |
+
+The public test fixture also covers two fail-closed cases: a deliberately
+broken archive-bundled search tool must be counted through aggregate fallback
+counters without rendering command output, and a deliberately corrupted active
+support node must produce nonzero support-failure counters without rendering
+the query, memory text, memory ID, source path, raw ref, or package body.
+
+An optional local private dogfood run after V2.22 stayed aggregate-only and
+reported `privacy_leak_count: 0`. It converted the previously opaque
+`private_active_current_support_sample_rate: 0.5` result into aggregate
+diagnostics: `archive_search_tool_context_package_failure_count: 8`,
+`template_search_tool_fallback_success_count: 8`,
+`active_support_expected_node_missing_count: 1`,
+`active_support_package_unsupported_count: 1`, and
+`active_support_wrong_active_hit_count: 2`. This is observability evidence,
+not a private archive correctness claim and not a private archive repair.
+
+## V2.23 Archive-Bundled Search Tool Drift Repair
+
+V2.23 closes the deployment-tool drift exposed by V2.22. It adds a narrow
+setup-path repair contract:
+
+```bash
+python skills/setup-my-precious/scripts/setup_memory_archive.py \
+  --path /path/to/agent-memory \
+  --refresh-tools \
+  --skip-config
+```
+
+The repair command refreshes only reusable `tools/**` files from the bundled
+template. It does not rewrite archive data, indexes, source records, daily
+records, session summaries, or user-owned config. It also fails closed when a
+tool target resolves outside the archive, such as through a symlink.
+
+The release gate now includes:
+
+```bash
+python3 benchmarks/search_tool_drift_repair_gate.py
+```
+
+The gate constructs a clean packaged deployment repo, deliberately replaces the
+deployment repo's bundled `tools/search_memory.py` with a stale tool that cannot
+emit `report_kind: memory_recall_context_package`, runs the documented
+`--refresh-tools` repair command, and then verifies the deployment repo's own
+`tools/search_memory.py` can produce a package-first
+`--depth evidence --context-json` result. Template fallback is not used as
+post-repair success evidence.
+
+| metric | value |
+| --- | ---: |
+| `stale_search_tool_detected_count` | 1 |
+| `repair_attempt_count` | 2 |
+| `post_repair_context_package_success_count` | 1 |
+| `template_fallback_used_after_repair_count` | 0 |
+| `archive_data_mutation_count` | 0 |
+| `unsafe_repair_fail_closed_count` | 1 |
+| `privacy_leak_count` | 0 |
+
+This proves synthetic deployment search-tool drift detection and repair. It
+does not prove private archive correctness, private content repair, ranking
+quality, LLM answer quality, vector search, ontology discovery, or scheduler
+publish behavior.
+
+## V2.25 Active Current Support Root-Cause Closure Gate
+
+V2.25 addresses the remaining post-V2.24 active/current support question
+without editing private archive content. V2.24 proved that the real deployment
+search tool no longer needs template fallback to emit
+`memory_recall_context_package`; the remaining private shadow failures were in
+active/current support classification rather than deployment-tool drift.
+
+The new public gate is:
+
+```bash
+python3 benchmarks/active_support_recall_closure_gate.py
+```
+
+It creates a clean packaged deployment archive, writes private-data-free
+synthetic memory rows, invokes the copied deployment repo search tool with
+`--depth evidence --context-json`, parses only
+`report_kind: memory_recall_context_package`, and reuses the same
+`active_support_diagnosis` recipe as the private lifecycle shadow gate. It does
+not use free-form search output as answerability evidence.
+
+The fixture covers four public cases:
+
+- supported active/current memory with package, hit, query support, summary
+  drilldown, and evidence drilldown all supported;
+- expected active node missing while another active supported hit is present;
+- expected active node present but package/hit answerability unsupported; and
+- expected active node missing with an unsupported no-hit package.
+
+The gate reports:
+
+| metric | value |
+| --- | ---: |
+| `active_support_synthetic_case_pass_rate` | 1.0 |
+| `active_support_context_package_parse_success_rate` | 1.0 |
+| `active_support_expected_node_missing_reproduction_count` | 1 |
+| `active_support_package_unsupported_reproduction_count` | 2 |
+| `active_support_wrong_active_hit_reproduction_count` | 1 |
+| `active_support_repair_success_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+An optional aggregate-only private dogfood run after V2.25 kept the V2.24
+tool-drift repair green: `archive_search_tool_context_package_failure_count: 0`,
+`template_search_tool_fallback_success_count: 0`,
+`private_context_package_parse_success_rate: 1.0`, and
+`privacy_leak_count: 0`. It still reported active-support failures through
+aggregate counters, including expected-node-missing, package-unsupported, and
+wrong-active-hit counts. Because the public synthetic closure gate passes, this
+classifies the remaining private shadow failure as a private archive content or
+sampling follow-up, not as a proven reusable search-tool or diagnosis bug.
+
+This proves public synthetic coverage for the active-support failure taxonomy
+and the aggregate diagnosis path. It does not prove private archive
+correctness, private content repair, ranking quality, LLM answer quality,
+vector search, ontology discovery, or public leaderboard parity.
+
+## V2.27 Reviewed Automatic Memory Publish Gate
+
+V2.27 closes the packaged publication mismatch between updater-generated
+automatic memory layers and the intentionally narrow default sync boundary.
+The default command still rejects automatic memory files. The only opt-in is
+`--include-reviewed-memory-nodes`, which adds exactly
+`memories/global.jsonl`, `memories/domains.jsonl`, and
+`memories/projects.jsonl`; it does not allow the whole `memories/` directory,
+review inputs, source-stream registries, tools, docs, or scheduler state.
+
+The public synthetic gate is:
+
+```bash
+python3 benchmarks/reviewed_automatic_memory_publish_gate.py
+```
+
+It initializes a fresh packaged archive for every case and uses a local bare
+Git remote for a real commit-and-push lifecycle. Reviewed mode runs changed-path
+and key-like scans, archive and publish-readiness audits, memory/index parity,
+lifecycle and evidence-reference checks, source drilldown checks, search health,
+and candidate cached-diff validation before publication. Dry-run uses a temporary
+Git index, so it exercises staged validation without changing the real index.
+
+The gate reports:
+
+| metric | value |
+| --- | ---: |
+| `default_mode_automatic_memory_rejection_rate` | 1.0 |
+| `reviewed_mode_safe_dry_run_pass_rate` | 1.0 |
+| `reviewed_mode_live_push_success_rate` | 1.0 |
+| `reviewed_mode_exact_stage_scope_rate` | 1.0 |
+| `reviewed_mode_exact_add_pathspec_rate` | 1.0 |
+| `reviewed_mode_dry_run_index_preservation_rate` | 1.0 |
+| `reviewed_mode_unsafe_rejection_accuracy` | 1.0 |
+| `reviewed_mode_index_parity_rejection_count` | 1 |
+| `reviewed_mode_lifecycle_rejection_count` | 1 |
+| `reviewed_mode_content_noise_rejection_count` | 1 |
+| `reviewed_mode_publish_readiness_rejection_count` | 1 |
+| `reviewed_mode_secret_rejection_count` | 1 |
+| `reviewed_mode_unexpected_path_rejection_count` | 5 |
+| `privacy_leak_count` | 0 |
+
+The unsafe cases cover index mismatch, broken lifecycle/evidence references,
+automatic-memory noise, a key-like value without rendering it, search-health
+failure, publish-readiness-only noise, and separate review/tool/source-stream/
+unapproved-memory-sibling/other unexpected paths. The safe dry-run case seeds a
+pre-existing staged blob and verifies that the real Git index is byte-identical
+after candidate validation.
+
+This proves deterministic packaged staged-path, audit, commit, and push closure
+for an explicitly reviewed automatic-memory mode. It does not prove LLM answer
+quality, ranking quality, vector search, ontology discovery, or public
+leaderboard parity.
+
+## V2.28 Bounded Long-Horizon Event-Boundary Memory Gate
+
+V2.28 adds the first bounded packaged stress gate over hundreds of event
+boundaries and multiple incremental epochs:
+
+```bash
+python3 benchmarks/long_horizon_memory_stress_gate.py
+```
+
+The gate creates a clean archive through the setup script and processes exactly
+240 synthetic session records as six monthly epochs of 40 records. The workload
+uses 12 project contexts, three archive domains, and two explicit non-project
+source partitions. Each epoch runs the copied updater and its induction and
+consolidation path before checkpoint recall. The final epoch is replayed without
+new input to gate idempotence. No final memory node is preseeded.
+
+The narratives cover cross-project support merge, paraphrase consolidation, a
+three-generation supersession chain, pending conflict review followed by an
+explicit approval, deprecation, 204 similar one-session distractors split
+between temporary local decisions and process-log updates, and a sticky
+explicit memory captured from a source event. The 16 checkpoint cases contain
+nine answer cases and seven abstention cases, including a post-resolution probe
+that requires the older
+conflicting preference to remain unsupported. Answerability comes only
+from copied deployment `search_memory.py` calls using
+`--depth evidence --context-json`; answer cases additionally verify memory,
+session, evidence, and source-ref depth packages.
+
+The fail-first harness initially reported
+`long_horizon_lifecycle_reciprocity_rate=0.6666666666666666` while every runtime
+behavior metric passed. Inspection showed an oracle error: under the accepted
+clean-cut contract, the final generation supersedes both prior generations and
+both inactive nodes point directly to that unique current node. The harness had
+incorrectly required the oldest node to retain the already-inactive intermediate
+successor. Correcting that expectation required no updater, consolidation, or
+search implementation change.
+
+The expanded 24-support cross-project case then reproduced a separate generic
+package handoff defect. Before the runtime fix, the active memory remained in
+the underlying memory collector's top five but was displaced from a
+`--limit 5` context package by higher-scoring session/index/markdown support
+artifacts. The fail-first report had
+`long_horizon_checkpoint_answer_accuracy=0.875` and
+`long_horizon_active_current_recall_at_5=0.7777777777777778`; lifecycle, index,
+replay, noise, and privacy gates still passed. The bounded fix prioritizes
+active memory hits only while constructing the machine-readable context
+package. Human-readable search ordering is unchanged. The search tool was then
+synchronized across the template, setup asset, and read-path skill copy.
+
+Two independent final runs passed in 37.789828 and 37.808815 seconds. Their JSON
+reports were identical after removing `runtime_seconds`. Final metrics were:
+
+| metric group | result |
+| --- | ---: |
+| ingest, checkpoint decision, abstention, active-current recall | 1.0 |
+| stale suppression, cross-project generalization, paraphrase consolidation | 1.0 |
+| noise rejection, explicit-memory survival, idempotent replay | 1.0 |
+| session, evidence, and source-ref drilldown | 1.0 |
+| lifecycle reciprocity, index parity, context-package parsing | 1.0 |
+| `duplicate_active_memory_count` | 0 |
+| `unexpected_active_memory_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The gate is deterministic, completes well below its 180-second limit, and is
+not duplicative of the smaller lifecycle fixtures, so it is part of
+`tools/run_quality_gates.py`.
+
+The required aggregate-only private shadow command was also run on 2026-07-10
+with `--sample-limit 24`. Against the pre-fix deployed search tool, it returned
+`privacy_leak_count=0`, context-package parsing 1.0, inactive suppression 1.0,
+lifecycle relation integrity 1.0, and support-ref reachability 1.0, but did not
+pass overall. Active-current support was `0.7083333333333334`, with seven
+expected-node-missing and seven package-unsupported samples. An aggregate-only
+diagnosis found all seven expected nodes in the memory collector's top five and
+in context packages at limit 50. Running the same shadow against the fixed
+repository template produced active-current support 1.0 and zeroed all six
+active-support failure counters, isolating deployment-tool drift rather than a
+private-content defect.
+
+After an explicitly approved tool-only deployment, the private repository's
+`tools/search_memory.py` was synchronized byte-for-byte with the fixed template.
+No memory record, index, session, source record, automation, scheduler, or
+publish configuration changed. The deployed search health check, archive audit,
+and publish-readiness audit passed. The exact deployed private shadow then
+returned active-current support 1.0, context-package parsing 1.0, inactive
+suppression 1.0, lifecycle relation integrity 1.0, review actionability 1.0,
+and support-ref reachability 1.0. All active-support failure counters and
+`privacy_leak_count` were zero. Neither run rendered a private query, memory
+text, ID, source path, raw ref, or source content. This closes deployed-runtime
+drift only; the aggregate shadow still does not establish private archive
+content correctness or answer quality.
+
+V2.28 proves bounded deterministic packaged behavior over 240 synthetic event
+boundaries. It does not prove production scale, high-cardinality users, live
+LLM induction or answer quality, vector retrieval, automatic ontology
+discovery, multi-principal governance, official benchmark parity, or solved
+long-term decay and deletion policy.
+
+## V2.29 Exact Evidence-To-Original-Event Drilldown Gate
+
+V2.29 closes the first bounded L0 source-event gap without putting source
+content into the normal recall package. The updater now preserves physical
+JSONL line number, per-line event ordinal, and normalized event hash. Generated
+evidence quotes receive opaque source anchors, and versioned source maps bind
+each quote to its exact locator while storing no raw event text. Automatic,
+explicit, consolidated, and lifecycle memories retain their exact evidence and
+source pairs.
+
+The source preview is a separate machine-readable operation. The agent first
+uses copied deployment search with `--depth source --context-json`, selects one
+exact `source_ref_id` from a supported active/current hit, and then invokes:
+
+```bash
+python tools/resolve_memory_source.py "<query>" \
+  --repo /path/to/agent-memory \
+  --source-ref-id "src_<exact-id>" \
+  --allow-source-root /path/to/authorized/source-root \
+  --authorize-source-preview \
+  --preview-json
+```
+
+The resolver emits `report_kind: memory_source_preview_package`. Before it
+returns one bounded redacted preview, it re-runs the copied source-depth context
+package, verifies active/current query support and exact-ref membership, checks
+lexical and resolved root containment plus symlink components, validates the
+whole source-record SHA-256, loads only the anchored JSONL line/event, and
+validates the event hash. It accepts no `all` selector. Missing authorization
+and every unsupported, stale, malformed, escaped, tampered, unsupported-format,
+or legacy state returns no preview.
+
+The deterministic packaged gate is:
+
+```bash
+python3 benchmarks/authorized_original_source_gate.py
+```
+
+It initializes a clean deployment archive and feeds exactly eight external
+synthetic JSONL source records containing 32 events through the copied updater
+and its real induction/consolidation path. No final memory node, evidence file,
+source map, or index is prewritten. Cases cover a supporting fact after an
+unrelated first event, two cross-project paraphrases with distinct sources, an
+explicit non-first event, current versus superseded source events, authorized
+and default-denied access, no-hit, inactive-only, wrong ref, root and symlink
+escape, source and event hash mismatch, unsupported format, malformed context,
+legacy source map, and a secret-bearing event whose safe text remains visible
+after redaction.
+
+Two independent runs completed in 4.924 and 4.891 seconds. Their reports were
+identical after removing `runtime_seconds`, so the gate was added to
+`tools/run_quality_gates.py`. Aggregate metrics were:
+
+| metric | result |
+| --- | ---: |
+| `source_context_package_parse_success_rate` | 1.0 |
+| `source_preview_package_parse_success_rate` | 1.0 |
+| `source_anchor_assignment_accuracy` | 1.0 |
+| `memory_evidence_quote_fidelity_rate` | 1.0 |
+| `authorized_original_event_resolution_rate` | 1.0 |
+| `default_source_content_block_rate` | 1.0 |
+| `unsupported_source_rejection_rate` | 1.0 |
+| `inactive_source_rejection_rate` | 1.0 |
+| `source_integrity_failure_block_rate` | 1.0 |
+| `legacy_source_map_fail_closed_rate` | 1.0 |
+| `source_preview_redaction_accuracy` | 1.0 |
+| `wrong_event_preview_count` | 0 |
+| `unredacted_secret_count` | 0 |
+| `raw_path_leak_count` | 0 |
+| `raw_ref_leak_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+V2.29 proves bounded generic JSONL event resolution in a clean packaged
+deployment after package-first support validation. It does not prove arbitrary
+transcript-format support, private production correctness, bulk source access,
+multi-principal authorization, LLM answer or induction quality, ranking
+quality, vector search, ontology discovery, or public leaderboard parity.
+
+## V2.30 Transactional Legacy Source-Anchor Upgrade Gate
+
+V2.30 adds a safe migration path for entries created before V2.29. Existing
+backfill first removes and regenerates an archive entry, so it cannot establish
+semantic parity or exact rollback for an anchor-only migration. The new copied
+deployment tool, `tools/upgrade_source_anchors.py`, instead reconstructs
+provenance from the unchanged evidence quote and external JSONL source event.
+It does not re-run summarization or induction.
+
+Focused fail-first evidence confirms the distinction: when existing backfill
+has removed the selected entry and its mocked `write_record()` returns `None`,
+the command returns success with the old entry still absent. That behavior is
+valid evidence that backfill is not the transactional migration primitive; it
+is not changed by V2.30.
+
+Dry run and apply both emit
+`report_kind: memory_source_anchor_upgrade_package`. Apply accepts exactly one
+source record, requires an exact archived source SHA-256 plus lexical and
+canonical root containment, and rejects zero or multiple event matches. The only
+allowed changes are source-anchor version/mappings, corresponding meta anchor
+IDs, and matching memory raw-ref anchors. Every replacement is prepared before
+mutation; target hashes are rechecked; archive audit and search health run
+after replacement; any failure restores original bytes and modes.
+
+The deterministic packaged gate is:
+
+```bash
+python3 benchmarks/legacy_source_anchor_upgrade_gate.py
+```
+
+It creates exactly six external synthetic JSONL records with 24 events, uses
+the copied updater to generate real summaries, evidence, source maps, memory
+nodes, and indexes, then removes provenance fields only to create the legacy
+fixture. Cases cover a non-first automatic fact, natural-user transformation,
+non-first explicit memory, incremental cross-project paraphrase sources,
+current and superseded nodes, secret redaction policy, already-current replay,
+missing/drifted/malformed sources, root and symlink escape, malformed source
+map, absent and ambiguous quotes, stale target fingerprints, mid-transaction
+failure, and post-audit rollback.
+
+Two independent runs completed in 5.983 and 5.937 seconds. Reports were
+identical after removing `runtime_seconds`, so the gate was added to
+`tools/run_quality_gates.py`. Every deterministic rate below was `1.0`:
+
+| metric group | metrics |
+| --- | --- |
+| package and eligibility | `legacy_upgrade_package_parse_success_rate`, `legacy_upgrade_eligibility_accuracy` |
+| binding and semantic parity | `legacy_exact_binding_accuracy`, `legacy_memory_id_parity_rate`, `legacy_memory_text_hash_parity_rate`, `legacy_evidence_quote_parity_rate`, `legacy_lifecycle_parity_rate`, `legacy_support_count_parity_rate` |
+| apply and resolver | `legacy_safe_apply_success_rate`, `legacy_post_upgrade_resolver_success_rate`, `legacy_idempotent_replay_rate`, `legacy_already_current_noop_rate` |
+| transaction safety | `legacy_transaction_rollback_rate`, `legacy_post_audit_rollback_rate`, `legacy_optimistic_concurrency_rejection_rate` |
+| fail-closed policy | `legacy_source_hash_drift_rejection_rate`, `legacy_missing_source_rejection_rate`, `legacy_unsafe_path_rejection_rate`, `legacy_ambiguous_binding_rejection_rate`, `legacy_secret_policy_accuracy` |
+
+`unexpected_semantic_change_count`, `partial_upgrade_count`,
+`wrong_event_preview_count`, `unredacted_secret_count`,
+`raw_path_leak_count`, `raw_ref_leak_count`, and `privacy_leak_count` were all
+zero.
+
+The 2026-07-11 aggregate-only private readiness scan sampled 24 legacy entries
+without installing or applying a private tool. Twenty-three were eligible and
+one was rejected as `ambiguous_evidence_event_binding`; the eligible sample
+contained 86 exact quote bindings. The private repository Git status hash was
+unchanged before and after the scan. This is readiness evidence only and not permission to migrate;
+it is also not proof of private content correctness.
+
+V2.30 proves bounded, single-record, provenance-only migration for supported
+JSONL in a clean packaged deployment. It does not prove arbitrary transcript formats.
+It also does not prove batch or production-wide migration safety,
+actual private deployment, public benchmark parity, LLM answer or induction quality, ranking
+quality, vector search, ontology discovery, or multi-principal governance.
+
+## V2.31 Archive Regeneration Reference-Closure Gate
+
+V2.31 closes two archive-regeneration failures observed by the deployment
+workflow without weakening the archive auditor. Replacing a source record can
+delete its old session package while an existing sticky explicit memory still
+contains the old summary, evidence, and source-map references. Daily rendering
+can also clip a combined summary inside a Markdown emphasis span, producing an
+incomplete durable index line.
+
+The updater now reconciles archive-internal explicit-memory provenance after
+existing and newly generated nodes have been merged. A failed component
+invalidates its complete session support bundle; valid memory-ID lifecycle
+links and non-session reference policy remain unchanged. Support counts are
+rederived from surviving evidence bundles. If reconciliation leaves an
+explicit memory without evidence, the updater exits with a bounded aggregate
+diagnostic instead of silently deleting or persisting the node.
+
+Daily records use a dedicated bounded clipper. It prefers sentence or word
+boundaries and removes Markdown emphasis markers before clipping when the
+normal boundary would leave an unbalanced span. The global clip behavior and
+the audit categories remain unchanged.
+
+The deterministic packaged gate is:
+
+```bash
+python3 benchmarks/archive_regeneration_closure_gate.py
+```
+
+It creates two independent pairs of clean synthetic deployment repositories.
+Each successful case performs a source update, creates an explicit lifecycle
+link through the copied updater, replaces the source package, reruns the copied
+updater, and then executes packaged archive audit, search health, reviewed sync
+dry-run, and an idempotent replay. A separate case removes the only support for
+a sticky explicit memory and requires a fail-closed result. The two structured
+reports are identical.
+
+| metric | result |
+| --- | ---: |
+| `regeneration_bundle_reconciliation_accuracy` | 1.0 |
+| `stale_derived_ref_count` | 0 |
+| `stale_evidence_ref_count` | 0 |
+| `stale_raw_ref_count` | 0 |
+| `support_count_consistency_rate` | 1.0 |
+| `lifecycle_link_retention_rate` | 1.0 |
+| `orphan_explicit_fail_closed_accuracy` | 1.0 |
+| `daily_structure_safe_clip_accuracy` | 1.0 |
+| `daily_durable_fact_retention_rate` | 1.0 |
+| `post_regeneration_archive_audit_pass_rate` | 1.0 |
+| `post_regeneration_search_health_pass_rate` | 1.0 |
+| `reviewed_sync_dry_run_pass_rate` | 1.0 |
+| `idempotent_replay_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+V2.31 proves reference and daily-render closure for supported synthetic
+packaged regeneration. It does not prove whole-repository transaction rollback,
+private deployment correctness or recovery, LLM summarization quality, ranking
+quality, vector search, ontology discovery, or public leaderboard parity.
 
 ## Current Baseline
 
@@ -229,7 +1711,7 @@ load.
 
 ## Updater-Driven Induction Baseline
 
-Baseline date: 2026-06-26
+Baseline date: 2026-07-07
 
 Code point used for the benchmark harness: this document revision
 
@@ -237,16 +1719,16 @@ Case file:
 `benchmarks/cases/updater_induction_synthetic.jsonl`
 
 Case fingerprint:
-`bfc1cd71ca7e50755cf68e487f39c2bb8ed23c137f1822a0216a5906f88c9bca`
+`70c9cf786338b362189ff246abfbb5e61ecdf3d35dac45d34d12b909d855ecb3`
 
 Runner fingerprint:
-`da94d3800a46664891f998d9dac7fe06c0a03631df4668e15cf3a797ce290c62`
+`f9dd2e8590088aa1707f9fc6a6e95725052703ee0f17959c2d80959075797ac7`
 
 Setup script fingerprint:
 `d3303d2b061a3568c107cdc6dfadddcf4b254d527ae4c44babbccc5e6f86774d`
 
 Updater script fingerprint:
-`b811d68366062e6116623e1278292f139b84d9d787017f64fdd4ec8b771f7b2b`
+`0787c964fd662950bb5ad46e5e67972a7ca21b0388baa7f1482b6af3404a73a3`
 
 Baseline command:
 
@@ -261,9 +1743,9 @@ Baseline result:
 
 | Metric | Value |
 | --- | ---: |
-| cases | 29 |
-| source_records | 41 |
-| expected_automatic_memories | 14 |
+| cases | 30 |
+| source_records | 43 |
+| expected_automatic_memories | 15 |
 | expected_forced_memories | 1 |
 | expected_lifecycle_links | 3 |
 | expected_memory_id_provenance_links | 3 |
@@ -284,6 +1766,12 @@ Baseline result:
 | low_confidence_review_rate | 1.0 |
 | scope_change_review_rate | 1.0 |
 | conflict_review_rate | 1.0 |
+| contradiction_review_routing_rate | 1.0 |
+| scope_shift_review_routing_rate | 1.0 |
+| consolidated_duplicate_suppression_rate | 1.0 |
+| consolidated_support_merge_rate | 1.0 |
+| consolidated_evidence_retention_rate | 1.0 |
+| post_consolidation_recall_at_5 | 1.0 |
 | review_routing_rate | 1.0 |
 | process_noise_rejection_rate | 1.0 |
 | ephemeral_status_rejection_rate | 1.0 |
@@ -309,6 +1797,7 @@ The updater-driven suite contains synthetic scenarios across these categories:
 | --- | ---: |
 | automatic_induction | 2 |
 | forced_memory | 1 |
+| induction_consolidation | 1 |
 | lifecycle | 1 |
 | natural_induction | 6 |
 | natural_precision | 8 |
@@ -332,6 +1821,9 @@ suppression rates. Unit coverage now also rejects duplicate decision IDs,
 repeated exact rows, and conflicting candidate/fingerprint actions, while
 dry-run preflight reports aggregate duplicate/conflict/stale/unsafe/unknown
 counts.
+The induction consolidation case verifies that paraphrased same-fact automatic
+memories collapse to one current node with merged support/evidence refs and
+remain recallable through a context package at top 5.
 A separate aggregate-safe authoring helper now generates pending private
 decision skeletons from active `index/induction_review_candidates.jsonl` rows
 without rendering candidate text, source paths, queries, raw refs, or
@@ -811,8 +2303,10 @@ Current gaps:
   memory text, probe cases, queries, source paths, or raw refs. This is still
   not a broad natural-language consolidation engine, a public benchmark score,
   or an end-to-end generated-answer evaluation.
-- Direct explicit-memory writes exist in the reusable updater, but runtime-level
-  adapters and governing-prompt integration still need policy design.
+- Direct explicit-memory writes now have a minimal runtime adapter and governing
+  prompt contract for short, evidence-bound facts. The remaining gap is broader
+  policy design for bulk explicit-memory governance, deletion, and conflict
+  handling.
 - The system has `global`, `domain`, and `project` memory files, and now has a
   minimum semantic lifecycle loop for support merge, paraphrase consolidation,
   false partial-supersession guards, refresh/supersession, contradiction links,
@@ -1939,7 +3433,7 @@ The command emitted aggregate-only JSON and returned success. It did not render
 private case rows, queries, reference answers, generated answers, memory text,
 source paths, or raw refs.
 
-Current required v1 gate summary:
+Recorded required v1 gate summary at that code point:
 
 | dimension | status | evidence level | key metrics |
 | --- | --- | --- | --- |
@@ -1949,7 +3443,7 @@ Current required v1 gate summary:
 | source_stream_registry | passed | packaged synthetic | `source_stream_update_rate=1.0`, `project_registry_independence_rate=1.0`, `archive_scope_assignment_rate=1.0`, `source_partition_assignment_rate=1.0`, `source_stream_evidence_reachability_rate=1.0`, `privacy_leak_count=0` |
 | generated_answer_eval | passed | private deployment aggregate | `case_pass_rate=1.0`, `answer_normalized_match_rate=1.0`, `abstention_accuracy=1.0`, `answer_scorable_case_rate=1.0`, `privacy_leak_count=0` |
 
-Current v1 readiness status:
+Recorded v1 readiness status at that code point:
 
 | metric | value |
 | --- | ---: |
@@ -1969,7 +3463,7 @@ Requirement audit:
 | Explicit forced memory | satisfied for v1 | updater and e2e gates include `forced_memory_capture_rate=1.0` and `e2e_forced_memory_recall_rate=1.0` |
 | Layered recall across memory/session/source/raw evidence | satisfied for v1 | layered and e2e gates pass layer calibration, session drilldown, evidence/source reachability, source-depth policy, raw-preview authorization, and redaction checks |
 | Safe drilldown from high-level memory to evidence/source | satisfied for v1 | source ref reachability, source-depth policy, source-drilldown privacy, raw-preview authorization, and raw-preview redaction are required gate metrics |
-| Quantified readiness gate | satisfied for v1 | `v1_readiness_gate.py` returns `extended_evidence_ready` with 5/5 required dimensions passed |
+| Quantified readiness gate | satisfied for v1 | `v1_readiness_gate.py` returned `extended_evidence_ready` with 5/5 required dimensions passed at that code point; the current packaged release contract is summarized in the V1 Readiness Gate section above |
 | Privacy boundary proof | satisfied for v1 | all required reports are aggregate-only and gate privacy leak counts are zero; private dogfood artifacts remain in the private deployment archive |
 | Deployment dogfood | satisfied for v1 | private dogfood answer flow authors, audits, answers, grades, and gates 20 positive plus 5 expected-abstain cases as aggregate-only evidence |
 
@@ -2439,6 +3933,271 @@ reruns must first restore `expected_record_missing=0`; only then should a
 bounded ranking change target the remaining same-layer/same-scope/different-topic
 residual noise.
 
+## V1.1 Private Shadow Coverage Refresh
+
+Date: 2026-07-06
+
+Code point before this documentation update:
+`3471b4f docs: align readiness evaluation with release gate`
+
+This refresh reran the private real-archive shadow evaluation against the
+existing strict v2 and expanded v3 redacted probes. The run used the read-only
+shadow evaluator and wrote aggregate JSON under `/tmp`; the private archive
+path, probe paths, raw case rows, queries, memory IDs, memory text, source refs,
+source paths, raw refs, and full JSON reports were not copied into this
+repository. Because the private deployment repository already had unrelated
+archive working-tree changes, this refresh did not run the generated-answer
+dogfood orchestrator, which would create private `.tmp`/`eval` artifacts.
+
+Aggregate refresh results:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| archive.memory_records | 1441 | 1441 |
+| archive.legacy_session_records | 285 | 285 |
+| probe_cases.cases | 27 | 34 |
+| probe_cases.positive_cases | 24 | 31 |
+| probe_cases.abstain_cases | 3 | 3 |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.8064516129032258 | 0.7804878048780488 |
+| top_k_noise_at_5 | 0.19354838709677424 | 0.2195121951219512 |
+| noise_sources_at_5.broad_lexical_match | 4 | 6 |
+| noise_sources_at_5.scope_mixed | 2 | 3 |
+| noise_sources_at_5.inactive_lifecycle | 0 | 0 |
+| noise_sources_at_5.low_signal_memory_node | 0 | 0 |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 5 | 7 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 2 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer_same_scope_topic | 0 | 0 |
+| noise_relation_to_expected_at_5.diff_layer | 0 | 0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| abstain_false_positive_results | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+| audit.status | passed | passed |
+| diagnostics.failure_types.recall_miss | 0 | 0 |
+| diagnostics.failure_types.top_k_noise | 5 | 8 |
+
+Threshold audit:
+
+| gate | result |
+| --- | --- |
+| strict v2 against `real_archive_shadow_v11.json` and `real_archive_shadow_v11_max.json` | passed with 0 threshold failures |
+| expanded v3 against `real_archive_shadow_v11_coverage.json` and `real_archive_shadow_v11_coverage_max.json` | passed with 0 threshold failures |
+
+Decision: the single next optimization category is ranking/noise reduction.
+This refresh no longer supports probe/archive drift cleanup as the next step:
+`expected_record_missing` is 0, `memory_recall_at_5` is 1.0 for both probes,
+and there are no recall misses. It also does not point to lifecycle or
+provenance repair: `lifecycle_integrity.score`,
+`provenance_coverage.score`, privacy, abstention, suppression, and audit are
+all green. The remaining measurable issue is top-k noise, concentrated in
+broad lexical matches and scope-mixed neighbors, with relation buckets at the
+current strict and expanded ceilings.
+
+### Ranking/Noise Reduction Slice
+
+Code point before this ranking change:
+`6d4303a docs: refresh private shadow coverage evidence`
+
+Hypothesis tested: once the highest-ranked memory hit has full
+layer/scope/topic metadata, same-layer/different-topic tail hits are residual
+ranking noise even when they share the anchor scope. The implementation keeps
+missing-metadata tails and same-topic supporting memories, but no longer lets
+same-scope/different-topic neighbors survive the relation tail pruning step.
+
+Private real-archive aggregate before/after:
+
+| metric | strict v2 before | strict v2 after | expanded v3 before | expanded v3 after |
+| --- | ---: | ---: | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.8064516129032258 | 0.9230769230769231 | 0.7804878048780488 | 0.9117647058823529 |
+| top_k_noise_at_5 | 0.19354838709677424 | 0.07692307692307687 | 0.2195121951219512 | 0.08823529411764708 |
+| noise_sources_at_5.broad_lexical_match | 4 | 1 | 6 | 2 |
+| noise_sources_at_5.scope_mixed | 2 | 1 | 3 | 1 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 5 | 1 | 7 | 1 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 1 | 2 | 2 |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 | 0 | 0 |
+| diagnostics.failure_types.top_k_noise | 5 | 2 | 8 | 3 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 | 1.0 | 1.0 |
+| abstain_pass_rate | 1.0 | 1.0 | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 | 1.0 | 1.0 |
+| provenance_coverage.score | 1.0 | 1.0 | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 | 1.0 | 1.0 |
+
+Decision: keep the ranking patch. It reduces private real-archive top-k noise
+on both strict and expanded probes, improves precision, and preserves recall,
+privacy, abstention, lifecycle, suppression, and provenance gates. The
+remaining residual noise is now concentrated in same-topic cross-scope
+neighbors and a small same-layer/same-scope/different-topic tail, so the next
+ranking step should not add broader lexical heuristics unless a fresh
+aggregate-only run shows a new dominant bucket.
+
+### Residual Top-K Noise Classification Loop
+
+Code point for the current classification pass:
+`572b90b fix: prune same-layer memory topic noise`
+
+This pass reran the strict v2 and expanded v3 private real-archive shadow
+evaluations from the current implementation. The reports stayed outside this
+repository and were used only for aggregate metrics and privacy-safe diagnostic
+counts; no private probe cases, queries, memory IDs, memory text, source refs,
+source paths, raw refs, or full JSON reports were copied into this repository.
+
+Current residual aggregate:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.9230769230769231 | 0.9117647058823529 |
+| top_k_noise_at_5 | 0.07692307692307687 | 0.08823529411764708 |
+| diagnostics.failure_types.top_k_noise | 2 | 3 |
+| noise_sources_at_5.broad_lexical_match | 1 | 2 |
+| noise_sources_at_5.scope_mixed | 1 | 1 |
+| noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic | 1 | 2 |
+| noise_relation_to_expected_at_5.same_layer_scope_diff_topic | 1 | 1 |
+| noise_relation_to_expected_at_5.expected_record_missing | 0 | 0 |
+| privacy_boundary_pass_rate | 1.0 | 1.0 |
+| abstain_pass_rate | 1.0 | 1.0 |
+| forbidden_output_violations | 0 | 0 |
+| active_memory_suppression | 1.0 | 1.0 |
+| provenance_coverage.score | 1.0 | 1.0 |
+| lifecycle_integrity.score | 1.0 | 1.0 |
+
+Decision: no implementation change in this pass. The residual failure set is
+too small and not dominated by one safe pruning category: strict v2 is split
+one-to-one between same-topic/cross-scope and same-scope/different-topic
+relations, while expanded v3 has only a two-to-one relation skew. The
+diagnostic source buckets are similarly split between broad lexical and
+scope-mixed neighbors. The search runtime can see layer, scope, topic, score,
+and ranking reasons, but it does not have the evaluator's expected-record
+relation labels. A global prune of same-layer/different-scope/same-topic tails
+would therefore risk deleting legitimate supporting memories, not just noise.
+
+The next ranking change should wait for stronger aggregate evidence or a public
+synthetic fixture that proves a safe runtime signal for same-topic/cross-scope
+noise. Until then, the latest implementation remains the current clean cut.
+
+### Same-Topic Cross-Scope Safety Fixture
+
+Code point for the fixture addition:
+this documentation update
+
+The repository now includes a public synthetic shadow-eval fixture for
+same-topic/cross-scope support and same-topic/cross-scope noise. The fixture
+uses generated public marker text only; it does not depend on private archive
+records, private probes, private queries, memory IDs from a deployment archive,
+source paths, raw refs, or private source content.
+
+Synthetic fixture result:
+
+| scenario | expected aggregate behavior |
+| --- | --- |
+| same-topic/cross-scope support | two expected memories with the same layer and topic but different scopes are both counted as relevant; `noise_result_count=0` |
+| same-topic/cross-scope noise | a same-layer/different-scope/same-topic neighbor that is not expected is counted as one top-k noise result with `noise_relation_to_expected_at_5.same_layer_diff_scope_same_topic=1` |
+| abstain/privacy/suppression guard | the fixture keeps recall at 1.0 for positive cases, abstention passing for the negative case, suppression passing for an expected-not memory, and privacy aggregate output passing |
+
+Decision: this fixture proves that the aggregate evaluator can distinguish
+expected same-topic/cross-scope support from unexpected same-topic/cross-scope
+noise when the case file supplies ground-truth expected memory IDs. This
+fixture is not sufficient to justify a production ranking change, because the
+search runtime still does not have that expected-record truth label. A future
+ranking goal must first identify a runtime-visible signal, such as a stable
+score/reason pattern, before pruning same-layer/different-scope/same-topic tail
+hits.
+
+### Same-Topic Cross-Scope Runtime-Signal Audit
+
+Code point for the diagnostic addition:
+this documentation update
+
+The shadow evaluator now emits `runtime_signal_diagnostics_at_5` as an
+aggregate-only diagnostic. For same-topic/cross-scope candidates it counts
+support and noise classes separately, but only renders runtime-visible buckets:
+relative score band, whitelisted reason-flag counters, source kind, confidence,
+and support-count band. It does not render queries, case text, memory IDs,
+memory text, source refs, source paths, raw refs, full `why` strings, scopes, or
+topics.
+
+Public synthetic fixture aggregate:
+
+| class | count | relative score band | strict-token coverage | confidence | support-count band |
+| --- | ---: | --- | ---: | --- | --- |
+| support | 2 | `gte_99=2` | 2 | high=2 | `2_4=2` |
+| noise | 1 | `gte_99=1` | 1 | high=1 | `2_4=1` |
+
+Private real-archive aggregate rerun:
+
+| metric | strict v2 | expanded v3 |
+| --- | ---: | ---: |
+| memory_recall_at_5 | 1.0 | 1.0 |
+| memory_precision_at_5 | 0.9230769230769231 | 0.9117647058823529 |
+| top_k_noise_at_5 | 0.07692307692307687 | 0.08823529411764708 |
+| same-topic/cross-scope support count | 0 | 0 |
+| same-topic/cross-scope noise count | 1 | 2 |
+| noise relative score band | `gte_99=1` | `gte_99=2` |
+| noise strict-token coverage | 0 | 0 |
+| noise important-token coverage | 1 | 2 |
+| noise field:text | 1 | 2 |
+| noise field:topic | 1 | 1 |
+| noise source kind | automatic=1 | automatic=2 |
+| noise confidence | medium confidence=1 | medium confidence=2 |
+| noise support-count band | support_count=1 | support_count=1 |
+
+Decision: the private residual noise has a candidate runtime-visible pattern:
+same-topic/cross-scope noise is near-tied with the top hit, automatic,
+medium-confidence, support_count=1, and lacks strict-token coverage. This is
+not yet sufficient for a ranking patch. The public fixture proves the evaluator
+can expose the signal safely, but it also shows that same-topic/cross-scope
+support can be high-signal and must not be globally pruned. A future ranking
+goal would need a public RED/GREEN regression for the stricter candidate
+pattern before changing production ranking.
+
+### V1.2 Conservative Same-Topic Cross-Scope Ranking Gate
+
+Date: 2026-07-07
+
+Code points for the ranking patch:
+`templates/agent-memory-repo/tools/search_memory.py`,
+`skills/using-my-precious/scripts/search_memory.py`, and the synchronized
+setup template copy.
+
+Decision: the V1.2 change is accepted as a narrow ranking/noise reduction patch.
+The search path now prunes a weak same-topic/cross-scope tail only after the
+existing 99% relative-score floor and only when the later tail hit is a memory
+hit with the same layer and topic as the top memory anchor, a different scope,
+`source:automatic`, `confidence:medium`, `support_count:1`, and no
+`strict-token-coverage` reason. It does not globally prune same-topic
+cross-scope results: public fixtures keep high-confidence or strict-token
+cross-scope support.
+
+Public fail-first fixtures:
+
+| fixture | RED behavior | GREEN behavior |
+| --- | --- | --- |
+| strong anchor plus weak cross-scope tail | weak tail remained in top-k | weak tail pruned; high/strict support kept |
+| weak anchor plus second weak cross-scope tail | second weak tail remained in top-k | second weak tail pruned; high/strict support kept |
+
+Private real-archive aggregate-only rerun after the patch:
+
+| metric | strict v2 before | strict v2 after | expanded v3 before | expanded v3 after |
+| --- | ---: | ---: | ---: | ---: |
+| `memory_recall_at_5` | 1.0 | 1.0 | 1.0 | 1.0 |
+| `memory_precision_at_5` | 0.9230769230769231 | 1.0 | 0.9117647058823529 | 1.0 |
+| `top_k_noise_at_5` | 0.07692307692307687 | 0.0 | 0.08823529411764708 | 0.0 |
+| same-topic/cross-scope support count | 0 | 0 | 0 | 0 |
+| same-topic/cross-scope noise count | 1 | 0 | 2 | 0 |
+
+`memory_recall_at_5` stayed 1.0 in both private shadow suites, while
+`top_k_noise_at_5` dropped to 0.0. The private evidence remains aggregate-only:
+the report does not render queries, case text, memory IDs, memory text, source
+refs, source paths, raw refs, full `why` strings, scopes, or topics.
+
 ## V1 Evidence Convergence Snapshot
 
 Date: 2026-07-01
@@ -2446,10 +4205,10 @@ Date: 2026-07-01
 Code point before this documentation update: `20c9380 fix: add archive search
 health check`
 
-This is the current evidence convergence snapshot for the v1 goal. It does not
-add new memory features. It records which evidence is currently green, which
-existing aggregate reports are safe to use with the readiness gate, and which
-claim boundaries remain.
+This is a historical evidence convergence snapshot for the v1 goal. It does
+not add new memory features. It records which evidence was green at that code
+point, which existing aggregate reports were safe to use with the readiness
+gate, and which claim boundaries remained.
 
 Repository baseline before this documentation update:
 
@@ -2568,10 +4327,11 @@ decay/deletion behavior.
 ## Next Roadmap After The Minimum Slice
 
 1. Strengthen automatic induction.
-   Move from literal `Reusable fact:` extraction toward a reviewable
-   consolidation stage that can merge repeated facts, preserve contradictory
-   evidence, route ambiguous scope changes to review, and avoid process-noise
-   promotion.
+   V2.19 now gates the deterministic first slice: repeated/paraphrased
+   induction facts can merge, contradictions are preserved, ambiguous scope
+   narrowing routes to review, and process-noise promotion is blocked. The
+   remaining work is live LLM induction quality and richer long-horizon
+   consolidation, not another unbounded pile of convenience heuristics.
 
 2. Deepen lifecycle operations.
    Extend the semantic merge/refresh/deprecation path beyond the current review

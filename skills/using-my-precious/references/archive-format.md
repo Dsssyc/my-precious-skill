@@ -36,6 +36,7 @@ agent-memory/
     YYYY/YYYY-MM-DD.md
   tools/
     search_memory.py
+    resolve_memory_source.py
     update_memory_archive.py
     run_memory_updates.py
     render_scheduler.py
@@ -164,13 +165,30 @@ nodes should not contribute support paths through memory-id graph resolution.
 
 `raw_refs` may point to protected source anchors or source-map entries rather
 than committed raw files. Compatible archives should not commit raw transcripts
-by default. When a `raw_refs` path points at an archive-local `source-map.json`,
-the `anchor` must name a key present in that source map. The legacy
-`explicit_memory` source-map anchor is treated as a controlled alias for
-`source_record`. Search source depth renders stable `source_ref_id`, `status`,
-and `reason` fields by default; it does not print raw source content unless an
-agent explicitly requests a short redacted preview with
-`--raw-source-preview <source_ref_id|all>`.
+by default. New source maps use `source_anchor_version: 1` and an
+`evidence_source_anchors` array. Each row binds one `quote_id` to a stable
+opaque `source_anchor_id`, physical JSONL `line_number`, per-line
+`event_ordinal`, and normalized `event_sha256`. The source map also keeps the
+full `source_record_sha256`. It stores locator metadata and hashes, never raw
+event text.
+
+Automatic and explicit memory nodes must use the evidence quote and source
+anchor from the event that actually supports the memory. Consolidation retains
+each distinct evidence/source pair. Lifecycle replacement keeps the inactive
+and current nodes traceable to their own source events even when the current
+node also retains older derivation support.
+
+Search source depth renders stable `source_ref_id`, `status`, and `reason`
+metadata only. External source preview is handled separately by
+`tools/resolve_memory_source.py`: it consumes a source-depth context package,
+accepts exactly one `source_ref_id`, requires an explicit allowed source root
+and `--authorize-source-preview`, verifies path/symlink containment, whole-file
+hash, JSONL line/event locator, and event hash, then returns a bounded redacted
+`memory_source_preview_package`. It never supports `all`. Existing source maps
+without the versioned quote-to-anchor mapping remain readable for normal
+summary/evidence recall but return `legacy_source_anchor_unavailable` for
+external preview. The first resolver contract is limited to JSONL records
+already accepted by the updater.
 
 ## Summary Requirements
 

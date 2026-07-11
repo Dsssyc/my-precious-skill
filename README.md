@@ -94,14 +94,19 @@ my-precious-skill/
       tools/search_memory.py
       tools/generate_answer_records.py
       tools/update_memory_archive.py
+      tools/capture_explicit_memory.py
       tools/induction_consolidation_audit.py
       tools/run_memory_updates.py
       tools/audit_memory_archive.py
+      tools/audit_publish_readiness.py
+      tools/repair_publish_surfaces.py
       tools/backfill_memory_archive.py
       tools/render_scheduler.py
       tools/sync_memory_archive.py
   tests/
     test_audit_memory_archive.py
+    test_audit_publish_readiness.py
+    test_repair_publish_surfaces.py
     test_search_memory.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
@@ -156,6 +161,26 @@ $using-my-precious search my historical agent memory for why raw transcripts sho
 ```text
 $using-my-precious find previous context about the production incident investigation
 ```
+
+For agent-facing source-grounded handoff, the default read path is to request a
+deterministic recall context package before answering from memory:
+
+```bash
+python "$AGENT_SESSION_MEMORY_REPO/tools/search_memory.py" \
+  "prior decisions about the migration strategy" \
+  --depth evidence \
+  --context-json
+```
+
+The JSON output has `report_kind: memory_recall_context_package` plus
+`answerability.status`. Agents should answer only from supported
+active/current hits and cite the listed summary or evidence drill paths. If the
+package is unsupported, inactive/superseded-only, malformed, or missing, they
+should abstain. Free-form search output is only for exploration or drilldown
+after the package decision; it is not the answerability source. The package
+omits memory text, raw refs, raw source content, credentials, scheduler state,
+and local private paths, and agents should not render private query text in
+answers or aggregate reports.
 
 `$setup-my-precious` records the archive location in
 `~/.config/my-precious/config.json` by default. The environment variable is an
@@ -415,9 +440,12 @@ Or run the packaged synthetic gates directly:
 python benchmarks/v1_readiness_gate.py --run-packaged
 ```
 
-The readiness gate emits aggregate-only JSON. It requires the packaged layered
-recall, updater induction, e2e induction-to-recall, and explicit source stream
-registry dimensions to pass before reporting `core_synthetic_ready`.
+The readiness gate emits aggregate-only JSON. With `--run-packaged`, it requires
+the packaged layered recall, updater induction, e2e induction-to-recall,
+explicit source stream registry, and clean-room packaged lifecycle dimensions to
+pass before reporting `core_synthetic_ready`. The lifecycle dimension summarizes
+archive/update/search/audit counts only; it does not render raw source text,
+memory text, search hits, source paths, or temporary paths.
 Source-stream reports must also be aggregate-only and must state that case
 details, memory text, source content, source paths, and raw refs were not
 rendered; passing metrics alone are not accepted as source-stream readiness
@@ -439,8 +467,12 @@ is solved. Optional
 `--answer-report` can add offline generated-answer grading evidence. Answer
 reports must include aggregate `source_benchmarks` and `case_origins` counts;
 passing answer metrics alone are not accepted as provenance-backed answer
-evidence. When a run needs to prove a specific dogfood or benchmark answer
-stream rather than any answer report, add one or more
+evidence. Required answer reports must also include deterministic answer
+handoff metrics: every non-abstention answer needs active/current memory
+support with `support_refs`, unsupported claims and inactive-memory answers
+must be zero, and abstention cases must be represented in the handoff contract.
+When a run needs to prove a specific dogfood or benchmark answer stream rather
+than any answer report, add one or more
 `--require-answer-source-benchmark NAME` or
 `--require-answer-case-origin NAME` checks; each required key must be present
 with a positive aggregate count, and either check makes the answer dimension
@@ -451,8 +483,10 @@ answer evidence. Add `--require-public`, `--require-shadow`, or
 `--require-answer` when those optional dimensions should fail the gate if
 absent. When
 `--run-packaged --require-answer` is used without an
-`--answer-report`, the gate runs the packaged synthetic generated-answer fixture
-and includes that aggregate report automatically. Public reports must be
+`--answer-report`, the gate builds the packaged synthetic generated-answer
+archive, generates extractive answer handoff records with
+`generate_answer_records.py`, grades them, and includes that aggregate report
+automatically. Public reports must be
 layered recall reports produced from converted
 public benchmark cases, including aggregate `source_benchmarks` counts and
 `case_origins.public_benchmark_adapter`; converter-only output or ordinary
@@ -475,26 +509,38 @@ python benchmarks/generated_answer_benchmark.py \
   --fail-under answer_normalized_match_rate=1.0 \
   --fail-under abstention_accuracy=1.0 \
   --fail-under answer_scorable_case_rate=1.0 \
+  --fail-under answer_handoff_present_rate=1.0 \
+  --fail-under answer_handoff_support_coverage_rate=1.0 \
+  --fail-under answer_handoff_supported_case_count=1 \
+  --fail-under answer_handoff_abstain_case_count=1 \
   --fail-over privacy_leak_count=0 \
   --fail-over failed_case_count=0 \
   --fail-over missing_answer_count=0 \
   --fail-over duplicate_answer_count=0 \
   --fail-over unknown_answer_count=0 \
-  --fail-over positive_without_reference_answer=0
+  --fail-over positive_without_reference_answer=0 \
+  --fail-over unsupported_claim_count=0 \
+  --fail-over inactive_memory_answer_count=0
 ```
 
 The answer benchmark reports aggregate `case_pass_rate`,
 `answer_exact_match_rate`, `answer_normalized_match_rate`, `answer_token_f1`,
 `abstention_accuracy`, missing/duplicate/unknown answer counts, answer-scorable
-case coverage, positive cases without reference answers, and privacy counts. It
+case coverage, positive cases without reference answers, answer handoff
+presence, answer handoff support coverage, supported/abstention handoff counts,
+unsupported claim count, inactive-memory answer count, and privacy counts. It
 also reports aggregate `source_benchmarks` and `case_origins` so
 `v1_readiness_gate.py` can reject source-less answer reports. Required answer
-reports must have `answer_scorable_case_rate: 1.0` and
-`positive_without_reference_answer: 0`; otherwise the gate cannot prove answer
-correctness for positive cases. Its claim boundary is narrow: it grades
-provided answer records against reference answers; it does not call a model,
-generate answers, or claim semantic equivalence beyond exact, normalized, and
-token-overlap checks.
+reports must have `answer_scorable_case_rate: 1.0`,
+`positive_without_reference_answer: 0`,
+`answer_handoff_present_rate: 1.0`,
+`answer_handoff_support_coverage_rate: 1.0`,
+`unsupported_claim_count: 0`, and `inactive_memory_answer_count: 0`; otherwise
+the gate cannot prove source-grounded answer handoff coverage for positive
+cases. Its claim boundary is narrow: it grades provided answer records against
+reference answers and audits deterministic handoff metadata; it does not call a
+model, generate answers, or claim semantic equivalence beyond exact,
+normalized, and token-overlap checks.
 
 Before generating answers, audit a private or public generated-answer case set
 for scoreability and aggregate provenance without rendering case IDs, queries,
@@ -539,6 +585,13 @@ failure artifacts are not needed for local diagnosis. Custom external
 `my_precious_generated_answer_dogfood` so cleanup cannot target a generic
 temporary or repository directory.
 
+The private dogfood wrapper is also validated by `v1_readiness_gate.py`: the
+nested answer benchmark must carry the V1.6 `answer_handoff` metrics, and the
+wrapper privacy block must declare that private paths, memory text, memory IDs,
+source paths, and raw refs were not rendered. Cleanup removes only the known
+dogfood-generated artifacts and then prunes empty dogfood directories, so
+unowned files in the work directory are preserved.
+
 Author an initial private dogfood generated-answer case set from an existing
 deployment archive's layered memories:
 
@@ -578,11 +631,14 @@ python ~/repos/agent-memory/tools/generate_answer_records.py \
 ```
 
 This adapter searches memory and writes private answer-record JSONL for later
-grading. Its stdout is aggregate-only and reports case counts, memory-answer
-counts, abstention counts, source benchmark counts, case-origin counts, and
-privacy flags. It is deliberately extractive: it does not call a model, does
-not read benchmark reference answers as inputs, and does not prove live
-generated-answer quality by itself.
+grading. Each non-abstention record carries an `answer_handoff` with
+`support_refs` from active/current memory through summary and evidence layers;
+unsupported or inactive-only cases abstain. Its stdout is aggregate-only and
+reports case counts, memory-answer counts, abstention counts, handoff support
+coverage, source benchmark counts, case-origin counts, and privacy flags. It is
+deliberately extractive: it does not call a model, does not read benchmark
+reference answers as inputs, and does not prove live generated-answer quality
+by itself.
 
 Search without invoking an agent:
 
@@ -1052,10 +1108,13 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
   --push
 ```
 
-The sync helper only stages archive paths (`INDEX.md`,
-`config/projects.jsonl`, `index/`, `memories/`, `reviews/`, `daily/`, and
-`sessions/`). It refuses tool/script edits, archive audit findings, unredacted
-key-like values, and whitespace errors before committing.
+The sync helper only stages publish-safe archive paths (`INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+`sessions/`). It refuses tool/script edits, automatic memory/review node files,
+archive audit findings, publish readiness failures in `daily/` or text-bearing
+indexed summary fields, unredacted key-like values, and whitespace errors before
+committing. Publish readiness reports are aggregate-only and include
+archive-relative paths, categories, and counts without matched snippets.
 
 ## Archive Contract
 
@@ -1197,12 +1256,48 @@ Runtime setup work that belongs in `$setup-my-precious`:
 
 ## Verification
 
-Validate the skill with your runtime's skill validator, then run the repository tests:
+Run the canonical release gate before publishing or opening a release PR:
 
 ```bash
+python3 tools/run_quality_gates.py
+```
+
+The release gate emits aggregate-only JSON and summarizes the v1 readiness
+scorecards without rendering child command stdout/stderr, memory text, search
+hits, source paths, temporary paths, or raw refs.
+
+For focused debugging, run the underlying checks directly:
+
+```bash
+python3 tools/validate_skills.py
+
+python3 benchmarks/packaged_lifecycle_gate.py
+
+python3 benchmarks/automation_publish_readiness_gate.py
+
+python3 benchmarks/publish_surface_repair_gate.py
+
+python3 benchmarks/scheduled_publish_recovery_gate.py
+
+python3 benchmarks/scheduled_publish_search_gate.py
+
+python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  tools/validate_skills.py \
+  tools/run_quality_gates.py \
+  benchmarks/packaged_lifecycle_gate.py \
+  benchmarks/automation_publish_readiness_gate.py \
+  benchmarks/publish_surface_repair_gate.py \
+  benchmarks/scheduled_publish_recovery_gate.py \
+  benchmarks/scheduled_publish_search_gate.py \
+  benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
@@ -1216,7 +1311,10 @@ python3 -m py_compile \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
+  templates/agent-memory-repo/tools/audit_publish_readiness.py \
+  templates/agent-memory-repo/tools/repair_publish_surfaces.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
+  templates/agent-memory-repo/tools/capture_explicit_memory.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \

@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -121,6 +121,20 @@ class V1ReadinessGateTests(unittest.TestCase):
             "answer_scorable_cases": 3,
             "positive_without_reference_answer": 0,
             "answer_scorable_case_rate": 1.0,
+            "answer_handoff_present_rate": 1.0,
+            "answer_handoff_support_coverage_rate": 1.0,
+            "answer_handoff_supported_case_count": 2,
+            "answer_handoff_abstain_case_count": 1,
+            "context_package_handoff_present_rate": 1.0,
+            "context_package_parse_success_rate": 1.0,
+            "context_package_support_coverage_rate": 1.0,
+            "context_package_abstention_accuracy": 1.0,
+            "context_package_supported_case_count": 2,
+            "context_package_abstain_case_count": 1,
+            "context_package_parse_failure_count": 0,
+            "context_package_inactive_rejection_count": 1,
+            "unsupported_claim_count": 0,
+            "inactive_memory_answer_count": 0,
             "source_benchmarks": {"MyPreciousGeneratedAnswerSynthetic": 3},
             "case_origins": {"packaged_generated_answer_fixture": 3},
             "privacy": {
@@ -129,6 +143,48 @@ class V1ReadinessGateTests(unittest.TestCase):
                 "generated_answers_rendered": False,
                 "reference_answers_rendered": False,
             },
+        }
+
+    def passing_lifecycle_report(self) -> dict:
+        return {
+            "status": "passed",
+            "records_archived": 1,
+            "session_count": 1,
+            "daily_file_count": 1,
+            "memory_count": 2,
+            "memory_file_count": 4,
+            "search_depths": ["memory", "session", "evidence", "source"],
+            "audit": "passed",
+            "search_health_check": "passed",
+            "sync_dry_run": "passed",
+            "self_maintenance": {
+                "status": "passed",
+                "automation_source_records": 2,
+                "automation_session_entries": 0,
+                "automation_memory_nodes": 0,
+                "automation_daily_noise_hits": 0,
+                "automation_index_noise_hits": 0,
+            },
+            "explicit_capture": {
+                "status": "passed",
+                "adapter_input_records": 1,
+                "captured_memory_nodes": 1,
+                "rejected_raw_transcript_records": 1,
+                "search_hit_count": 1,
+                "privacy_leak_count": 0,
+            },
+            "explicit_revision": {
+                "status": "passed",
+                "explicit_revision_input_records": 2,
+                "explicit_revision_superseded_records": 1,
+                "explicit_revision_deprecated_records": 1,
+                "current_fact_search_hit_count": 1,
+                "stale_fact_default_search_hit_count": 0,
+                "withdrawn_fact_default_search_hit_count": 0,
+                "revision_evidence_reachability_count": 2,
+                "privacy_leak_count": 0,
+            },
+            "output_contract": "aggregate_only",
         }
 
     def passing_shadow_report(self) -> dict:
@@ -219,6 +275,7 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["dimensions"]["public_benchmark_adapter"]["status"], "not_run_optional")
             self.assertEqual(payload["dimensions"]["real_archive_shadow_eval"]["status"], "not_run_optional")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "not_run_optional")
+            self.assertNotIn("packaged_lifecycle", payload["dimensions"])
             self.assertEqual(payload["scorecard"]["required_dimensions"], 4)
             self.assertEqual(payload["scorecard"]["required_passed"], 4)
             self.assertEqual(payload["scorecard"]["optional_passed"], 0)
@@ -829,6 +886,111 @@ class V1ReadinessGateTests(unittest.TestCase):
             failures = payload["dimensions"]["generated_answer_eval"]["failures"]
             self.assertTrue(any(failure["metric"] == "case_pass_rate" for failure in failures))
 
+    def test_required_answer_report_rejects_missing_answer_handoff_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            for key in (
+                "answer_handoff_present_rate",
+                "answer_handoff_support_coverage_rate",
+                "answer_handoff_supported_case_count",
+                "answer_handoff_abstain_case_count",
+                "unsupported_claim_count",
+                "inactive_memory_answer_count",
+            ):
+                answer_payload.pop(key)
+            answer = self.write_json(root, "answer.json", answer_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["generated_answer_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("answer_handoff_present_rate", failed_metrics)
+            self.assertIn("answer_handoff_support_coverage_rate", failed_metrics)
+            self.assertIn("generated_answer_eval", result.stderr)
+
+    def test_required_answer_report_rejects_missing_context_package_metrics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            for key in (
+                "context_package_handoff_present_rate",
+                "context_package_parse_success_rate",
+                "context_package_support_coverage_rate",
+                "context_package_abstention_accuracy",
+                "context_package_supported_case_count",
+                "context_package_abstain_case_count",
+                "context_package_parse_failure_count",
+                "context_package_inactive_rejection_count",
+            ):
+                answer_payload.pop(key)
+            answer = self.write_json(root, "answer.json", answer_payload)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["generated_answer_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("context_package_handoff_present_rate", failed_metrics)
+            self.assertIn("context_package_parse_success_rate", failed_metrics)
+            self.assertIn("context_package_support_coverage_rate", failed_metrics)
+            self.assertIn("context_package_abstention_accuracy", failed_metrics)
+            self.assertIn("context_package_inactive_rejection_count", failed_metrics)
+            self.assertIn("generated_answer_eval", result.stderr)
+
     def test_required_answer_report_rejects_unscored_positive_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1007,7 +1169,17 @@ class V1ReadinessGateTests(unittest.TestCase):
             answer_payload["source_benchmarks"] = {"MyPreciousPrivateDogfood": 3}
             answer_payload["case_origins"] = {"private_dogfood": 3}
             answer_payload.pop("report_kind")
-            answer_payload.pop("privacy")
+            answer_payload["privacy"] = {
+                "aggregate_only": True,
+                "queries_rendered": False,
+                "generated_answers_rendered": False,
+                "reference_answers_rendered": False,
+                "private_paths_rendered": False,
+                "memory_text_rendered": False,
+                "memory_ids_rendered": False,
+                "source_paths_rendered": False,
+                "raw_refs_rendered": False,
+            }
             answer = self.write_json(
                 root,
                 "answer.json",
@@ -1020,6 +1192,11 @@ class V1ReadinessGateTests(unittest.TestCase):
                         "queries_rendered": False,
                         "generated_answers_rendered": False,
                         "reference_answers_rendered": False,
+                        "private_paths_rendered": False,
+                        "memory_text_rendered": False,
+                        "memory_ids_rendered": False,
+                        "source_paths_rendered": False,
+                        "raw_refs_rendered": False,
                     },
                 },
             )
@@ -1055,6 +1232,84 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
 
+    def test_private_dogfood_gate_wrapper_rejects_private_detail_privacy_flags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            layered = self.write_json(root, "layered.json", self.passing_layered_report())
+            updater = self.write_json(root, "updater.json", self.passing_updater_report())
+            e2e = self.write_json(root, "e2e.json", self.passing_e2e_report())
+            source_stream = self.write_json(root, "source-stream.json", self.passing_source_stream_report())
+            answer_payload = self.passing_answer_report()
+            answer_payload["source_benchmarks"] = {"MyPreciousPrivateDogfood": 3}
+            answer_payload["case_origins"] = {"private_dogfood": 3}
+            answer_payload.pop("report_kind")
+            answer_payload["privacy"] = {
+                "aggregate_only": True,
+                "queries_rendered": False,
+                "generated_answers_rendered": False,
+                "reference_answers_rendered": False,
+                "private_paths_rendered": False,
+                "memory_text_rendered": False,
+                "memory_ids_rendered": False,
+                "source_paths_rendered": False,
+                "raw_refs_rendered": False,
+            }
+            answer = self.write_json(
+                root,
+                "answer.json",
+                {
+                    "report_kind": "private_generated_answer_dogfood_gate",
+                    "status": "passed",
+                    "answer_benchmark": answer_payload,
+                    "privacy": {
+                        "aggregate_only": True,
+                        "queries_rendered": False,
+                        "generated_answers_rendered": False,
+                        "reference_answers_rendered": False,
+                        "private_paths_rendered": False,
+                        "memory_text_rendered": False,
+                        "memory_ids_rendered": True,
+                        "source_paths_rendered": True,
+                        "raw_refs_rendered": True,
+                    },
+                },
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--layered-report",
+                    str(layered),
+                    "--updater-report",
+                    str(updater),
+                    "--e2e-report",
+                    str(e2e),
+                    "--source-stream-report",
+                    str(source_stream),
+                    "--answer-report",
+                    str(answer),
+                    "--require-answer",
+                    "--require-answer-source-benchmark",
+                    "MyPreciousPrivateDogfood",
+                    "--require-answer-case-origin",
+                    "private_dogfood",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            payload = json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(payload["overall_status"], "not_ready")
+            failures = payload["dimensions"]["generated_answer_eval"]["failures"]
+            failed_metrics = {failure["metric"] for failure in failures}
+            self.assertIn("privacy.memory_ids_rendered", failed_metrics)
+            self.assertIn("privacy.source_paths_rendered", failed_metrics)
+            self.assertIn("privacy.raw_refs_rendered", failed_metrics)
+
     def test_run_packaged_require_answer_uses_packaged_answer_report(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             work_dir = Path(tmpdir) / "work"
@@ -1063,6 +1318,7 @@ class V1ReadinessGateTests(unittest.TestCase):
                 "updater": self.passing_updater_report(),
                 "e2e": self.passing_e2e_report(),
                 "source_stream": self.passing_source_stream_report(),
+                "lifecycle": self.passing_lifecycle_report(),
                 "answer": self.passing_answer_report(),
             }
             stdout = io.StringIO()
@@ -1082,8 +1338,143 @@ class V1ReadinessGateTests(unittest.TestCase):
             self.assertEqual(return_code, 0)
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["overall_status"], "extended_evidence_ready")
+            self.assertEqual(payload["dimensions"]["packaged_lifecycle"]["status"], "passed")
             self.assertEqual(payload["dimensions"]["generated_answer_eval"]["status"], "passed")
+            self.assertEqual(payload["scorecard"]["required_dimensions"], 6)
+
+    def test_run_packaged_includes_required_lifecycle_dimension(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = Path(tmpdir) / "work"
+            packaged_reports = {
+                "layered": self.passing_layered_report(),
+                "updater": self.passing_updater_report(),
+                "e2e": self.passing_e2e_report(),
+                "source_stream": self.passing_source_stream_report(),
+                "lifecycle": self.passing_lifecycle_report(),
+            }
+            stdout = io.StringIO()
+
+            with mock.patch.object(readiness_gate, "run_packaged_reports", return_value=packaged_reports) as runner:
+                with redirect_stdout(stdout):
+                    return_code = readiness_gate.main(
+                        [
+                            "--run-packaged",
+                            "--work-dir",
+                            str(work_dir),
+                        ]
+                    )
+
+            runner.assert_called_once_with(work_dir.resolve(), include_answer=False)
+            self.assertEqual(return_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["overall_status"], "core_synthetic_ready")
+            self.assertEqual(
+                payload["claim_boundary"],
+                "core synthetic gates passed, including explicit source streams and clean-room packaged lifecycle; full v1 target remains unproven",
+            )
             self.assertEqual(payload["scorecard"]["required_dimensions"], 5)
+            self.assertEqual(payload["scorecard"]["required_passed"], 5)
+            lifecycle = payload["dimensions"]["packaged_lifecycle"]
+            self.assertTrue(lifecycle["required"])
+            self.assertEqual(lifecycle["status"], "passed")
+            self.assertEqual(
+                lifecycle["claim_boundary"],
+                "clean-room packaged lifecycle only; no private archive or raw transcript claim",
+            )
+            self.assertEqual(lifecycle["metrics"]["records_archived"], 1)
+            self.assertEqual(lifecycle["metrics"]["session_count"], 1)
+            self.assertEqual(lifecycle["metrics"]["daily_file_count"], 1)
+            self.assertEqual(lifecycle["metrics"]["memory_count"], 2)
+            self.assertEqual(lifecycle["metrics"]["memory_file_count"], 4)
+            self.assertEqual(lifecycle["metrics"]["search_depth_count"], 4)
+            self.assertTrue(lifecycle["metrics"]["audit_passed"])
+            self.assertTrue(lifecycle["metrics"]["search_health_check_passed"])
+            self.assertTrue(lifecycle["metrics"]["sync_dry_run_passed"])
+            self.assertEqual(
+                lifecycle["metrics"]["self_maintenance"],
+                {
+                    "automation_source_records": 2,
+                    "automation_session_entries": 0,
+                    "automation_memory_nodes": 0,
+                    "automation_daily_noise_hits": 0,
+                    "automation_index_noise_hits": 0,
+                },
+            )
+            self.assertEqual(
+                lifecycle["metrics"]["explicit_capture"],
+                {
+                    "adapter_input_records": 1,
+                    "captured_memory_nodes": 1,
+                    "rejected_raw_transcript_records": 1,
+                    "search_hit_count": 1,
+                    "privacy_leak_count": 0,
+                },
+            )
+            self.assertEqual(
+                lifecycle["metrics"]["explicit_revision"],
+                {
+                    "explicit_revision_input_records": 2,
+                    "explicit_revision_superseded_records": 1,
+                    "explicit_revision_deprecated_records": 1,
+                    "current_fact_search_hit_count": 1,
+                    "stale_fact_default_search_hit_count": 0,
+                    "withdrawn_fact_default_search_hit_count": 0,
+                    "revision_evidence_reachability_count": 2,
+                    "privacy_leak_count": 0,
+                },
+            )
+            self.assertEqual(lifecycle["output_contract"], "aggregate_only")
+            self.assertNotIn("search_depths", lifecycle)
+
+    def test_run_packaged_lifecycle_failure_keeps_readiness_output_aggregate_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = Path(tmpdir) / "work"
+            packaged_reports = {
+                "layered": self.passing_layered_report(),
+                "updater": self.passing_updater_report(),
+                "e2e": self.passing_e2e_report(),
+                "source_stream": self.passing_source_stream_report(),
+                "lifecycle": {
+                    "status": "failed",
+                    "failures": [
+                        {
+                            "stage": "/tmp/my-precious-lifecycle-sensitive/source-records",
+                            "reason": "command_failed with clean-room lifecycle fact",
+                            "returncode": 1,
+                            "stderr": "raw source text should not be echoed",
+                        }
+                    ],
+                },
+            }
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with mock.patch.object(readiness_gate, "run_packaged_reports", return_value=packaged_reports):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    return_code = readiness_gate.main(
+                        [
+                            "--run-packaged",
+                            "--work-dir",
+                            str(work_dir),
+                        ]
+                    )
+
+            self.assertEqual(return_code, 1)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["overall_status"], "not_ready")
+            lifecycle = payload["dimensions"]["packaged_lifecycle"]
+            self.assertEqual(lifecycle["status"], "failed")
+            self.assertEqual(
+                lifecycle["failures"],
+                [{"stage": "packaged_lifecycle", "reason": "child_gate_failed", "returncode": 1}],
+            )
+            self.assertIn("packaged_lifecycle", stderr.getvalue())
+            self.assertNotIn("/tmp", stdout.getvalue())
+            self.assertNotIn("/tmp", stderr.getvalue())
+            self.assertNotIn("clean-room lifecycle fact", stdout.getvalue())
+            self.assertNotIn("clean-room lifecycle fact", stderr.getvalue())
+            self.assertNotIn("raw source text", stdout.getvalue())
+            self.assertNotIn("raw source text", stderr.getvalue())
 
 
 if __name__ == "__main__":

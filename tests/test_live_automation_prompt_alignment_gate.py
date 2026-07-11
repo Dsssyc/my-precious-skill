@@ -1,0 +1,43 @@
+import json
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+
+GATE_SCRIPT = Path("benchmarks/live_automation_prompt_alignment_gate.py").resolve()
+
+
+class LiveAutomationPromptAlignmentGateTests(unittest.TestCase):
+    def test_gate_reports_alignment_metrics_without_prompt_text(self):
+        result = subprocess.run(
+            [sys.executable, str(GATE_SCRIPT)],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        report = json.loads(result.stdout)
+        self.assertEqual(report["report_kind"], "live_automation_prompt_alignment_gate")
+        self.assertEqual(report["status"], "passed")
+        self.assertTrue(report["privacy"]["aggregate_only"])
+        self.assertFalse(report["privacy"]["prompt_text_rendered"])
+        metrics = report["metrics"]
+        self.assertTrue(metrics["rendered_prompt_alignment_pass"])
+        self.assertTrue(metrics["publish_readiness_gate_present"])
+        self.assertTrue(metrics["repair_step_present"])
+        self.assertTrue(metrics["post_repair_recheck_present"])
+        self.assertTrue(metrics["sync_dry_run_before_push_present"])
+        self.assertTrue(metrics["sync_only_publish_path_present"])
+        self.assertEqual(metrics["missing_readiness_rejection_count"], 1)
+        self.assertEqual(metrics["raw_git_rejection_count"], 1)
+        self.assertEqual(metrics["raw_git_publish_path_count"], 0)
+        self.assertEqual(metrics["private_archive_content_committed_count"], 0)
+        self.assertEqual(metrics["privacy_leak_count"], 0)
+        self.assertNotIn("PRIVATE_AUTOMATION_PROMPT_SENTINEL", result.stdout)
+        self.assertNotIn("tools/run_memory_updates.py --memory-repo", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

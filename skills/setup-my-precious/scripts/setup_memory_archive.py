@@ -99,6 +99,19 @@ def template_files() -> list[str]:
     )
 
 
+def tool_template_files() -> list[str]:
+    tools_dir = TEMPLATE_DIR / "tools"
+    if not tools_dir.exists():
+        return []
+    return sorted(
+        str(path.relative_to(TEMPLATE_DIR))
+        for path in tools_dir.rglob("*")
+        if path.is_file()
+        and not TEMPLATE_SKIP_DIRS.intersection(path.relative_to(TEMPLATE_DIR).parts)
+        and path.suffix not in TEMPLATE_SKIP_SUFFIXES
+    )
+
+
 def is_safe_target_path(target: Path, path: Path) -> bool:
     try:
         path.resolve(strict=False).relative_to(target.resolve())
@@ -112,6 +125,33 @@ def ensure_safe_template_destinations(target: Path) -> None:
         destination = target / relative
         if not is_safe_target_path(target, destination):
             raise SystemExit(f"Refusing to write unsafe template path: {destination}")
+
+
+def ensure_safe_tool_destinations(target: Path) -> None:
+    for relative in tool_template_files():
+        destination = target / relative
+        if not is_safe_target_path(target, destination):
+            raise SystemExit(f"Refusing to write unsafe tool path: {destination}")
+
+
+def refresh_tool_files(target: Path, dry_run: bool) -> int:
+    ensure_template()
+    if not target.is_dir():
+        raise SystemExit(f"target archive does not exist: {target}")
+    files = tool_template_files()
+    if not files:
+        raise SystemExit(f"template tools directory is empty: {TEMPLATE_DIR / 'tools'}")
+    if dry_run:
+        print(f"dry-run: refresh {len(files)} tool files from {TEMPLATE_DIR / 'tools'} -> {target / 'tools'}")
+        return len(files)
+    ensure_safe_tool_destinations(target)
+    for relative in files:
+        source = TEMPLATE_DIR / relative
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    print(f"Tool files refreshed: {len(files)}")
+    return len(files)
 
 
 def stage_template_files(target: Path, dry_run: bool) -> None:
@@ -218,6 +258,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--public", action="store_true", help="Create a public GitHub repo instead")
     parser.add_argument("--force", action="store_true", help="Merge template files into a non-empty directory")
     parser.add_argument(
+        "--refresh-tools",
+        action="store_true",
+        help="Refresh only bundled reusable tool files in an existing archive",
+    )
+    parser.add_argument(
         "--allow-existing-history",
         action="store_true",
         help="Allow GitHub mode to push preexisting Git history after manual review",
@@ -235,6 +280,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.mode == "github" and not args.github_repo:
         raise SystemExit("--github-repo is required when --mode github")
+    if args.refresh_tools and args.mode == "github":
+        raise SystemExit("--refresh-tools only supports --mode local")
+    if args.refresh_tools:
+        refresh_tool_files(target, args.dry_run)
+        print(f"Archive tools ready: {target}")
+        return 0
     if args.mode == "github":
         ensure_safe_github_history(target, args.allow_existing_history)
 

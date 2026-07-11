@@ -8,8 +8,24 @@ unresolved work, reusable facts, and user preferences.
 
 ## Search
 
-Search starts with high-level memory nodes and can drill down into supporting
-sessions and evidence when `index/memories.jsonl` exists:
+Before answering a historical fact from memory, request the machine-readable
+recall context package and use `answerability.status` as the decision boundary:
+
+```bash
+python tools/search_memory.py "<query>" --depth evidence --context-json
+python tools/search_memory.py "<query>" --project-path /path/to/current/project --depth evidence --context-json
+```
+
+The JSON output has `report_kind: memory_recall_context_package`. Answer only
+from supported active/current hits and the listed summary or evidence drill
+paths. Abstain when the package is unsupported, inactive/superseded-only,
+malformed, or missing. Free-form search output is for exploration after the
+package decision; it is not the answerability source and should not render
+private query text, memory text, raw refs, source paths, credentials, scheduler
+state, or local private paths.
+
+After the package decision, use free-form search to inspect high-level memory
+nodes and drill down into supporting sessions and evidence:
 
 ```bash
 python tools/search_memory.py "<query>"
@@ -22,13 +38,26 @@ python tools/search_memory.py "<query>" --depth evidence
 Use `--depth source` only when source reachability is needed and the user has
 explicitly asked for it. The command reports safe source ref metadata
 (`source_ref_id`, `status`, and `reason`); it does not print raw source content
-or copy raw transcripts into the archive. A short redacted raw-source snippet
-requires both an explicit preview target and a separate authorization
-confirmation:
+or copy raw transcripts into the archive. To resolve an external source event,
+first select exactly one ref from a supported active/current source-depth
+context package, then use the separate resolver with an explicitly allowed
+source root and authorization:
 
 ```bash
-python tools/search_memory.py "<query>" --depth source --raw-source-preview all --authorize-raw-source-preview
+python tools/search_memory.py "<query>" --depth source --context-json
+python tools/resolve_memory_source.py "<query>" \
+  --repo "$PWD" \
+  --source-ref-id "src_<exact-id>" \
+  --allow-source-root /path/to/authorized/source-root \
+  --authorize-source-preview \
+  --preview-json
 ```
+
+The resolver returns `memory_source_preview_package` and fails closed without a
+preview for missing authorization, unsupported or inactive-only support, wrong
+refs, malformed packages, escaped paths or symlinks, source/event hash
+mismatch, unsupported formats, and legacy source maps. It does not accept
+`all`; source records remain outside this repository.
 Use `--preferred-scope global|domain|project` when the current task has an
 explicit memory layer but cross-layer fallback should remain possible.
 
@@ -99,6 +128,33 @@ If `source-dir` contains records from multiple projects, add
 `--require-project-metadata` so records without explicit project path metadata
 are skipped.
 
+## Upgrade Legacy Source Anchors
+
+Legacy entries remain usable for summary and evidence recall, but exact source
+preview fails closed with `legacy_source_anchor_unavailable`. Upgrade one
+authorized external JSONL record without re-summarizing it:
+
+```bash
+python tools/upgrade_source_anchors.py \
+  --memory-repo . \
+  --source-record /path/to/authorized/source.jsonl \
+  --allow-source-root /path/to/authorized \
+  --dry-run \
+  --report-json
+```
+
+After reviewing an `eligible` aggregate report, replace `--dry-run` with
+`--apply`. Apply is single-record, requires an exact archived source hash,
+updates provenance fields only, uses optimistic concurrency, and rolls back
+exact bytes if replacement, archive audit, or search health fails. Add
+`--allow-redacted-secrets` only after explicit review; source content and secret
+values are never emitted by the report.
+
+Omit `--source-record` only for a bounded, read-only readiness scan with
+`--scan-limit`. Readiness is not batch migration or deployment approval. Use
+`backfill_memory_archive.py` only when summary/evidence regeneration is the
+intended repair; it is not a provenance-only source-anchor upgrade.
+
 Repair old generated summaries for a project by replacing existing entries for
 the same source records:
 
@@ -126,6 +182,25 @@ python tools/backfill_memory_archive.py \
 `--rewrite-existing` on `tools/run_memory_updates.py` is still available for
 small repositories, but it can be slower on large shared source directories.
 Both modes are repair paths, not the normal incremental path.
+
+## Refresh Bundled Tools
+
+If this deployment repository's bundled `tools/search_memory.py` is stale and
+cannot emit a package-first recall context with
+`report_kind: memory_recall_context_package`, refresh reusable tool files from
+the installed setup skill:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_memory_archive.py \
+  --path . \
+  --refresh-tools \
+  --skip-config
+```
+
+This command updates only `tools/**`. It preserves archive data, indexes,
+source records, daily records, session summaries, and user-owned config. Do not
+use `tools/sync_memory_archive.py` for tool refreshes; automatic archive sync
+intentionally refuses tool/script changes.
 
 ## Audit
 
@@ -260,12 +335,53 @@ python tools/generate_answer_records.py \
 ```
 
 The adapter searches this archive and writes private answer-record JSONL for
-`generated_answer_benchmark.py`. Its stdout is aggregate-only: it reports case
-counts, answer records written, memory-answer counts, abstention counts, no-hit
-counts, source benchmark counts, case-origin counts, and privacy flags without
-printing queries, generated answers, reference answers, source paths, or raw
-refs. It is extractive and deterministic; it does not call a model or prove
-semantic generated-answer quality.
+`generated_answer_benchmark.py`. Each non-abstention answer record includes an
+`answer_handoff` object with `support_refs` that connect the generated answer
+to active/current memory, summary, and evidence layers. Cases without a
+supported active memory hit abstain instead of fabricating an answer. The
+adapter stdout is aggregate-only: it reports case counts, answer records
+written, memory-answer counts, abstention counts, answer handoff support
+coverage, no-hit counts, source benchmark counts, case-origin counts, and
+privacy flags without printing queries, generated answers, reference answers,
+source paths, or raw refs. It is extractive and deterministic; it does not call
+a model or prove semantic generated-answer quality.
+
+## Capture Explicit Memories
+
+Automatic induction is the default path for ordinary source records. When a user
+or governing prompt explicitly asks to remember, force-save, or distill a short
+fact, use the explicit capture adapter with agent-neutral JSONL:
+
+```jsonl
+{"text":"Prefer evidence-bound memories over unsupported recollection.","layer":"global","scope":"global","source":"explicit_request"}
+```
+
+Run:
+
+```bash
+python tools/capture_explicit_memory.py \
+  --input /path/to/explicit-memory.jsonl
+```
+
+Rows may include `text`, optional `layer`, optional `scope`, and optional
+`source`. Do not paste raw chat transcripts, message arrays, source content,
+tool logs, or automation run notes into explicit capture. Each row should be a
+short fact. The adapter creates evidence-bound support files, writes a sticky
+`source: explicit` memory node, rebuilds indexes, and refuses raw transcript
+fields.
+
+When correcting or retracting an earlier explicit memory, keep using the same
+adapter's explicit revision path:
+
+```jsonl
+{"operation":"replace","text":"Prefer the current fact.","replaces_memory_id":"mem_old_fact"}
+{"operation":"withdraw","text":"Withdraw the obsolete fact.","deprecates_memory_id":"mem_old_fact"}
+```
+
+`operation: replace` marks the old fact as superseded by the current fact.
+`operation: withdraw` marks the old fact as deprecated without creating an
+active replacement. The old fact is superseded rather than deleted, and
+provenance remains traceable through lifecycle links and evidence drilldown.
 
 ## Render Scheduler Config
 
@@ -315,12 +431,52 @@ After an update, commit and optionally push generated archive changes:
 python tools/sync_memory_archive.py --push
 ```
 
+The default command continues to reject automatic memory layer files. To
+publish only the three updater-generated layers after deterministic review,
+opt in explicitly:
+
+```bash
+python tools/sync_memory_archive.py --include-reviewed-memory-nodes --push
+```
+
+This mode adds exactly `memories/global.jsonl`, `memories/domains.jsonl`, and
+`memories/projects.jsonl`. It still rejects the rest of `memories/`, all
+`reviews/`, source-stream registry changes, tools, docs, scheduler state, and
+other unexpected paths. Before dry-run or publication it requires archive,
+publish-readiness, search-health, lifecycle/reference, evidence drilldown, and
+memory-index parity checks to pass, then validates the candidate staged diff.
+
+For a readiness-only check of the publish-facing generated surfaces:
+
+```bash
+python tools/audit_publish_readiness.py --memory-repo .
+```
+
+If readiness fails because `daily/` or text-bearing `index/*.jsonl` entries
+contain command progress, sandbox chatter, or raw-source references derived
+from structured session metadata, run the repair helper before retrying sync:
+
+```bash
+python tools/repair_publish_surfaces.py --memory-repo . --apply
+```
+
+The helper edits only `sessions/**/meta.json`, regenerates derived archive
+surfaces through the updater, and emits aggregate counts only. It fails closed
+on malformed metadata or ambiguous scalar text instead of guessing.
+
 The sync helper refuses to proceed when non-archive paths changed, when
-generated archive files still contain recognized key-like values, when archive
-audit finds low-quality index text, or when `git diff --cached --check` fails.
-Expected archive paths are limited to
-`INDEX.md`, `config/projects.jsonl`, `config/source_streams.jsonl`, `index/`,
-`memories/`, `reviews/`, `daily/`, and `sessions/`.
+generated archive files still contain recognized key-like values, when the
+publish readiness audit finds command progress, prompt/environment blocks,
+permission/sandbox chatter, raw source paths/raw refs/full queries, secret-like
+values, or generic automation narration in `daily/` or text-bearing indexed
+summary fields, when archive audit finds low-quality index text, or when
+`git diff --cached --check` fails. The readiness report is aggregate-only:
+archive-relative paths, categories, and counts, without matched snippets or
+private text. Default publish-safe archive paths are limited to `INDEX.md`,
+`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+`sessions/`. The explicit reviewed mode adds only the three automatic memory
+layer files named above. Review decisions, source-stream registries, tools, and
+docs remain outside automatic archive sync in both modes.
 
 ## Archive Data
 

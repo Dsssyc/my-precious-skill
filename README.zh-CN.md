@@ -84,13 +84,18 @@ my-precious-skill/
       schemas/session_summary.schema.json
       tools/search_memory.py
       tools/update_memory_archive.py
+      tools/capture_explicit_memory.py
       tools/run_memory_updates.py
       tools/audit_memory_archive.py
+      tools/audit_publish_readiness.py
+      tools/repair_publish_surfaces.py
       tools/backfill_memory_archive.py
       tools/render_scheduler.py
       tools/sync_memory_archive.py
   tests/
     test_audit_memory_archive.py
+    test_audit_publish_readiness.py
+    test_repair_publish_surfaces.py
     test_search_memory.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
@@ -145,6 +150,26 @@ $using-my-precious 根据我的历史 agent memory，找一下之前为什么不
 ```text
 $using-my-precious 查找之前关于生产事故排查的上下文
 ```
+
+用于 agent 面向证据回答的 handoff 时，默认 read path 是先请求确定性的
+recall context package，再决定是否回答：
+
+```bash
+python "$AGENT_SESSION_MEMORY_REPO/tools/search_memory.py" \
+  "prior decisions about the migration strategy" \
+  --depth evidence \
+  --context-json
+```
+
+JSON 输出包含 `report_kind: memory_recall_context_package` 和
+`answerability.status`。agent 只能基于 supported 的 active/current hits
+回答，并引用列出的 summary 或 evidence drill paths；如果 package 是
+unsupported、inactive/superseded-only、malformed 或 missing，就应该
+abstain。free-form search output 只能在 package decision 之后用于探索或
+drilldown，不能作为 answerability source。该 package 不渲染 memory
+text、raw refs、raw source content、credentials、scheduler state 或 local
+private paths；agent 在答案或 aggregate reports 中也不应渲染 private
+query text。
 
 `$setup-my-precious` 默认会把 archive 位置写入
 `~/.config/my-precious/config.json`。环境变量只是当前 shell 和自动化任务的
@@ -355,20 +380,30 @@ python benchmarks/v1_readiness_gate.py \
 python benchmarks/v1_readiness_gate.py --run-packaged
 ```
 
-readiness gate 只输出 aggregate JSON。它要求 packaged layered recall、
-updater induction、e2e induction-to-recall 和 explicit source stream registry
-四个核心维度通过后，才会报告 `core_synthetic_ready`。可选的
+readiness gate 只输出 aggregate JSON。使用 `--run-packaged` 时，它要求
+packaged layered recall、updater induction、e2e induction-to-recall、explicit
+source stream registry 和 clean-room packaged lifecycle 五个核心维度通过后，
+才会报告 `core_synthetic_ready`。lifecycle 维度只汇总
+archive/update/search/audit 的计数，不渲染 raw source text、memory text、
+search hits、source paths 或 temporary paths。可选的
 `--public-report` 和 `--shadow-report` 可以接入
 仓库外 adapted public benchmark 报告和私有真实 archive 的 aggregate shadow eval
 报告；如果希望这些可选维度缺失时也让 gate 失败，使用 `--require-public` 或
 `--require-shadow`。`--answer-report` 可以接入离线 generated-answer 评分报告；
+required answer report 必须包含 deterministic answer handoff 指标：非拒答答案
+必须通过 `support_refs` 连接到 active/current memory、summary 和 evidence，
+unsupported claim 与 inactive-memory answer 计数必须为 0，拒答 case 也必须在
+handoff contract 中明确记录。
 如果需要证明某个特定 dogfood 或 benchmark answer stream，而不是任意 answer
 report，可以添加 `--require-answer-source-benchmark NAME` 或
 `--require-answer-case-origin NAME`。这些参数只检查 aggregate
 `source_benchmarks` / `case_origins` 中对应 key 是否有正计数，并且会隐式要求
 answer 维度必须存在，即使没有额外写 `--require-answer`。例如
 `--require-answer-case-origin private_dogfood` 可以防止 packaged synthetic fixture
-或 public-only answer report 被误当成私有 dogfood answer evidence。public report
+或 public-only answer report 被误当成私有 dogfood answer evidence。
+`--run-packaged --require-answer` 在没有外部 `--answer-report` 时，会先构建
+packaged synthetic generated-answer archive，再用 `generate_answer_records.py`
+生成 extractive answer handoff records 并评分。public report
 必须是由公开 benchmark 转换 case 生成的
 layered recall 报告，并包含 aggregate `source_benchmarks` 计数和
 `case_origins.public_benchmark_adapter`；converter-only 输出或普通合成 layered
@@ -414,6 +449,12 @@ memory ID、source path 或 raw ref；如果不需要保留失败产物做本地
 例如 `my_precious_generated_answer_dogfood`，避免 cleanup 指向泛用临时目录或
 仓库目录。
 
+这个 private dogfood wrapper 也会被 `v1_readiness_gate.py` 校验：嵌套的
+answer benchmark 必须带有 V1.6 `answer_handoff` 指标，wrapper privacy block
+必须声明 private path、memory text、memory ID、source path 和 raw ref 都没有
+被渲染。cleanup 只删除已知 dogfood 生成产物，然后清理空的 dogfood 目录；如果
+work dir 里有不属于 dogfood 的文件，会被保留。
+
 也可以从私有部署 archive 的 layered memories 生成初始 private dogfood
 generated-answer case set：
 
@@ -438,6 +479,14 @@ case-origin 和 privacy flags。生成的 case 文件包含私有 query 与 refe
 answer，不能放进本开发仓库，并且 gate 结束后要清理 `.tmp` 输出。
 `--abstain-limit` 会额外生成确定性的 no-hit `expected_abstain` case，让私有
 dogfood answer report 同时证明正向回答和拒答行为。
+
+`generate_answer_records.py` 写出的每条非拒答 answer record 都带有
+`answer_handoff.support_refs`，把答案连接到 active/current memory、summary 和
+evidence 层；只有 inactive 记忆或缺少 support 时会拒答，而不是拼接无证据答案。
+adapter stdout 只输出 aggregate JSON，包括 handoff support coverage、
+supported/abstain handoff counts、`unsupported_claim_count`、
+`inactive_memory_answer_count` 和 privacy flags；它不证明 live model answer
+quality。
 
 不用 agent，也可以直接运行搜索脚本：
 
@@ -798,10 +847,10 @@ python ~/repos/agent-memory/tools/sync_memory_archive.py \
   --push
 ```
 
-sync helper 只 stage archive 路径（`INDEX.md`、`config/projects.jsonl`、
-`index/`、`memories/`、`reviews/`、`daily/` 和 `sessions/`）。提交前它会拒绝
-tool/script 改动、archive audit findings、未脱敏的 key-like value 和
-whitespace 错误。
+sync helper 只 stage publish-safe archive 路径（`INDEX.md`、
+`config/projects.jsonl`、`index/`、`daily/`、`memories/explicit.jsonl` 和
+`sessions/`）。提交前它会拒绝 tool/script 改动、automatic memory/review node
+文件、archive audit findings、未脱敏的 key-like value 和 whitespace 错误。
 
 ## 归档格式约定
 
@@ -938,12 +987,48 @@ skills/using-my-precious/references/archive-format.md
 
 ## 验证
 
-先用你的 runtime 对应的 skill validator 校验 skill，然后运行仓库测试：
+发布或提交 release PR 前，优先运行 canonical release gate：
 
 ```bash
+python3 tools/run_quality_gates.py
+```
+
+release gate 只输出 aggregate JSON，并只汇总 v1 readiness scorecard；不会渲染
+子命令 stdout/stderr、memory text、search hits、source paths、temporary paths 或
+raw refs。
+
+如果需要定位失败原因，可以直接运行底层检查命令：
+
+```bash
+python3 tools/validate_skills.py
+
+python3 benchmarks/packaged_lifecycle_gate.py
+
+python3 benchmarks/automation_publish_readiness_gate.py
+
+python3 benchmarks/publish_surface_repair_gate.py
+
+python3 benchmarks/scheduled_publish_recovery_gate.py
+
+python3 benchmarks/scheduled_publish_search_gate.py
+
+python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged
+
+python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+
 python3 -m unittest discover -s tests -p 'test_*.py'
 
 python3 -m py_compile \
+  tools/validate_skills.py \
+  tools/run_quality_gates.py \
+  benchmarks/packaged_lifecycle_gate.py \
+  benchmarks/automation_publish_readiness_gate.py \
+  benchmarks/publish_surface_repair_gate.py \
+  benchmarks/scheduled_publish_recovery_gate.py \
+  benchmarks/scheduled_publish_search_gate.py \
+  benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
   benchmarks/updater_induction_benchmark.py \
   benchmarks/layered_recall_benchmark.py \
@@ -957,7 +1042,10 @@ python3 -m py_compile \
   skills/using-my-precious/scripts/search_memory.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
+  templates/agent-memory-repo/tools/audit_publish_readiness.py \
+  templates/agent-memory-repo/tools/repair_publish_surfaces.py \
   templates/agent-memory-repo/tools/backfill_memory_archive.py \
+  templates/agent-memory-repo/tools/capture_explicit_memory.py \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \

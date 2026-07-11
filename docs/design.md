@@ -89,6 +89,13 @@ and JSONL indexes.
   `archive_scope` when project should be only a source context, and
   `--source-partition` or registry `source_partition` when source freshness
   should survive project path migration.
+- `templates/agent-memory-repo/tools/capture_explicit_memory.py`: minimal
+  runtime adapter for explicit memory capture. Automatic induction is the
+  default for ordinary source records; when a user or governing prompt explicitly
+  asks to remember a short fact, this adapter accepts agent-neutral JSONL with
+  `text`, optional `layer`, optional `scope`, and optional `source`, creates
+  evidence-bound support files, calls the existing explicit-memory updater path,
+  and refuses raw transcript fields.
 - `benchmarks/updater_induction_benchmark.py`: synthetic write-path benchmark
   that drives the real setup and updater scripts from temporary source records
   and reports aggregate induction, lifecycle, provenance, and privacy metrics.
@@ -100,6 +107,9 @@ and JSONL indexes.
   benchmark that drives setup, `config/source_streams.jsonl`, the real global
   runner, generated memory indexes, layered recall scoring, and source-policy
   checks without project registry rows or rendered private case details.
+- `benchmarks/packaged_lifecycle_gate.py`: clean-room packaged lifecycle gate
+  that verifies setup, update, search, audit, privacy refusal, and template
+  sync behavior without using private archives.
 - `benchmarks/generated_answer_benchmark.py`: aggregate-only offline grader for
   already generated answer records. It scores exact, normalized, token-overlap,
   abstention, missing/duplicate/unknown-answer, and privacy metrics without
@@ -143,15 +153,23 @@ and JSONL indexes.
   `--run-packaged --require-answer` and no external `--answer-report`.
 - `benchmarks/v1_readiness_gate.py`: aggregate-only convergence gate that
   combines required packaged synthetic reports, including the explicit source
-  stream registry benchmark, with optional adapted public benchmark, private
-  shadow-eval, and generated-answer aggregate reports. Required private shadow
-  reports must include the privacy shape plus a minimum real-archive retrieval
-  quality floor for precision, top-k noise, abstention, active-memory
-  suppression, scope-mixed noise, and inactive-lifecycle noise. Generated-answer
-  reports must include aggregate source benchmark and case-origin counts in
-  addition to metrics and privacy flags. It reports bounded readiness status
-  without rendering private probe cases, queries, memory text, source paths, raw
-  refs, generated answers, or reference answers.
+  stream registry benchmark and packaged lifecycle gate, with optional adapted
+  public benchmark, private shadow-eval, and generated-answer aggregate
+  reports. The packaged core run currently reports required 5/5; the packaged
+  generated-answer run with `--require-answer` currently reports required 6/6.
+  Required private shadow reports must include the privacy shape plus a minimum
+  real-archive retrieval quality floor for precision, top-k noise, abstention,
+  active-memory suppression, scope-mixed noise, and inactive-lifecycle noise.
+  Generated-answer reports must include aggregate source benchmark and
+  case-origin counts in addition to metrics and privacy flags. It reports
+  bounded readiness status without rendering private probe cases, queries,
+  memory text, source paths, raw refs, generated answers, or reference answers.
+- `tools/run_quality_gates.py`: canonical repo-local release gate that runs
+  validation, packaged lifecycle, packaged v1 readiness with and without
+  generated-answer evidence, unit tests, Python compilation, template sync, and
+  diff hygiene while emitting aggregate-only JSON. This is the release
+  verification entrypoint; `benchmarks/v1_readiness_gate.py` remains the
+  memory-readiness entrypoint.
 - `templates/agent-memory-repo/tools/render_scheduler.py`: renders reviewable
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
@@ -170,9 +188,15 @@ and JSONL indexes.
   aggregate-only authoring helper that appends pending private induction review
   decision skeletons without rendering candidate text, memory text, source
   paths, queries, raw refs, or transcripts.
+- `templates/agent-memory-repo/tools/repair_publish_surfaces.py`:
+  aggregate-only dry-run/apply helper that removes deterministic
+  publish-surface noise from structured session metadata, rebuilds derived
+  archive surfaces, and fails closed on malformed metadata or ambiguous scalar
+  text.
 - `templates/agent-memory-repo/tools/sync_memory_archive.py`: safe Git sync
-  helper that stages only generated archive paths and refuses unexpected files
-  or unredacted key-like values.
+  helper that stages only publish-safe archive paths (`INDEX.md`,
+  `config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
+  `sessions/`) and refuses unexpected files or unredacted key-like values.
 - `templates/agent-memory-repo/`: starter private archive repository layout.
 
 ## Scheduling Model
@@ -380,6 +404,24 @@ safe status metadata by default; unsafe paths or sensitive-looking anchor text
 are rendered as `[unsafe-source-ref]` instead of being printed verbatim. Unsafe
 memory metadata fields are rendered as `[unsafe-field]` so archive records
 cannot inject extra output lines.
+
+Legacy source maps without `source_anchor_version: 1` remain valid for summary
+and evidence recall but are unavailable for original-event preview. Their
+upgrade path is provenance-only: parse existing evidence quote IDs and text,
+uniquely bind each quote to a physical event in the unchanged external JSONL
+record, then add `evidence_source_anchors`, matching meta anchor IDs, and exact
+memory raw-ref anchors. Memory IDs/text, lifecycle, support counts,
+summary/evidence paths and prose, session identity, timestamps, and source hash
+must remain byte- or value-identical as applicable.
+
+`upgrade_source_anchors.py` applies at most one source record per invocation.
+It requires lexical and canonical source-root containment, no nested symlink,
+an exact archived source SHA-256, and unique event binding. It prepares all
+replacement files before mutation, rechecks target hashes, replaces in a
+deterministic order, and runs archive audit plus search health. Any stale
+fingerprint, write failure, audit failure, or health failure restores original
+bytes and modes. Archive-wide dry-run scanning is aggregate-only and bounded;
+batch apply and private deployment remain separate future operations.
 
 Reliability cases check long-memory behaviors inspired by LongMemEval, LOCoMo,
 Memora, and long-context retrieval stress tests:
