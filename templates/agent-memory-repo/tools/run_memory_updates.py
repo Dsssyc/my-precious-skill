@@ -11,14 +11,23 @@ not depend on a project registry row.
 from __future__ import annotations
 
 import argparse
+import errno
+import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
+
+if os.name == "posix":
+    import fcntl
+elif os.name == "nt":
+    import msvcrt
 
 
 CONFIG_CANDIDATES = (
@@ -41,6 +50,195 @@ PROJECT_REGISTRY = Path("config/projects.jsonl")
 SOURCE_STREAM_REGISTRY = Path("config/source_streams.jsonl")
 UNSAFE_PATH = "[unsafe-path]"
 UNSAFE_IDENTIFIER = "[unsafe-identifier]"
+CONCURRENT_UPDATE_EXIT = getattr(os, "EX_TEMPFAIL", 75)
+CHILD_TERMINATION_TIMEOUT_SECONDS = 5.0
+
+
+class RunnerInterrupted(Exception):
+    def __init__(self, signum: int) -> None:
+        super().__init__(f"runner interrupted by signal {signum}")
+        self.signum = signum
+
+
+class UpdateRunLock:
+    def __init__(self, memory_repo: Path) -> None:
+        canonical_repo = str(memory_repo.resolve())
+        digest = hashlib.sha256(canonical_repo.encode("utf-8")).hexdigest()
+        uid = os.getuid() if hasattr(os, "getuid") else 0
+        self.lock_root = Path(tempfile.gettempdir()) / f"my-precious-update-locks-{uid}"
+        self.lock_path = self.lock_root / f"{digest}.lock"
+        self.handle = None
+
+    def acquire(self) -> bool:
+        if self.lock_root.exists() and self.lock_root.is_symlink():
+            raise OSError("unsafe update lock root")
+        self.lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name == "posix":
+            self.lock_root.chmod(0o700)
+        if self.lock_path.is_symlink():
+            raise OSError("unsafe update lock file")
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(self.lock_path, flags, 0o600)
+        handle = None
+        try:
+            handle = os.fdopen(fd, "r+b", buffering=0)
+            fd = -1
+            if hasattr(os, "fchmod"):
+                os.fchmod(handle.fileno(), 0o600)
+            if os.name == "posix":
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    handle.close()
+                    return False
+            elif os.name == "nt":
+                handle.seek(0)
+                if not handle.read(1):
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError as exc:
+                    if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                        handle.close()
+                        return False
+                    raise
+            else:
+                raise OSError("unsupported update lock platform")
+            os.set_inheritable(handle.fileno(), True)
+        except BaseException:
+            if handle is not None:
+                handle.close()
+            elif fd >= 0:
+                os.close(fd)
+            raise
+        self.handle = handle
+        return True
+
+    def child_process_options(self) -> dict[str, object]:
+        if self.handle is None:
+            raise RuntimeError("update lock is not held")
+        if os.name == "posix":
+            return {
+                "pass_fds": (self.handle.fileno(),),
+                "start_new_session": True,
+            }
+        return {
+            "close_fds": False,
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
+        }
+
+    def release(self) -> bool:
+        if self.handle is None:
+            return True
+        released = True
+        try:
+            if os.name == "posix":
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            elif os.name == "nt":
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            released = False
+        finally:
+            self.handle.close()
+            self.handle = None
+        return released
+
+    def close_parent_handle(self) -> None:
+        if self.handle is None:
+            return
+        self.handle.close()
+        self.handle = None
+
+
+class ChildProcessController:
+    def __init__(self, update_lock: UpdateRunLock) -> None:
+        self.update_lock = update_lock
+        self.current: subprocess.Popen[str] | None = None
+
+    def run(self, command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        with (
+            tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout_file,
+            tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stderr_file,
+        ):
+            child = subprocess.Popen(
+                command,
+                cwd=cwd,
+                text=True,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                **self.update_lock.child_process_options(),
+            )
+            self.current = child
+            try:
+                returncode = child.wait()
+            finally:
+                if child.poll() is not None:
+                    self.current = None
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                "",
+                "",
+            )
+
+    def signal_current(self) -> None:
+        child = self.current
+        if child is None or child.poll() is not None:
+            return
+        if os.name == "posix":
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            except PermissionError:
+                try:
+                    child.terminate()
+                except ProcessLookupError:
+                    return
+        else:
+            try:
+                child.terminate()
+            except OSError:
+                return
+
+    def terminate_current(self) -> bool:
+        child = self.current
+        if child is None or child.poll() is not None:
+            self.current = None
+            return True
+        self.signal_current()
+        try:
+            child.wait(timeout=CHILD_TERMINATION_TIMEOUT_SECONDS)
+            self.current = None
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+        if os.name == "posix":
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                self.current = None
+                return True
+            except PermissionError:
+                try:
+                    child.kill()
+                except ProcessLookupError:
+                    self.current = None
+                    return True
+        else:
+            try:
+                child.kill()
+            except OSError:
+                return child.poll() is not None
+        try:
+            child.wait(timeout=CHILD_TERMINATION_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            return False
+        self.current = None
+        return True
 
 
 def has_sensitive_identifier_token(text: str) -> bool:
@@ -115,9 +313,13 @@ def configured_memory_repos() -> list[str]:
 
 
 def resolve_memory_repo(repo_arg: str | None) -> Path:
-    candidates: list[str] = []
     if repo_arg:
-        candidates.append(repo_arg)
+        repo = Path(repo_arg).expanduser()
+        if repo.exists() and (repo / "tools" / "update_memory_archive.py").exists():
+            return repo.resolve()
+        raise SystemExit("update_status=blocked reason=memory_repo_unavailable")
+
+    candidates: list[str] = []
     candidates.append(str(Path(__file__).resolve().parents[1]))
     for env_name in ("AGENT_SESSION_MEMORY_REPO", "AGENT_MEMORY_REPO"):
         value = os.environ.get(env_name)
@@ -130,10 +332,7 @@ def resolve_memory_repo(repo_arg: str | None) -> Path:
         repo = Path(candidate).expanduser()
         if repo.exists() and (repo / "tools" / "update_memory_archive.py").exists():
             return repo.resolve()
-    raise SystemExit(
-        "No memory repository found. Run setup-my-precious, pass --memory-repo, "
-        "or set AGENT_SESSION_MEMORY_REPO."
-    )
+    raise SystemExit("update_status=blocked reason=memory_repo_unavailable")
 
 
 def should_skip(path: Path) -> bool:
@@ -228,12 +427,12 @@ def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
 
 def ensure_safe_project_registry_path(memory_repo: Path, path: Path) -> None:
     if not is_safe_repo_path(memory_repo, path):
-        raise SystemExit(f"Refusing to access unsafe project registry path: {safe_diagnostic_path(path)}")
+        raise SystemExit("Refusing to access unsafe project registry path: [redacted]")
 
 
 def ensure_safe_source_stream_registry_path(memory_repo: Path, path: Path) -> None:
     if not is_safe_repo_path(memory_repo, path):
-        raise SystemExit(f"Refusing to access unsafe source stream registry path: {safe_diagnostic_path(path)}")
+        raise SystemExit("Refusing to access unsafe source stream registry path: [redacted]")
 
 
 def load_registry(memory_repo: Path) -> dict[str, dict[str, object]]:
@@ -296,8 +495,7 @@ def load_source_stream_registry(memory_repo: Path) -> dict[str, dict[str, object
                     value = normalized.get(key)
                     if not isinstance(value, str) or not value.strip():
                         raise SystemExit(
-                            f"source stream {safe_diagnostic_identifier(stream_id)} line {line_no} "
-                            f"requires {key}"
+                            f"source stream configuration line {line_no} requires {key}"
                         )
                     normalized[key] = value.strip()
             streams[stream_id.strip()] = normalized
@@ -330,7 +528,7 @@ def merge_discovered_projects(
 def write_registry(memory_repo: Path, projects: dict[str, dict[str, object]], dry_run: bool) -> None:
     path = registry_path(memory_repo)
     if dry_run:
-        print(f"dry-run: write project registry {safe_diagnostic_path(path)}")
+        print("dry-run: project registry write planned")
         return
     ensure_safe_project_registry_path(memory_repo, path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -358,7 +556,32 @@ def enabled_source_streams(streams: dict[str, dict[str, object]]) -> list[dict[s
     return rows
 
 
+def require_clean_worktree(memory_repo: Path) -> bool:
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=memory_repo,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        print(
+            "update_status=blocked reason=clean_worktree_unavailable",
+            file=sys.stderr,
+        )
+        return False
+    dirty_entry_count = len(result.stdout.splitlines())
+    if dirty_entry_count:
+        print(
+            f"update_status=blocked reason=dirty_worktree dirty_entry_count={dirty_entry_count}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def run_project_update(
+    controller: ChildProcessController,
     memory_repo: Path,
     project: dict[str, object],
     default_source_dir: Path,
@@ -367,6 +590,7 @@ def run_project_update(
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
+    defer_memory_ref_reconciliation: bool,
 ) -> int:
     project_path = str(project["project_path"])
     source_dir = Path(str(project.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -398,19 +622,20 @@ def run_project_update(
         command.append("--allow-redacted-secrets")
     if rewrite_existing:
         command.append("--rewrite-existing")
+    if defer_memory_ref_reconciliation:
+        command.append("--defer-memory-ref-reconciliation")
     if dry_run:
         command.append("--dry-run")
 
-    print(f"Updating project: {safe_diagnostic_path(Path(project_path))}")
-    result = subprocess.run(command, cwd=memory_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+    print("Updating project.")
+    result = controller.run(command, memory_repo)
+    if result.returncode:
+        print("update_status=failed reason=project_update_failed", file=sys.stderr)
     return result.returncode
 
 
 def run_source_stream_update(
+    controller: ChildProcessController,
     memory_repo: Path,
     stream: dict[str, object],
     default_source_dir: Path,
@@ -419,6 +644,7 @@ def run_source_stream_update(
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
+    defer_memory_ref_reconciliation: bool,
 ) -> int:
     stream_id = str(stream["stream_id"])
     source_dir = Path(str(stream.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -454,15 +680,15 @@ def run_source_stream_update(
         command.append("--allow-redacted-secrets")
     if rewrite_existing:
         command.append("--rewrite-existing")
+    if defer_memory_ref_reconciliation:
+        command.append("--defer-memory-ref-reconciliation")
     if dry_run:
         command.append("--dry-run")
 
-    print(f"Updating source stream: {safe_diagnostic_identifier(stream_id)}")
-    result = subprocess.run(command, cwd=memory_repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+    print("Updating source stream.")
+    result = controller.run(command, memory_repo)
+    if result.returncode:
+        print("update_status=failed reason=source_stream_update_failed", file=sys.stderr)
     return result.returncode
 
 
@@ -482,15 +708,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Rebuild matching source records and replace older archive entries for each project/source record",
     )
+    parser.add_argument(
+        "--require-clean-worktree",
+        action="store_true",
+        help="Block before mutation unless a Git-backed memory repository is clean",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Discover and run project updates without writing records")
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    memory_repo = resolve_memory_repo(args.memory_repo)
-    source_dir = Path(args.source_dir).expanduser().resolve()
-    patterns = tuple(args.pattern or DEFAULT_PATTERNS)
+def run_updates(
+    args: argparse.Namespace,
+    memory_repo: Path,
+    source_dir: Path,
+    patterns: tuple[str, ...],
+    controller: ChildProcessController,
+) -> int:
+    if args.require_clean_worktree and not require_clean_worktree(memory_repo):
+        return 1
 
     registered = load_registry(memory_repo)
     source_streams = load_source_stream_registry(memory_repo)
@@ -500,8 +735,8 @@ def main(argv: list[str] | None = None) -> int:
 
     runnable = enabled_projects(projects)
     runnable_streams = enabled_source_streams(source_streams)
-    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
-    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
+    print("Memory repo: configured")
+    print("Source dir: configured")
     print(f"Discovered projects: {len(discovered)}")
     print(f"Registered new projects: {added}")
     print(f"Enabled projects: {len(runnable)}")
@@ -513,10 +748,10 @@ def main(argv: list[str] | None = None) -> int:
             print("No registered projects and no project paths discovered from source records.")
         return 0
 
-    failures = 0
     updated = 0
-    for project in runnable:
+    for project_index, project in enumerate(runnable):
         returncode = run_project_update(
+            controller,
             memory_repo,
             project,
             source_dir,
@@ -525,16 +760,19 @@ def main(argv: list[str] | None = None) -> int:
             patterns,
             args.allow_redacted_secrets,
             args.rewrite_existing,
+            project_index < len(runnable) - 1 or bool(runnable_streams),
         )
         if returncode:
-            failures += 1
-        else:
-            updated += 1
+            print(f"Projects updated: {updated}")
+            print("Source streams updated: 0")
+            print("Projects failed: 1", file=sys.stderr)
+            return 1
+        updated += 1
 
-    stream_failures = 0
     streams_updated = 0
-    for stream in runnable_streams:
+    for stream_index, stream in enumerate(runnable_streams):
         returncode = run_source_stream_update(
+            controller,
             memory_repo,
             stream,
             source_dir,
@@ -543,21 +781,72 @@ def main(argv: list[str] | None = None) -> int:
             patterns,
             args.allow_redacted_secrets,
             args.rewrite_existing,
+            stream_index < len(runnable_streams) - 1,
         )
         if returncode:
-            stream_failures += 1
-        else:
-            streams_updated += 1
+            print(f"Projects updated: {updated}")
+            print(f"Source streams updated: {streams_updated}")
+            print("Source streams failed: 1", file=sys.stderr)
+            return 1
+        streams_updated += 1
 
     print(f"Projects updated: {updated}")
     print(f"Source streams updated: {streams_updated}")
-    if failures:
-        print(f"Projects failed: {failures}", file=sys.stderr)
-    if stream_failures:
-        print(f"Source streams failed: {stream_failures}", file=sys.stderr)
-    if failures or stream_failures:
-        return 1
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    memory_repo = resolve_memory_repo(args.memory_repo)
+    source_dir = Path(args.source_dir).expanduser().resolve()
+    patterns = tuple(args.pattern or DEFAULT_PATTERNS)
+    update_lock = UpdateRunLock(memory_repo)
+    try:
+        acquired = update_lock.acquire()
+    except OSError:
+        print("update_status=blocked reason=lock_unavailable", file=sys.stderr)
+        return CONCURRENT_UPDATE_EXIT
+    if not acquired:
+        print("update_status=blocked reason=concurrent_update", file=sys.stderr)
+        return CONCURRENT_UPDATE_EXIT
+
+    controller = ChildProcessController(update_lock)
+    previous_handlers: dict[int, object] = {}
+    interrupted_signum: int | None = None
+
+    def handle_signal(signum: int, _frame: object) -> None:
+        nonlocal interrupted_signum
+        controller.signal_current()
+        if interrupted_signum is not None:
+            return
+        interrupted_signum = signum
+        raise RunnerInterrupted(signum)
+
+    exit_code = 1
+    try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, handle_signal)
+        exit_code = run_updates(args, memory_repo, source_dir, patterns, controller)
+    except RunnerInterrupted as exc:
+        print("update_status=blocked reason=interrupted", file=sys.stderr)
+        exit_code = 128 + exc.signum
+    except Exception:
+        print("update_status=failed reason=runner_internal_error", file=sys.stderr)
+        exit_code = 1
+    finally:
+        child_stopped = controller.terminate_current()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+        if child_stopped:
+            if not update_lock.release():
+                print("update_status=blocked reason=lock_release_failed", file=sys.stderr)
+                exit_code = 1
+        else:
+            update_lock.close_parent_handle()
+            print("update_status=blocked reason=child_cleanup_failed", file=sys.stderr)
+            exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":

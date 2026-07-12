@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -3636,8 +3637,98 @@ def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -
     return sorted(reconciled, key=memory_node_sort_key)
 
 
-def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
+def existing_durable_memory_ids(memory_repo: Path) -> set[str]:
+    memory_ids: set[str] = set()
+    for path in sorted((memory_repo / "memories").glob("*.jsonl")):
+        for node in iter_jsonl(path):
+            memory_id = node.get("memory_id")
+            if isinstance(memory_id, str) and memory_id:
+                memory_ids.add(memory_id)
+    return memory_ids
+
+
+def committed_durable_memory_ids(memory_repo: Path) -> set[str]:
+    if not (memory_repo / ".git").exists():
+        return set()
+    memory_ids: set[str] = set()
+    relative_paths = [
+        *(f"memories/{file_name}" for file_name in MEMORY_LAYER_FILES.values()),
+        "memories/explicit.jsonl",
+    ]
+    for relative in relative_paths:
+        try:
+            result = subprocess.run(
+                ["git", "show", f"HEAD:{relative}"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError:
+            return set()
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            try:
+                node = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            memory_id = node.get("memory_id") if isinstance(node, dict) else None
+            if isinstance(memory_id, str) and memory_id:
+                memory_ids.add(memory_id)
+    return memory_ids
+
+
+def reconcile_removed_memory_references(
+    nodes: list[dict],
+    removed_memory_ids: set[str],
+) -> list[dict]:
+    if not removed_memory_ids:
+        return nodes
+    reconciled: list[dict] = []
+    list_fields = (
+        "derived_from",
+        "supersedes",
+        "contradicts",
+        "deprecates",
+        "contradicted_by",
+    )
+    scalar_fields = ("superseded_by", "deprecated_by")
+    for node in nodes:
+        updated = dict(node)
+        for field in list_fields:
+            values = updated.get(field)
+            if isinstance(values, list):
+                updated[field] = [value for value in values if value not in removed_memory_ids]
+        for field in scalar_fields:
+            if updated.get(field) in removed_memory_ids:
+                updated[field] = None
+        reconciled.append(updated)
+    return reconciled
+
+
+def write_memory_nodes(
+    memory_repo: Path,
+    nodes: list[dict],
+    *,
+    reconcile_removed_refs: bool = True,
+) -> list[dict]:
+    previous_memory_ids = set()
+    if reconcile_removed_refs:
+        previous_memory_ids = existing_durable_memory_ids(memory_repo) | committed_durable_memory_ids(
+            memory_repo
+        )
     nodes = merge_existing_explicit_memory_nodes(memory_repo, nodes)
+    if reconcile_removed_refs:
+        current_memory_ids = {
+            memory_id
+            for node in nodes
+            if isinstance((memory_id := node.get("memory_id")), str) and memory_id
+        }
+        nodes = reconcile_removed_memory_references(
+            nodes,
+            previous_memory_ids - current_memory_ids,
+        )
     apply_memory_id_supersession_links(nodes)
     apply_memory_id_contradiction_links(nodes)
     apply_memory_id_deprecation_links(nodes)
@@ -4288,7 +4379,7 @@ def write_jsonl_index(memory_repo: Path, path: Path, rows: list[dict], label: st
     write_safe_archive_text(memory_repo, path, "\n".join(lines) + ("\n" if lines else ""), label)
 
 
-def rebuild_indexes(memory_repo: Path) -> None:
+def rebuild_indexes(memory_repo: Path, *, reconcile_removed_refs: bool = True) -> None:
     index_dir = memory_repo / "index"
     if not is_safe_repo_path(memory_repo, index_dir):
         raise SystemExit(f"Refusing to write unsafe archive index path: {safe_diagnostic_path(index_dir)}")
@@ -4308,7 +4399,11 @@ def rebuild_indexes(memory_repo: Path) -> None:
         initial_review_candidates,
         review_decisions,
     )
-    memory_nodes = write_memory_nodes(memory_repo, memory_nodes)
+    memory_nodes = write_memory_nodes(
+        memory_repo,
+        memory_nodes,
+        reconcile_removed_refs=reconcile_removed_refs,
+    )
     review_candidates = build_memory_review_candidates(memory_nodes)
     review_candidates = filter_reviewed_memory_candidates(review_candidates, review_decision_results)
     consolidation_traces = build_memory_consolidation_traces(memory_nodes, review_candidates)
@@ -4633,6 +4728,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Only archive source records that explicitly identify the current project path",
     )
+    parser.add_argument(
+        "--defer-memory-ref-reconciliation",
+        action="store_true",
+        help="Defer clean-cut memory-reference closure to a later updater in the same serialized run",
+    )
     parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
     parser.add_argument(
         "--explicit-layer",
@@ -4742,7 +4842,10 @@ def main(argv: list[str] | None = None) -> int:
             for text in args.explicit_memory
         ]
         write_memory_nodes(memory_repo, [*generated_nodes, *direct_nodes])
-        rebuild_indexes(memory_repo)
+        rebuild_indexes(
+            memory_repo,
+            reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
+        )
         return 0
 
     latest, archived_hashes, archived_source_hashes = archived_project_state(
@@ -4814,7 +4917,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         if written is None:
             skipped_records += 1
-    rebuild_indexes(memory_repo)
+    rebuild_indexes(
+        memory_repo,
+        reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
+    )
     if args.rewrite_existing or removed_entries:
         print(f"Existing entries removed: {removed_entries}")
     print(f"Records skipped as low-signal: {skipped_records}")

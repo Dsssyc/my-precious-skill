@@ -1989,6 +1989,90 @@ selection. It is not ranking repair. It is not archive-audit repair. It is not i
 It is not LLM answer quality, vector search,
 ontology discovery, private archive quality, or public leaderboard parity.
 
+## V2.38 Scheduled Update Single-Writer And Interrupted-Run Recovery Closure
+
+V2.38 closes the reusable runtime defect reproduced by overlapping scheduled
+updates: two global runners could mutate one deployment archive concurrently,
+a failed child did not stop later children, and task completion could be reported
+without a verifiable remote publication receipt.
+
+The deterministic public gate is:
+
+```bash
+python3 benchmarks/scheduled_update_single_writer_gate.py
+```
+
+The runner now acquires a repo-scoped exclusive lock before registry discovery
+or archive mutation. The parent and current child hold the same lock ownership;
+therefore an orphaned child keeps a second writer blocked until that child exits.
+A competing runner returns nonzero with
+`update_status=blocked reason=concurrent_update` and aggregate-only output. The
+project/source-stream loops use first failure fail-fast behavior, and managed
+SIGINT/SIGTERM handling terminates the current child before releasing ownership.
+Scheduled global commands use `--require-clean-worktree`, which rejects tracked,
+deleted, and untracked startup state before any child launch.
+
+The synthetic gate reports:
+
+| metric | value |
+| --- | ---: |
+| `single_writer_acceptance_rate` | 1.0 |
+| `concurrent_writer_rejection_rate` | 1.0 |
+| `dirty_startup_rejection_rate` | 1.0 |
+| `first_failure_fail_fast_rate` | 1.0 |
+| `post_failure_child_launch_count` | 0 |
+| `parent_termination_child_cleanup_rate` | 1.0 |
+| `orphan_child_lock_retention_rate` | 1.0 |
+| `lock_release_after_exit_rate` | 1.0 |
+| `publish_attempt_after_failed_update_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The scheduler prompt contract separately requires a publication receipt. Codex
+task completion is not publish success. After the sync helper, the automation
+fetches the remote and verifies a clean worktree plus equality between
+`git rev-parse HEAD` and `git rev-parse origin/main`. It may emit only
+`published`, `no_op_current`, or `blocked`; a command failure, missing receipt,
+dirty state, or commit mismatch is `blocked`. The alignment gate includes
+negative cases for a missing clean-worktree flag and a missing receipt contract.
+
+The bounded private recovery was completed on 2026-07-12 without committing
+private evidence to this repository. The failed generated state was first
+classified by aggregate path counts and quarantined locally. A controlled run
+then completed 71/71 registered project updates, zero source-stream updates, and
+exit zero in approximately 83 minutes while process sampling showed one runner
+and at most one updater child.
+
+The first post-run audit correctly blocked publication on four stale memory-ID
+targets retained by one explicit node after clean-cut regeneration removed the
+old automatic nodes. The reusable repair now reconciles against both current and
+committed durable memory IDs, removes only targets proven to have disappeared,
+and preserves unknown missing refs for fail-closed audit. Its focused
+updater/audit suite passed 184 tests. A zero-record locked rebuild then closed
+the stale edges. The archive audit, publish-readiness audit, and search health
+check passed; publish-surface repair reported zero malformed or ambiguous
+records and zero privacy leaks.
+
+The serialized runner defers stale-edge closure on all non-final updater
+children, so only the final child reconciles after every prior child succeeds.
+Later-project regeneration therefore cannot be erased by an earlier intermediate rebuild.
+
+The reviewed sync helper committed and pushed archive commit `a8fd832`. A fresh
+fetch proved local `HEAD` equals `origin/main`, the commit advanced from the
+pre-publication SHA, and the worktree was clean. A total of three local stashes
+containing the original failed state and blocked recovery checkpoints remain retained. The
+original concurrent-failure stash was never reapplied or published; later clean
+recovery checkpoints were used locally to continue the same recovery, while the
+stash refs themselves were never pushed or dropped. The live automation prompt
+alignment gate passed with zero privacy leaks and zero raw Git publish paths,
+after which the existing automation was restored to `status: ACTIVE`.
+
+V2.38 proves current-platform, single-host scheduled update ownership,
+first-failure propagation, bounded process cleanup, dirty-startup rejection,
+and deterministic publication-status semantics. It is not whole-run rollback,
+not a cross-host distributed lock, not a GitHub availability SLA, and not memory quality.
+It also does not change ranking, induction, schema, archive audit
+heuristics, or sync allowlists.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

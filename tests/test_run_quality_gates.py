@@ -86,6 +86,9 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any("benchmarks/scheduled_publish_search_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/scheduled_content_noise_repair_closure_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/live_automation_prompt_alignment_gate.py" in command for command in commands))
+        self.assertTrue(
+            any("benchmarks/scheduled_update_single_writer_gate.py" in command for command in commands)
+        )
         self.assertTrue(any("benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture" in command for command in commands))
         self.assertTrue(any("benchmarks/search_tool_drift_repair_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/runtime_tool_bundle_parity_gate.py" in command for command in commands))
@@ -129,6 +132,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/scheduled_publish_search_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/scheduled_content_noise_repair_closure_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/live_automation_prompt_alignment_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/scheduled_update_single_writer_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/private_lifecycle_governance_shadow_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/search_tool_drift_repair_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/runtime_tool_bundle_parity_gate.py", module.PY_COMPILE_TARGETS)

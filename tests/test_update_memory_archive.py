@@ -3128,6 +3128,69 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 [{"path": "sessions/2026/07/11/valid/source-map.json", "anchor": "anchor_valid"}],
             )
 
+    def test_write_memory_nodes_prunes_only_refs_to_nodes_removed_by_clean_cut(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            memories_dir = memory_repo / "memories"
+            memories_dir.mkdir(parents=True)
+            removed_id = "mem_removed_by_clean_cut"
+            current_id = "mem_current_after_clean_cut"
+            unknown_id = "mem_unknown_malformed_ref"
+            explicit_id = "mem_explicit_survivor"
+            removed_node = self.synthetic_memory_node(removed_id, "Removed synthetic memory.")
+            current_node = self.synthetic_memory_node(current_id, "Current synthetic memory.")
+            explicit_node = {
+                **self.synthetic_memory_node(explicit_id, "Explicit synthetic memory."),
+                "source": "explicit",
+                "derived_from": [removed_id, unknown_id],
+                "evidence_refs": [{"path": "support/evidence.md", "quote_id": "ev_explicit"}],
+                "deprecates": [removed_id, unknown_id],
+                "supersedes": [removed_id],
+                "contradicts": [removed_id],
+                "contradicted_by": [removed_id],
+                "superseded_by": removed_id,
+                "deprecated_by": removed_id,
+            }
+            (memories_dir / module.MEMORY_LAYER_FILES["project"]).write_text(
+                json.dumps(removed_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (memories_dir / "explicit.jsonl").write_text(
+                json.dumps(explicit_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=memory_repo, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "synthetic@example.invalid"],
+                cwd=memory_repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Synthetic Test"],
+                cwd=memory_repo,
+                check=True,
+            )
+            subprocess.run(["git", "add", "memories"], cwd=memory_repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=memory_repo, check=True)
+            (memories_dir / module.MEMORY_LAYER_FILES["project"]).write_text(
+                json.dumps(current_node, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            written = module.write_memory_nodes(memory_repo, [current_node])
+
+            explicit = next(node for node in written if node.get("memory_id") == explicit_id)
+            self.assertEqual(explicit["derived_from"], [unknown_id])
+            self.assertEqual(explicit["deprecates"], [unknown_id])
+            self.assertEqual(explicit["supersedes"], [])
+            self.assertEqual(explicit["contradicts"], [])
+            self.assertEqual(explicit["contradicted_by"], [])
+            self.assertIsNone(explicit.get("superseded_by"))
+            self.assertIsNone(explicit.get("deprecated_by"))
+            self.assertNotIn(removed_id, json.dumps(explicit, sort_keys=True))
+
     def test_update_memory_archive_refreshes_automatic_memory_with_supersession_links(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         update_script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()

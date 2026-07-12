@@ -109,6 +109,7 @@ python3 benchmarks/scheduled_publish_recovery_gate.py
 python3 benchmarks/scheduled_publish_search_gate.py
 python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
+python3 benchmarks/scheduled_update_single_writer_gate.py
 python3 benchmarks/induction_consolidation_gate.py
 python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/long_horizon_memory_stress_gate.py
@@ -177,6 +178,7 @@ python3 -m py_compile \
   benchmarks/scheduled_publish_search_gate.py \
   benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/live_automation_prompt_alignment_gate.py \
+  benchmarks/scheduled_update_single_writer_gate.py \
   benchmarks/induction_consolidation_gate.py \
   benchmarks/lifecycle_governance_gate.py \
   benchmarks/long_horizon_memory_stress_gate.py \

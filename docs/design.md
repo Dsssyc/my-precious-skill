@@ -239,6 +239,40 @@ Agent-native automations should use exactly one working directory: the private
 deployment repository. Multiple working directories can create multiple
 concurrent automation conversations for the same scheduled job.
 
+The V2.38 scheduled execution contract adds a second, runtime-enforced boundary.
+The global runner acquires a repo-scoped exclusive lock before registry discovery
+or archive mutation. The parent and current child retain the same lock ownership,
+so a surviving child continues to reject another writer even if the parent is
+abnormally terminated. A competing runner exits nonzero with aggregate status
+`update_status=blocked reason=concurrent_update`. The first failed project or
+source-stream child stops the run immediately, and SIGINT/SIGTERM triggers bounded
+child cleanup before the runner releases the lock.
+
+Rendered global scheduler commands include `--require-clean-worktree`. That
+preflight rejects tracked, deleted, or untracked Git state before mutation; the
+flag remains optional for local-only manual runner use. Agent-native publication
+does not infer success from task completion. It records the starting commit,
+publishes only through `tools/sync_memory_archive.py`, fetches `origin/main`, and
+checks a clean worktree plus local/remote commit equality. Its terminal result is
+exactly one of `published`, `no_op_current`, or `blocked`.
+
+This is a single-host execution-ownership contract. It is not whole-run rollback,
+not a cross-host distributed lock, not a GitHub availability SLA, and not a
+memory-quality claim.
+
+Clean-cut regeneration also closes references to durable memory nodes that it
+removes. The previous-ID evidence is the union of IDs in the current durable
+files and committed durable memory IDs from Git `HEAD` when available. The
+reconciler removes only lifecycle or `derived_from` edges whose target belongs
+to that previous set and is absent from the new set. Unknown missing IDs are not
+silently repaired and remain audit failures. Local-only non-Git archives use the
+current durable files as their previous set.
+
+Within a serialized global run, every non-final updater child defers this
+reconciliation, so only the final child closes removed references after all
+project and source-stream updates have succeeded. This prevents a target that a
+later child would regenerate from being removed prematurely.
+
 ## Environment Contract
 
 `setup-my-precious` writes the archive location to

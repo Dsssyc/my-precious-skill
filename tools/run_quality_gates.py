@@ -35,6 +35,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_publish_search_gate.py",
     "benchmarks/scheduled_content_noise_repair_closure_gate.py",
     "benchmarks/live_automation_prompt_alignment_gate.py",
+    "benchmarks/scheduled_update_single_writer_gate.py",
     "benchmarks/induction_consolidation_gate.py",
     "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
@@ -151,6 +152,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "live_automation_prompt_alignment",
             ("python3", "benchmarks/live_automation_prompt_alignment_gate.py"),
+        ),
+        CheckSpec(
+            "scheduled_update_single_writer",
+            ("python3", "benchmarks/scheduled_update_single_writer_gate.py"),
         ),
         CheckSpec(
             "induction_consolidation",

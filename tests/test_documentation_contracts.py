@@ -729,6 +729,53 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v238_single_writer_and_publish_receipt_contract(self):
+        section = self.evaluation_section(
+            "## V2.38 Scheduled Update Single-Writer And Interrupted-Run Recovery Closure"
+        )
+        for phrase in (
+            "scheduled_update_single_writer_gate.py",
+            "--require-clean-worktree",
+            "reason=concurrent_update",
+            "first failure fail-fast",
+            "parent and current child",
+            "published",
+            "no_op_current",
+            "blocked",
+            "single_writer_acceptance_rate",
+            "orphan_child_lock_retention_rate",
+            "publish_attempt_after_failed_update_count",
+            "privacy_leak_count",
+            "not whole-run rollback",
+            "not a cross-host distributed lock",
+            "not a GitHub availability SLA",
+            "not memory quality",
+            "committed durable memory IDs",
+            "only the final child",
+            "71/71",
+            "83 minutes",
+            "four stale",
+            "`a8fd832`",
+            "three local stashes",
+            "`status: ACTIVE`",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+        for phrase in (
+            "V2.38 scheduled execution contract",
+            "--require-clean-worktree",
+            "reason=concurrent_update",
+            "parent and current child",
+            "published",
+            "no_op_current",
+            "blocked",
+            "committed durable memory IDs",
+            "only the final child",
+        ):
+            self.assert_contains(design, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
