@@ -689,6 +689,46 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v237_safe_no_change_result(self):
+        section = self.evaluation_section(
+            "## V2.37 Public Query-Support Calibration With Frozen Holdout"
+        )
+        for phrase in (
+            "public_query_support_calibration_gate.py",
+            "strict_v1",
+            "weighted_partial_060_v1",
+            "weighted_partial_050_specific_v1",
+            "c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19",
+            "4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7",
+            "5106e9379647edeacb71a7161bacd7c602b8ea246a34b8911f514a81c063613d",
+            "`status: failed`",
+            "`readiness_status: inconclusive`",
+            "`status: completed`",
+            "`readiness_status: no_go`",
+            "`decision_reason: no_safe_policy`",
+            "38/40",
+            "32/40",
+            "11/30",
+            "4/11",
+            "2/4",
+            "1/3",
+            "40/40",
+            "34/40",
+            "13/30",
+            "6/13",
+            "0/6",
+            "ranking_drift_count = 0",
+            "`calibration_passed`",
+            "is not a final `go`",
+            "production query-support behavior remained unchanged",
+            "not ranking repair",
+            "not archive-audit repair",
+            "not induction-content quality",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

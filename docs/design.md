@@ -790,6 +790,25 @@ payloads, and memory text stay outside this repository and outside the report.
 The fast `--offline-fixture` mode tests only this harness contract and is the
 only mode included in the canonical offline quality gate.
 
+The public query-support calibration gate reuses that label-isolated packaged
+lifecycle instead of defining another ingestion adapter. It freezes the V2.36
+selection as a holdout, excludes those question IDs before selecting a second
+deterministic calibration cohort, and attributes each baseline-retrievable
+positive through gold-session-derived memory creation, active/current state,
+top-five retrieval, query support, hit answerability, and package
+answerability. It evaluates exactly three predeclared token-coverage policies.
+Gold provenance, rank, question type, benchmark IDs, and dataset-specific token
+exceptions are scorer-only and cannot become runtime support features. A policy
+may change production behavior only after passing existing hard negatives,
+calibration precision/abstention/coverage thresholds, and the frozen holdout.
+Otherwise the gate reports a bounded `no_go` or `inconclusive` result and leaves
+the existing search implementation unchanged. Only its synthetic
+`--offline-fixture` mode belongs in the canonical release gate; public inputs,
+generated archives, and aggregate reports remain outside the reusable repo.
+`calibration_passed` is an intermediate state that only authorizes guarded
+integration and frozen-holdout evaluation; it is not a final `go`. Selected
+runtime parity and the remaining final thresholds are enforced on the holdout.
+
 The generated-answer benchmark has a packaged synthetic fixture with two
 positive answer cases and one abstention case. `v1_readiness_gate.py
 --run-packaged --require-answer` runs that fixture automatically when no

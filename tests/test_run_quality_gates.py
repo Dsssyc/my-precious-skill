@@ -95,6 +95,12 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(
             any("benchmarks/public_induction_recall_gate.py --offline-fixture" in command for command in commands)
         )
+        self.assertTrue(
+            any(
+                "benchmarks/public_query_support_calibration_gate.py --offline-fixture" in command
+                for command in commands
+            )
+        )
         self.assertTrue(any("benchmarks/active_support_recall_closure_gate.py" in command for command in commands))
         self.assertTrue(
             any("benchmarks/reviewed_automatic_memory_publish_gate.py" in command for command in commands)
@@ -128,6 +134,10 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/runtime_tool_bundle_parity_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/three_layer_distribution_preflight_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/public_induction_recall_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "benchmarks/public_query_support_calibration_gate.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("benchmarks/active_support_recall_closure_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/reviewed_automatic_memory_publish_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/long_horizon_memory_stress_gate.py", module.PY_COMPILE_TARGETS)

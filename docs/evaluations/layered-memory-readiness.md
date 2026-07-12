@@ -1846,6 +1846,149 @@ a separate bounded goal that first chooses which observed blocker to study:
 coding-agent process-noise audit compatibility, L1 public-query retrieval, or
 natural-conversation induction support. V2.36 does not implement those changes.
 
+## V2.37 Public Query-Support Calibration With Frozen Holdout
+
+V2.37 adds `benchmarks/public_query_support_calibration_gate.py`. It reuses the
+V2.36 label-isolated source conversion and real packaged lifecycle, but separates
+policy calibration from a frozen holdout. The holdout is exactly the V2.36
+selection with fingerprint
+`4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7`.
+Seed `my-precious-v237-calibration` selects another five positives per official
+question type plus ten abstentions after excluding every holdout ID. The
+calibration fingerprint is
+`c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19`;
+the cohort overlap count is 0.
+
+The three policies were frozen before public scoring:
+
+| policy | rule |
+| --- | --- |
+| `strict_v1` | existing complete meaningful, strict, or important-token coverage |
+| `weighted_partial_060_v1` | at least two matches, weighted coverage at least 0.60, and no missing importance-4 token |
+| `weighted_partial_050_specific_v1` | at least two matches, weighted coverage at least 0.50, one importance-2 match, and no missing importance-4 token |
+
+Rank, gold provenance, question type, benchmark IDs, and dataset-specific token
+exceptions were not candidate-policy inputs. Free-form output was not used for
+answerability. The fast synthetic policy-selection contract is canonical:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py --offline-fixture
+```
+
+The public runs used the same pinned LongMemEval cleaned S file as V2.36:
+
+```text
+https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json
+SHA-256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
+```
+
+Calibration command:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort calibration \
+  --work-dir /tmp/my-precious-v237-calibration \
+  --report-file /tmp/my-precious-v237-calibration-report.json
+```
+
+The calibration report SHA-256 is
+`789f979563fbb249464723cdd76a1d28f8c9ac12cdeb44f5f6287f8979958ec7`.
+It returned `status: failed`, `readiness_status: inconclusive`, and
+`decision_reason: insufficient_gold_candidates`.
+
+Calibration structure and attribution:
+
+| metric | numerator / denominator | rate or count |
+| --- | ---: | ---: |
+| packaged setup | 40/40 | 1.0 |
+| updater success | 38/40 | 0.95 |
+| archive audit success | 32/40 | 0.80 |
+| context-package parse success | 38/40 | 0.95 |
+| baseline-retrievable positives | 11/30 | 0.3666666667 |
+| gold-derived memory present | 11/11 | 1.0 |
+| active/current gold-derived memory | 11/11 | 1.0 |
+| gold memory candidate at 1 | 4/11 | 0.3636363636 |
+| gold memory candidate at 5 | 4/11 | 0.3636363636 |
+| retrieval first loss | 7/11 | 0.6363636364 |
+| query-support first loss | 4/11 | 0.3636363636 |
+| attribution invariant violations | count | 0 |
+| privacy leaks | count | 0 |
+
+Two calibration cases were rejected by the existing updater secret gate for
+cookie-like and GitHub-token-like source patterns. V2.37 did not use
+`--allow-redacted-secrets`, change the updater, replace the selected cases, or
+lower the five-candidate minimum. The resulting four gold candidates make the
+calibration performance decision inconclusive. Audit failures were also
+retained rather than repaired because archive-audit behavior is outside this
+goal.
+
+Calibration policy results:
+
+| policy | gold support | precision | abstention | hard-negative rejection |
+| --- | ---: | ---: | ---: | ---: |
+| `strict_v1` | 0/4 | 0/0 | 10/10 | 3/3 |
+| `weighted_partial_060_v1` | 2/4 | 2/2 | 10/10 | 1/3 |
+| `weighted_partial_050_specific_v1` | 2/4 | 2/3 | 9/10 | 1/3 |
+
+Both partial policies failed the predeclared `hard_negative_rejection_rate =
+1.0` requirement. The looser policy also produced one false abstention-cohort
+support. Therefore neither policy was eligible even apart from the insufficient
+public denominator.
+
+Had a policy passed calibration, the gate would have emitted the intermediate
+`calibration_passed` state before guarded integration. That state is not a final `go`;
+selected-runtime parity and all final safety thresholds remain holdout requirements.
+
+Frozen holdout command:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --selected-policy none \
+  --work-dir /tmp/my-precious-v237-holdout \
+  --report-file /tmp/my-precious-v237-holdout-report.json
+```
+
+The frozen holdout returned `status: completed`, `readiness_status: no_go`, and
+`decision_reason: no_safe_policy`. The aggregate-only report SHA-256 was
+`5106e9379647edeacb71a7161bacd7c602b8ea246a34b8911f514a81c063613d`.
+
+Frozen holdout structure and attribution:
+
+| metric | numerator / denominator | rate or count |
+| --- | ---: | ---: |
+| packaged setup | 40/40 | 1.0 |
+| updater success | 40/40 | 1.0 |
+| archive audit success | 34/40 | 0.85 |
+| context-package parse success | 40/40 | 1.0 |
+| baseline-retrievable positives | 13/30 | 0.4333333333 |
+| gold-derived memory present and active | 13/13 | 1.0 |
+| gold memory candidate at 1 | 6/13 | 0.4615384615 |
+| gold memory candidate at 5 | 6/13 | 0.4615384615 |
+| strict query-supported gold candidates | 0/6 | 0.0 |
+| retrieval first loss | 7/13 | 0.5384615385 |
+| query-support first loss | 6/13 | 0.4615384615 |
+| abstention accuracy | 10/10 | 1.0 |
+| hard-negative rejection | 3/3 | 1.0 |
+| ranking_drift_count = 0 | count | 0 |
+| privacy leaks | count | 0 |
+
+This formalizes the V2.36 preflight: induction provenance was present for all
+13 baseline cases, seven were lost before context top five, and six correct
+rank-one candidates were rejected by strict query support. The two proposed
+partial relaxations were not safe enough to ship. The production query-support behavior remained unchanged;
+no search-tool template sync was required.
+
+V2.37 is a bounded safe-no-change result. It proves disjoint public calibration,
+frozen holdout attribution, policy/runtime parity, and fail-closed candidate
+selection. It is not ranking repair. It is not archive-audit repair. It is not induction-content quality.
+It is not LLM answer quality, vector search,
+ontology discovery, private archive quality, or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
