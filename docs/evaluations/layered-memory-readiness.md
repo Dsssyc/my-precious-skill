@@ -2073,6 +2073,109 @@ not a cross-host distributed lock, not a GitHub availability SLA, and not memory
 It also does not change ranking, induction, schema, archive audit
 heuristics, or sync allowlists.
 
+## V2.39 Scheduled Update Single-Inventory And Single-Finalization Throughput Closure
+
+Date: 2026-07-13
+
+V2.39 addresses the two repeated-work paths measured after V2.38's controlled
+71-project run took approximately 83 minutes. The global runner previously
+scanned the shared source directory once for project discovery, then each
+project updater scanned and parsed it again. Every successful updater also ran
+the archive-wide `rebuild_indexes()` path, even when it selected zero records.
+
+The deterministic public gate is:
+
+```bash
+python3 benchmarks/scheduled_update_throughput_gate.py
+```
+
+The runner now builds one in-memory inventory for each unique canonical source
+root and pattern set. It reuses that inventory for project discovery and target
+selection, then sends only target-specific metadata through stdin. The payload
+contains relative paths and integrity metadata, never source content. The child
+revalidates containment, metadata, hash, project matching, and automation-source
+exclusion before mutation. Malformed, duplicate, outside-root, symlink-escape,
+or changed inventory records fail closed with aggregate-only diagnostics.
+
+Each ingestion child writes authoritative session metadata while deferring
+derived surfaces. During this interval high-water selection reads authoritative
+session metadata rather than the now-stale generated session index. After every
+project and source-stream child succeeds, one finalize-only child rebuilds all
+derived indexes, daily views, memory nodes, and clean-cut references. An
+ingestion failure launches no finalizer; a finalizer failure propagates nonzero.
+Dry runs and runs without runnable targets do not finalize.
+
+The public gate uses a lightweight 71-target scheduling case for deterministic
+operation counts and a smaller actual-updater case for byte-for-byte comparison
+against the V2.38 scripts. It also reruns the V2.38 single-writer gate.
+
+| metric | value |
+| --- | ---: |
+| `source_inventory_amplification` | 1.0 |
+| `source_root_rescan_count` | 0 |
+| `nonselected_record_reparse_count` | 0 |
+| `target_dispatch_accuracy` | 1.0 |
+| `successful_run_finalization_count` | 1 |
+| `failed_run_finalization_count` | 0 |
+| `output_parity_rate` | 1.0 |
+| `output_parity_scenario_count` | 4 |
+| `fail_closed_inventory_rejection_rate` | 1.0 |
+| `single_writer_regression_pass_rate` | 1.0 |
+| `synthetic_redundant_work_reduction_rate` | 0.986013986013986 |
+| `privacy_leak_count` | 0 |
+
+The four actual-updater parity scenarios cover registered projects with a
+shared archive scope and independent source partitions, a source stream, and
+custom-pattern, zero-record, and rewrite/max-record execution. This
+proves deterministic source-inventory reuse, target dispatch, a single
+successful final rebuild, failure suppression, and final archive-output parity
+for the synthetic contract. It is not whole-run rollback, not distributed
+locking, and not private wall-clock performance. It does not prove memory quality,
+ranking, induction quality, LLM answer quality, vector search, ontology
+discovery, GitHub availability, or public leaderboard parity. Private bounded
+timing and deployment evidence remain separate acceptance gates and must not be
+inferred from the synthetic operation-count result.
+
+### Private acceptance result: `no_go`
+
+The bounded private shadow measurement used one immutable source snapshot with
+338 candidate files and 2,611,465,503 aggregate source bytes. No source content,
+project names, repository paths, or generated archive records were copied into
+this repository. A controlled 12-target, zero-new-record A/B isolated repeated
+inventory and rebuild work:
+
+| private shadow metric | value |
+| --- | ---: |
+| V2.38 baseline elapsed seconds | 1923.252 |
+| V2.39 candidate elapsed seconds | 165.667 |
+| controlled-case speedup | 11.609x |
+| V2.39 source inventory seconds | 42.796 |
+| V2.39 archive-state seconds | 3.919 |
+| V2.39 target discovery seconds | 116.146 |
+| selected records in the bounded hotspot profile | 25 |
+| selected aggregate source bytes | 1518602464 |
+
+The required 71-target default-update shadow run did not complete before the
+hard 1800-second acceptance limit. Therefore V2.39 failed the full private
+wall-clock gate even though the isolated repeated-work case improved. The
+timed-out report did not retain reviewable private byte-parity evidence, so
+private output parity was not accepted; the public synthetic parity result must
+not be substituted for it.
+
+One bounded diagnostic pass showed that inventory construction, archive-state
+reads, and target discovery accounted for approximately 163 seconds, while the
+selected records represented approximately 1.52 GB. This supports the inference
+that record materialization remained the dominant unclosed path, but it does not
+identify or prove a safe materialization optimization. Changing record writing,
+summarization, source parsing, or source-anchor behavior is outside this goal's
+single-inventory and single-finalization scope, so no further correction was
+attempted.
+
+The candidate was not installed or deployed. V2.38 remains deployed, and V2.39
+is retained only as a source-level implementation and reproducible public gate.
+A future goal may address large-record materialization only with a separately
+bounded contract, output-parity evidence, and its own private acceptance limit.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

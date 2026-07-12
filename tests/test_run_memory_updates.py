@@ -23,6 +23,163 @@ def load_runner_module():
 
 
 class RunMemoryUpdatesTests(unittest.TestCase):
+    def test_source_inventory_reads_each_candidate_once_and_preserves_dispatch_semantics(self):
+        module = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_a = root / "project-a"
+            project_b = root / "project-b"
+            source_dir.mkdir()
+            project_a.mkdir()
+            project_b.mkdir()
+
+            fixtures = {
+                "a.jsonl": {
+                    "timestamp": "2026-07-13T01:00:00Z",
+                    "cwd": str(project_a),
+                    "role": "user",
+                    "content": "Synthetic project A inventory record.",
+                },
+                "b.jsonl": {
+                    "timestamp": "2026-07-13T02:00:00Z",
+                    "cwd": str(project_b),
+                    "role": "user",
+                    "content": "Synthetic project B inventory record.",
+                },
+                "stream.jsonl": {
+                    "timestamp": "2026-07-13T03:00:00Z",
+                    "role": "user",
+                    "content": "Synthetic source stream record without project metadata.",
+                },
+            }
+            for name, payload in fixtures.items():
+                (source_dir / name).write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            (source_dir / "automation.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "cwd": str(project_a),
+                            "thread_source": "automation",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            original_read_bytes = Path.read_bytes
+            read_counts: dict[Path, int] = {}
+
+            def counted_read_bytes(path: Path) -> bytes:
+                resolved = path.resolve()
+                read_counts[resolved] = read_counts.get(resolved, 0) + 1
+                return original_read_bytes(path)
+
+            with mock.patch.object(Path, "read_bytes", counted_read_bytes):
+                inventory = module.build_source_inventory(
+                    source_dir,
+                    ("*.jsonl", "a*.jsonl"),
+                )
+
+            self.assertEqual(set(read_counts.values()), {1})
+            self.assertEqual(len(read_counts), 4)
+            self.assertEqual(
+                [record.relative_path for record in inventory],
+                ["a.jsonl", "b.jsonl", "stream.jsonl"],
+            )
+            self.assertEqual(
+                module.discover_projects_from_inventory(inventory),
+                [project_a.resolve(), project_b.resolve()],
+            )
+            self.assertEqual(
+                [
+                    record.relative_path
+                    for record in module.inventory_records_for_target(
+                        inventory,
+                        project_a,
+                        require_project_metadata=True,
+                    )
+                ],
+                ["a.jsonl"],
+            )
+            self.assertEqual(
+                [
+                    record.relative_path
+                    for record in module.inventory_records_for_target(
+                        inventory,
+                        root / "source-stream",
+                        require_project_metadata=False,
+                    )
+                ],
+                ["stream.jsonl"],
+            )
+
+    def test_source_inventory_fails_closed_on_symlink_escape_without_rendering_paths(self):
+        module = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            source_dir.mkdir()
+            outside = root / "PRIVATE_INVENTORY_ESCAPE.jsonl"
+            outside.write_text("{}\n", encoding="utf-8")
+            (source_dir / "escape.jsonl").symlink_to(outside)
+
+            with self.assertRaises(module.SourceInventoryError) as raised:
+                module.build_source_inventory(source_dir, ("*.jsonl",))
+
+            self.assertEqual(str(raised.exception), "source_inventory_unsafe")
+            self.assertNotIn(str(root), str(raised.exception))
+            self.assertNotIn(outside.name, str(raised.exception))
+
+    def test_runner_classifies_unsafe_source_inventory_before_child_launch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            tools_dir = memory_repo / "tools"
+            config_dir = memory_repo / "config"
+            tools_dir.mkdir(parents=True)
+            config_dir.mkdir()
+            source_dir.mkdir()
+            shutil.copyfile(
+                Path("templates/agent-memory-repo/tools/run_memory_updates.py"),
+                tools_dir / "run_memory_updates.py",
+            )
+            marker = root / "child-launched"
+            (tools_dir / "update_memory_archive.py").write_text(
+                "from pathlib import Path\nPath('" + str(marker) + "').touch()\n",
+                encoding="utf-8",
+            )
+            (config_dir / "projects.jsonl").write_text("", encoding="utf-8")
+            outside = root / "PRIVATE_RUNNER_ESCAPE.jsonl"
+            outside.write_text("{}\n", encoding="utf-8")
+            (source_dir / "escape.jsonl").symlink_to(outside)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(tools_dir / "run_memory_updates.py"),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                ],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("update_status=blocked reason=source_inventory_invalid", result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+            self.assertNotIn(outside.name, result.stdout + result.stderr)
+
     def test_run_memory_updates_runs_registered_source_stream_without_project_registry(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -886,9 +1043,48 @@ import sys
 from pathlib import Path
 
 log = Path(os.environ['MY_PRECIOUS_TEST_RECONCILIATION_LOG'])
-deferred = '--defer-memory-ref-reconciliation' in sys.argv[1:]
+is_finalize = '--finalize-archive' in sys.argv[1:]
+deferred = '--defer-global-rebuild' in sys.argv[1:]
 with log.open('a', encoding='utf-8') as handle:
-    handle.write(('deferred' if deferred else 'reconciled') + '\\n')
+    if is_finalize:
+        handle.write('finalized-reconciled\\n')
+    else:
+        handle.write(('ingestion-deferred' if deferred else 'ingestion-rebuilt') + '\\n')
+""",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def install_throughput_contract_fake_updater(memory_repo: Path) -> None:
+        (memory_repo / "tools/update_memory_archive.py").write_text(
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+is_finalize = '--finalize-archive' in args
+records = []
+if '--source-inventory-stdin' in args:
+    payload = json.loads(sys.stdin.read())
+    records = [row['relative_path'] for row in payload['records']]
+project = ''
+if '--project-path' in args:
+    project = Path(args[args.index('--project-path') + 1]).name
+row = {
+    'kind': 'finalize' if is_finalize else 'ingestion',
+    'project': project,
+    'records': records,
+    'inventory_stdin': '--source-inventory-stdin' in args,
+    'defer_global_rebuild': '--defer-global-rebuild' in args,
+}
+with Path(os.environ['MY_PRECIOUS_TEST_THROUGHPUT_LOG']).open('a', encoding='utf-8') as handle:
+    handle.write(json.dumps(row, sort_keys=True) + '\\n')
+if project and project == os.environ.get('MY_PRECIOUS_TEST_FAIL_PROJECT'):
+    raise SystemExit(9)
+if is_finalize and os.environ.get('MY_PRECIOUS_TEST_FAIL_FINALIZER') == '1':
+    raise SystemExit(10)
 """,
             encoding="utf-8",
         )
@@ -1103,7 +1299,7 @@ with log.open('a', encoding='utf-8') as handle:
             self.assertIn("update_status=failed reason=project_update_failed", result.stderr)
             self.assertNotIn("PRIVATE_CHILD_FAILURE_DETAIL", result.stdout + result.stderr)
 
-    def test_only_final_child_reconciles_removed_memory_references(self):
+    def test_only_archive_finalizer_reconciles_removed_memory_references(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             memory_repo, source_dir = self.make_fake_repo(root, project_count=2, include_stream=True)
@@ -1122,8 +1318,107 @@ with log.open('a', encoding='utf-8') as handle:
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
                 log.read_text(encoding="utf-8").splitlines(),
-                ["deferred", "deferred", "reconciled"],
+                [
+                    "ingestion-deferred",
+                    "ingestion-deferred",
+                    "ingestion-deferred",
+                    "finalized-reconciled",
+                ],
             )
+
+    def test_runner_dispatches_target_inventories_and_finalizes_once(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo, source_dir = self.make_fake_repo(root, project_count=2, include_stream=True)
+            self.install_throughput_contract_fake_updater(memory_repo)
+            project_a = root / "project-a"
+            project_b = root / "project-b"
+            fixtures = {
+                "a.jsonl": {
+                    "timestamp": "2026-07-13T07:00:00Z",
+                    "cwd": str(project_a),
+                    "role": "user",
+                    "content": "Synthetic project A dispatch record.",
+                },
+                "b.jsonl": {
+                    "timestamp": "2026-07-13T08:00:00Z",
+                    "cwd": str(project_b),
+                    "role": "user",
+                    "content": "Synthetic project B dispatch record.",
+                },
+                "stream.jsonl": {
+                    "timestamp": "2026-07-13T09:00:00Z",
+                    "role": "user",
+                    "content": "Synthetic source stream dispatch record.",
+                },
+            }
+            for name, payload in fixtures.items():
+                (source_dir / name).write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            log = root / "throughput-contract.jsonl"
+
+            result = subprocess.run(
+                self.runner_command(memory_repo, source_dir),
+                cwd=memory_repo,
+                env={**os.environ, "MY_PRECIOUS_TEST_THROUGHPUT_LOG": str(log)},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["kind"] for row in rows], ["ingestion", "ingestion", "ingestion", "finalize"])
+            self.assertEqual(
+                {row["project"]: row["records"] for row in rows[:-1]},
+                {
+                    "project-a": ["a.jsonl"],
+                    "project-b": ["b.jsonl"],
+                    "source-stream": ["stream.jsonl"],
+                },
+            )
+            self.assertTrue(all(row["inventory_stdin"] for row in rows[:-1]))
+            self.assertTrue(all(row["defer_global_rebuild"] for row in rows[:-1]))
+            self.assertFalse(rows[-1]["inventory_stdin"])
+            self.assertFalse(rows[-1]["defer_global_rebuild"])
+
+    def test_runner_suppresses_later_targets_and_finalization_after_ingestion_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo, source_dir = self.make_fake_repo(root, project_count=2)
+            self.install_throughput_contract_fake_updater(memory_repo)
+            for name in ("a", "b"):
+                project_path = root / f"project-{name}"
+                (source_dir / f"{name}.jsonl").write_text(
+                    json.dumps(
+                        {
+                            "timestamp": "2026-07-13T10:00:00Z",
+                            "cwd": str(project_path),
+                            "role": "user",
+                            "content": f"Synthetic failing dispatch record {name}.",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            log = root / "throughput-failure.jsonl"
+
+            result = subprocess.run(
+                self.runner_command(memory_repo, source_dir),
+                cwd=memory_repo,
+                env={
+                    **os.environ,
+                    "MY_PRECIOUS_TEST_THROUGHPUT_LOG": str(log),
+                    "MY_PRECIOUS_TEST_FAIL_PROJECT": "project-a",
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([(row["kind"], row["project"]) for row in rows], [("ingestion", "project-a")])
+            self.assertIn("Archive finalizations: 0", result.stdout)
 
     def test_second_runner_is_rejected_before_mutation_and_lock_releases_after_exit(self):
         with tempfile.TemporaryDirectory() as tmpdir:

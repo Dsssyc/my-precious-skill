@@ -1,4 +1,6 @@
 import importlib.util
+import hashlib
+import io
 import json
 import os
 import subprocess
@@ -7,6 +9,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 
 def set_mtime(path: Path, stamp: str) -> None:
@@ -5440,6 +5443,303 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             )
 
         self.assertEqual([record.path.name for record in records], ["human.jsonl"])
+
+    def test_discover_records_from_inventory_reads_only_dispatched_candidates(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            selected = source_dir / "selected.jsonl"
+            selected.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T04:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Synthetic selected inventory record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            unselected = source_dir / "unselected.jsonl"
+            unselected.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T05:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Synthetic record that must not be reparsed.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raw = selected.read_bytes()
+            stat = selected.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 1,
+                    "records": [
+                        {
+                            "relative_path": "selected.jsonl",
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": stat.st_size,
+                            "mtime_ns": stat.st_mtime_ns,
+                        }
+                    ],
+                }
+            )
+            original_read_record_text = module.read_record_text
+            reads: list[Path] = []
+
+            def counted_read_record_text(path: Path) -> str:
+                reads.append(path.resolve())
+                return original_read_record_text(path)
+
+            module.read_record_text = counted_read_record_text
+            try:
+                records = module.discover_records_from_inventory(
+                    payload,
+                    source_dir,
+                    None,
+                    project_path,
+                    require_project_metadata=True,
+                )
+            finally:
+                module.read_record_text = original_read_record_text
+
+            self.assertEqual([record.path for record in records], [selected.resolve()])
+            self.assertEqual(reads, [selected.resolve()])
+            self.assertNotIn(unselected.resolve(), reads)
+
+    def test_finalize_archive_rebuilds_once_without_a_source_directory(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+
+            with mock.patch.object(module, "rebuild_indexes") as rebuild:
+                result = module.main(
+                    [
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--finalize-archive",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            rebuild.assert_called_once_with(memory_repo.resolve(), reconcile_removed_refs=True)
+
+    def test_defer_global_rebuild_writes_session_without_rebuilding_derived_surfaces(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            (source_dir / "record.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T06:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: deferred ingestion writes authoritative session metadata.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(module, "rebuild_indexes") as rebuild:
+                result = module.main(
+                    [
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--source-dir",
+                        str(source_dir),
+                        "--project-path",
+                        str(project_path),
+                        "--require-project-metadata",
+                        "--defer-global-rebuild",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            rebuild.assert_not_called()
+            self.assertEqual(len(list((memory_repo / "sessions").glob("**/meta.json"))), 1)
+
+    def test_deferred_high_water_ignores_stale_generated_session_index(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            project_path = root / "project"
+            source_path = root / "records" / "record.jsonl"
+            (memory_repo / "index").mkdir(parents=True)
+            meta_dir = memory_repo / "sessions/2026/07/13/current"
+            meta_dir.mkdir(parents=True)
+            project_path.mkdir()
+            source_path.parent.mkdir()
+            source_path.write_text("{}\n", encoding="utf-8")
+            scope = "domain:synthetic"
+            partition = "source:synthetic"
+            (memory_repo / "index/sessions.jsonl").write_text(
+                json.dumps(
+                    {
+                        "project_path": str(project_path),
+                        "archive_scope": scope,
+                        "source_partition": partition,
+                        "source_updated_at": "2026-08-01T00:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (meta_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "project_path": str(project_path),
+                        "archive_scope": scope,
+                        "source_partition": partition,
+                        "source_record": str(source_path),
+                        "source_record_sha256": "a" * 64,
+                        "source_updated_at": "2026-07-13T06:00:00Z",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            latest, hashes, source_hashes = module.archived_project_state(
+                memory_repo,
+                project_path,
+                scope,
+                partition,
+                include_generated_index=False,
+            )
+
+            self.assertEqual(module.isoformat(latest), "2026-07-13T06:00:00Z")
+            self.assertEqual(hashes, {"a" * 64})
+            self.assertEqual(source_hashes[str(source_path.resolve())], {"a" * 64})
+
+    def test_source_inventory_stdin_bypasses_directory_discovery(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            with (
+                mock.patch.object(module, "discover_records", side_effect=AssertionError("directory scan used")),
+                mock.patch.object(module, "discover_records_from_inventory", return_value=[]) as from_inventory,
+                mock.patch.object(sys, "stdin", io.StringIO("{}")),
+            ):
+                result = module.main(
+                    [
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--source-dir",
+                        str(source_dir),
+                        "--project-path",
+                        str(project_path),
+                        "--require-project-metadata",
+                        "--source-inventory-stdin",
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            from_inventory.assert_called_once()
+            self.assertEqual(from_inventory.call_args.args[0], "{}")
+
+    def test_source_inventory_cli_fails_closed_when_a_dispatched_record_changes(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            source = source_dir / "PRIVATE_SOURCE_SENTINEL.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T11:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Synthetic inventory mutation record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raw = source.read_bytes()
+            stat = source.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 1,
+                    "records": [
+                        {
+                            "relative_path": source.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": stat.st_size,
+                            "mtime_ns": stat.st_mtime_ns,
+                        }
+                    ],
+                }
+            )
+            source.write_text(source.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--source-inventory-stdin",
+                    "--defer-global-rebuild",
+                ],
+                input=payload,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("update_status=blocked reason=source_inventory_invalid", result.stderr)
+            self.assertNotIn(source.name, result.stdout + result.stderr)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+            self.assertEqual(list((memory_repo / "sessions").glob("**/meta.json")), [])
 
     def test_update_memory_archive_archive_scope_decouples_high_water_from_project_path(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
@@ -52,6 +53,21 @@ UNSAFE_PATH = "[unsafe-path]"
 UNSAFE_IDENTIFIER = "[unsafe-identifier]"
 CONCURRENT_UPDATE_EXIT = getattr(os, "EX_TEMPFAIL", 75)
 CHILD_TERMINATION_TIMEOUT_SECONDS = 5.0
+SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
+SOURCE_INVENTORY_REPORT_VERSION = 1
+
+
+@dataclass(frozen=True)
+class SourceInventoryRecord:
+    relative_path: str
+    sha256: str
+    size: int
+    mtime_ns: int
+    project_paths: tuple[Path, ...]
+
+
+class SourceInventoryError(ValueError):
+    pass
 
 
 class RunnerInterrupted(Exception):
@@ -158,7 +174,13 @@ class ChildProcessController:
         self.update_lock = update_lock
         self.current: subprocess.Popen[str] | None = None
 
-    def run(self, command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    def run(
+        self,
+        command: list[str],
+        cwd: Path,
+        *,
+        input_text: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         with (
             tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stdout_file,
             tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as stderr_file,
@@ -167,13 +189,15 @@ class ChildProcessController:
                 command,
                 cwd=cwd,
                 text=True,
+                stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 **self.update_lock.child_process_options(),
             )
             self.current = child
             try:
-                returncode = child.wait()
+                child.communicate(input=input_text)
+                returncode = child.returncode
             finally:
                 if child.poll() is not None:
                     self.current = None
@@ -391,22 +415,112 @@ def walk_json_values(value: object) -> Iterable[tuple[str, object]]:
             yield from walk_json_values(child)
 
 
-def discover_projects(source_dir: Path, patterns: tuple[str, ...]) -> list[Path]:
-    discovered: set[Path] = set()
+def source_value_is_automation(value: object) -> bool:
+    if not isinstance(value, dict) or value.get("type") != "session_meta":
+        return False
+    payload = value.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    return str(payload.get("thread_source") or "").strip().lower() == "automation"
+
+
+def build_source_inventory(
+    source_dir: Path,
+    patterns: tuple[str, ...],
+) -> list[SourceInventoryRecord]:
     if not source_dir.exists() or not source_dir.is_dir():
         return []
-    for path in iter_candidate_files(source_dir, patterns):
+    source_root = source_dir.resolve()
+    inventory: list[SourceInventoryRecord] = []
+    seen: set[Path] = set()
+    for path in iter_candidate_files(source_root, patterns):
+        resolved = path.resolve()
         try:
-            text = path.read_bytes().decode("utf-8", errors="replace")
-        except OSError:
+            resolved.relative_to(source_root)
+        except ValueError as exc:
+            raise SourceInventoryError("source_inventory_unsafe") from exc
+        if resolved in seen:
             continue
-        for value in iter_json_values(path, text):
+        seen.add(resolved)
+        try:
+            relative_path = resolved.relative_to(source_root).as_posix()
+            initial_stat = resolved.stat()
+            raw = resolved.read_bytes()
+            final_stat = resolved.stat()
+        except OSError as exc:
+            raise SourceInventoryError("source_inventory_unavailable") from exc
+        if (
+            initial_stat.st_size != len(raw)
+            or initial_stat.st_size != final_stat.st_size
+            or initial_stat.st_mtime_ns != final_stat.st_mtime_ns
+        ):
+            raise SourceInventoryError("source_inventory_changed")
+        text = raw.decode("utf-8", errors="replace")
+        values = list(iter_json_values(resolved, text))
+        if any(source_value_is_automation(value) for value in values):
+            continue
+        project_paths: set[Path] = set()
+        for value in values:
             for key, child in walk_json_values(value):
-                if key in PROJECT_PATH_KEYS and isinstance(child, str) and child.strip():
-                    candidate = Path(child).expanduser()
-                    if candidate.is_absolute():
-                        discovered.add(candidate.resolve())
+                if key not in PROJECT_PATH_KEYS or not isinstance(child, str) or not child.strip():
+                    continue
+                candidate = Path(child).expanduser()
+                if candidate.is_absolute():
+                    project_paths.add(candidate.resolve())
+        inventory.append(
+            SourceInventoryRecord(
+                relative_path=relative_path,
+                sha256=hashlib.sha256(raw).hexdigest(),
+                size=final_stat.st_size,
+                mtime_ns=final_stat.st_mtime_ns,
+                project_paths=tuple(sorted(project_paths, key=lambda item: item.as_posix())),
+            )
+        )
+    return sorted(inventory, key=lambda record: record.relative_path)
+
+
+def discover_projects_from_inventory(inventory: Iterable[SourceInventoryRecord]) -> list[Path]:
+    discovered = {project_path for record in inventory for project_path in record.project_paths}
     return sorted(discovered, key=lambda item: item.as_posix())
+
+
+def inventory_records_for_target(
+    inventory: Iterable[SourceInventoryRecord],
+    project_path: Path,
+    *,
+    require_project_metadata: bool,
+) -> list[SourceInventoryRecord]:
+    project_key = project_path.resolve()
+    return [
+        record
+        for record in inventory
+        if project_key in record.project_paths
+        or (not record.project_paths and not require_project_metadata)
+    ]
+
+
+def source_inventory_payload(inventory: Iterable[SourceInventoryRecord]) -> str:
+    return json.dumps(
+        {
+            "report_kind": SOURCE_INVENTORY_REPORT_KIND,
+            "report_version": SOURCE_INVENTORY_REPORT_VERSION,
+            "records": [
+                {
+                    "relative_path": record.relative_path,
+                    "sha256": record.sha256,
+                    "size": record.size,
+                    "mtime_ns": record.mtime_ns,
+                }
+                for record in inventory
+            ],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def discover_projects(source_dir: Path, patterns: tuple[str, ...]) -> list[Path]:
+    return discover_projects_from_inventory(build_source_inventory(source_dir, patterns))
 
 
 def registry_path(memory_repo: Path) -> Path:
@@ -584,13 +698,13 @@ def run_project_update(
     controller: ChildProcessController,
     memory_repo: Path,
     project: dict[str, object],
+    inventory: list[SourceInventoryRecord],
     default_source_dir: Path,
     dry_run: bool,
     max_records: int | None,
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
-    defer_memory_ref_reconciliation: bool,
 ) -> int:
     project_path = str(project["project_path"])
     source_dir = Path(str(project.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -604,6 +718,8 @@ def run_project_update(
         "--project-path",
         project_path,
         "--require-project-metadata",
+        "--source-inventory-stdin",
+        "--defer-global-rebuild",
     ]
     project_name = project.get("project")
     if isinstance(project_name, str) and project_name.strip():
@@ -622,13 +738,15 @@ def run_project_update(
         command.append("--allow-redacted-secrets")
     if rewrite_existing:
         command.append("--rewrite-existing")
-    if defer_memory_ref_reconciliation:
-        command.append("--defer-memory-ref-reconciliation")
     if dry_run:
         command.append("--dry-run")
 
     print("Updating project.")
-    result = controller.run(command, memory_repo)
+    result = controller.run(
+        command,
+        memory_repo,
+        input_text=source_inventory_payload(inventory),
+    )
     if result.returncode:
         print("update_status=failed reason=project_update_failed", file=sys.stderr)
     return result.returncode
@@ -638,13 +756,13 @@ def run_source_stream_update(
     controller: ChildProcessController,
     memory_repo: Path,
     stream: dict[str, object],
+    inventory: list[SourceInventoryRecord],
     default_source_dir: Path,
     dry_run: bool,
     max_records: int | None,
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
-    defer_memory_ref_reconciliation: bool,
 ) -> int:
     stream_id = str(stream["stream_id"])
     source_dir = Path(str(stream.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -669,6 +787,8 @@ def run_source_stream_update(
         source_partition,
         "--project",
         project_name.strip(),
+        "--source-inventory-stdin",
+        "--defer-global-rebuild",
     ]
     if stream.get("require_project_metadata") is True:
         command.append("--require-project-metadata")
@@ -680,15 +800,35 @@ def run_source_stream_update(
         command.append("--allow-redacted-secrets")
     if rewrite_existing:
         command.append("--rewrite-existing")
-    if defer_memory_ref_reconciliation:
-        command.append("--defer-memory-ref-reconciliation")
     if dry_run:
         command.append("--dry-run")
 
     print("Updating source stream.")
-    result = controller.run(command, memory_repo)
+    result = controller.run(
+        command,
+        memory_repo,
+        input_text=source_inventory_payload(inventory),
+    )
     if result.returncode:
         print("update_status=failed reason=source_stream_update_failed", file=sys.stderr)
+    return result.returncode
+
+
+def run_archive_finalization(
+    controller: ChildProcessController,
+    memory_repo: Path,
+) -> int:
+    command = [
+        sys.executable,
+        str(memory_repo / "tools" / "update_memory_archive.py"),
+        "--memory-repo",
+        str(memory_repo),
+        "--finalize-archive",
+    ]
+    print("Finalizing archive.")
+    result = controller.run(command, memory_repo)
+    if result.returncode:
+        print("update_status=failed reason=archive_finalization_failed", file=sys.stderr)
     return result.returncode
 
 
@@ -729,69 +869,108 @@ def run_updates(
 
     registered = load_registry(memory_repo)
     source_streams = load_source_stream_registry(memory_repo)
-    discovered = discover_projects(source_dir, patterns)
+    inventories: dict[Path, list[SourceInventoryRecord]] = {}
+
+    def inventory_for(candidate: Path) -> list[SourceInventoryRecord]:
+        source_root = candidate.expanduser().resolve()
+        if source_root not in inventories:
+            inventories[source_root] = build_source_inventory(source_root, patterns)
+        return inventories[source_root]
+
+    discovered = discover_projects_from_inventory(inventory_for(source_dir))
     projects, added = merge_discovered_projects(registered, discovered, source_dir)
     write_registry(memory_repo, projects, args.dry_run)
 
     runnable = enabled_projects(projects)
     runnable_streams = enabled_source_streams(source_streams)
+    for project in runnable:
+        inventory_for(Path(str(project.get("source_dir") or source_dir)))
+    for stream in runnable_streams:
+        inventory_for(Path(str(stream.get("source_dir") or source_dir)))
     print("Memory repo: configured")
     print("Source dir: configured")
     print(f"Discovered projects: {len(discovered)}")
     print(f"Registered new projects: {added}")
     print(f"Enabled projects: {len(runnable)}")
     print(f"Enabled source streams: {len(runnable_streams)}")
+    print(f"Source inventories built: {len(inventories)}")
+    print("Source root rescans: 0")
 
     if not runnable and not runnable_streams:
         print("Projects updated: 0")
+        print("Archive finalizations: 0")
         if not discovered and not registered:
             print("No registered projects and no project paths discovered from source records.")
         return 0
 
     updated = 0
-    for project_index, project in enumerate(runnable):
+    for project in runnable:
+        project_source_dir = Path(str(project.get("source_dir") or source_dir)).expanduser().resolve()
+        project_inventory = inventory_records_for_target(
+            inventory_for(project_source_dir),
+            Path(str(project["project_path"])),
+            require_project_metadata=True,
+        )
         returncode = run_project_update(
             controller,
             memory_repo,
             project,
+            project_inventory,
             source_dir,
             args.dry_run,
             args.max_records,
             patterns,
             args.allow_redacted_secrets,
             args.rewrite_existing,
-            project_index < len(runnable) - 1 or bool(runnable_streams),
         )
         if returncode:
             print(f"Projects updated: {updated}")
             print("Source streams updated: 0")
+            print("Archive finalizations: 0")
             print("Projects failed: 1", file=sys.stderr)
             return 1
         updated += 1
 
     streams_updated = 0
-    for stream_index, stream in enumerate(runnable_streams):
+    for stream in runnable_streams:
+        stream_source_dir = Path(str(stream.get("source_dir") or source_dir)).expanduser().resolve()
+        stream_project_path = Path(str(stream.get("project_path") or stream_source_dir)).expanduser().resolve()
+        stream_inventory = inventory_records_for_target(
+            inventory_for(stream_source_dir),
+            stream_project_path,
+            require_project_metadata=stream.get("require_project_metadata") is True,
+        )
         returncode = run_source_stream_update(
             controller,
             memory_repo,
             stream,
+            stream_inventory,
             source_dir,
             args.dry_run,
             args.max_records,
             patterns,
             args.allow_redacted_secrets,
             args.rewrite_existing,
-            stream_index < len(runnable_streams) - 1,
         )
         if returncode:
             print(f"Projects updated: {updated}")
             print(f"Source streams updated: {streams_updated}")
+            print("Archive finalizations: 0")
             print("Source streams failed: 1", file=sys.stderr)
             return 1
         streams_updated += 1
 
+    finalizations = 0
+    if not args.dry_run:
+        if run_archive_finalization(controller, memory_repo):
+            print(f"Projects updated: {updated}")
+            print(f"Source streams updated: {streams_updated}")
+            print("Archive finalizations: 0")
+            return 1
+        finalizations = 1
     print(f"Projects updated: {updated}")
     print(f"Source streams updated: {streams_updated}")
+    print(f"Archive finalizations: {finalizations}")
     return 0
 
 
@@ -831,6 +1010,9 @@ def main(argv: list[str] | None = None) -> int:
     except RunnerInterrupted as exc:
         print("update_status=blocked reason=interrupted", file=sys.stderr)
         exit_code = 128 + exc.signum
+    except SourceInventoryError:
+        print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+        exit_code = 1
     except Exception:
         print("update_status=failed reason=runner_internal_error", file=sys.stderr)
         exit_code = 1

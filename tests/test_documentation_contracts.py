@@ -776,6 +776,42 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(design, phrase)
 
+    def test_docs_record_v239_single_inventory_and_finalization_contract(self):
+        section = self.evaluation_section(
+            "## V2.39 Scheduled Update Single-Inventory And Single-Finalization Throughput Closure"
+        )
+        for phrase in (
+            "scheduled_update_throughput_gate.py",
+            "source_inventory_amplification",
+            "source_root_rescan_count",
+            "nonselected_record_reparse_count",
+            "target_dispatch_accuracy",
+            "successful_run_finalization_count",
+            "failed_run_finalization_count",
+            "output_parity_rate",
+            "output_parity_scenario_count",
+            "fail_closed_inventory_rejection_rate",
+            "single_writer_regression_pass_rate",
+            "synthetic_redundant_work_reduction_rate",
+            "privacy_leak_count",
+            "target-specific metadata through stdin",
+            "authoritative session metadata",
+            "not whole-run rollback",
+            "not private wall-clock performance",
+            "does not prove memory quality",
+            "Private acceptance result: `no_go`",
+            "1923.252",
+            "165.667",
+            "11.609",
+            "1800",
+            "1518602464",
+            "V2.38 remains deployed",
+            "private output parity was not accepted",
+            "custom-pattern, zero-record, and rewrite/max-record",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

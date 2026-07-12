@@ -107,12 +107,13 @@ import time
 from pathlib import Path
 
 args = sys.argv[1:]
-project_path = Path(args[args.index('--project-path') + 1])
+is_finalize = '--finalize-archive' in args
+project_path = Path(args[args.index('--project-path') + 1]) if '--project-path' in args else None
 launch_log = Path(os.environ['MY_PRECIOUS_GATE_LAUNCH_LOG'])
 with launch_log.open('a', encoding='utf-8') as handle:
-    handle.write(project_path.name + ':' + str(os.getpid()) + '\\n')
+    handle.write((project_path.name if project_path is not None else 'finalize') + ':' + str(os.getpid()) + '\\n')
 mode = os.environ['MY_PRECIOUS_GATE_MODE']
-if mode == 'fail' and project_path.name == 'project-a':
+if mode == 'fail' and project_path is not None and project_path.name == 'project-a':
     print('{PRIVATE_SENTINEL}', file=sys.stderr)
     raise SystemExit(9)
 if mode == 'block':

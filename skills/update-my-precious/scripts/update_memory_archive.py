@@ -72,6 +72,8 @@ SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
 SOURCE_ANCHOR_VERSION = 1
+SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
+SOURCE_INVENTORY_REPORT_VERSION = 1
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
     "approve_supersedes",
     "approve_contradicts",
@@ -269,6 +271,10 @@ class SourceRecord:
     path: Path
     updated_at: datetime
     sha256: str
+
+
+class SourceInventoryError(ValueError):
+    pass
 
 
 @dataclass
@@ -775,6 +781,8 @@ def archived_project_state(
     project_path: Path,
     archive_scope: str | None = None,
     source_partition: str | None = None,
+    *,
+    include_generated_index: bool = True,
 ) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
     scope_key = archive_scope or str(project_path.resolve())
     partition_key = source_partition or str(project_path.resolve())
@@ -782,15 +790,16 @@ def archived_project_state(
     archived_hashes: set[str] = set()
     archived_source_hashes: dict[str, set[str]] = {}
 
-    for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
-        if archive_scope_for_row(record) != scope_key:
-            continue
-        if not row_matches_source_partition(record, partition_key):
-            continue
-        for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
-            parsed = parse_timestamp(record.get(key))
-            if parsed and (latest is None or parsed > latest):
-                latest = parsed
+    if include_generated_index:
+        for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
+            if archive_scope_for_row(record) != scope_key:
+                continue
+            if not row_matches_source_partition(record, partition_key):
+                continue
+            for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
+                parsed = parse_timestamp(record.get(key))
+                if parsed and (latest is None or parsed > latest):
+                    latest = parsed
 
     for meta_path in (memory_repo / "sessions").glob("**/meta.json"):
         try:
@@ -986,6 +995,93 @@ def discover_records(
             continue
         updated_at = source_timestamp(path, text)
         source_hash = sha256_file(path)
+        source_key = str(path)
+        prior_hashes_for_source = archived_source_hashes.get(source_key, set())
+        source_changed_since_archive = bool(prior_hashes_for_source) and source_hash not in prior_hashes_for_source
+        if after is not None:
+            if updated_at < after and not source_changed_since_archive:
+                continue
+            if updated_at == after and source_hash in archived_hashes:
+                continue
+        records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash))
+    return sorted(records, key=lambda item: (item.updated_at, item.path.as_posix()))
+
+
+def discover_records_from_inventory(
+    payload_text: str,
+    source_dir: Path,
+    after: datetime | None,
+    project_path: Path,
+    archived_hashes: set[str] | None = None,
+    archived_source_hashes: dict[str, set[str]] | None = None,
+    require_project_metadata: bool = False,
+) -> list[SourceRecord]:
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise SourceInventoryError("source inventory is malformed") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("report_kind") != SOURCE_INVENTORY_REPORT_KIND
+        or payload.get("report_version") != SOURCE_INVENTORY_REPORT_VERSION
+        or not isinstance(payload.get("records"), list)
+    ):
+        raise SourceInventoryError("source inventory contract is invalid")
+
+    source_root = source_dir.resolve()
+    archived_hashes = archived_hashes or set()
+    archived_source_hashes = archived_source_hashes or {}
+    seen: set[Path] = set()
+    records: list[SourceRecord] = []
+    for row in payload["records"]:
+        if not isinstance(row, dict):
+            raise SourceInventoryError("source inventory row is invalid")
+        relative_path = row.get("relative_path")
+        expected_hash = row.get("sha256")
+        expected_size = row.get("size")
+        expected_mtime_ns = row.get("mtime_ns")
+        if (
+            not isinstance(relative_path, str)
+            or not relative_path
+            or Path(relative_path).is_absolute()
+            or any(part in {"", ".", ".."} for part in Path(relative_path).parts)
+            or not isinstance(expected_hash, str)
+            or not SHA256_HEX_PATTERN.fullmatch(expected_hash)
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+            or not isinstance(expected_mtime_ns, int)
+            or expected_mtime_ns < 0
+        ):
+            raise SourceInventoryError("source inventory row is invalid")
+        try:
+            path = (source_root / relative_path).resolve(strict=True)
+            path.relative_to(source_root)
+        except (OSError, ValueError) as exc:
+            raise SourceInventoryError("source inventory path is unsafe") from exc
+        if path in seen:
+            raise SourceInventoryError("source inventory contains duplicate paths")
+        seen.add(path)
+        try:
+            stat = path.stat()
+            text = read_record_text(path)
+            source_hash = sha256_file(path)
+            current_stat = path.stat()
+        except OSError as exc:
+            raise SourceInventoryError("source inventory record is unavailable") from exc
+        if (
+            stat.st_size != expected_size
+            or stat.st_mtime_ns != expected_mtime_ns
+            or current_stat.st_size != expected_size
+            or current_stat.st_mtime_ns != expected_mtime_ns
+            or source_hash != expected_hash
+        ):
+            raise SourceInventoryError("source inventory record changed")
+        if is_codex_automation_thread_source(path, text):
+            raise SourceInventoryError("source inventory contains an automation record")
+        if not record_matches_project(path, text, project_path, require_project_metadata):
+            raise SourceInventoryError("source inventory target mismatch")
+
+        updated_at = source_timestamp(path, text)
         source_key = str(path)
         prior_hashes_for_source = archived_source_hashes.get(source_key, set())
         source_changed_since_archive = bool(prior_hashes_for_source) and source_hash not in prior_hashes_for_source
@@ -4702,7 +4798,7 @@ def unique_durable_daily_items(items: Iterable[object]) -> list[str]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--memory-repo", help="Path to the private memory repository")
-    parser.add_argument("--source-dir", required=True, help="Directory containing source records to scan")
+    parser.add_argument("--source-dir", help="Directory containing source records to scan")
     parser.add_argument("--project-path", default=os.getcwd(), help="Project path used for source-record filtering and legacy scope defaults")
     parser.add_argument(
         "--archive-scope",
@@ -4732,6 +4828,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--defer-memory-ref-reconciliation",
         action="store_true",
         help="Defer clean-cut memory-reference closure to a later updater in the same serialized run",
+    )
+    parser.add_argument(
+        "--defer-global-rebuild",
+        action="store_true",
+        help="Write authoritative session surfaces and defer derived archive rebuilding",
+    )
+    parser.add_argument(
+        "--source-inventory-stdin",
+        action="store_true",
+        help="Read a versioned target-specific source inventory from standard input",
+    )
+    parser.add_argument(
+        "--finalize-archive",
+        action="store_true",
+        help="Rebuild derived archive surfaces without scanning source records",
     )
     parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
     parser.add_argument(
@@ -4773,6 +4884,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     memory_repo = resolve_memory_repo(args.memory_repo)
+    if args.finalize_archive:
+        rebuild_indexes(memory_repo, reconcile_removed_refs=True)
+        return 0
+    if not args.source_dir:
+        raise SystemExit("--source-dir is required unless --finalize-archive is used")
     source_dir = Path(args.source_dir).expanduser().resolve()
     project_path = Path(args.project_path).expanduser().resolve()
     archive_scope = normalize_archive_scope(args.archive_scope, project_path)
@@ -4853,16 +4969,32 @@ def main(argv: list[str] | None = None) -> int:
         project_path,
         archive_scope,
         source_partition,
+        include_generated_index=not args.defer_global_rebuild,
     )
-    records = discover_records(
-        source_dir,
-        patterns,
+    discovery_args = (
         None if args.rewrite_existing else latest,
         project_path,
         set() if args.rewrite_existing else archived_hashes,
         {} if args.rewrite_existing else archived_source_hashes,
-        require_project_metadata=args.require_project_metadata,
     )
+    if args.source_inventory_stdin:
+        try:
+            records = discover_records_from_inventory(
+                sys.stdin.read(),
+                source_dir,
+                *discovery_args,
+                require_project_metadata=args.require_project_metadata,
+            )
+        except SourceInventoryError:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
+    else:
+        records = discover_records(
+            source_dir,
+            patterns,
+            *discovery_args,
+            require_project_metadata=args.require_project_metadata,
+        )
     if args.max_records >= 0:
         records = records[: args.max_records]
 
@@ -4917,10 +5049,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         if written is None:
             skipped_records += 1
-    rebuild_indexes(
-        memory_repo,
-        reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
-    )
+    if not args.defer_global_rebuild:
+        rebuild_indexes(
+            memory_repo,
+            reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
+        )
     if args.rewrite_existing or removed_entries:
         print(f"Existing entries removed: {removed_entries}")
     print(f"Records skipped as low-signal: {skipped_records}")

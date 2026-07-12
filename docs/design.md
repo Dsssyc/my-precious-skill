@@ -179,10 +179,11 @@ and JSONL indexes.
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
 - `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
-  bootstraps an empty project registry by scanning source records for project
-  paths, invokes the per-project updater for each enabled project, and can run
-  explicit source streams keyed by stable archive scope plus source partition
-  without first materializing a project row.
+  inventories each unique source root once, bootstraps an empty project registry
+  from that snapshot, invokes an isolated updater for each enabled target, and
+  rebuilds derived archive surfaces once after every ingestion succeeds. It can
+  also run explicit source streams keyed by stable archive scope plus source
+  partition without first materializing a project row.
 - `templates/agent-memory-repo/tools/induction_consolidation_audit.py`:
   privacy-safe read-only audit for automatic induction, lifecycle consolidation,
   evidence reachability, and aggregate real-history output safety.
@@ -207,9 +208,12 @@ and JSONL indexes.
 ## Scheduling Model
 
 Default scheduled updates should call `tools/run_memory_updates.py`, not the
-single-project updater. The runner reads `config/projects.jsonl`, scans the
-shared source-record directory for project metadata, registers newly discovered
-projects, and updates each enabled project. It also reads
+single-project updater. The runner reads `config/projects.jsonl`, inventories
+each unique shared source root once, registers newly discovered projects, and
+sends target-specific integrity metadata through stdin to each serialized
+updater child. Ingestion children write authoritative session surfaces while
+derived indexes remain unchanged; one finalizer rebuilds those indexes and
+reconciles memory references only after all ingestion succeeds. It also reads
 `config/source_streams.jsonl` when present, so a deployment can schedule a
 domain/global source stream whose primary identity is `archive_scope` plus
 `source_partition` rather than a project registry row. This avoids a bootstrap
