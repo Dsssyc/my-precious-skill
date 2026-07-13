@@ -2319,6 +2319,93 @@ All private temporary snapshots and reports were removed after recording the
 aggregate result. The candidate was not installed or deployed, the automation
 configuration was restored unchanged, and V2.38 remains deployed.
 
+## V2.42 Scheduled Durable Semantic Index Final Performance Closure
+
+Date: 2026-07-13
+
+V2.42 tests the final permitted architecture for closing scheduled
+selected-record preparation under the current archive semantics and 2x target.
+The proposed architecture would build one durable semantic index per selected
+record, combining early non-durable event rejection with removal of repeated
+summary and source-lookup work. The public attribution command is:
+
+```bash
+python3 benchmarks/durable_semantic_index_gate.py
+```
+
+The synthetic gate uses stack-based exclusive timing, so nested helper time is
+assigned only to the innermost phase. It observes repeated work in the current
+path and compares normal preparation with a test-only durable-event projection
+and semantic-cache counterfactual. It does not add a runtime semantic index.
+
+| deterministic public metric | value |
+| --- | ---: |
+| `exclusive_phase_attribution_coverage_rate` | 1.0 |
+| `exclusive_phase_overlap_seconds` | 0.0 |
+| `baseline_raw_event_traversal_count` | 13 |
+| `baseline_source_event_lookup_full_scan_count` | 4 |
+| `baseline_source_event_for_text_scan_count` | 2 |
+| `baseline_source_text_normalization_count` | 24 |
+| `baseline_repeated_semantic_normalization_count` | 63 |
+| `baseline_nondurable_text_materialization_count` | 6 |
+| `counterfactual_archive_output_parity_rate` | 1.0 |
+| `counterfactual_summary_field_parity_rate` | 1.0 |
+| `counterfactual_source_anchor_parity_rate` | 1.0 |
+| `counterfactual_event_order_parity_rate` | 1.0 |
+| `counterfactual_event_hash_parity_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+### Private architecture result: `architecture_no_go`
+
+One immutable CoW source/archive snapshot was used after the deployed runtime
+passed 19/19 tool parity, the private archive was clean and current, the update
+lock was available, and the existing automation was paused without changing
+its prompt. The deterministic two-record subset remained inside the required
+256-512 MiB window. Only aggregate counts and timings were retained.
+
+| private attribution metric | value |
+| --- | ---: |
+| inventory records | 313 |
+| enabled targets | 72 |
+| selected candidates | 19 |
+| subset records | 2 |
+| subset aggregate bytes | 351763185 |
+| total preparation seconds | 131.576364 |
+| fused avoidable processing seconds | 75.622322 |
+| `fused_avoidable_processing_share` | 0.574740927 |
+| `fused_projected_max_speedup` | 2.351507735 |
+| `exclusive_phase_attribution_coverage_rate` | 1.0 |
+| `exclusive_phase_overlap_seconds` | 0.0 |
+| repeated semantic normalization seconds | 32.855674 |
+| non-durable event normalization seconds | 31.667363 |
+| non-durable event materialization seconds | 6.191203 |
+| source lookup seconds | 2.794896 |
+| repeated event scan seconds | 2.113185 |
+| `private_candidate_run_count` | 0 |
+| `private_full_shadow_run_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The removable share missed the required 0.60 threshold and its Amdahl upper
+bound missed the required 2.5x threshold. The runtime `DurableSemanticIndex`
+candidate was therefore not implemented. No warm-up, alternating A/B subset
+timings, 72-target shadow, installation, deployment, or publication occurred.
+The numerator already treats all measured repeated normalization, repeated
+scan, source-lookup, and non-durable phases as fully removable, so the reported
+share and speedup are optimistic upper bounds rather than guaranteed gains.
+Per the convergence rule, this closes scheduled selected-record performance
+work under the current semantics and 2x target until the target, constraints,
+or evidence changes; no second hotspot or alternative optimization was pursued.
+
+The private snapshot and harness were deleted, the private archive remained
+clean and current, and the automation was restored to its original active
+configuration and prompt hash. V2.38 remains deployed.
+
+V2.42 proves exclusive public attribution, counterfactual output parity, and a
+bounded private architecture decision. It does not prove runtime semantic-index
+behavior, private candidate speedup, memory quality, ranking, induction quality,
+LLM quality, vector search, ontology discovery, GitHub availability, deployment
+approval, or public benchmark parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

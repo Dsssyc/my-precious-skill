@@ -113,6 +113,7 @@ python3 benchmarks/scheduled_update_single_writer_gate.py
 python3 benchmarks/scheduled_update_throughput_gate.py
 python3 benchmarks/selected_record_materialization_gate.py
 python3 benchmarks/durable_event_projection_gate.py
+python3 benchmarks/durable_semantic_index_gate.py
 python3 benchmarks/induction_consolidation_gate.py
 python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/long_horizon_memory_stress_gate.py
@@ -185,6 +186,7 @@ python3 -m py_compile \
   benchmarks/scheduled_update_throughput_gate.py \
   benchmarks/selected_record_materialization_gate.py \
   benchmarks/durable_event_projection_gate.py \
+  benchmarks/durable_semantic_index_gate.py \
   benchmarks/induction_consolidation_gate.py \
   benchmarks/lifecycle_governance_gate.py \
   benchmarks/long_horizon_memory_stress_gate.py \

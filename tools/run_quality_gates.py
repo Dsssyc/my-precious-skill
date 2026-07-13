@@ -39,6 +39,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_update_throughput_gate.py",
     "benchmarks/selected_record_materialization_gate.py",
     "benchmarks/durable_event_projection_gate.py",
+    "benchmarks/durable_semantic_index_gate.py",
     "benchmarks/induction_consolidation_gate.py",
     "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
@@ -171,6 +172,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "durable_event_projection",
             ("python3", "benchmarks/durable_event_projection_gate.py"),
+        ),
+        CheckSpec(
+            "durable_semantic_index",
+            ("python3", "benchmarks/durable_semantic_index_gate.py"),
         ),
         CheckSpec(
             "induction_consolidation",

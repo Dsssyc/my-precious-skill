@@ -98,6 +98,9 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(
             any("benchmarks/durable_event_projection_gate.py" in command for command in commands)
         )
+        self.assertTrue(
+            any("benchmarks/durable_semantic_index_gate.py" in command for command in commands)
+        )
         self.assertTrue(any("benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture" in command for command in commands))
         self.assertTrue(any("benchmarks/search_tool_drift_repair_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/runtime_tool_bundle_parity_gate.py" in command for command in commands))
@@ -145,6 +148,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/scheduled_update_throughput_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/selected_record_materialization_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/durable_event_projection_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/durable_semantic_index_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/private_lifecycle_governance_shadow_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/search_tool_drift_repair_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/runtime_tool_bundle_parity_gate.py", module.PY_COMPILE_TARGETS)
