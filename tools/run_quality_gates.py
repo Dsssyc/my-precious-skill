@@ -49,6 +49,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/public_induction_recall_gate.py",
     "benchmarks/public_query_support_calibration_gate.py",
     "benchmarks/public_induction_first_loss_gate.py",
+    "benchmarks/session_support_preservation_gate.py",
     "benchmarks/active_support_recall_closure_gate.py",
     "benchmarks/reviewed_automatic_memory_publish_gate.py",
     "benchmarks/long_horizon_memory_stress_gate.py",
@@ -223,6 +224,14 @@ def build_release_checks() -> list[CheckSpec]:
             (
                 "python3",
                 "benchmarks/public_induction_first_loss_gate.py",
+                "--offline-fixture",
+            ),
+        ),
+        CheckSpec(
+            "session_support_preservation_offline",
+            (
+                "python3",
+                "benchmarks/session_support_preservation_gate.py",
                 "--offline-fixture",
             ),
         ),

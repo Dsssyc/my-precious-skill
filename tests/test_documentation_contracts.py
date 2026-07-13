@@ -966,6 +966,40 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v245_session_support_preservation_contract(self):
+        section = self.evaluation_section(
+            "## V2.45 Session Support Preservation Attribution And One-Shot Repair"
+        )
+        for phrase in (
+            "session_support_preservation_gate.py",
+            "source_event_missing_after_extraction",
+            "durability_filter_rejected",
+            "no_summary_channel_candidate",
+            "evidence_budget_evicted",
+            "evidence_bound_to_wrong_ordinal",
+            "evidence_source_entry_missing",
+            "source_anchor_materialization_failed",
+            "preserved",
+            "support_event_attribution_coverage_rate",
+            "support_event_partition_invariant_violation_count",
+            "v244_locator_support_status_disagreement_count",
+            "latest_noninitial_user_declaration_v1",
+            "archive_audit_failed",
+            "safety_regression",
+            "candidate production change and candidate-only tests were removed",
+            "holdout was not run",
+            "Terminal public decision:",
+            "not LLM answer quality",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+            "does not prove private deployment readiness",
+            "does not prove scheduler reliability",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

@@ -124,6 +124,7 @@ python3 benchmarks/three_layer_distribution_preflight_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
 python3 benchmarks/public_query_support_calibration_gate.py --offline-fixture
 python3 benchmarks/public_induction_first_loss_gate.py --offline-fixture
+python3 benchmarks/session_support_preservation_gate.py --offline-fixture
 python3 benchmarks/active_support_recall_closure_gate.py
 python3 benchmarks/reviewed_automatic_memory_publish_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
@@ -218,6 +219,7 @@ python3 -m py_compile \
   benchmarks/public_induction_recall_gate.py \
   benchmarks/public_query_support_calibration_gate.py \
   benchmarks/public_induction_first_loss_gate.py \
+  benchmarks/session_support_preservation_gate.py \
   benchmarks/active_support_recall_closure_gate.py \
   benchmarks/reviewed_automatic_memory_publish_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
