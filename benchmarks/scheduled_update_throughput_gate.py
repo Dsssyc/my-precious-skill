@@ -245,11 +245,13 @@ def run_dry_run(root: Path) -> tuple[int, list[str]]:
 def inventory_row(path: Path, source_root: Path, *, relative_path: str | None = None) -> dict[str, object]:
     raw = path.read_bytes()
     stat = path.stat()
+    source_value = json.loads(raw)
     return {
         "relative_path": relative_path or path.relative_to(source_root).as_posix(),
         "sha256": hashlib.sha256(raw).hexdigest(),
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
+        "source_updated_at": source_value["timestamp"],
     }
 
 
@@ -257,7 +259,7 @@ def inventory_payload(rows: list[dict[str, object]]) -> str:
     return json.dumps(
         {
             "report_kind": "memory_source_inventory",
-            "report_version": 1,
+            "report_version": 2,
             "records": rows,
         },
         sort_keys=True,

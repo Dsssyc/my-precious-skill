@@ -812,6 +812,43 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v240_selected_record_materialization_contract(self):
+        section = self.evaluation_section(
+            "## V2.40 Scheduled Selected-Record Materialization Throughput Closure"
+        )
+        for phrase in (
+            "selected_record_materialization_gate.py",
+            "selected_record_source_read_amplification",
+            "selected_record_redaction_amplification",
+            "selected_record_json_decode_amplification",
+            "selected_record_preparation_before_mutation_rate",
+            "selected_record_raw_payload_retention_count",
+            "selected_record_output_parity_rate",
+            "selected_record_source_anchor_parity_rate",
+            "selected_record_secret_policy_parity_rate",
+            "selected_record_mutation_rejection_rate",
+            "direct_cli_regression_pass_rate",
+            "v239_throughput_regression_pass_rate",
+            "v238_single_writer_regression_pass_rate",
+            "synthetic_materialization_work_reduction_rate",
+            "4.0 to 1.0",
+            "2.0 to 1.0",
+            "6.0 to 2.0",
+            "Private acceptance result: `no_go`",
+            "343,800,494",
+            "147.893",
+            "126.182",
+            "1.172062",
+            "v239_v240_subset_output_parity_rate",
+            "private_shadow_run_count",
+            "selected-subset speedup was below the required 2.0",
+            "not deployment approval",
+            "V2.38 remains deployed",
+            "raw source payload",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

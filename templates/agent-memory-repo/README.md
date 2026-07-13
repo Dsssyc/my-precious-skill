@@ -84,6 +84,9 @@ Each unique source root is inventoried once per run. Target updates remain
 serialized and isolated, while derived archive indexes and memory-reference
 closure are rebuilt once after every target succeeds. A failed target prevents
 that finalization and leaves publication blocked.
+Within each scheduled child, high-water selection uses inventory metadata;
+selected JSONL records are read and redacted once and converted to compact
+archive artifacts before any archive mutation begins.
 Registered rows may include `archive_scope` to make scheduled updates use a
 stable memory domain that is not the project path. Incremental high-water and
 source-hash freshness are tracked by `source_partition` inside that archive

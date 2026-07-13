@@ -54,7 +54,8 @@ UNSAFE_IDENTIFIER = "[unsafe-identifier]"
 CONCURRENT_UPDATE_EXIT = getattr(os, "EX_TEMPFAIL", 75)
 CHILD_TERMINATION_TIMEOUT_SECONDS = 5.0
 SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
-SOURCE_INVENTORY_REPORT_VERSION = 1
+SOURCE_INVENTORY_REPORT_VERSION = 2
+TIMESTAMP_KEYS = {"timestamp", "created_at", "updated_at", "started_at", "ended_at", "date"}
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class SourceInventoryRecord:
     sha256: str
     size: int
     mtime_ns: int
+    source_updated_at: str
     project_paths: tuple[Path, ...]
 
 
@@ -424,6 +426,62 @@ def source_value_is_automation(value: object) -> bool:
     return str(payload.get("thread_source") or "").strip().lower() == "automation"
 
 
+def parse_source_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def direct_source_timestamps(value: object) -> Iterable[datetime]:
+    if isinstance(value, dict):
+        for key in TIMESTAMP_KEYS:
+            parsed = parse_source_timestamp(value.get(key))
+            if parsed:
+                yield parsed
+    elif isinstance(value, list):
+        for item in value:
+            yield from direct_source_timestamps(item)
+
+
+def timestamp_from_source_filename(path: Path) -> datetime | None:
+    for pattern in (
+        r"\d{4}-\d{2}-\d{2}T\d{2}[:_-]\d{2}[:_-]\d{2}Z?",
+        r"\d{4}-\d{2}-\d{2}",
+    ):
+        match = re.search(pattern, path.as_posix())
+        if not match:
+            continue
+        value = match.group(0)
+        if "T" in value:
+            date_part, time_part = value.split("T", 1)
+            suffix = "Z" if time_part.endswith("Z") else ""
+            if suffix:
+                time_part = time_part[:-1]
+            value = f"{date_part}T{re.sub(r'[-_]', ':', time_part)}{suffix}"
+        parsed = parse_source_timestamp(value)
+        if parsed:
+            return parsed
+    return None
+
+
+def source_updated_at_from_values(path: Path, values: Iterable[object], mtime: float) -> str:
+    timestamps = [timestamp for value in values for timestamp in direct_source_timestamps(value)]
+    filename_timestamp = timestamp_from_source_filename(path)
+    if filename_timestamp:
+        timestamps.append(filename_timestamp)
+    selected = max(timestamps) if timestamps else datetime.fromtimestamp(mtime, tz=UTC)
+    return selected.isoformat().replace("+00:00", "Z")
+
+
 def build_source_inventory(
     source_dir: Path,
     patterns: tuple[str, ...],
@@ -473,6 +531,7 @@ def build_source_inventory(
                 sha256=hashlib.sha256(raw).hexdigest(),
                 size=final_stat.st_size,
                 mtime_ns=final_stat.st_mtime_ns,
+                source_updated_at=source_updated_at_from_values(resolved, values, final_stat.st_mtime),
                 project_paths=tuple(sorted(project_paths, key=lambda item: item.as_posix())),
             )
         )
@@ -510,6 +569,7 @@ def source_inventory_payload(inventory: Iterable[SourceInventoryRecord]) -> str:
                     "sha256": record.sha256,
                     "size": record.size,
                     "mtime_ns": record.mtime_ns,
+                    "source_updated_at": record.source_updated_at,
                 }
                 for record in inventory
             ],

@@ -23,6 +23,32 @@ def load_runner_module():
 
 
 class RunMemoryUpdatesTests(unittest.TestCase):
+    def test_source_inventory_preserves_subsecond_source_timestamp(self):
+        module = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            (source_dir / "subsecond.jsonl").write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T01:02:03.123456Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Synthetic subsecond inventory record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            inventory = module.build_source_inventory(source_dir, ("*.jsonl",))
+
+            self.assertEqual(inventory[0].source_updated_at, "2026-07-13T01:02:03.123456Z")
+
     def test_source_inventory_reads_each_candidate_once_and_preserves_dispatch_semantics(self):
         module = load_runner_module()
 
@@ -89,6 +115,25 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             self.assertEqual(
                 [record.relative_path for record in inventory],
                 ["a.jsonl", "b.jsonl", "stream.jsonl"],
+            )
+            self.assertEqual(module.SOURCE_INVENTORY_REPORT_VERSION, 2)
+            self.assertEqual(
+                [record.source_updated_at for record in inventory],
+                [
+                    "2026-07-13T01:00:00Z",
+                    "2026-07-13T02:00:00Z",
+                    "2026-07-13T03:00:00Z",
+                ],
+            )
+            payload = json.loads(module.source_inventory_payload(inventory))
+            self.assertEqual(payload["report_version"], 2)
+            self.assertEqual(
+                [row["source_updated_at"] for row in payload["records"]],
+                [
+                    "2026-07-13T01:00:00Z",
+                    "2026-07-13T02:00:00Z",
+                    "2026-07-13T03:00:00Z",
+                ],
             )
             self.assertEqual(
                 module.discover_projects_from_inventory(inventory),

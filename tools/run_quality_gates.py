@@ -37,6 +37,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/live_automation_prompt_alignment_gate.py",
     "benchmarks/scheduled_update_single_writer_gate.py",
     "benchmarks/scheduled_update_throughput_gate.py",
+    "benchmarks/selected_record_materialization_gate.py",
     "benchmarks/induction_consolidation_gate.py",
     "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
@@ -161,6 +162,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "scheduled_update_throughput",
             ("python3", "benchmarks/scheduled_update_throughput_gate.py"),
+        ),
+        CheckSpec(
+            "selected_record_materialization",
+            ("python3", "benchmarks/selected_record_materialization_gate.py"),
         ),
         CheckSpec(
             "induction_consolidation",

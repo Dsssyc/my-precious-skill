@@ -220,6 +220,13 @@ domain/global source stream whose primary identity is `archive_scope` plus
 deadlock where an empty deployment repository has no project registry and
 reduces the requirement that every source stream first become a project.
 
+The internal inventory includes a normalized source timestamp so scheduled
+children can apply high-water and record limits before reading selected source
+content. Each selected JSONL record is then read and redacted once, converted
+to compact prepared archive artifacts, and released from memory. Every selected
+record must prepare successfully before the child removes or writes archive
+entries. Direct updater calls retain the established discovery path.
+
 `config/projects.jsonl` is runtime configuration, while `index/projects.jsonl`
 and `index/scopes.jsonl` are generated archive indexes. Disabled projects in
 `config/projects.jsonl` must remain disabled even if source records still

@@ -3473,6 +3473,28 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Refusing to write unsafe archive record file path:", str(caught.exception))
             self.assertEqual(outside_summary.read_text(encoding="utf-8"), "unchanged\n")
 
+    def test_apply_low_signal_prepared_record_removes_partial_destination(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source = root / "record.jsonl"
+            destination = memory_repo / "sessions/2026/07/13/partial"
+            destination.mkdir(parents=True)
+            (destination / "partial.txt").write_text("partial\n", encoding="utf-8")
+            record = module.SourceRecord(
+                source,
+                datetime(2026, 7, 13, 6, 0, tzinfo=timezone.utc),
+                "a" * 64,
+            )
+            prepared = module.PreparedArchiveRecord(record, destination, (), {})
+
+            result = module.apply_prepared_record(memory_repo, prepared)
+
+            self.assertIsNone(result)
+            self.assertFalse(destination.exists())
+
     def test_update_memory_archive_creates_searchable_summary(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
@@ -5444,7 +5466,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
         self.assertEqual([record.path.name for record in records], ["human.jsonl"])
 
-    def test_discover_records_from_inventory_reads_only_dispatched_candidates(self):
+    def test_discover_records_from_inventory_selects_metadata_without_reading_source_content(self):
         module = load_update_module()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5479,44 +5501,98 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            raw = selected.read_bytes()
-            stat = selected.stat()
+            selected_raw = selected.read_bytes()
+            selected_stat = selected.stat()
+            unselected_raw = unselected.read_bytes()
+            unselected_stat = unselected.stat()
             payload = json.dumps(
                 {
                     "report_kind": "memory_source_inventory",
-                    "report_version": 1,
+                    "report_version": 2,
                     "records": [
                         {
                             "relative_path": "selected.jsonl",
+                            "sha256": hashlib.sha256(selected_raw).hexdigest(),
+                            "size": selected_stat.st_size,
+                            "mtime_ns": selected_stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-13T04:00:00Z",
+                        },
+                        {
+                            "relative_path": "unselected.jsonl",
+                            "sha256": hashlib.sha256(unselected_raw).hexdigest(),
+                            "size": unselected_stat.st_size,
+                            "mtime_ns": unselected_stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-13T05:00:00Z",
+                        },
+                    ],
+                }
+            )
+            with (
+                mock.patch.object(module, "read_record_text", side_effect=AssertionError("source content read")),
+                mock.patch.object(module, "sha256_file", side_effect=AssertionError("source content hashed")),
+            ):
+                records = module.discover_records_from_inventory(
+                    payload,
+                    source_dir,
+                    datetime(2026, 7, 13, 4, 30, tzinfo=timezone.utc),
+                    project_path,
+                    require_project_metadata=True,
+                )
+
+            self.assertEqual([record.path for record in records], [unselected.resolve()])
+            self.assertEqual(records[0].updated_at, datetime(2026, 7, 13, 5, 0, tzinfo=timezone.utc))
+            self.assertEqual(records[0].expected_size, unselected_stat.st_size)
+            self.assertEqual(records[0].expected_mtime_ns, unselected_stat.st_mtime_ns)
+
+    def test_inventory_preparation_rejects_symlink_swap_after_metadata_selection(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            source = source_dir / "selected.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T06:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Synthetic selected inventory record.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raw = source.read_bytes()
+            stat = source.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 2,
+                    "records": [
+                        {
+                            "relative_path": source.name,
                             "sha256": hashlib.sha256(raw).hexdigest(),
                             "size": stat.st_size,
                             "mtime_ns": stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-13T06:00:00Z",
                         }
                     ],
                 }
             )
-            original_read_record_text = module.read_record_text
-            reads: list[Path] = []
+            records = module.discover_records_from_inventory(payload, source_dir, None, project_path)
+            outside = root / "outside.jsonl"
+            outside.write_bytes(raw)
+            source.unlink()
+            source.symlink_to(outside)
 
-            def counted_read_record_text(path: Path) -> str:
-                reads.append(path.resolve())
-                return original_read_record_text(path)
+            with self.assertRaises(module.SourceInventoryError) as raised:
+                module.read_validated_inventory_record(records[0])
 
-            module.read_record_text = counted_read_record_text
-            try:
-                records = module.discover_records_from_inventory(
-                    payload,
-                    source_dir,
-                    None,
-                    project_path,
-                    require_project_metadata=True,
-                )
-            finally:
-                module.read_record_text = original_read_record_text
-
-            self.assertEqual([record.path for record in records], [selected.resolve()])
-            self.assertEqual(reads, [selected.resolve()])
-            self.assertNotIn(unselected.resolve(), reads)
+            self.assertEqual(str(raised.exception), "source inventory path is unsafe")
 
     def test_finalize_archive_rebuilds_once_without_a_source_directory(self):
         module = load_update_module()

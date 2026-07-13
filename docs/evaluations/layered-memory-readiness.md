@@ -2176,6 +2176,81 @@ is retained only as a source-level implementation and reproducible public gate.
 A future goal may address large-record materialization only with a separately
 bounded contract, output-parity evidence, and its own private acceptance limit.
 
+## V2.40 Scheduled Selected-Record Materialization Throughput Closure
+
+Date: 2026-07-13
+
+V2.40 addresses the selected-record materialization work isolated by V2.39.
+The internal inventory contract now carries normalized `source_updated_at`
+metadata. Scheduled children apply schema, containment, high-water, source-hash
+freshness, and `--max-records` selection before opening selected source content.
+Each selected JSONL record is then read once, hashed from those bytes, redacted
+once, and decoded at most twice per valid line for original-anchor and redacted
+event semantics.
+
+Selected records become compact `PreparedArchiveRecord` values containing only
+derived archive artifacts and redaction counts. They retain no raw source payload.
+Every selected record must validate and prepare before the first existing entry
+is removed or new archive file is written. Non-JSON inputs retain the established
+fallback, and direct updater calls retain their prior discovery behavior.
+
+The deterministic public command is:
+
+```bash
+python3 benchmarks/selected_record_materialization_gate.py
+```
+
+| metric | value |
+| --- | ---: |
+| `selected_record_source_read_amplification` | 1.0 |
+| `selected_record_redaction_amplification` | 1.0 |
+| `selected_record_json_decode_amplification` | 2.0 |
+| `selected_record_preparation_before_mutation_rate` | 1.0 |
+| `selected_record_raw_payload_retention_count` | 0 |
+| `selected_record_output_parity_rate` | 1.0 |
+| `selected_record_source_anchor_parity_rate` | 1.0 |
+| `selected_record_secret_policy_parity_rate` | 1.0 |
+| `selected_record_mutation_rejection_rate` | 1.0 |
+| `direct_cli_regression_pass_rate` | 1.0 |
+| `v239_throughput_regression_pass_rate` | 1.0 |
+| `v238_single_writer_regression_pass_rate` | 1.0 |
+| `synthetic_materialization_work_reduction_rate` | 0.6666666666666667 |
+| `privacy_leak_count` | 0 |
+
+Against the fixed V2.39 source, full-content read amplification changed from
+4.0 to 1.0, redaction amplification from 2.0 to 1.0, and source JSON decode
+amplification from 6.0 to 2.0. The synthetic gate also requires byte-for-byte
+archive output, source-anchor, secret-policy, mutation, direct-CLI, V2.39
+throughput, and V2.38 single-writer parity.
+
+### Private acceptance result: `no_go`
+
+The bounded acceptance used one immutable CoW source snapshot. It discovered
+310 source inventory records, 72 enabled targets, and 27 selected candidates.
+The deterministic subset contained two unique selected records totaling
+343,800,494 bytes. Only aggregate counts and timings were retained; no project
+names, repository paths, source content, or archive content entered this
+repository.
+
+| private acceptance metric | value |
+| --- | ---: |
+| V2.39 subset elapsed seconds | 147.893 |
+| V2.40 subset elapsed seconds | 126.182 |
+| `private_selected_materialization_speedup` | 1.172062 |
+| `v239_v240_subset_output_parity_rate` | 1.0 |
+| `private_shadow_run_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The selected-subset speedup was below the required 2.0 threshold. Per the
+convergence rule, V2.38 parity and the 72-target candidate shadow were not run,
+and no further micro-optimization was attempted. The candidate was not
+installed or deployed. V2.38 remains deployed.
+
+The public operation-count result and synthetic output parity are not deployment approval.
+V2.40 does not prove memory quality, ranking, induction
+quality, LLM quality, vector search, scheduler reliability, GitHub availability,
+ontology discovery, or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
