@@ -2452,6 +2452,190 @@ skills, alter the private archive, change the automation prompt, rerun a private
 72-target timing shadow, or claim that a source pull request has already been
 merged.
 
+## V2.44 Public Induction First-Loss Attribution And Bounded Repair
+
+Date: 2026-07-13
+
+V2.44 adds `benchmarks/public_induction_first_loss_gate.py` to attribute every
+selected positive LongMemEval case to exactly one earliest deterministic loss.
+The updater, consolidator, archive, and search path receive only normal
+role/content source records and metadata. Questions, answers, `has_answer`
+positions, answer-session labels, and expected support events remain
+scorer-only. Scorer event positions are resolved to generated evidence anchors
+after ingestion; they are never written into source records or used as direct
+memory input. Free-form search output is not an answerability source.
+
+The ordered, mutually exclusive taxonomy is:
+
+| category | first failed contract |
+| --- | --- |
+| `source_rejected` | the normal source refusal boundary rejected the record |
+| `update_failed` | packaged setup or updater execution did not complete |
+| `archive_audit_failed` | the generated archive failed its normal audit |
+| `session_support_omitted` | no expected scorer support event survived as an evidence anchor |
+| `memory_induction_omitted_or_overcompressed` | preserved support had no active automatic memory |
+| `memory_present_not_top5` | active support memory did not enter the context top five |
+| `top1_not_query_supported` | a top-five support candidate did not produce supported query evidence |
+| `supported` | active support survived into a supported context package |
+
+Every taxonomy category emits an aggregate count and rate, including
+`memory_present_not_top5_rate` and `top1_not_query_supported_rate`.
+
+The offline public-data-free contract is canonical:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py --offline-fixture
+```
+
+The external runs used the same official LongMemEval cleaned S artifact as
+V2.36 and V2.37. The downloaded input and every generated archive/report stayed
+outside this repository.
+
+| frozen input | SHA-256 or selection fingerprint |
+| --- | --- |
+| dataset | `d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442` |
+| calibration selection | `c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19` |
+| frozen holdout selection | `4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7` |
+| cohort overlap | 0 |
+
+The baseline calibration command was:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort calibration \
+  --work-dir /tmp/my-precious-v244-calibration \
+  --report-file /tmp/my-precious-v244-calibration-report.json
+```
+
+Calibration found one eligible induction defect. `session_support_omitted`
+accounted for 15 cases, all 15 pre-retrieval induction losses, exceeding both
+the minimum five cases and 0.40 share. Only one candidate was permitted:
+`durable_first_person_projection_v1`, a general first-person declaration
+projection with evidence-slot priority. It contained no answer-label input,
+question phrase list, ranking change, top-k change, query-support relaxation,
+lifecycle change, or secret-policy change.
+
+| calibration metric | baseline | frozen candidate |
+| --- | ---: | ---: |
+| `positive_first_loss_attribution_coverage_rate` | 1.0 | 1.0 |
+| `session_support_event_preservation_rate` | 19/56 (0.3392857143) | 19/56 (0.3392857143) |
+| `source_rejected` | 2 | 2 |
+| `update_failed` | 0 | 0 |
+| `archive_audit_failed` | 6 | 5 |
+| `session_support_omitted` | 15 | 15 |
+| `memory_induction_omitted_or_overcompressed` | 0 | 0 |
+| `memory_present_not_top5` | 6 | 5 |
+| `top1_not_query_supported` | 1 | 3 |
+| `supported` | 0 | 0 |
+| `pre_retrieval_induction_loss_count` | 15 | 15 |
+| updater success | 38/40 | 38/40 |
+| archive audit success | 32/40 | 33/40 |
+| `abstention_accuracy` | 1.0 | 1.0 |
+| `false_promotion_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The candidate was frozen despite zero calibration gain so that the single
+allowed strategy could receive one final, non-tunable holdout decision. The
+baseline holdout used the baseline runtime bundle; the candidate run consumed
+only its aggregate baseline report and the frozen strategy slug:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --calibration-report /tmp/my-precious-v244-calibration-report.json \
+  --work-dir /tmp/my-precious-v244-holdout-baseline \
+  --report-file /tmp/my-precious-v244-holdout-baseline-report.json
+
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --calibration-report /tmp/my-precious-v244-calibration-report.json \
+  --baseline-report /tmp/my-precious-v244-holdout-baseline-report.json \
+  --candidate-strategy durable_first_person_projection_v1 \
+  --runtime-root /tmp/my-precious-v244-candidate-runtime \
+  --work-dir /tmp/my-precious-v244-holdout-candidate \
+  --report-file /tmp/my-precious-v244-holdout-candidate-report.json
+```
+
+The baseline reproduced the V2.36/V2.37 split through
+`baseline_retrievable_positive_count = 13` and
+`previously_unexplained_positive_count = 17`. The latter partition has its own
+`previously_unexplained_first_loss_attribution_coverage_rate = 1.0` and
+`previously_unexplained_first_loss_partition_invariant_violation_count = 0`.
+The previously unexplained 17 positives are now accounted for as follows:
+
+| first loss among the previous 17 | count | rate |
+| --- | ---: | ---: |
+| `source_rejected` | 0 | 0.0 |
+| `update_failed` | 0 | 0.0 |
+| `archive_audit_failed` | 3 | 0.1764705882 |
+| `session_support_omitted` | 10 | 0.5882352941 |
+| `memory_induction_omitted_or_overcompressed` | 0 | 0.0 |
+| `memory_present_not_top5` | 4 | 0.2352941176 |
+| `top1_not_query_supported` | 0 | 0.0 |
+| `supported` | 0 | 0.0 |
+
+The full 30-positive baseline first-loss partition was 0 source rejection, 0
+update failure, 4 audit failures, 15 session-support omissions, 0 memory-node
+omissions, 9 top-five retrieval losses, 2 query-support losses, and 0 supported
+cases. Its support-event preservation was 19/46 (0.4130434783).
+
+The frozen candidate did not change either owning induction metric:
+
+| final comparison | result | required |
+| --- | ---: | ---: |
+| baseline targeted loss | 15 | - |
+| candidate targeted loss | 15 | - |
+| `recovered_holdout_positive_count` | 0 | at least 2 |
+| `targeted_holdout_loss_reduction_rate` | 0.0 | at least 0.25 |
+| `recovered_pre_retrieval_positive_count` | 0 | at least 2 |
+| `pre_retrieval_induction_loss_reduction_rate` | 0.0 | at least 0.25 |
+| candidate updater success | 40/40 | no regression |
+| candidate archive audit success | 34/40 | no regression |
+| `abstention_accuracy` | 10/10 (1.0) | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `false_promotion_count` | 0 | 0 |
+| `gold_label_ingestion_count` | 0 | 0 |
+| `direct_memory_injection_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The required V2.37 synthetic boundary rerun also kept the strict policy's three
+hard-negative rejections at 3/3. Candidate `safety_passed` was 1, but
+`gain_passed` was 0. The candidate merely moved two later losses from
+`memory_present_not_top5` to `top1_not_query_supported`; it did not recover an
+induction loss or a supported case.
+
+| aggregate artifact | SHA-256 |
+| --- | --- |
+| baseline calibration report | `8950a2bdd0d1a469173039a0634ce9e8fec6e86cf7a8440defd184f4c777c45d` |
+| candidate calibration report | `3b9b806803719061e99d19997cdad886b9cf7b386c6b2b0a4d83906bd561ce4d` |
+| baseline holdout report | `849c775ee07bb73476243c0352ea8b4adb288783a162270ff5a4ae2235664adc` |
+| candidate holdout report | `92d82da6e5ab005deb945b8ab14324fc5657befd3ae8021d5b232650a51abb23` |
+| baseline runtime bundle | `d6c2b27f44432590a96bc21ec76dd11ee2906e68bbc2eebf30b4cfa2517dd1c0` |
+| candidate runtime bundle | `4f8fb5aaa33bdba6d9865615d8708c54a72255c123fab94c8ff56a6320260d7b` |
+| baseline configuration | `882bbd00305319992d591139e70576a1dec2a1e36f9a7bd16bb9bccd001a505b` |
+| candidate configuration | `fdec2cd60b2e25474e12dde1ca2b8542c6f7dbcb20cdbc24fa33f8154de7fd48` |
+| candidate strategy | `654054d60b0e6b3bf11c0ece8759c39176cd7f8af9985758c1871b08039c0f5a` |
+
+Terminal public decision: `induction_no_go`, reason
+`insufficient_holdout_gain`. The failed candidate production change and its
+candidate-only tests were removed. No second hypothesis was attempted. Because
+there was no public go, the conditional private aggregate shadow was skipped.
+V2.44 does not install or deploy skills, modify the private archive, alter the
+scheduler, or promote the V2.39/V2.40 runtime.
+
+V2.44 proves deterministic source-to-session-to-memory first-loss attribution,
+scorer isolation, a complete explanation of the previous 17/30 holdout gap,
+and a bounded safe no-go for the only candidate. It is not LLM answer quality.
+It is not ranking quality. It is not vector search. It is not ontology discovery.
+It is not public leaderboard parity. It does not prove that a different future
+induction design will fail.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
