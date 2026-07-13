@@ -874,6 +874,54 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v243_mainline_release_truth_contract(self):
+        section = self.evaluation_section(
+            "## V2.43 Mainline Release Truth And Candidate-Chain Convergence"
+        )
+        for phrase in (
+            "`9ae179f`",
+            "`51bdfbe`",
+            "`e25c5bc`",
+            "source main",
+            "installed skills",
+            "private deployment",
+            "V2.37",
+            "V2.38",
+            "V2.39",
+            "V2.40",
+            "V2.41",
+            "V2.42",
+            "private performance `no_go` is not a functional failure",
+            "`19/19`",
+            "`17/19`",
+            "two stale target tools",
+            "559cd20bf9d458ded5fd17749a0c231cf999700d3bd330dca2071083a2d1cacd",
+            "ea3946e3bdb824b7966a62240d0d24dd637e0accdd16d7b7924cbc31d17ae08c",
+            "72/72",
+            "`published`",
+            "`profile_no_go`",
+            "`architecture_no_go`",
+            "no runtime `DurableSemanticIndex` implementation",
+            "selected-record performance work remains closed",
+            "does not install or deploy",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        runtime_paths = sorted(
+            {
+                *Path("skills").rglob("*.py"),
+                *Path("templates/agent-memory-repo/tools").rglob("*.py"),
+            }
+        )
+        runtime_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in runtime_paths
+        )
+        self.assertIsNone(
+            re.search(r"durable[_\s-]*semantic[_\s-]*index", runtime_text, flags=re.IGNORECASE)
+        )
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

@@ -2406,6 +2406,52 @@ behavior, private candidate speedup, memory quality, ranking, induction quality,
 LLM quality, vector search, ontology discovery, GitHub availability, deployment
 approval, or public benchmark parity.
 
+## V2.43 Mainline Release Truth And Candidate-Chain Convergence
+
+Date: 2026-07-13
+
+V2.43 converges the six linear V2.37-V2.42 source commits without rewriting
+their verified history. At the dated V2.43 preflight, source main was V2.36
+commit `9ae179f`, and the verified implementation input ended at V2.42 commit
+`51bdfbe`. The integration pull request records that immutable comparison; it
+does not assert the remote state after the pull-request lifecycle. Merging the
+pull request advances the reusable source and packaged template, but it does
+not install or deploy that source on its own.
+
+The release decision keeps public functional evidence separate from private
+deployment performance. In particular, a private performance `no_go` is not a functional failure.
+V2.39 and V2.40 remain eligible for source integration because their public
+functional, privacy, packaged-runtime, output-parity, and regression gates pass;
+their failed private timing thresholds still prohibit treating them as installed
+or deployed performance improvements.
+
+| version | change class | public result | installed/private result | release implication |
+| --- | --- | --- | --- | --- |
+| V2.37 | evaluation-only query-support calibration | safe no-change; no runtime policy selected | not installed or deployed | retain the bounded `no_go` evidence without changing query support |
+| V2.38 | scheduled runner, updater, recovery, and publication runtime | functional and privacy gates pass | the V2.43 preflight observed installed skills and private deployment matching the runtime bundle from commit `e25c5bc` | deployed baseline observed by this preflight and source integration input |
+| V2.39 | single-inventory and single-finalization runtime | public output parity and regressions pass | private full run exceeded 1800 seconds; output parity was not accepted | integrate as source runtime, without deployment approval |
+| V2.40 | selected-record preparation runtime | public artifact, anchor, secret-policy, and regression parity pass | private subset speedup 1.172062; no full shadow | integrate as source runtime, without deployment approval |
+| V2.41 | attribution benchmark only | deterministic gate passes | private `profile_no_go`; no projection runtime | retain evidence only |
+| V2.42 | final architecture benchmark only | deterministic gate passes | private `architecture_no_go`; no candidate run | retain the final closure and no runtime `DurableSemanticIndex` implementation |
+
+The three release layers were checked independently with aggregate-only evidence:
+
+| layer comparison | observed status | claim boundary |
+| --- | --- | --- |
+| source candidate to private deployment | the 2026-07-13 preflight reported `17/19` matching tools, with two stale target tools; source bundle `559cd20bf9d458ded5fd17749a0c231cf999700d3bd330dca2071083a2d1cacd` | expected drift from the V2.39/V2.40 source-only runtime; not a deployment defect |
+| installed skills to private deployment | the 2026-07-13 preflight reported `19/19` matching tools and equal bundle fingerprint `ea3946e3bdb824b7966a62240d0d24dd637e0accdd16d7b7924cbc31d17ae08c` | both matched the V2.38 runtime at preflight time; not latest-source parity |
+| private deployment operation | the 2026-07-13 receipt was clean and current; the 04:05-07:13 scheduled run completed 72/72 enabled targets and reported `published` | dated V2.38 operational evidence only; not approval of V2.39/V2.40 performance |
+
+The packaged runtime contains no `DurableSemanticIndex` symbol, and
+selected-record performance work remains closed under the current archive
+semantics and 2x target. Reopening it requires a changed target, changed
+constraints, or materially different evidence rather than another hotspot or
+micro-optimization. The V2.43 convergence commit itself changes only
+documentation and its focused contract test. It does not install or deploy
+skills, alter the private archive, change the automation prompt, rerun a private
+72-target timing shadow, or claim that a source pull request has already been
+merged.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
