@@ -849,6 +849,31 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v241_durable_event_projection_attribution_contract(self):
+        section = self.evaluation_section(
+            "## V2.41 Scheduled Durable-Event Projection Attribution And Closure"
+        )
+        for phrase in (
+            "durable_event_projection_gate.py",
+            "phase_attribution_coverage_rate",
+            "implementation_decision_accuracy",
+            "nondurable_output_dependency_rate",
+            "Private attribution result: `profile_no_go`",
+            "347,065,206",
+            "126.012448",
+            "36.752164",
+            "0.291655026",
+            "1.411741506",
+            "summary_source_anchor",
+            "58.319916",
+            "private_shadow_run_count",
+            "did not reach the required 0.55",
+            "V2.38 remains deployed",
+            "not projection implementation",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

@@ -2251,6 +2251,74 @@ V2.40 does not prove memory quality, ranking, induction
 quality, LLM quality, vector search, scheduler reliability, GitHub availability,
 ontology discovery, or public leaderboard parity.
 
+## V2.41 Scheduled Durable-Event Projection Attribution And Closure
+
+Date: 2026-07-13
+
+V2.41 tests whether early projection of durable events can close the residual
+selected-record preparation time left by V2.40. The public attribution command
+is:
+
+```bash
+python3 benchmarks/durable_event_projection_gate.py
+```
+
+The synthetic gate uses mixed JSONL records with durable user/final messages
+and large status, commentary, function-call, and function-output payloads. Its
+profiling harness produces the same prepared artifacts as the normal V2.40
+path. A counterfactual run using only the existing `user`, `assistant`, and
+`record` events preserves artifact content, event order, and source hashes.
+
+| deterministic metric | value |
+| --- | ---: |
+| `phase_attribution_coverage_rate` | 1.0 |
+| `implementation_decision_accuracy` | 1.0 |
+| `profile_harness_output_parity_rate` | 1.0 |
+| `nondurable_output_dependency_rate` | 0.0 |
+| `durable_event_projection_parity_rate` | 1.0 |
+| `durable_event_order_parity_rate` | 1.0 |
+| `durable_event_hash_parity_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+These metrics prove bounded phase attribution and that non-durable events do
+not contribute to the synthetic durable archive output. They are not projection implementation,
+private hotspot evidence, deployment approval, or memory-quality evidence.
+
+### Private attribution result: `profile_no_go`
+
+The single permitted private attribution used one immutable CoW snapshot. It
+found 311 inventory records, 72 enabled targets, and 28 selected candidates.
+The deterministic subset contained two unique records totaling 347,065,206
+bytes. Only aggregate phase timings and counts were retained.
+
+| private attribution metric | value |
+| --- | ---: |
+| total selected-record preparation seconds | 126.012448 |
+| avoidable non-durable processing seconds | 36.752164 |
+| `avoidable_nondurable_processing_share` | 0.291655026 |
+| `projected_max_speedup` | 1.411741506 |
+| `phase_attribution_coverage_rate` | 1.0 |
+| `nondurable_output_dependency_rate` | 0.0 |
+| `summary_source_anchor` seconds | 58.319916 |
+| `redaction` seconds | 16.845393 |
+| `nondurable_event_normalization` seconds | 30.489503 |
+| `private_shadow_run_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The measured avoidable share did not reach the required 0.55 threshold, and
+the Amdahl upper bound did not reach 2.2x. The conditional projection was
+therefore not implemented. Per the convergence rule, the larger
+`summary_source_anchor` phase was recorded but not pursued as a second
+optimization strategy, and no 72-target shadow was run.
+
+The implementation decision combines the private aggregate timing share with
+the public counterfactual `nondurable_output_dependency_rate=0.0`; it does not
+claim private artifact-parity evidence.
+
+All private temporary snapshots and reports were removed after recording the
+aggregate result. The candidate was not installed or deployed, the automation
+configuration was restored unchanged, and V2.38 remains deployed.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
