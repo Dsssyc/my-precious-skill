@@ -35,6 +35,11 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_publish_search_gate.py",
     "benchmarks/scheduled_content_noise_repair_closure_gate.py",
     "benchmarks/live_automation_prompt_alignment_gate.py",
+    "benchmarks/scheduled_update_single_writer_gate.py",
+    "benchmarks/scheduled_update_throughput_gate.py",
+    "benchmarks/selected_record_materialization_gate.py",
+    "benchmarks/durable_event_projection_gate.py",
+    "benchmarks/durable_semantic_index_gate.py",
     "benchmarks/induction_consolidation_gate.py",
     "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
@@ -42,6 +47,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/runtime_tool_bundle_parity_gate.py",
     "benchmarks/three_layer_distribution_preflight_gate.py",
     "benchmarks/public_induction_recall_gate.py",
+    "benchmarks/public_query_support_calibration_gate.py",
     "benchmarks/active_support_recall_closure_gate.py",
     "benchmarks/reviewed_automatic_memory_publish_gate.py",
     "benchmarks/long_horizon_memory_stress_gate.py",
@@ -152,6 +158,26 @@ def build_release_checks() -> list[CheckSpec]:
             ("python3", "benchmarks/live_automation_prompt_alignment_gate.py"),
         ),
         CheckSpec(
+            "scheduled_update_single_writer",
+            ("python3", "benchmarks/scheduled_update_single_writer_gate.py"),
+        ),
+        CheckSpec(
+            "scheduled_update_throughput",
+            ("python3", "benchmarks/scheduled_update_throughput_gate.py"),
+        ),
+        CheckSpec(
+            "selected_record_materialization",
+            ("python3", "benchmarks/selected_record_materialization_gate.py"),
+        ),
+        CheckSpec(
+            "durable_event_projection",
+            ("python3", "benchmarks/durable_event_projection_gate.py"),
+        ),
+        CheckSpec(
+            "durable_semantic_index",
+            ("python3", "benchmarks/durable_semantic_index_gate.py"),
+        ),
+        CheckSpec(
             "induction_consolidation",
             ("python3", "benchmarks/induction_consolidation_gate.py"),
         ),
@@ -182,6 +208,14 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "public_induction_recall_offline",
             ("python3", "benchmarks/public_induction_recall_gate.py", "--offline-fixture"),
+        ),
+        CheckSpec(
+            "public_query_support_calibration_offline",
+            (
+                "python3",
+                "benchmarks/public_query_support_calibration_gate.py",
+                "--offline-fixture",
+            ),
         ),
         CheckSpec(
             "active_support_recall_closure",

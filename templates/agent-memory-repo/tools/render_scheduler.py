@@ -107,6 +107,7 @@ def archive_program_arguments(
             str(memory_repo),
             "--source-dir",
             str(source_dir),
+            "--require-clean-worktree",
         ]
     else:
         args = [
@@ -140,6 +141,7 @@ def shell_archive_command(
             shlex.quote(str(memory_repo)),
             "--source-dir",
             shlex.quote(str(source_dir)),
+            "--require-clean-worktree",
         ]
     else:
         args = [
@@ -173,6 +175,7 @@ def agent_native_prompt(
             str(memory_repo),
             "--source-dir",
             str(source_dir),
+            "--require-clean-worktree",
         ]
     else:
         update_command = [
@@ -216,6 +219,9 @@ def agent_native_prompt(
             "Use exactly one working directory:",
             str(memory_repo),
             "",
+            "Before running the updater, record the starting commit with:",
+            "git rev-parse HEAD",
+            "",
             "Run:",
             shlex.join(update_command),
             "",
@@ -235,6 +241,17 @@ def agent_native_prompt(
             "If the sync dry-run passes and reports expected archive changes, run:",
             shlex.join(sync_command),
             "If the sync dry-run reports no expected archive changes, report that the archive is already current and do not create an empty commit.",
+            "",
+            "Task completion is not publish success. After either a successful live sync or a dry-run-confirmed no-op, verify the publication receipt:",
+            "git fetch origin main",
+            "git rev-parse HEAD",
+            "git rev-parse origin/main",
+            'test -z "$(git status --porcelain=v1 --untracked-files=all)"',
+            "Finish with exactly one terminal status:",
+            "- `published`: only when the live sync helper returned zero after creating and pushing a commit, the worktree is clean, HEAD equals origin/main, and final HEAD differs from the starting commit.",
+            "- `no_op_current`: only when the sync dry-run reported no expected archive changes, the worktree is clean, HEAD equals origin/main, and no commit was created.",
+            "- `blocked`: for every other result, including command failure, dirty state, a missing receipt, or commit mismatch.",
+            "Do not report `published` or `no_op_current` from Codex task state alone.",
             "",
             "Daily record content contract:",
             "- Treat generated daily/YYYY/YYYY-MM-DD.md files as durable memory indexes, not automation run logs.",

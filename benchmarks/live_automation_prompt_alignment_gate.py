@@ -188,6 +188,19 @@ def preflight_fail_closed_contract_present(prompt: str) -> bool:
     return stop_language and all(token in lowered for token in required_tokens)
 
 
+def terminal_status_contract_present(prompt: str) -> bool:
+    lowered = prompt.lower()
+    required_tokens = (
+        "finish with exactly one terminal status",
+        "`published`",
+        "`no_op_current`",
+        "`blocked`",
+        "worktree is clean",
+        "head equals origin/main",
+    )
+    return all(token in lowered for token in required_tokens)
+
+
 def private_marker_count(prompt: str) -> int:
     return sum(1 for marker in PRIVATE_MARKERS if marker in prompt)
 
@@ -201,8 +214,9 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         "--report-json",
         "--skip-config",
     )
+    runner_update_positions = command_positions(lines, "tools/run_memory_updates.py")
     update_positions = [
-        *command_positions(lines, "tools/run_memory_updates.py"),
+        *runner_update_positions,
         *command_positions(lines, "tools/update_memory_archive.py"),
     ]
     archive_positions = command_positions(lines, "tools/audit_memory_archive.py")
@@ -215,6 +229,13 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         "tools/sync_memory_archive.py",
         "--push",
         excluded=("--dry-run",),
+    )
+    head_positions = command_positions(lines, "git rev-parse HEAD")
+    fetch_positions = command_positions(lines, "git fetch origin main")
+    origin_head_positions = command_positions(lines, "git rev-parse origin/main")
+    clean_status_positions = command_positions(
+        lines,
+        "git status --porcelain=v1 --untracked-files=all",
     )
     generic_search_count = actionable_generic_content_query_count(prompt)
     raw_git_count = actionable_raw_git_publish_path_count(prompt)
@@ -231,6 +252,21 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
     search_after = first_after(search_positions, readiness_after) if readiness_after is not None else None
     sync_dry = first_after(sync_dry_positions, search_after) if search_after is not None else None
     sync_live = first_after(sync_live_positions, sync_dry) if sync_dry is not None else None
+    initial_head = (
+        max((position for position in head_positions if update is not None and position < update), default=None)
+        if update is not None
+        else None
+    )
+    receipt_fetch = first_after(fetch_positions, sync_live) if sync_live is not None else None
+    receipt_head = first_after(head_positions, receipt_fetch) if receipt_fetch is not None else None
+    receipt_origin_head = (
+        first_after(origin_head_positions, receipt_head) if receipt_head is not None else None
+    )
+    receipt_clean_status = (
+        first_after(clean_status_positions, receipt_origin_head)
+        if receipt_origin_head is not None
+        else None
+    )
 
     publish_readiness_gate_present = readiness_before is not None and readiness_after is not None
     repair_step_present = repair is not None
@@ -241,6 +277,33 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         preflight is not None and update is not None and preflight < update
     )
     fail_closed_present = preflight_fail_closed_contract_present(prompt)
+    clean_worktree_flag_present = bool(runner_update_positions) and all(
+        "--require-clean-worktree" in lines[position]
+        for position in runner_update_positions
+    )
+    receipt_language_present = all(
+        token in prompt.lower()
+        for token in (
+            "publication receipt",
+            "live sync helper returned zero",
+            "final head differs from the starting commit",
+            "head equals origin/main",
+            "worktree is clean",
+        )
+    )
+    publication_receipt_contract_present = (
+        initial_head is not None
+        and receipt_fetch is not None
+        and receipt_head is not None
+        and receipt_origin_head is not None
+        and receipt_clean_status is not None
+        and receipt_language_present
+    )
+    terminal_contract_present = terminal_status_contract_present(prompt)
+    task_completion_not_publish_success_present = (
+        "task completion is not publish success" in prompt.lower()
+        and "task state alone" in prompt.lower()
+    )
     preflight_aligned = preflight_before_update_present and fail_closed_present and refresh_count == 0
     aligned = (
         update is not None
@@ -252,6 +315,10 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         and sync_only_publish_path_present
         and generic_search_count == 0
         and private_count == 0
+        and clean_worktree_flag_present
+        and publication_receipt_contract_present
+        and terminal_contract_present
+        and task_completion_not_publish_success_present
     )
     return {
         "aligned": aligned,
@@ -270,17 +337,31 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         "preflight_fail_closed_contract_present": fail_closed_present,
         "actionable_tool_refresh_count": refresh_count,
         "preflight_aligned": preflight_aligned,
+        "clean_worktree_flag_present": clean_worktree_flag_present,
+        "publication_receipt_contract_present": publication_receipt_contract_present,
+        "terminal_status_contract_present": terminal_contract_present,
+        "task_completion_not_publish_success_present": task_completion_not_publish_success_present,
     }
 
 
-def synthetic_preflight_prompt(*, updater_first: bool = False, auto_refresh: bool = False) -> str:
+def synthetic_preflight_prompt(
+    *,
+    updater_first: bool = False,
+    auto_refresh: bool = False,
+    require_clean_worktree: bool = True,
+    include_publication_receipt: bool = True,
+) -> str:
     preflight = (
         "python /installed/setup-my-precious/scripts/setup_memory_archive.py "
         "--path /tmp/agent-memory --check-tools --report-json --skip-config"
     )
     update = "python tools/run_memory_updates.py --memory-repo /tmp/agent-memory --source-dir /tmp/source"
+    if require_clean_worktree:
+        update += " --require-clean-worktree"
     prefix = [
         "Run the runtime parity preflight before updater execution.",
+        "Before running the updater, record the starting commit with:",
+        "git rev-parse HEAD",
         update if updater_first else preflight,
         preflight if updater_first else (
             "Require exit zero and valid JSON with report_kind runtime_tool_bundle_parity, "
@@ -318,6 +399,21 @@ def synthetic_preflight_prompt(*, updater_first: bool = False, auto_refresh: boo
             "python tools/sync_memory_archive.py --push",
         ]
     )
+    if include_publication_receipt:
+        prefix.extend(
+            [
+                "Task completion is not publish success. Verify the publication receipt after sync.",
+                "git fetch origin main",
+                "git rev-parse HEAD",
+                "git rev-parse origin/main",
+                "git status --porcelain=v1 --untracked-files=all",
+                "Finish with exactly one terminal status:",
+                "- `published`: only when the live sync helper returned zero, the worktree is clean, HEAD equals origin/main, and final HEAD differs from the starting commit.",
+                "- `no_op_current`: only for a confirmed no-op when the worktree is clean and HEAD equals origin/main.",
+                "- `blocked`: for every other result.",
+                "Do not infer publication from task state alone.",
+            ]
+        )
     return "\n".join(prefix)
 
 
@@ -378,6 +474,14 @@ def case_result(case: PromptCase) -> dict[str, object]:
             evaluation["preflight_fail_closed_contract_present"]
         ),
         "actionable_tool_refresh_count": int(evaluation["actionable_tool_refresh_count"]),
+        "clean_worktree_flag_present": bool(evaluation["clean_worktree_flag_present"]),
+        "publication_receipt_contract_present": bool(
+            evaluation["publication_receipt_contract_present"]
+        ),
+        "terminal_status_contract_present": bool(evaluation["terminal_status_contract_present"]),
+        "task_completion_not_publish_success_present": bool(
+            evaluation["task_completion_not_publish_success_present"]
+        ),
     }
 
 
@@ -409,6 +513,18 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
         "preflight_fail_closed_contract_present": all(
             case["preflight_fail_closed_contract_present"] for case in preflight_cases
         ),
+        "clean_worktree_flag_present": all(
+            case["clean_worktree_flag_present"] for case in positive_cases
+        ),
+        "publication_receipt_contract_present": all(
+            case["publication_receipt_contract_present"] for case in positive_cases
+        ),
+        "terminal_status_contract_present": all(
+            case["terminal_status_contract_present"] for case in positive_cases
+        ),
+        "task_completion_not_publish_success_present": all(
+            case["task_completion_not_publish_success_present"] for case in positive_cases
+        ),
         "updater_before_preflight_rejection_count": sum(
             1
             for case in negative_cases
@@ -425,6 +541,18 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
         ),
         "raw_git_rejection_count": sum(
             1 for case in negative_cases if case["case"] == "negative_raw_git_prompt" and not case["actual_aligned"]
+        ),
+        "missing_clean_worktree_rejection_count": sum(
+            1
+            for case in negative_cases
+            if case["case"] == "negative_missing_clean_worktree_prompt"
+            and not case["actual_aligned"]
+        ),
+        "missing_publication_receipt_rejection_count": sum(
+            1
+            for case in negative_cases
+            if case["case"] == "negative_missing_publication_receipt_prompt"
+            and not case["actual_aligned"]
         ),
         "raw_git_publish_path_count": raw_git_count,
         "private_archive_content_committed_count": private_count,
@@ -444,10 +572,16 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
         and metrics["synthetic_preflight_alignment_pass"]
         and metrics["preflight_before_update_present"]
         and metrics["preflight_fail_closed_contract_present"]
+        and metrics["clean_worktree_flag_present"]
+        and metrics["publication_receipt_contract_present"]
+        and metrics["terminal_status_contract_present"]
+        and metrics["task_completion_not_publish_success_present"]
         and metrics["updater_before_preflight_rejection_count"] == 1
         and metrics["auto_refresh_rejection_count"] == 1
         and metrics["missing_readiness_rejection_count"] == 1
         and metrics["raw_git_rejection_count"] == 1
+        and metrics["missing_clean_worktree_rejection_count"] == 1
+        and metrics["missing_publication_receipt_rejection_count"] == 1
         and metrics["raw_git_publish_path_count"] == 0
         and metrics["private_archive_content_committed_count"] == 0
         and metrics["generic_content_query_required_count"] == 0
@@ -494,6 +628,18 @@ def run_gate(root: Path, *, automation_config: Path | None = None) -> dict[str, 
         PromptCase(
             "negative_auto_refresh_prompt",
             synthetic_preflight_prompt(auto_refresh=True),
+            False,
+            requires_preflight=True,
+        ),
+        PromptCase(
+            "negative_missing_clean_worktree_prompt",
+            synthetic_preflight_prompt(require_clean_worktree=False),
+            False,
+            requires_preflight=True,
+        ),
+        PromptCase(
+            "negative_missing_publication_receipt_prompt",
+            synthetic_preflight_prompt(include_publication_receipt=False),
             False,
             requires_preflight=True,
         ),

@@ -179,10 +179,11 @@ and JSONL indexes.
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
 - `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
-  bootstraps an empty project registry by scanning source records for project
-  paths, invokes the per-project updater for each enabled project, and can run
-  explicit source streams keyed by stable archive scope plus source partition
-  without first materializing a project row.
+  inventories each unique source root once, bootstraps an empty project registry
+  from that snapshot, invokes an isolated updater for each enabled target, and
+  rebuilds derived archive surfaces once after every ingestion succeeds. It can
+  also run explicit source streams keyed by stable archive scope plus source
+  partition without first materializing a project row.
 - `templates/agent-memory-repo/tools/induction_consolidation_audit.py`:
   privacy-safe read-only audit for automatic induction, lifecycle consolidation,
   evidence reachability, and aggregate real-history output safety.
@@ -207,14 +208,24 @@ and JSONL indexes.
 ## Scheduling Model
 
 Default scheduled updates should call `tools/run_memory_updates.py`, not the
-single-project updater. The runner reads `config/projects.jsonl`, scans the
-shared source-record directory for project metadata, registers newly discovered
-projects, and updates each enabled project. It also reads
+single-project updater. The runner reads `config/projects.jsonl`, inventories
+each unique shared source root once, registers newly discovered projects, and
+sends target-specific integrity metadata through stdin to each serialized
+updater child. Ingestion children write authoritative session surfaces while
+derived indexes remain unchanged; one finalizer rebuilds those indexes and
+reconciles memory references only after all ingestion succeeds. It also reads
 `config/source_streams.jsonl` when present, so a deployment can schedule a
 domain/global source stream whose primary identity is `archive_scope` plus
 `source_partition` rather than a project registry row. This avoids a bootstrap
 deadlock where an empty deployment repository has no project registry and
 reduces the requirement that every source stream first become a project.
+
+The internal inventory includes a normalized source timestamp so scheduled
+children can apply high-water and record limits before reading selected source
+content. Each selected JSONL record is then read and redacted once, converted
+to compact prepared archive artifacts, and released from memory. Every selected
+record must prepare successfully before the child removes or writes archive
+entries. Direct updater calls retain the established discovery path.
 
 `config/projects.jsonl` is runtime configuration, while `index/projects.jsonl`
 and `index/scopes.jsonl` are generated archive indexes. Disabled projects in
@@ -238,6 +249,40 @@ ontology discovery and should be reviewed intentionally.
 Agent-native automations should use exactly one working directory: the private
 deployment repository. Multiple working directories can create multiple
 concurrent automation conversations for the same scheduled job.
+
+The V2.38 scheduled execution contract adds a second, runtime-enforced boundary.
+The global runner acquires a repo-scoped exclusive lock before registry discovery
+or archive mutation. The parent and current child retain the same lock ownership,
+so a surviving child continues to reject another writer even if the parent is
+abnormally terminated. A competing runner exits nonzero with aggregate status
+`update_status=blocked reason=concurrent_update`. The first failed project or
+source-stream child stops the run immediately, and SIGINT/SIGTERM triggers bounded
+child cleanup before the runner releases the lock.
+
+Rendered global scheduler commands include `--require-clean-worktree`. That
+preflight rejects tracked, deleted, or untracked Git state before mutation; the
+flag remains optional for local-only manual runner use. Agent-native publication
+does not infer success from task completion. It records the starting commit,
+publishes only through `tools/sync_memory_archive.py`, fetches `origin/main`, and
+checks a clean worktree plus local/remote commit equality. Its terminal result is
+exactly one of `published`, `no_op_current`, or `blocked`.
+
+This is a single-host execution-ownership contract. It is not whole-run rollback,
+not a cross-host distributed lock, not a GitHub availability SLA, and not a
+memory-quality claim.
+
+Clean-cut regeneration also closes references to durable memory nodes that it
+removes. The previous-ID evidence is the union of IDs in the current durable
+files and committed durable memory IDs from Git `HEAD` when available. The
+reconciler removes only lifecycle or `derived_from` edges whose target belongs
+to that previous set and is absent from the new set. Unknown missing IDs are not
+silently repaired and remain audit failures. Local-only non-Git archives use the
+current durable files as their previous set.
+
+Within a serialized global run, every non-final updater child defers this
+reconciliation, so only the final child closes removed references after all
+project and source-stream updates have succeeded. This prevents a target that a
+later child would regenerate from being removed prematurely.
 
 ## Environment Contract
 
@@ -789,6 +834,25 @@ generated archives, questions, answers, case IDs, source paths, context package
 payloads, and memory text stay outside this repository and outside the report.
 The fast `--offline-fixture` mode tests only this harness contract and is the
 only mode included in the canonical offline quality gate.
+
+The public query-support calibration gate reuses that label-isolated packaged
+lifecycle instead of defining another ingestion adapter. It freezes the V2.36
+selection as a holdout, excludes those question IDs before selecting a second
+deterministic calibration cohort, and attributes each baseline-retrievable
+positive through gold-session-derived memory creation, active/current state,
+top-five retrieval, query support, hit answerability, and package
+answerability. It evaluates exactly three predeclared token-coverage policies.
+Gold provenance, rank, question type, benchmark IDs, and dataset-specific token
+exceptions are scorer-only and cannot become runtime support features. A policy
+may change production behavior only after passing existing hard negatives,
+calibration precision/abstention/coverage thresholds, and the frozen holdout.
+Otherwise the gate reports a bounded `no_go` or `inconclusive` result and leaves
+the existing search implementation unchanged. Only its synthetic
+`--offline-fixture` mode belongs in the canonical release gate; public inputs,
+generated archives, and aggregate reports remain outside the reusable repo.
+`calibration_passed` is an intermediate state that only authorizes guarded
+integration and frozen-holdout evaluation; it is not a final `go`. Selected
+runtime parity and the remaining final thresholds are enforced on the holdout.
 
 The generated-answer benchmark has a packaged synthetic fixture with two
 positive answer cases and one abstention case. `v1_readiness_gate.py

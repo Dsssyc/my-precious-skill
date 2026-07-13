@@ -689,6 +689,239 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_evaluation_doc_records_v237_safe_no_change_result(self):
+        section = self.evaluation_section(
+            "## V2.37 Public Query-Support Calibration With Frozen Holdout"
+        )
+        for phrase in (
+            "public_query_support_calibration_gate.py",
+            "strict_v1",
+            "weighted_partial_060_v1",
+            "weighted_partial_050_specific_v1",
+            "c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19",
+            "4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7",
+            "5106e9379647edeacb71a7161bacd7c602b8ea246a34b8911f514a81c063613d",
+            "`status: failed`",
+            "`readiness_status: inconclusive`",
+            "`status: completed`",
+            "`readiness_status: no_go`",
+            "`decision_reason: no_safe_policy`",
+            "38/40",
+            "32/40",
+            "11/30",
+            "4/11",
+            "2/4",
+            "1/3",
+            "40/40",
+            "34/40",
+            "13/30",
+            "6/13",
+            "0/6",
+            "ranking_drift_count = 0",
+            "`calibration_passed`",
+            "is not a final `go`",
+            "production query-support behavior remained unchanged",
+            "not ranking repair",
+            "not archive-audit repair",
+            "not induction-content quality",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_docs_record_v238_single_writer_and_publish_receipt_contract(self):
+        section = self.evaluation_section(
+            "## V2.38 Scheduled Update Single-Writer And Interrupted-Run Recovery Closure"
+        )
+        for phrase in (
+            "scheduled_update_single_writer_gate.py",
+            "--require-clean-worktree",
+            "reason=concurrent_update",
+            "first failure fail-fast",
+            "parent and current child",
+            "published",
+            "no_op_current",
+            "blocked",
+            "single_writer_acceptance_rate",
+            "orphan_child_lock_retention_rate",
+            "publish_attempt_after_failed_update_count",
+            "privacy_leak_count",
+            "not whole-run rollback",
+            "not a cross-host distributed lock",
+            "not a GitHub availability SLA",
+            "not memory quality",
+            "committed durable memory IDs",
+            "only the final child",
+            "71/71",
+            "83 minutes",
+            "four stale",
+            "`a8fd832`",
+            "three local stashes",
+            "`status: ACTIVE`",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design = DESIGN_DOC.read_text(encoding="utf-8")
+        for phrase in (
+            "V2.38 scheduled execution contract",
+            "--require-clean-worktree",
+            "reason=concurrent_update",
+            "parent and current child",
+            "published",
+            "no_op_current",
+            "blocked",
+            "committed durable memory IDs",
+            "only the final child",
+        ):
+            self.assert_contains(design, phrase)
+
+    def test_docs_record_v239_single_inventory_and_finalization_contract(self):
+        section = self.evaluation_section(
+            "## V2.39 Scheduled Update Single-Inventory And Single-Finalization Throughput Closure"
+        )
+        for phrase in (
+            "scheduled_update_throughput_gate.py",
+            "source_inventory_amplification",
+            "source_root_rescan_count",
+            "nonselected_record_reparse_count",
+            "target_dispatch_accuracy",
+            "successful_run_finalization_count",
+            "failed_run_finalization_count",
+            "output_parity_rate",
+            "output_parity_scenario_count",
+            "fail_closed_inventory_rejection_rate",
+            "single_writer_regression_pass_rate",
+            "synthetic_redundant_work_reduction_rate",
+            "privacy_leak_count",
+            "target-specific metadata through stdin",
+            "authoritative session metadata",
+            "not whole-run rollback",
+            "not private wall-clock performance",
+            "does not prove memory quality",
+            "Private acceptance result: `no_go`",
+            "1923.252",
+            "165.667",
+            "11.609",
+            "1800",
+            "1518602464",
+            "V2.38 remains deployed",
+            "private output parity was not accepted",
+            "custom-pattern, zero-record, and rewrite/max-record",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_docs_record_v240_selected_record_materialization_contract(self):
+        section = self.evaluation_section(
+            "## V2.40 Scheduled Selected-Record Materialization Throughput Closure"
+        )
+        for phrase in (
+            "selected_record_materialization_gate.py",
+            "selected_record_source_read_amplification",
+            "selected_record_redaction_amplification",
+            "selected_record_json_decode_amplification",
+            "selected_record_preparation_before_mutation_rate",
+            "selected_record_raw_payload_retention_count",
+            "selected_record_output_parity_rate",
+            "selected_record_source_anchor_parity_rate",
+            "selected_record_secret_policy_parity_rate",
+            "selected_record_mutation_rejection_rate",
+            "direct_cli_regression_pass_rate",
+            "v239_throughput_regression_pass_rate",
+            "v238_single_writer_regression_pass_rate",
+            "synthetic_materialization_work_reduction_rate",
+            "4.0 to 1.0",
+            "2.0 to 1.0",
+            "6.0 to 2.0",
+            "Private acceptance result: `no_go`",
+            "343,800,494",
+            "147.893",
+            "126.182",
+            "1.172062",
+            "v239_v240_subset_output_parity_rate",
+            "private_shadow_run_count",
+            "selected-subset speedup was below the required 2.0",
+            "not deployment approval",
+            "V2.38 remains deployed",
+            "raw source payload",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_docs_record_v241_durable_event_projection_attribution_contract(self):
+        section = self.evaluation_section(
+            "## V2.41 Scheduled Durable-Event Projection Attribution And Closure"
+        )
+        for phrase in (
+            "durable_event_projection_gate.py",
+            "phase_attribution_coverage_rate",
+            "implementation_decision_accuracy",
+            "nondurable_output_dependency_rate",
+            "Private attribution result: `profile_no_go`",
+            "347,065,206",
+            "126.012448",
+            "36.752164",
+            "0.291655026",
+            "1.411741506",
+            "summary_source_anchor",
+            "58.319916",
+            "private_shadow_run_count",
+            "did not reach the required 0.55",
+            "V2.38 remains deployed",
+            "not projection implementation",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_docs_record_v243_mainline_release_truth_contract(self):
+        section = self.evaluation_section(
+            "## V2.43 Mainline Release Truth And Candidate-Chain Convergence"
+        )
+        for phrase in (
+            "`9ae179f`",
+            "`51bdfbe`",
+            "`e25c5bc`",
+            "source main",
+            "installed skills",
+            "private deployment",
+            "V2.37",
+            "V2.38",
+            "V2.39",
+            "V2.40",
+            "V2.41",
+            "V2.42",
+            "private performance `no_go` is not a functional failure",
+            "`19/19`",
+            "`17/19`",
+            "two stale target tools",
+            "559cd20bf9d458ded5fd17749a0c231cf999700d3bd330dca2071083a2d1cacd",
+            "ea3946e3bdb824b7966a62240d0d24dd637e0accdd16d7b7924cbc31d17ae08c",
+            "72/72",
+            "`published`",
+            "`profile_no_go`",
+            "`architecture_no_go`",
+            "no runtime `DurableSemanticIndex` implementation",
+            "selected-record performance work remains closed",
+            "does not install or deploy",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        runtime_paths = sorted(
+            {
+                *Path("skills").rglob("*.py"),
+                *Path("templates/agent-memory-repo/tools").rglob("*.py"),
+            }
+        )
+        runtime_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in runtime_paths
+        )
+        self.assertIsNone(
+            re.search(r"durable[_\s-]*semantic[_\s-]*index", runtime_text, flags=re.IGNORECASE)
+        )
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

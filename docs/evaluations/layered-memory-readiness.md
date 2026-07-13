@@ -1846,6 +1846,612 @@ a separate bounded goal that first chooses which observed blocker to study:
 coding-agent process-noise audit compatibility, L1 public-query retrieval, or
 natural-conversation induction support. V2.36 does not implement those changes.
 
+## V2.37 Public Query-Support Calibration With Frozen Holdout
+
+V2.37 adds `benchmarks/public_query_support_calibration_gate.py`. It reuses the
+V2.36 label-isolated source conversion and real packaged lifecycle, but separates
+policy calibration from a frozen holdout. The holdout is exactly the V2.36
+selection with fingerprint
+`4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7`.
+Seed `my-precious-v237-calibration` selects another five positives per official
+question type plus ten abstentions after excluding every holdout ID. The
+calibration fingerprint is
+`c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19`;
+the cohort overlap count is 0.
+
+The three policies were frozen before public scoring:
+
+| policy | rule |
+| --- | --- |
+| `strict_v1` | existing complete meaningful, strict, or important-token coverage |
+| `weighted_partial_060_v1` | at least two matches, weighted coverage at least 0.60, and no missing importance-4 token |
+| `weighted_partial_050_specific_v1` | at least two matches, weighted coverage at least 0.50, one importance-2 match, and no missing importance-4 token |
+
+Rank, gold provenance, question type, benchmark IDs, and dataset-specific token
+exceptions were not candidate-policy inputs. Free-form output was not used for
+answerability. The fast synthetic policy-selection contract is canonical:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py --offline-fixture
+```
+
+The public runs used the same pinned LongMemEval cleaned S file as V2.36:
+
+```text
+https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json
+SHA-256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
+```
+
+Calibration command:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort calibration \
+  --work-dir /tmp/my-precious-v237-calibration \
+  --report-file /tmp/my-precious-v237-calibration-report.json
+```
+
+The calibration report SHA-256 is
+`789f979563fbb249464723cdd76a1d28f8c9ac12cdeb44f5f6287f8979958ec7`.
+It returned `status: failed`, `readiness_status: inconclusive`, and
+`decision_reason: insufficient_gold_candidates`.
+
+Calibration structure and attribution:
+
+| metric | numerator / denominator | rate or count |
+| --- | ---: | ---: |
+| packaged setup | 40/40 | 1.0 |
+| updater success | 38/40 | 0.95 |
+| archive audit success | 32/40 | 0.80 |
+| context-package parse success | 38/40 | 0.95 |
+| baseline-retrievable positives | 11/30 | 0.3666666667 |
+| gold-derived memory present | 11/11 | 1.0 |
+| active/current gold-derived memory | 11/11 | 1.0 |
+| gold memory candidate at 1 | 4/11 | 0.3636363636 |
+| gold memory candidate at 5 | 4/11 | 0.3636363636 |
+| retrieval first loss | 7/11 | 0.6363636364 |
+| query-support first loss | 4/11 | 0.3636363636 |
+| attribution invariant violations | count | 0 |
+| privacy leaks | count | 0 |
+
+Two calibration cases were rejected by the existing updater secret gate for
+cookie-like and GitHub-token-like source patterns. V2.37 did not use
+`--allow-redacted-secrets`, change the updater, replace the selected cases, or
+lower the five-candidate minimum. The resulting four gold candidates make the
+calibration performance decision inconclusive. Audit failures were also
+retained rather than repaired because archive-audit behavior is outside this
+goal.
+
+Calibration policy results:
+
+| policy | gold support | precision | abstention | hard-negative rejection |
+| --- | ---: | ---: | ---: | ---: |
+| `strict_v1` | 0/4 | 0/0 | 10/10 | 3/3 |
+| `weighted_partial_060_v1` | 2/4 | 2/2 | 10/10 | 1/3 |
+| `weighted_partial_050_specific_v1` | 2/4 | 2/3 | 9/10 | 1/3 |
+
+Both partial policies failed the predeclared `hard_negative_rejection_rate =
+1.0` requirement. The looser policy also produced one false abstention-cohort
+support. Therefore neither policy was eligible even apart from the insufficient
+public denominator.
+
+Had a policy passed calibration, the gate would have emitted the intermediate
+`calibration_passed` state before guarded integration. That state is not a final `go`;
+selected-runtime parity and all final safety thresholds remain holdout requirements.
+
+Frozen holdout command:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --selected-policy none \
+  --work-dir /tmp/my-precious-v237-holdout \
+  --report-file /tmp/my-precious-v237-holdout-report.json
+```
+
+The frozen holdout returned `status: completed`, `readiness_status: no_go`, and
+`decision_reason: no_safe_policy`. The aggregate-only report SHA-256 was
+`5106e9379647edeacb71a7161bacd7c602b8ea246a34b8911f514a81c063613d`.
+
+Frozen holdout structure and attribution:
+
+| metric | numerator / denominator | rate or count |
+| --- | ---: | ---: |
+| packaged setup | 40/40 | 1.0 |
+| updater success | 40/40 | 1.0 |
+| archive audit success | 34/40 | 0.85 |
+| context-package parse success | 40/40 | 1.0 |
+| baseline-retrievable positives | 13/30 | 0.4333333333 |
+| gold-derived memory present and active | 13/13 | 1.0 |
+| gold memory candidate at 1 | 6/13 | 0.4615384615 |
+| gold memory candidate at 5 | 6/13 | 0.4615384615 |
+| strict query-supported gold candidates | 0/6 | 0.0 |
+| retrieval first loss | 7/13 | 0.5384615385 |
+| query-support first loss | 6/13 | 0.4615384615 |
+| abstention accuracy | 10/10 | 1.0 |
+| hard-negative rejection | 3/3 | 1.0 |
+| ranking_drift_count = 0 | count | 0 |
+| privacy leaks | count | 0 |
+
+This formalizes the V2.36 preflight: induction provenance was present for all
+13 baseline cases, seven were lost before context top five, and six correct
+rank-one candidates were rejected by strict query support. The two proposed
+partial relaxations were not safe enough to ship. The production query-support behavior remained unchanged;
+no search-tool template sync was required.
+
+V2.37 is a bounded safe-no-change result. It proves disjoint public calibration,
+frozen holdout attribution, policy/runtime parity, and fail-closed candidate
+selection. It is not ranking repair. It is not archive-audit repair. It is not induction-content quality.
+It is not LLM answer quality, vector search,
+ontology discovery, private archive quality, or public leaderboard parity.
+
+## V2.38 Scheduled Update Single-Writer And Interrupted-Run Recovery Closure
+
+V2.38 closes the reusable runtime defect reproduced by overlapping scheduled
+updates: two global runners could mutate one deployment archive concurrently,
+a failed child did not stop later children, and task completion could be reported
+without a verifiable remote publication receipt.
+
+The deterministic public gate is:
+
+```bash
+python3 benchmarks/scheduled_update_single_writer_gate.py
+```
+
+The runner now acquires a repo-scoped exclusive lock before registry discovery
+or archive mutation. The parent and current child hold the same lock ownership;
+therefore an orphaned child keeps a second writer blocked until that child exits.
+A competing runner returns nonzero with
+`update_status=blocked reason=concurrent_update` and aggregate-only output. The
+project/source-stream loops use first failure fail-fast behavior, and managed
+SIGINT/SIGTERM handling terminates the current child before releasing ownership.
+Scheduled global commands use `--require-clean-worktree`, which rejects tracked,
+deleted, and untracked startup state before any child launch.
+
+The synthetic gate reports:
+
+| metric | value |
+| --- | ---: |
+| `single_writer_acceptance_rate` | 1.0 |
+| `concurrent_writer_rejection_rate` | 1.0 |
+| `dirty_startup_rejection_rate` | 1.0 |
+| `first_failure_fail_fast_rate` | 1.0 |
+| `post_failure_child_launch_count` | 0 |
+| `parent_termination_child_cleanup_rate` | 1.0 |
+| `orphan_child_lock_retention_rate` | 1.0 |
+| `lock_release_after_exit_rate` | 1.0 |
+| `publish_attempt_after_failed_update_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The scheduler prompt contract separately requires a publication receipt. Codex
+task completion is not publish success. After the sync helper, the automation
+fetches the remote and verifies a clean worktree plus equality between
+`git rev-parse HEAD` and `git rev-parse origin/main`. It may emit only
+`published`, `no_op_current`, or `blocked`; a command failure, missing receipt,
+dirty state, or commit mismatch is `blocked`. The alignment gate includes
+negative cases for a missing clean-worktree flag and a missing receipt contract.
+
+The bounded private recovery was completed on 2026-07-12 without committing
+private evidence to this repository. The failed generated state was first
+classified by aggregate path counts and quarantined locally. A controlled run
+then completed 71/71 registered project updates, zero source-stream updates, and
+exit zero in approximately 83 minutes while process sampling showed one runner
+and at most one updater child.
+
+The first post-run audit correctly blocked publication on four stale memory-ID
+targets retained by one explicit node after clean-cut regeneration removed the
+old automatic nodes. The reusable repair now reconciles against both current and
+committed durable memory IDs, removes only targets proven to have disappeared,
+and preserves unknown missing refs for fail-closed audit. Its focused
+updater/audit suite passed 184 tests. A zero-record locked rebuild then closed
+the stale edges. The archive audit, publish-readiness audit, and search health
+check passed; publish-surface repair reported zero malformed or ambiguous
+records and zero privacy leaks.
+
+The serialized runner defers stale-edge closure on all non-final updater
+children, so only the final child reconciles after every prior child succeeds.
+Later-project regeneration therefore cannot be erased by an earlier intermediate rebuild.
+
+The reviewed sync helper committed and pushed archive commit `a8fd832`. A fresh
+fetch proved local `HEAD` equals `origin/main`, the commit advanced from the
+pre-publication SHA, and the worktree was clean. A total of three local stashes
+containing the original failed state and blocked recovery checkpoints remain retained. The
+original concurrent-failure stash was never reapplied or published; later clean
+recovery checkpoints were used locally to continue the same recovery, while the
+stash refs themselves were never pushed or dropped. The live automation prompt
+alignment gate passed with zero privacy leaks and zero raw Git publish paths,
+after which the existing automation was restored to `status: ACTIVE`.
+
+V2.38 proves current-platform, single-host scheduled update ownership,
+first-failure propagation, bounded process cleanup, dirty-startup rejection,
+and deterministic publication-status semantics. It is not whole-run rollback,
+not a cross-host distributed lock, not a GitHub availability SLA, and not memory quality.
+It also does not change ranking, induction, schema, archive audit
+heuristics, or sync allowlists.
+
+## V2.39 Scheduled Update Single-Inventory And Single-Finalization Throughput Closure
+
+Date: 2026-07-13
+
+V2.39 addresses the two repeated-work paths measured after V2.38's controlled
+71-project run took approximately 83 minutes. The global runner previously
+scanned the shared source directory once for project discovery, then each
+project updater scanned and parsed it again. Every successful updater also ran
+the archive-wide `rebuild_indexes()` path, even when it selected zero records.
+
+The deterministic public gate is:
+
+```bash
+python3 benchmarks/scheduled_update_throughput_gate.py
+```
+
+The runner now builds one in-memory inventory for each unique canonical source
+root and pattern set. It reuses that inventory for project discovery and target
+selection, then sends only target-specific metadata through stdin. The payload
+contains relative paths and integrity metadata, never source content. The child
+revalidates containment, metadata, hash, project matching, and automation-source
+exclusion before mutation. Malformed, duplicate, outside-root, symlink-escape,
+or changed inventory records fail closed with aggregate-only diagnostics.
+
+Each ingestion child writes authoritative session metadata while deferring
+derived surfaces. During this interval high-water selection reads authoritative
+session metadata rather than the now-stale generated session index. After every
+project and source-stream child succeeds, one finalize-only child rebuilds all
+derived indexes, daily views, memory nodes, and clean-cut references. An
+ingestion failure launches no finalizer; a finalizer failure propagates nonzero.
+Dry runs and runs without runnable targets do not finalize.
+
+The public gate uses a lightweight 71-target scheduling case for deterministic
+operation counts and a smaller actual-updater case for byte-for-byte comparison
+against the V2.38 scripts. It also reruns the V2.38 single-writer gate.
+
+| metric | value |
+| --- | ---: |
+| `source_inventory_amplification` | 1.0 |
+| `source_root_rescan_count` | 0 |
+| `nonselected_record_reparse_count` | 0 |
+| `target_dispatch_accuracy` | 1.0 |
+| `successful_run_finalization_count` | 1 |
+| `failed_run_finalization_count` | 0 |
+| `output_parity_rate` | 1.0 |
+| `output_parity_scenario_count` | 4 |
+| `fail_closed_inventory_rejection_rate` | 1.0 |
+| `single_writer_regression_pass_rate` | 1.0 |
+| `synthetic_redundant_work_reduction_rate` | 0.986013986013986 |
+| `privacy_leak_count` | 0 |
+
+The four actual-updater parity scenarios cover registered projects with a
+shared archive scope and independent source partitions, a source stream, and
+custom-pattern, zero-record, and rewrite/max-record execution. This
+proves deterministic source-inventory reuse, target dispatch, a single
+successful final rebuild, failure suppression, and final archive-output parity
+for the synthetic contract. It is not whole-run rollback, not distributed
+locking, and not private wall-clock performance. It does not prove memory quality,
+ranking, induction quality, LLM answer quality, vector search, ontology
+discovery, GitHub availability, or public leaderboard parity. Private bounded
+timing and deployment evidence remain separate acceptance gates and must not be
+inferred from the synthetic operation-count result.
+
+### Private acceptance result: `no_go`
+
+The bounded private shadow measurement used one immutable source snapshot with
+338 candidate files and 2,611,465,503 aggregate source bytes. No source content,
+project names, repository paths, or generated archive records were copied into
+this repository. A controlled 12-target, zero-new-record A/B isolated repeated
+inventory and rebuild work:
+
+| private shadow metric | value |
+| --- | ---: |
+| V2.38 baseline elapsed seconds | 1923.252 |
+| V2.39 candidate elapsed seconds | 165.667 |
+| controlled-case speedup | 11.609x |
+| V2.39 source inventory seconds | 42.796 |
+| V2.39 archive-state seconds | 3.919 |
+| V2.39 target discovery seconds | 116.146 |
+| selected records in the bounded hotspot profile | 25 |
+| selected aggregate source bytes | 1518602464 |
+
+The required 71-target default-update shadow run did not complete before the
+hard 1800-second acceptance limit. Therefore V2.39 failed the full private
+wall-clock gate even though the isolated repeated-work case improved. The
+timed-out report did not retain reviewable private byte-parity evidence, so
+private output parity was not accepted; the public synthetic parity result must
+not be substituted for it.
+
+One bounded diagnostic pass showed that inventory construction, archive-state
+reads, and target discovery accounted for approximately 163 seconds, while the
+selected records represented approximately 1.52 GB. This supports the inference
+that record materialization remained the dominant unclosed path, but it does not
+identify or prove a safe materialization optimization. Changing record writing,
+summarization, source parsing, or source-anchor behavior is outside this goal's
+single-inventory and single-finalization scope, so no further correction was
+attempted.
+
+The candidate was not installed or deployed. V2.38 remains deployed, and V2.39
+is retained only as a source-level implementation and reproducible public gate.
+A future goal may address large-record materialization only with a separately
+bounded contract, output-parity evidence, and its own private acceptance limit.
+
+## V2.40 Scheduled Selected-Record Materialization Throughput Closure
+
+Date: 2026-07-13
+
+V2.40 addresses the selected-record materialization work isolated by V2.39.
+The internal inventory contract now carries normalized `source_updated_at`
+metadata. Scheduled children apply schema, containment, high-water, source-hash
+freshness, and `--max-records` selection before opening selected source content.
+Each selected JSONL record is then read once, hashed from those bytes, redacted
+once, and decoded at most twice per valid line for original-anchor and redacted
+event semantics.
+
+Selected records become compact `PreparedArchiveRecord` values containing only
+derived archive artifacts and redaction counts. They retain no raw source payload.
+Every selected record must validate and prepare before the first existing entry
+is removed or new archive file is written. Non-JSON inputs retain the established
+fallback, and direct updater calls retain their prior discovery behavior.
+
+The deterministic public command is:
+
+```bash
+python3 benchmarks/selected_record_materialization_gate.py
+```
+
+| metric | value |
+| --- | ---: |
+| `selected_record_source_read_amplification` | 1.0 |
+| `selected_record_redaction_amplification` | 1.0 |
+| `selected_record_json_decode_amplification` | 2.0 |
+| `selected_record_preparation_before_mutation_rate` | 1.0 |
+| `selected_record_raw_payload_retention_count` | 0 |
+| `selected_record_output_parity_rate` | 1.0 |
+| `selected_record_source_anchor_parity_rate` | 1.0 |
+| `selected_record_secret_policy_parity_rate` | 1.0 |
+| `selected_record_mutation_rejection_rate` | 1.0 |
+| `direct_cli_regression_pass_rate` | 1.0 |
+| `v239_throughput_regression_pass_rate` | 1.0 |
+| `v238_single_writer_regression_pass_rate` | 1.0 |
+| `synthetic_materialization_work_reduction_rate` | 0.6666666666666667 |
+| `privacy_leak_count` | 0 |
+
+Against the fixed V2.39 source, full-content read amplification changed from
+4.0 to 1.0, redaction amplification from 2.0 to 1.0, and source JSON decode
+amplification from 6.0 to 2.0. The synthetic gate also requires byte-for-byte
+archive output, source-anchor, secret-policy, mutation, direct-CLI, V2.39
+throughput, and V2.38 single-writer parity.
+
+### Private acceptance result: `no_go`
+
+The bounded acceptance used one immutable CoW source snapshot. It discovered
+310 source inventory records, 72 enabled targets, and 27 selected candidates.
+The deterministic subset contained two unique selected records totaling
+343,800,494 bytes. Only aggregate counts and timings were retained; no project
+names, repository paths, source content, or archive content entered this
+repository.
+
+| private acceptance metric | value |
+| --- | ---: |
+| V2.39 subset elapsed seconds | 147.893 |
+| V2.40 subset elapsed seconds | 126.182 |
+| `private_selected_materialization_speedup` | 1.172062 |
+| `v239_v240_subset_output_parity_rate` | 1.0 |
+| `private_shadow_run_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The selected-subset speedup was below the required 2.0 threshold. Per the
+convergence rule, V2.38 parity and the 72-target candidate shadow were not run,
+and no further micro-optimization was attempted. The candidate was not
+installed or deployed. V2.38 remains deployed.
+
+The public operation-count result and synthetic output parity are not deployment approval.
+V2.40 does not prove memory quality, ranking, induction
+quality, LLM quality, vector search, scheduler reliability, GitHub availability,
+ontology discovery, or public leaderboard parity.
+
+## V2.41 Scheduled Durable-Event Projection Attribution And Closure
+
+Date: 2026-07-13
+
+V2.41 tests whether early projection of durable events can close the residual
+selected-record preparation time left by V2.40. The public attribution command
+is:
+
+```bash
+python3 benchmarks/durable_event_projection_gate.py
+```
+
+The synthetic gate uses mixed JSONL records with durable user/final messages
+and large status, commentary, function-call, and function-output payloads. Its
+profiling harness produces the same prepared artifacts as the normal V2.40
+path. A counterfactual run using only the existing `user`, `assistant`, and
+`record` events preserves artifact content, event order, and source hashes.
+
+| deterministic metric | value |
+| --- | ---: |
+| `phase_attribution_coverage_rate` | 1.0 |
+| `implementation_decision_accuracy` | 1.0 |
+| `profile_harness_output_parity_rate` | 1.0 |
+| `nondurable_output_dependency_rate` | 0.0 |
+| `durable_event_projection_parity_rate` | 1.0 |
+| `durable_event_order_parity_rate` | 1.0 |
+| `durable_event_hash_parity_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+These metrics prove bounded phase attribution and that non-durable events do
+not contribute to the synthetic durable archive output. They are not projection implementation,
+private hotspot evidence, deployment approval, or memory-quality evidence.
+
+### Private attribution result: `profile_no_go`
+
+The single permitted private attribution used one immutable CoW snapshot. It
+found 311 inventory records, 72 enabled targets, and 28 selected candidates.
+The deterministic subset contained two unique records totaling 347,065,206
+bytes. Only aggregate phase timings and counts were retained.
+
+| private attribution metric | value |
+| --- | ---: |
+| total selected-record preparation seconds | 126.012448 |
+| avoidable non-durable processing seconds | 36.752164 |
+| `avoidable_nondurable_processing_share` | 0.291655026 |
+| `projected_max_speedup` | 1.411741506 |
+| `phase_attribution_coverage_rate` | 1.0 |
+| `nondurable_output_dependency_rate` | 0.0 |
+| `summary_source_anchor` seconds | 58.319916 |
+| `redaction` seconds | 16.845393 |
+| `nondurable_event_normalization` seconds | 30.489503 |
+| `private_shadow_run_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The measured avoidable share did not reach the required 0.55 threshold, and
+the Amdahl upper bound did not reach 2.2x. The conditional projection was
+therefore not implemented. Per the convergence rule, the larger
+`summary_source_anchor` phase was recorded but not pursued as a second
+optimization strategy, and no 72-target shadow was run.
+
+The implementation decision combines the private aggregate timing share with
+the public counterfactual `nondurable_output_dependency_rate=0.0`; it does not
+claim private artifact-parity evidence.
+
+All private temporary snapshots and reports were removed after recording the
+aggregate result. The candidate was not installed or deployed, the automation
+configuration was restored unchanged, and V2.38 remains deployed.
+
+## V2.42 Scheduled Durable Semantic Index Final Performance Closure
+
+Date: 2026-07-13
+
+V2.42 tests the final permitted architecture for closing scheduled
+selected-record preparation under the current archive semantics and 2x target.
+The proposed architecture would build one durable semantic index per selected
+record, combining early non-durable event rejection with removal of repeated
+summary and source-lookup work. The public attribution command is:
+
+```bash
+python3 benchmarks/durable_semantic_index_gate.py
+```
+
+The synthetic gate uses stack-based exclusive timing, so nested helper time is
+assigned only to the innermost phase. It observes repeated work in the current
+path and compares normal preparation with a test-only durable-event projection
+and semantic-cache counterfactual. It does not add a runtime semantic index.
+
+| deterministic public metric | value |
+| --- | ---: |
+| `exclusive_phase_attribution_coverage_rate` | 1.0 |
+| `exclusive_phase_overlap_seconds` | 0.0 |
+| `baseline_raw_event_traversal_count` | 13 |
+| `baseline_source_event_lookup_full_scan_count` | 4 |
+| `baseline_source_event_for_text_scan_count` | 2 |
+| `baseline_source_text_normalization_count` | 24 |
+| `baseline_repeated_semantic_normalization_count` | 63 |
+| `baseline_nondurable_text_materialization_count` | 6 |
+| `counterfactual_archive_output_parity_rate` | 1.0 |
+| `counterfactual_summary_field_parity_rate` | 1.0 |
+| `counterfactual_source_anchor_parity_rate` | 1.0 |
+| `counterfactual_event_order_parity_rate` | 1.0 |
+| `counterfactual_event_hash_parity_rate` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+### Private architecture result: `architecture_no_go`
+
+One immutable CoW source/archive snapshot was used after the deployed runtime
+passed 19/19 tool parity, the private archive was clean and current, the update
+lock was available, and the existing automation was paused without changing
+its prompt. The deterministic two-record subset remained inside the required
+256-512 MiB window. Only aggregate counts and timings were retained.
+
+| private attribution metric | value |
+| --- | ---: |
+| inventory records | 313 |
+| enabled targets | 72 |
+| selected candidates | 19 |
+| subset records | 2 |
+| subset aggregate bytes | 351763185 |
+| total preparation seconds | 131.576364 |
+| fused avoidable processing seconds | 75.622322 |
+| `fused_avoidable_processing_share` | 0.574740927 |
+| `fused_projected_max_speedup` | 2.351507735 |
+| `exclusive_phase_attribution_coverage_rate` | 1.0 |
+| `exclusive_phase_overlap_seconds` | 0.0 |
+| repeated semantic normalization seconds | 32.855674 |
+| non-durable event normalization seconds | 31.667363 |
+| non-durable event materialization seconds | 6.191203 |
+| source lookup seconds | 2.794896 |
+| repeated event scan seconds | 2.113185 |
+| `private_candidate_run_count` | 0 |
+| `private_full_shadow_run_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The removable share missed the required 0.60 threshold and its Amdahl upper
+bound missed the required 2.5x threshold. The runtime `DurableSemanticIndex`
+candidate was therefore not implemented. No warm-up, alternating A/B subset
+timings, 72-target shadow, installation, deployment, or publication occurred.
+The numerator already treats all measured repeated normalization, repeated
+scan, source-lookup, and non-durable phases as fully removable, so the reported
+share and speedup are optimistic upper bounds rather than guaranteed gains.
+Per the convergence rule, this closes scheduled selected-record performance
+work under the current semantics and 2x target until the target, constraints,
+or evidence changes; no second hotspot or alternative optimization was pursued.
+
+The private snapshot and harness were deleted, the private archive remained
+clean and current, and the automation was restored to its original active
+configuration and prompt hash. V2.38 remains deployed.
+
+V2.42 proves exclusive public attribution, counterfactual output parity, and a
+bounded private architecture decision. It does not prove runtime semantic-index
+behavior, private candidate speedup, memory quality, ranking, induction quality,
+LLM quality, vector search, ontology discovery, GitHub availability, deployment
+approval, or public benchmark parity.
+
+## V2.43 Mainline Release Truth And Candidate-Chain Convergence
+
+Date: 2026-07-13
+
+V2.43 converges the six linear V2.37-V2.42 source commits without rewriting
+their verified history. At the dated V2.43 preflight, source main was V2.36
+commit `9ae179f`, and the verified implementation input ended at V2.42 commit
+`51bdfbe`. The integration pull request records that immutable comparison; it
+does not assert the remote state after the pull-request lifecycle. Merging the
+pull request advances the reusable source and packaged template, but it does
+not install or deploy that source on its own.
+
+The release decision keeps public functional evidence separate from private
+deployment performance. In particular, a private performance `no_go` is not a functional failure.
+V2.39 and V2.40 remain eligible for source integration because their public
+functional, privacy, packaged-runtime, output-parity, and regression gates pass;
+their failed private timing thresholds still prohibit treating them as installed
+or deployed performance improvements.
+
+| version | change class | public result | installed/private result | release implication |
+| --- | --- | --- | --- | --- |
+| V2.37 | evaluation-only query-support calibration | safe no-change; no runtime policy selected | not installed or deployed | retain the bounded `no_go` evidence without changing query support |
+| V2.38 | scheduled runner, updater, recovery, and publication runtime | functional and privacy gates pass | the V2.43 preflight observed installed skills and private deployment matching the runtime bundle from commit `e25c5bc` | deployed baseline observed by this preflight and source integration input |
+| V2.39 | single-inventory and single-finalization runtime | public output parity and regressions pass | private full run exceeded 1800 seconds; output parity was not accepted | integrate as source runtime, without deployment approval |
+| V2.40 | selected-record preparation runtime | public artifact, anchor, secret-policy, and regression parity pass | private subset speedup 1.172062; no full shadow | integrate as source runtime, without deployment approval |
+| V2.41 | attribution benchmark only | deterministic gate passes | private `profile_no_go`; no projection runtime | retain evidence only |
+| V2.42 | final architecture benchmark only | deterministic gate passes | private `architecture_no_go`; no candidate run | retain the final closure and no runtime `DurableSemanticIndex` implementation |
+
+The three release layers were checked independently with aggregate-only evidence:
+
+| layer comparison | observed status | claim boundary |
+| --- | --- | --- |
+| source candidate to private deployment | the 2026-07-13 preflight reported `17/19` matching tools, with two stale target tools; source bundle `559cd20bf9d458ded5fd17749a0c231cf999700d3bd330dca2071083a2d1cacd` | expected drift from the V2.39/V2.40 source-only runtime; not a deployment defect |
+| installed skills to private deployment | the 2026-07-13 preflight reported `19/19` matching tools and equal bundle fingerprint `ea3946e3bdb824b7966a62240d0d24dd637e0accdd16d7b7924cbc31d17ae08c` | both matched the V2.38 runtime at preflight time; not latest-source parity |
+| private deployment operation | the 2026-07-13 receipt was clean and current; the 04:05-07:13 scheduled run completed 72/72 enabled targets and reported `published` | dated V2.38 operational evidence only; not approval of V2.39/V2.40 performance |
+
+The packaged runtime contains no `DurableSemanticIndex` symbol, and
+selected-record performance work remains closed under the current archive
+semantics and 2x target. Reopening it requires a changed target, changed
+constraints, or materially different evidence rather than another hotspot or
+micro-optimization. The V2.43 convergence commit itself changes only
+documentation and its focused contract test. It does not install or deploy
+skills, alter the private archive, change the automation prompt, rerun a private
+72-target timing shadow, or claim that a source pull request has already been
+merged.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

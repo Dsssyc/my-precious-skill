@@ -830,6 +830,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn(str((target / "tools/run_memory_updates.py").resolve()), payload["ProgramArguments"])
             self.assertIn(str(source_dir.resolve()), payload["ProgramArguments"])
             self.assertIn("--allow-redacted-secrets", payload["ProgramArguments"])
+            self.assertIn("--require-clean-worktree", payload["ProgramArguments"])
             self.assertNotIn("--project-path", payload["ProgramArguments"])
             self.assertNotIn(str((target / "tools/update_memory_archive.py").resolve()), payload["ProgramArguments"])
 
@@ -915,6 +916,7 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Use exactly one working directory", prompt)
             self.assertIn(str(target.resolve()), prompt)
             self.assertIn("--allow-redacted-secrets", prompt)
+            self.assertIn("--require-clean-worktree", prompt)
             self.assertIn("tools/sync_memory_archive.py --push", prompt)
             self.assertIn("tools/sync_memory_archive.py --dry-run --push", prompt)
             self.assertIn("python tools/audit_memory_archive.py", prompt)
@@ -939,6 +941,16 @@ class SetupMemoryArchiveTests(unittest.TestCase):
             self.assertIn("Keep automation run notes separate from generated daily archive files", prompt)
             self.assertIn("Do not hand-stage files", prompt)
             self.assertIn("Do not use raw git add, git commit, or git push as the archive publish path", prompt)
+            self.assertIn("Task completion is not publish success", prompt)
+            self.assertIn("published", prompt)
+            self.assertIn("no_op_current", prompt)
+            self.assertIn("blocked", prompt)
+            self.assertIn("git rev-parse HEAD", prompt)
+            self.assertIn("git rev-parse origin/main", prompt)
+            self.assertIn(
+                'test -z "$(git status --porcelain=v1 --untracked-files=all)"',
+                prompt,
+            )
 
     def test_render_scheduler_refuses_global_schedule_without_runner(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

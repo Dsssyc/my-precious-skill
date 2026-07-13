@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -71,6 +72,8 @@ SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
 SOURCE_ANCHOR_VERSION = 1
+SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
+SOURCE_INVENTORY_REPORT_VERSION = 2
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
     "approve_supersedes",
     "approve_contradicts",
@@ -268,6 +271,20 @@ class SourceRecord:
     path: Path
     updated_at: datetime
     sha256: str
+    expected_size: int | None = None
+    expected_mtime_ns: int | None = None
+
+
+class SourceInventoryError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class PreparedArchiveRecord:
+    record: SourceRecord
+    destination: Path
+    artifacts: tuple[tuple[str, str], ...]
+    redaction_counts: dict[str, int]
 
 
 @dataclass
@@ -774,6 +791,8 @@ def archived_project_state(
     project_path: Path,
     archive_scope: str | None = None,
     source_partition: str | None = None,
+    *,
+    include_generated_index: bool = True,
 ) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
     scope_key = archive_scope or str(project_path.resolve())
     partition_key = source_partition or str(project_path.resolve())
@@ -781,15 +800,16 @@ def archived_project_state(
     archived_hashes: set[str] = set()
     archived_source_hashes: dict[str, set[str]] = {}
 
-    for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
-        if archive_scope_for_row(record) != scope_key:
-            continue
-        if not row_matches_source_partition(record, partition_key):
-            continue
-        for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
-            parsed = parse_timestamp(record.get(key))
-            if parsed and (latest is None or parsed > latest):
-                latest = parsed
+    if include_generated_index:
+        for record in iter_jsonl(memory_repo / "index" / "sessions.jsonl"):
+            if archive_scope_for_row(record) != scope_key:
+                continue
+            if not row_matches_source_partition(record, partition_key):
+                continue
+            for key in ("source_updated_at", "ended_at", "updated_at", "started_at", "date"):
+                parsed = parse_timestamp(record.get(key))
+                if parsed and (latest is None or parsed > latest):
+                    latest = parsed
 
     for meta_path in (memory_repo / "sessions").glob("**/meta.json"):
         try:
@@ -876,9 +896,13 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
             continue
 
 
-def record_matches_project(path: Path, text: str, project_path: Path, require_project_metadata: bool = False) -> bool:
+def record_matches_project_values(
+    values: Iterable[object],
+    project_path: Path,
+    require_project_metadata: bool = False,
+) -> bool:
     discovered_paths: list[Path] = []
-    for value in iter_source_json_values(path, text):
+    for value in values:
         for key, child in walk_json_values(value):
             if key in PROJECT_PATH_KEYS and isinstance(child, str) and child.strip():
                 candidate = Path(child).expanduser()
@@ -890,8 +914,16 @@ def record_matches_project(path: Path, text: str, project_path: Path, require_pr
     return any(candidate == project_key for candidate in discovered_paths)
 
 
-def is_codex_automation_thread_source(path: Path, text: str) -> bool:
-    for value in iter_source_json_values(path, text):
+def record_matches_project(path: Path, text: str, project_path: Path, require_project_metadata: bool = False) -> bool:
+    return record_matches_project_values(
+        iter_source_json_values(path, text),
+        project_path,
+        require_project_metadata,
+    )
+
+
+def source_values_are_automation(values: Iterable[object]) -> bool:
+    for value in values:
         if not isinstance(value, dict):
             continue
         if value.get("type") != "session_meta":
@@ -903,6 +935,10 @@ def is_codex_automation_thread_source(path: Path, text: str) -> bool:
         if thread_source == "automation":
             return True
     return False
+
+
+def is_codex_automation_thread_source(path: Path, text: str) -> bool:
+    return source_values_are_automation(iter_source_json_values(path, text))
 
 
 def timestamp_from_filename(path: Path) -> datetime | None:
@@ -941,16 +977,26 @@ def direct_timestamp_candidates(value: object) -> Iterable[datetime]:
             yield from direct_timestamp_candidates(item)
 
 
-def source_timestamp(path: Path, text: str) -> datetime:
+def source_timestamp_from_values(
+    path: Path,
+    values: Iterable[object],
+    *,
+    fallback_mtime: float | None = None,
+) -> datetime:
     candidates: list[datetime] = []
-    for value in iter_source_json_values(path, text):
+    for value in values:
         candidates.extend(direct_timestamp_candidates(value))
     filename_timestamp = timestamp_from_filename(path)
     if filename_timestamp:
         candidates.append(filename_timestamp)
     if candidates:
         return max(candidates)
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    mtime = path.stat().st_mtime if fallback_mtime is None else fallback_mtime
+    return datetime.fromtimestamp(mtime, tz=UTC)
+
+
+def source_timestamp(path: Path, text: str) -> datetime:
+    return source_timestamp_from_values(path, iter_source_json_values(path, text))
 
 
 def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterable[Path]:
@@ -995,6 +1041,108 @@ def discover_records(
                 continue
         records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash))
     return sorted(records, key=lambda item: (item.updated_at, item.path.as_posix()))
+
+
+def discover_records_from_inventory(
+    payload_text: str,
+    source_dir: Path,
+    after: datetime | None,
+    project_path: Path,
+    archived_hashes: set[str] | None = None,
+    archived_source_hashes: dict[str, set[str]] | None = None,
+    require_project_metadata: bool = False,
+) -> list[SourceRecord]:
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise SourceInventoryError("source inventory is malformed") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("report_kind") != SOURCE_INVENTORY_REPORT_KIND
+        or payload.get("report_version") != SOURCE_INVENTORY_REPORT_VERSION
+        or not isinstance(payload.get("records"), list)
+    ):
+        raise SourceInventoryError("source inventory contract is invalid")
+
+    source_root = source_dir.resolve()
+    archived_hashes = archived_hashes or set()
+    archived_source_hashes = archived_source_hashes or {}
+    seen: set[Path] = set()
+    records: list[SourceRecord] = []
+    for row in payload["records"]:
+        if not isinstance(row, dict):
+            raise SourceInventoryError("source inventory row is invalid")
+        relative_path = row.get("relative_path")
+        expected_hash = row.get("sha256")
+        expected_size = row.get("size")
+        expected_mtime_ns = row.get("mtime_ns")
+        source_updated_at = row.get("source_updated_at")
+        updated_at = parse_timestamp(source_updated_at)
+        if (
+            not isinstance(relative_path, str)
+            or not relative_path
+            or Path(relative_path).is_absolute()
+            or any(part in {"", ".", ".."} for part in Path(relative_path).parts)
+            or not isinstance(expected_hash, str)
+            or not SHA256_HEX_PATTERN.fullmatch(expected_hash)
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+            or not isinstance(expected_mtime_ns, int)
+            or expected_mtime_ns < 0
+            or updated_at is None
+        ):
+            raise SourceInventoryError("source inventory row is invalid")
+        try:
+            path = (source_root / relative_path).resolve(strict=True)
+            path.relative_to(source_root)
+        except (OSError, ValueError) as exc:
+            raise SourceInventoryError("source inventory path is unsafe") from exc
+        if path in seen:
+            raise SourceInventoryError("source inventory contains duplicate paths")
+        seen.add(path)
+        source_key = str(path)
+        prior_hashes_for_source = archived_source_hashes.get(source_key, set())
+        source_changed_since_archive = bool(prior_hashes_for_source) and expected_hash not in prior_hashes_for_source
+        if after is not None:
+            if updated_at < after and not source_changed_since_archive:
+                continue
+            if updated_at == after and expected_hash in archived_hashes:
+                continue
+        records.append(
+            SourceRecord(
+                path=path,
+                updated_at=updated_at,
+                sha256=expected_hash,
+                expected_size=expected_size,
+                expected_mtime_ns=expected_mtime_ns,
+            )
+        )
+    return sorted(records, key=lambda item: (item.updated_at, item.path.as_posix()))
+
+
+def read_validated_inventory_record(record: SourceRecord) -> tuple[str, float]:
+    try:
+        if record.path.resolve(strict=True) != record.path:
+            raise SourceInventoryError("source inventory path is unsafe")
+        initial_stat = record.path.stat()
+        raw = record.path.read_bytes()
+        final_stat = record.path.stat()
+    except SourceInventoryError:
+        raise
+    except OSError as exc:
+        raise SourceInventoryError("source inventory record is unavailable") from exc
+    if (
+        record.expected_size is None
+        or record.expected_mtime_ns is None
+        or initial_stat.st_size != record.expected_size
+        or initial_stat.st_mtime_ns != record.expected_mtime_ns
+        or final_stat.st_size != record.expected_size
+        or final_stat.st_mtime_ns != record.expected_mtime_ns
+        or len(raw) != record.expected_size
+        or hashlib.sha256(raw).hexdigest() != record.sha256
+    ):
+        raise SourceInventoryError("source inventory record changed")
+    return raw.decode("utf-8", errors="replace"), final_stat.st_mtime
 
 
 def redact_text(text: str) -> tuple[str, dict[str, int]]:
@@ -1780,21 +1928,7 @@ def jsonl_contains_value(text: str) -> bool:
     return False
 
 
-def extract_source_events(path: Path, text: str, hash_text: str | None = None) -> list[MemoryEvent]:
-    events: list[MemoryEvent] = []
-    parsed_any = False
-    if path.suffix == ".jsonl":
-        events = jsonl_events_with_locators(text, hash_text)
-        parsed_any = jsonl_contains_value(text)
-    else:
-        for value in iter_source_json_values(path, text):
-            parsed_any = True
-            events.extend(events_from_value(value))
-    if not parsed_any:
-        for line in text.splitlines():
-            line = clip(line)
-            if line:
-                events.append(MemoryEvent("record", line))
+def clean_source_events(events: Iterable[MemoryEvent]) -> list[MemoryEvent]:
     cleaned: list[MemoryEvent] = []
     for event in events:
         event_text = strip_memory_citation_blocks(event.text)
@@ -1813,6 +1947,74 @@ def extract_source_events(path: Path, text: str, hash_text: str | None = None) -
                     )
                 )
     return cleaned
+
+
+def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[MemoryEvent], list[object]]:
+    source_lines = source_text.splitlines()
+    redacted_lines = redacted_text.splitlines()
+    if len(source_lines) != len(redacted_lines):
+        raise SourceInventoryError("source redaction changed JSONL boundaries")
+
+    events: list[MemoryEvent] = []
+    source_values: list[object] = []
+    parsed_any = False
+    for line_number, (source_line, redacted_line) in enumerate(zip(source_lines, redacted_lines), 1):
+        source_value = None
+        stripped_source = source_line.strip()
+        if stripped_source:
+            try:
+                source_value = json.loads(stripped_source)
+            except json.JSONDecodeError:
+                pass
+        if source_value is not None:
+            source_values.append(source_value)
+
+        stripped_redacted = redacted_line.strip()
+        if not stripped_redacted:
+            continue
+        try:
+            redacted_value = json.loads(stripped_redacted)
+        except json.JSONDecodeError:
+            continue
+        parsed_any = True
+        line_events = events_from_value(redacted_value)
+        hash_events = events_from_value(source_value) if source_value is not None else []
+        for event_ordinal, event in enumerate(line_events, 1):
+            hash_text = hash_events[event_ordinal - 1].text if event_ordinal <= len(hash_events) else event.text
+            events.append(
+                MemoryEvent(
+                    event.kind,
+                    event.text,
+                    line_number,
+                    event_ordinal,
+                    source_event_sha256(hash_text),
+                )
+            )
+
+    if not parsed_any:
+        for line in redacted_lines:
+            text = clip(line)
+            if text:
+                events.append(MemoryEvent("record", text))
+    return clean_source_events(events), source_values
+
+
+def extract_source_events(path: Path, text: str, hash_text: str | None = None) -> list[MemoryEvent]:
+    events: list[MemoryEvent] = []
+    parsed_any = False
+    if path.suffix == ".jsonl":
+        events = jsonl_events_with_locators(text, hash_text)
+        parsed_any = jsonl_contains_value(text)
+    else:
+        for value in iter_source_json_values(path, text):
+            parsed_any = True
+            events.extend(events_from_value(value))
+    if not parsed_any:
+        for line in text.splitlines():
+            line = clip(line)
+            if line:
+                events.append(MemoryEvent("record", line))
+    return clean_source_events(events)
 
 
 def bullet_list(items: list[str], fallback: str) -> str:
@@ -2587,7 +2789,7 @@ def materialize_source_anchors(summary_data: dict[str, object], source_record_sh
     return anchors
 
 
-def write_record(
+def prepare_record(
     memory_repo: Path,
     project_path: Path,
     archive_scope: str,
@@ -2595,23 +2797,19 @@ def write_record(
     project_name: str,
     source_agent: str,
     record: SourceRecord,
-) -> Path | None:
+    source_events: list[MemoryEvent],
+    redaction_counts: dict[str, int],
+) -> PreparedArchiveRecord:
     project_slug = slugify(project_name)
     destination = record_dir(memory_repo, project_slug, record)
     if not is_safe_archive_entry_dir(memory_repo, destination):
         raise SystemExit(f"Refusing to write unsafe archive entry path: {safe_diagnostic_path(destination)}")
-    destination.mkdir(parents=True, exist_ok=True)
-
-    source_text = read_record_text(record.path)
-    redacted_text, redaction_counts = redact_text(source_text)
-    source_events = extract_source_events(record.path, redacted_text, source_text)
     summary_data = summarize_events(source_events, project_name)
     explicit_memories = extract_explicit_memory_texts(source_events)
     summary_data["explicit_sources"] = explicit_source_entries(explicit_memories, source_events)
     summary_data["memory_candidate_sources"] = memory_candidate_source_entries(summary_data, source_events)
     if not has_durable_summary_content(summary_data):
-        shutil.rmtree(destination)
-        return None
+        return PreparedArchiveRecord(record, destination, (), redaction_counts)
     archived_at = utc_now()
     rel_summary = destination.relative_to(memory_repo) / "summary.md"
     rel_evidence = destination.relative_to(memory_repo) / "evidence.md"
@@ -2728,22 +2926,102 @@ See `evidence.md` for short redacted snippets that support the summary.
         redactions += "- No redactions were applied to the source content.\n"
     redactions = strip_trailing_whitespace_lines(redactions)
 
-    write_safe_archive_text(memory_repo, destination / "summary.md", summary, "record file")
-    write_safe_archive_text(memory_repo, destination / "evidence.md", evidence, "record file")
-    write_safe_archive_text(
-        memory_repo,
-        destination / "meta.json",
-        json.dumps(meta, indent=2, sort_keys=True) + "\n",
-        "record file",
+    return PreparedArchiveRecord(
+        record,
+        destination,
+        (
+            ("summary.md", summary),
+            ("evidence.md", evidence),
+            ("meta.json", json.dumps(meta, indent=2, sort_keys=True) + "\n"),
+            ("redactions.md", redactions),
+            ("source-map.json", json.dumps(source_map, indent=2, sort_keys=True) + "\n"),
+        ),
+        redaction_counts,
     )
-    write_safe_archive_text(memory_repo, destination / "redactions.md", redactions, "record file")
-    write_safe_archive_text(
+
+
+def prepare_inventory_record(
+    memory_repo: Path,
+    project_path: Path,
+    archive_scope: str,
+    source_partition: str,
+    project_name: str,
+    source_agent: str,
+    record: SourceRecord,
+    require_project_metadata: bool,
+) -> PreparedArchiveRecord:
+    source_text, source_mtime = read_validated_inventory_record(record)
+    redacted_text, redaction_counts = redact_text(source_text)
+    if record.path.suffix == ".jsonl":
+        try:
+            source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
+        except SourceInventoryError:
+            source_values = list(iter_source_json_values(record.path, source_text))
+            source_events = extract_source_events(record.path, redacted_text, source_text)
+    else:
+        source_values = list(iter_source_json_values(record.path, source_text))
+        source_events = extract_source_events(record.path, redacted_text, source_text)
+    if source_values_are_automation(source_values):
+        raise SourceInventoryError("source inventory contains an automation record")
+    if not record_matches_project_values(source_values, project_path, require_project_metadata):
+        raise SourceInventoryError("source inventory target mismatch")
+    if source_timestamp_from_values(record.path, source_values, fallback_mtime=source_mtime) != record.updated_at:
+        raise SourceInventoryError("source inventory timestamp mismatch")
+    del source_values, source_text, redacted_text
+    return prepare_record(
         memory_repo,
-        destination / "source-map.json",
-        json.dumps(source_map, indent=2, sort_keys=True) + "\n",
-        "record file",
+        project_path,
+        archive_scope,
+        source_partition,
+        project_name,
+        source_agent,
+        record,
+        source_events,
+        redaction_counts,
     )
-    return destination
+
+
+def apply_prepared_record(memory_repo: Path, prepared: PreparedArchiveRecord) -> Path | None:
+    if not prepared.artifacts:
+        if prepared.destination.exists():
+            if not is_safe_archive_entry_dir(memory_repo, prepared.destination):
+                raise SystemExit(
+                    f"Refusing to remove unsafe archive entry path: {safe_diagnostic_path(prepared.destination)}"
+                )
+            shutil.rmtree(prepared.destination)
+        return None
+    if not is_safe_archive_entry_dir(memory_repo, prepared.destination):
+        raise SystemExit(f"Refusing to write unsafe archive entry path: {safe_diagnostic_path(prepared.destination)}")
+    prepared.destination.mkdir(parents=True, exist_ok=True)
+    for name, text in prepared.artifacts:
+        write_safe_archive_text(memory_repo, prepared.destination / name, text, "record file")
+    return prepared.destination
+
+
+def write_record(
+    memory_repo: Path,
+    project_path: Path,
+    archive_scope: str,
+    source_partition: str,
+    project_name: str,
+    source_agent: str,
+    record: SourceRecord,
+) -> Path | None:
+    source_text = read_record_text(record.path)
+    redacted_text, redaction_counts = redact_text(source_text)
+    source_events = extract_source_events(record.path, redacted_text, source_text)
+    prepared = prepare_record(
+        memory_repo,
+        project_path,
+        archive_scope,
+        source_partition,
+        project_name,
+        source_agent,
+        record,
+        source_events,
+        redaction_counts,
+    )
+    return apply_prepared_record(memory_repo, prepared)
 
 
 def memory_topic(text: str, tags: Iterable[str]) -> str:
@@ -3636,8 +3914,98 @@ def merge_existing_explicit_memory_nodes(memory_repo: Path, nodes: list[dict]) -
     return sorted(reconciled, key=memory_node_sort_key)
 
 
-def write_memory_nodes(memory_repo: Path, nodes: list[dict]) -> list[dict]:
+def existing_durable_memory_ids(memory_repo: Path) -> set[str]:
+    memory_ids: set[str] = set()
+    for path in sorted((memory_repo / "memories").glob("*.jsonl")):
+        for node in iter_jsonl(path):
+            memory_id = node.get("memory_id")
+            if isinstance(memory_id, str) and memory_id:
+                memory_ids.add(memory_id)
+    return memory_ids
+
+
+def committed_durable_memory_ids(memory_repo: Path) -> set[str]:
+    if not (memory_repo / ".git").exists():
+        return set()
+    memory_ids: set[str] = set()
+    relative_paths = [
+        *(f"memories/{file_name}" for file_name in MEMORY_LAYER_FILES.values()),
+        "memories/explicit.jsonl",
+    ]
+    for relative in relative_paths:
+        try:
+            result = subprocess.run(
+                ["git", "show", f"HEAD:{relative}"],
+                cwd=memory_repo,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError:
+            return set()
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            try:
+                node = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            memory_id = node.get("memory_id") if isinstance(node, dict) else None
+            if isinstance(memory_id, str) and memory_id:
+                memory_ids.add(memory_id)
+    return memory_ids
+
+
+def reconcile_removed_memory_references(
+    nodes: list[dict],
+    removed_memory_ids: set[str],
+) -> list[dict]:
+    if not removed_memory_ids:
+        return nodes
+    reconciled: list[dict] = []
+    list_fields = (
+        "derived_from",
+        "supersedes",
+        "contradicts",
+        "deprecates",
+        "contradicted_by",
+    )
+    scalar_fields = ("superseded_by", "deprecated_by")
+    for node in nodes:
+        updated = dict(node)
+        for field in list_fields:
+            values = updated.get(field)
+            if isinstance(values, list):
+                updated[field] = [value for value in values if value not in removed_memory_ids]
+        for field in scalar_fields:
+            if updated.get(field) in removed_memory_ids:
+                updated[field] = None
+        reconciled.append(updated)
+    return reconciled
+
+
+def write_memory_nodes(
+    memory_repo: Path,
+    nodes: list[dict],
+    *,
+    reconcile_removed_refs: bool = True,
+) -> list[dict]:
+    previous_memory_ids = set()
+    if reconcile_removed_refs:
+        previous_memory_ids = existing_durable_memory_ids(memory_repo) | committed_durable_memory_ids(
+            memory_repo
+        )
     nodes = merge_existing_explicit_memory_nodes(memory_repo, nodes)
+    if reconcile_removed_refs:
+        current_memory_ids = {
+            memory_id
+            for node in nodes
+            if isinstance((memory_id := node.get("memory_id")), str) and memory_id
+        }
+        nodes = reconcile_removed_memory_references(
+            nodes,
+            previous_memory_ids - current_memory_ids,
+        )
     apply_memory_id_supersession_links(nodes)
     apply_memory_id_contradiction_links(nodes)
     apply_memory_id_deprecation_links(nodes)
@@ -4288,7 +4656,7 @@ def write_jsonl_index(memory_repo: Path, path: Path, rows: list[dict], label: st
     write_safe_archive_text(memory_repo, path, "\n".join(lines) + ("\n" if lines else ""), label)
 
 
-def rebuild_indexes(memory_repo: Path) -> None:
+def rebuild_indexes(memory_repo: Path, *, reconcile_removed_refs: bool = True) -> None:
     index_dir = memory_repo / "index"
     if not is_safe_repo_path(memory_repo, index_dir):
         raise SystemExit(f"Refusing to write unsafe archive index path: {safe_diagnostic_path(index_dir)}")
@@ -4308,7 +4676,11 @@ def rebuild_indexes(memory_repo: Path) -> None:
         initial_review_candidates,
         review_decisions,
     )
-    memory_nodes = write_memory_nodes(memory_repo, memory_nodes)
+    memory_nodes = write_memory_nodes(
+        memory_repo,
+        memory_nodes,
+        reconcile_removed_refs=reconcile_removed_refs,
+    )
     review_candidates = build_memory_review_candidates(memory_nodes)
     review_candidates = filter_reviewed_memory_candidates(review_candidates, review_decision_results)
     consolidation_traces = build_memory_consolidation_traces(memory_nodes, review_candidates)
@@ -4607,7 +4979,7 @@ def unique_durable_daily_items(items: Iterable[object]) -> list[str]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--memory-repo", help="Path to the private memory repository")
-    parser.add_argument("--source-dir", required=True, help="Directory containing source records to scan")
+    parser.add_argument("--source-dir", help="Directory containing source records to scan")
     parser.add_argument("--project-path", default=os.getcwd(), help="Project path used for source-record filtering and legacy scope defaults")
     parser.add_argument(
         "--archive-scope",
@@ -4632,6 +5004,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--require-project-metadata",
         action="store_true",
         help="Only archive source records that explicitly identify the current project path",
+    )
+    parser.add_argument(
+        "--defer-memory-ref-reconciliation",
+        action="store_true",
+        help="Defer clean-cut memory-reference closure to a later updater in the same serialized run",
+    )
+    parser.add_argument(
+        "--defer-global-rebuild",
+        action="store_true",
+        help="Write authoritative session surfaces and defer derived archive rebuilding",
+    )
+    parser.add_argument(
+        "--source-inventory-stdin",
+        action="store_true",
+        help="Read a versioned target-specific source inventory from standard input",
+    )
+    parser.add_argument(
+        "--finalize-archive",
+        action="store_true",
+        help="Rebuild derived archive surfaces without scanning source records",
     )
     parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
     parser.add_argument(
@@ -4673,6 +5065,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     memory_repo = resolve_memory_repo(args.memory_repo)
+    if args.finalize_archive:
+        rebuild_indexes(memory_repo, reconcile_removed_refs=True)
+        return 0
+    if not args.source_dir:
+        raise SystemExit("--source-dir is required unless --finalize-archive is used")
     source_dir = Path(args.source_dir).expanduser().resolve()
     project_path = Path(args.project_path).expanduser().resolve()
     archive_scope = normalize_archive_scope(args.archive_scope, project_path)
@@ -4742,7 +5139,10 @@ def main(argv: list[str] | None = None) -> int:
             for text in args.explicit_memory
         ]
         write_memory_nodes(memory_repo, [*generated_nodes, *direct_nodes])
-        rebuild_indexes(memory_repo)
+        rebuild_indexes(
+            memory_repo,
+            reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
+        )
         return 0
 
     latest, archived_hashes, archived_source_hashes = archived_project_state(
@@ -4750,18 +5150,54 @@ def main(argv: list[str] | None = None) -> int:
         project_path,
         archive_scope,
         source_partition,
+        include_generated_index=not args.defer_global_rebuild,
     )
-    records = discover_records(
-        source_dir,
-        patterns,
+    discovery_args = (
         None if args.rewrite_existing else latest,
         project_path,
         set() if args.rewrite_existing else archived_hashes,
         {} if args.rewrite_existing else archived_source_hashes,
-        require_project_metadata=args.require_project_metadata,
     )
+    if args.source_inventory_stdin:
+        try:
+            records = discover_records_from_inventory(
+                sys.stdin.read(),
+                source_dir,
+                *discovery_args,
+                require_project_metadata=args.require_project_metadata,
+            )
+        except SourceInventoryError:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
+    else:
+        records = discover_records(
+            source_dir,
+            patterns,
+            *discovery_args,
+            require_project_metadata=args.require_project_metadata,
+        )
     if args.max_records >= 0:
         records = records[: args.max_records]
+
+    prepared_records: list[PreparedArchiveRecord] | None = None
+    if args.source_inventory_stdin and not args.dry_run:
+        try:
+            prepared_records = [
+                prepare_inventory_record(
+                    memory_repo,
+                    project_path,
+                    archive_scope,
+                    source_partition,
+                    project_name,
+                    args.source_agent,
+                    record,
+                    args.require_project_metadata,
+                )
+                for record in records
+            ]
+        except SourceInventoryError:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
 
     print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
     print(f"Project path: {safe_diagnostic_path(project_path)}")
@@ -4779,11 +5215,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return 0
 
-    sensitive_records: list[tuple[SourceRecord, dict[str, int]]] = []
-    for record in records:
-        _, counts = redact_text(read_record_text(record.path))
-        if counts:
-            sensitive_records.append((record, counts))
+    if prepared_records is not None:
+        sensitive_records = [
+            (prepared.record, prepared.redaction_counts)
+            for prepared in prepared_records
+            if prepared.redaction_counts
+        ]
+    else:
+        sensitive_records = []
+        for record in records:
+            _, counts = redact_text(read_record_text(record.path))
+            if counts:
+                sensitive_records.append((record, counts))
     if sensitive_records and not args.allow_redacted_secrets:
         print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
         for record, counts in sensitive_records:
@@ -4794,7 +5237,7 @@ def main(argv: list[str] | None = None) -> int:
 
     removed_entries = 0
     skipped_records = 0
-    for record in records:
+    for record_index, record in enumerate(records):
         if args.rewrite_existing or str(record.path.resolve()) in archived_source_hashes:
             removed_entries += remove_existing_entries_for_source(
                 memory_repo,
@@ -4803,18 +5246,25 @@ def main(argv: list[str] | None = None) -> int:
                 archive_scope,
                 source_partition,
             )
-        written = write_record(
-            memory_repo=memory_repo,
-            project_path=project_path,
-            archive_scope=archive_scope,
-            source_partition=source_partition,
-            project_name=project_name,
-            source_agent=args.source_agent,
-            record=record,
-        )
+        if prepared_records is None:
+            written = write_record(
+                memory_repo=memory_repo,
+                project_path=project_path,
+                archive_scope=archive_scope,
+                source_partition=source_partition,
+                project_name=project_name,
+                source_agent=args.source_agent,
+                record=record,
+            )
+        else:
+            written = apply_prepared_record(memory_repo, prepared_records[record_index])
         if written is None:
             skipped_records += 1
-    rebuild_indexes(memory_repo)
+    if not args.defer_global_rebuild:
+        rebuild_indexes(
+            memory_repo,
+            reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
+        )
     if args.rewrite_existing or removed_entries:
         print(f"Existing entries removed: {removed_entries}")
     print(f"Records skipped as low-signal: {skipped_records}")

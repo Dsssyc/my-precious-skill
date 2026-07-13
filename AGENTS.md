@@ -109,6 +109,11 @@ python3 benchmarks/scheduled_publish_recovery_gate.py
 python3 benchmarks/scheduled_publish_search_gate.py
 python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
+python3 benchmarks/scheduled_update_single_writer_gate.py
+python3 benchmarks/scheduled_update_throughput_gate.py
+python3 benchmarks/selected_record_materialization_gate.py
+python3 benchmarks/durable_event_projection_gate.py
+python3 benchmarks/durable_semantic_index_gate.py
 python3 benchmarks/induction_consolidation_gate.py
 python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/long_horizon_memory_stress_gate.py
@@ -117,6 +122,7 @@ python3 benchmarks/search_tool_drift_repair_gate.py
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
+python3 benchmarks/public_query_support_calibration_gate.py --offline-fixture
 python3 benchmarks/active_support_recall_closure_gate.py
 python3 benchmarks/reviewed_automatic_memory_publish_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
@@ -132,6 +138,26 @@ python3 benchmarks/public_induction_recall_gate.py \
   --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
   --work-dir /tmp/my-precious-public-induction-run \
   --report-file /tmp/my-precious-public-induction-report.json
+```
+
+Run V2.37 public query-support calibration and the frozen holdout only with the
+pinned dataset and generated archives outside this repository:
+
+```bash
+python3 benchmarks/public_query_support_calibration_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort calibration \
+  --work-dir /tmp/my-precious-query-support-calibration \
+  --report-file /tmp/my-precious-query-support-calibration-report.json
+
+python3 benchmarks/public_query_support_calibration_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --selected-policy none \
+  --work-dir /tmp/my-precious-query-support-holdout \
+  --report-file /tmp/my-precious-query-support-holdout-report.json
 ```
 
 Compile bundled scripts when implementation code changes:
@@ -156,6 +182,11 @@ python3 -m py_compile \
   benchmarks/scheduled_publish_search_gate.py \
   benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/live_automation_prompt_alignment_gate.py \
+  benchmarks/scheduled_update_single_writer_gate.py \
+  benchmarks/scheduled_update_throughput_gate.py \
+  benchmarks/selected_record_materialization_gate.py \
+  benchmarks/durable_event_projection_gate.py \
+  benchmarks/durable_semantic_index_gate.py \
   benchmarks/induction_consolidation_gate.py \
   benchmarks/lifecycle_governance_gate.py \
   benchmarks/long_horizon_memory_stress_gate.py \
@@ -164,6 +195,7 @@ python3 -m py_compile \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
   benchmarks/public_induction_recall_gate.py \
+  benchmarks/public_query_support_calibration_gate.py \
   benchmarks/active_support_recall_closure_gate.py \
   benchmarks/reviewed_automatic_memory_publish_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
