@@ -56,6 +56,12 @@ python tools/capture_explicit_memory.py --input /path/to/explicit-memory.jsonl
 Do not paste raw chat transcripts, message arrays, source content, tool logs, or
 automation run notes into explicit capture. Each row should be a short fact.
 
+Automatic preference induction scans the complete event stream, keeps the
+user's original supported English or Chinese wording, and preserves the source
+user-event anchor. Do not promote current-task, tentative, hypothetical,
+question, quoted-example, process, or assistant-acknowledgement text. This
+bounded rule is not translation or arbitrary semantic inference.
+
 When the user explicitly corrects or retracts an earlier explicit memory, use
 the explicit revision path in the same adapter. Use `operation: replace` with
 `replaces_memory_id` when there is a new current fact. Use `operation:

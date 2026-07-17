@@ -2708,6 +2708,162 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(anchor["event_sha256"], source_hash)
         self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
 
+    def test_natural_user_preference_anchor_wins_over_assistant_literal_collision(self):
+        module = load_update_module()
+        source_text = "I prefer bounded plans to end in verified evidence."
+        derived_fact = "The user prefers bounded plans to end in verified evidence."
+        source_hash = module.source_event_sha256(source_text)
+        events = [
+            module.MemoryEvent("assistant", derived_fact, 1, 1, "a" * 64),
+            module.MemoryEvent("user", source_text, 2, 1, source_hash),
+        ]
+
+        summary = module.summarize_events(events, "synthetic-preference-collision")
+        source = next(row for row in summary["fact_sources"] if row["text"] == derived_fact)
+        anchor = next(
+            row
+            for row in summary["evidence_sources"]
+            if row["quote_id"] == source["evidence_quote_id"]
+        )
+
+        self.assertEqual(source["source"], "natural_user")
+        self.assertEqual(anchor["line_number"], 2)
+        self.assertEqual(anchor["event_ordinal"], 1)
+        self.assertEqual(anchor["event_sha256"], source_hash)
+
+    def test_natural_user_preference_scans_full_stream_for_durable_chinese_constraint(self):
+        module = load_update_module()
+        earlier_preferences = [
+            module.MemoryEvent(
+                "user",
+                f"I prefer synthetic preference marker {index} to remain deterministic.",
+                index,
+                1,
+                module.source_event_sha256(
+                    f"I prefer synthetic preference marker {index} to remain deterministic."
+                ),
+            )
+            for index in range(1, 7)
+        ]
+        source_text = (
+            "以后给我起草 goal 提示词时，我默认要求每个 subgoal 都必须可收敛，"
+            "并以可验证指标结束。"
+        )
+        source_hash = module.source_event_sha256(source_text)
+        events = [
+            *earlier_preferences,
+            module.MemoryEvent("assistant", "Unrelated project history remains synthetic.", 7, 1, "a" * 64),
+            module.MemoryEvent("user", source_text, 8, 1, source_hash),
+        ]
+
+        summary = module.summarize_events(events, "synthetic-long-preference")
+
+        expected_fact = f"用户偏好：{source_text}"
+        self.assertIn(expected_fact, summary["facts"])
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        self.assertEqual(source["source"], "natural_user")
+        anchor = next(
+            row
+            for row in summary["evidence_sources"]
+            if row["quote_id"] == source["evidence_quote_id"]
+        )
+        self.assertEqual(anchor["line_number"], 8)
+        self.assertEqual(anchor["event_ordinal"], 1)
+        self.assertEqual(anchor["event_sha256"], source_hash)
+
+    def test_natural_user_preference_rejects_chinese_temporary_hypothetical_and_quoted_text(self):
+        module = load_update_module()
+
+        rejected = (
+            "这次任务我希望只输出三段。",
+            "如果以后给我写 goal 提示词，是不是应该每个 subgoal 都可收敛？",
+            "引用提示词：\u201c我希望以后所有 goal 都只有一个 subgoal。\u201d",
+            "我的偏好可能是每次只输出三段，但我还没决定。",
+            "我的偏好是今天只输出三段。",
+            "示例，我默认要求所有计划都只有一个阶段。",
+            "例如，我默认要求所有计划都只有一个阶段。",
+            "引用如下。我的偏好是所有计划只能有一个阶段。",
+            "这一个任务我默认要求只输出三段。",
+            "以后给我看看这个报错。",
+            "以后给我检查当前 HEAD 的状态。",
+            "我默认这个分支已经合并。",
+            "我默认认为测试已经通过。",
+        )
+
+        self.assertEqual(
+            [module.natural_user_memory_fact(text) for text in rejected],
+            ["" for _ in rejected],
+        )
+
+    def test_natural_user_preference_promotes_repeated_agent_directed_normative_constraints(self):
+        module = load_update_module()
+        source_texts = (
+            "你给出的长期计划必须有明确停止条件，不能无限增加子任务，"
+            "每个阶段都必须以可验证结果结束。",
+            "那你给一个长期计划，必须有明确停止条件，不能无限增加子任务，"
+            "每个阶段都必须以可验证结果结束。",
+        )
+
+        for source_text in source_texts:
+            with self.subTest(source_text=source_text):
+                self.assertEqual(
+                    module.natural_user_memory_fact(source_text),
+                    f"用户偏好：{source_text}",
+                )
+
+    def test_natural_user_preference_preserves_reference_format_rule(self):
+        module = load_update_module()
+        source_text = "引用如下格式的代码时，我默认要求保留行号。"
+
+        self.assertEqual(
+            module.natural_user_memory_fact(source_text),
+            f"用户偏好：{source_text}",
+        )
+
+    def test_summarize_events_does_not_promote_chinese_assistant_acknowledgement(self):
+        module = load_update_module()
+        acknowledgements = (
+            "明白了，我会记住用户偏好，每个计划都必须可验证。",
+            "好的，我记住了用户偏好，后续每个计划都必须可验证。",
+            "明白，后续每个计划都必须可验证。",
+            "了解，我将遵循用户偏好，每个计划都必须可收敛。",
+            "OK，我会记住用户偏好，每个计划都必须可验证。",
+            "好的，已记住用户偏好，后续每个计划都必须可验证。",
+            "收到，后面我会按这个要求执行，每个计划都必须可验证。",
+        )
+        events = [module.MemoryEvent("user", "请回顾已有计划。", 1, 1, "a" * 64)]
+        events.extend(
+            module.MemoryEvent("assistant", text, index, 1, str(index) * 64)
+            for index, text in enumerate(acknowledgements, 2)
+        )
+
+        summary = module.summarize_events(events, "synthetic-acknowledgement")
+
+        for acknowledgement in acknowledgements:
+            with self.subTest(acknowledgement=acknowledgement):
+                self.assertNotIn(acknowledgement, summary["facts"])
+                self.assertFalse(
+                    any(
+                        row.get("source") == "natural_assistant"
+                        and row.get("text") == acknowledgement
+                        for row in summary["fact_sources"]
+                    )
+                )
+
+    def test_summarize_events_preserves_ack_prefixed_substantive_memory(self):
+        module = load_update_module()
+        architecture_decision = "OK，后续版本将使用新 API，这是已审查的架构决定。"
+        release_requirement = "好的，已记录决策：后续发布必须通过质量门禁。"
+        events = [
+            module.MemoryEvent("assistant", text, index, 1, str(index) * 64)
+            for index, text in enumerate((architecture_decision, release_requirement), 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-substantive-decisions")
+
+        self.assertIn(architecture_decision, summary["decisions"])
+        self.assertIn(release_requirement, summary["facts"])
+
     def test_build_memory_nodes_skips_automatic_candidates_without_summary_or_evidence(self):
         module = load_update_module()
         rows = [

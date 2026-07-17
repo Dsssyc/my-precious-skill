@@ -113,6 +113,14 @@ force-save, or distill a short fact, use the deployment repository's
 `tools/capture_explicit_memory.py` explicit capture path instead of waiting for
 ordinary summarization.
 
+Ordinary induction scans the complete event stream for high-confidence,
+durable user preferences in supported English and Chinese forms. It preserves
+the user's original language and binds the derived fact to the originating
+user event. Temporary or current-task constraints, tentative or hypothetical
+statements, questions, quoted examples, process text, and assistant
+acknowledgements must not be promoted. This is bounded extraction, not
+translation or open-ended semantic inference.
+
 The explicit capture adapter consumes agent-neutral JSONL. Each row should
 contain a short fact in `text` plus optional `layer`, `scope`, and `source`
 fields:

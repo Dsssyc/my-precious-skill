@@ -197,6 +197,24 @@ QUERY_STOP_TOKENS = {
     "would",
     "why",
 }
+QUERY_FACET_PATTERNS = (
+    re.compile(
+        r"\b(?:(?:global|user|personal)\s+)?preferences?\b|\bprefer\b|"
+        r"(?:全局|用户|我的|个人)?(?:长期)?偏好|默认(?:要求|选择|使用)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:project\s+history|historical\s+(?:decision|context)|program\s+map|roadmap)\b|"
+        r"项目历史|历史(?:决策|上下文)|路线图|阶段(?:计划|历史)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:current\s+(?:head|tests?|reviewed(?:[ -]code)?|repository|repo|state|status)|"
+        r"live\s+(?:repository|repo|state|status))\b|"
+        r"(?:当前|最新)\s*(?:HEAD|测试|已审(?:代码|状态)|仓库|代码状态|状态)",
+        re.IGNORECASE,
+    ),
+)
 
 
 def tokenize(text: str) -> list[str]:
@@ -562,6 +580,12 @@ def meaningful_coverage_tokens(query_tokens: list[str]) -> list[str]:
     if len(tokens) > 5:
         return []
     return tokens
+
+
+def query_decomposition_recommended(query: str, query_tokens: list[str]) -> bool:
+    meaningful_tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
+    facet_count = sum(1 for pattern in QUERY_FACET_PATTERNS if pattern.search(query))
+    return len(meaningful_tokens) > 5 or facet_count >= 2
 
 
 def has_meaningful_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
@@ -2133,6 +2157,7 @@ def build_context_package(
         context_hit(repo, hit, rank, depth, query_tokens)
         for rank, hit in enumerate(context_package_hits(hits, limit), 1)
     ]
+    decomposition_recommended = query_decomposition_recommended(query, query_tokens)
     return {
         "report_kind": "memory_recall_context_package",
         "report_version": 1,
@@ -2149,6 +2174,10 @@ def build_context_package(
             "preferred_scope": preferred_scope,
             "legacy_sessions": legacy_sessions,
             "project_context_provided": bool(project_path),
+            "decomposition_recommended": decomposition_recommended,
+            "decomposition_reason": (
+                "broad_or_multi_intent_query" if decomposition_recommended else "focused_query"
+            ),
         },
         "answerability": context_answerability(context_hits, inactive_match_count),
         "hits": context_hits,

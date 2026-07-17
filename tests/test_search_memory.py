@@ -149,6 +149,134 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertEqual(package["hits"][0]["memory_id"], "mem_high_support")
         self.assertEqual(package["answerability"]["status"], "supported")
 
+    def test_context_package_recommends_bounded_decomposition_for_broad_query(self):
+        search_memory = load_search_memory_module()
+        query = "请找出我的全局偏好、项目历史、当前 HEAD"
+        query_tokens = search_memory.unique_query_tokens(query)
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query=query,
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[],
+            inactive_match_count=0,
+        )
+
+        self.assertTrue(package["query"]["decomposition_recommended"])
+        self.assertEqual(package["query"]["decomposition_reason"], "broad_or_multi_intent_query")
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+
+    def test_context_package_keeps_focused_query_without_decomposition_signal(self):
+        search_memory = load_search_memory_module()
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query="goal preference",
+            query_tokens=["goal", "preference"],
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[],
+            inactive_match_count=0,
+        )
+
+        self.assertFalse(package["query"]["decomposition_recommended"])
+        self.assertEqual(package["query"]["decomposition_reason"], "focused_query")
+
+    def test_context_package_does_not_split_single_facet_conjunctions(self):
+        search_memory = load_search_memory_module()
+
+        for query in (
+            "design and architecture preference",
+            "我希望默认使用中文并且保持简洁",
+        ):
+            with self.subTest(query=query):
+                package = search_memory.build_context_package(
+                    repo=Path("."),
+                    query=query,
+                    query_tokens=search_memory.unique_query_tokens(query),
+                    depth="evidence",
+                    limit=5,
+                    scope="all",
+                    preferred_scope="",
+                    legacy_sessions=False,
+                    project_path=None,
+                    hits=[],
+                    inactive_match_count=0,
+                )
+
+                self.assertFalse(package["query"]["decomposition_recommended"])
+                self.assertEqual(package["query"]["decomposition_reason"], "focused_query")
+
+    def test_context_package_decomposition_signal_is_answerability_orthogonal(self):
+        search_memory = load_search_memory_module()
+        query_tokens = [
+            "historical",
+            "preference",
+            "project",
+            "program",
+            "current",
+            "reviewed",
+            "state",
+        ]
+        supported_hit = search_memory.Hit(
+            path=Path("index/memories.jsonl/mem_decomposition_supported"),
+            score=100,
+            source="memory",
+            why=[],
+            memory_id="mem_decomposition_supported",
+            layer="global",
+            scope="global",
+            topic="decomposition-orthogonality",
+            drill_paths=(
+                "sessions/2026/01/10/decomposition/summary.md",
+                "sessions/2026/01/10/decomposition/evidence.md",
+            ),
+            matched_tokens=tuple(query_tokens),
+        )
+
+        supported = search_memory.build_context_package(
+            repo=Path("."),
+            query=" ".join(query_tokens),
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[supported_hit],
+            inactive_match_count=0,
+        )
+        inactive_only = search_memory.build_context_package(
+            repo=Path("."),
+            query=" ".join(query_tokens),
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[],
+            inactive_match_count=1,
+        )
+
+        self.assertTrue(supported["query"]["decomposition_recommended"])
+        self.assertEqual(supported["answerability"]["status"], "supported")
+        self.assertTrue(inactive_only["query"]["decomposition_recommended"])
+        self.assertEqual(inactive_only["answerability"]["status"], "unsupported")
+        self.assertEqual(inactive_only["answerability"]["reason"], "no_active_current_support")
+
     def test_prune_low_relative_memory_hits_requires_99_percent_floor(self):
         search_memory = load_search_memory_module()
         top = search_memory.Hit(path=Path("top"), score=1000, source="memory", why=[])

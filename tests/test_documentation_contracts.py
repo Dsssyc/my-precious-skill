@@ -1019,6 +1019,59 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(update_skill, phrase)
 
+    def test_docs_record_v249_real_use_recall_utility_contract(self):
+        section = self.evaluation_section("## V2.49 Real-Use Recall Utility Closure")
+        for phrase in (
+            "benchmarks/real_use_recall_utility_gate.py",
+            "exact or short controls were supported in `2/2` cases",
+            "natural or multi-intent forms were supported in `0/2` cases",
+            "query.decomposition_recommended",
+            "complete event stream",
+            "source user-event anchor",
+            "at most two context-package queries",
+            "current HEAD",
+            "synthetic_case_count",
+            "durable_chinese_preference_extraction_recall",
+            "natural_goal_preference_supported_recall",
+            "project_history_supported_recall",
+            "live_state_memory_answer_count",
+            "wrong_project_supported_hit_count",
+            "unsupported_claim_count",
+            "privacy_leak_count",
+            "not general semantic-memory quality",
+            "not ranking quality",
+            "not vector search",
+            "not private archive correctness",
+            "not public leaderboard parity",
+            "not LLM answer quality",
+            "Private shadow result: `deployment_no_go`",
+            "private_preference_materialization_count",
+            "private_preference_source_binding_rate",
+            "private_goal_preference_supported",
+            "private_project_history_supported",
+            "private_transaction_invocation_count=0",
+            "source-normalization ordering boundary",
+            "skill-invocation prefix",
+            "candidate matched only `16/19`",
+            "prior `19/19` runtime parity",
+            "automation remained ACTIVE",
+            "was not installed",
+            "V2.39/V2.40",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        for phrase in (
+            "complete event stream",
+            "original language",
+            "assistant-acknowledgement",
+            "not translation",
+            "query.decomposition_recommended",
+            "per-hit `query_support`",
+            "current HEAD",
+        ):
+            self.assert_contains(self.skill_contracts + "\n" + self.design, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

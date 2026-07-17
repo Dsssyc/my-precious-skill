@@ -697,6 +697,33 @@ coverage additionally gates duplicate/conflicting induction review decision
 rejection and aggregate-only preflight output. They require
 `natural_false_promotion_rate` to remain 0 and `privacy_leak_count` to remain 0.
 
+### V2.49 Bounded Real-Use Preference And Facet Slice
+
+`benchmarks/real_use_recall_utility_gate.py` exercises a noisy long session
+through the clean packaged updater and consumes only packaged context JSON from
+the copied search tool. The write-side candidate scans the complete event
+stream for high-confidence durable English and Chinese user preferences,
+preserves original wording and the source user-event anchor, and rejects
+temporary, tentative, hypothetical, question, quoted-example, process, and
+assistant-acknowledgement text. It does not translate or infer arbitrary user
+meaning.
+
+The read-side candidate adds `query.decomposition_recommended` and
+`query.decomposition_reason` as query-shape metadata only. The fields do not
+change ranking, per-hit `query_support`, active/current status, lifecycle,
+scope, drill-path, privacy, or package answerability. The runtime recipe splits
+global preferences, project history, and live repository state, uses no more
+than two package queries for each historical facet, and routes current HEAD,
+tests, and reviewed-code state to repository inspection.
+
+The V2.49 private shadow ended in `deployment_no_go`. A durable real user
+message prefixed by a skill invocation was rejected as raw prompt text because
+the invocation's local path was checked before the existing skill-prefix
+normalizer ran. The frozen candidate was not retuned, installed, or used for a
+private transaction. This source-normalization ordering boundary remains a
+future goal; the public synthetic gate does not prove private source-adapter
+coverage.
+
 ## End-To-End Induction-To-Recall Benchmark
 
 `benchmarks/e2e_induction_recall_benchmark.py` evaluates the minimum complete

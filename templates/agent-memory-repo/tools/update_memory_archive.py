@@ -186,6 +186,58 @@ NATURAL_USER_MEMORY_PATTERNS = (
     (re.compile(r"(?i)^\s*my\s+preference\s+is\s+(?:that\s+)?(?P<text>.+)$"), "The user prefers {text}"),
     (re.compile(r"(?i)^\s*i\s+want\s+(?P<text>.+)$"), "The user wants {text}"),
 )
+CHINESE_TEXT_PATTERN = re.compile(r"[\u3400-\u9fff]")
+CHINESE_DIRECT_USER_PREFERENCE_PATTERN = re.compile(
+    r"(?:^|[，,。；;])\s*(?:"
+    r"我(?:的)?(?:长期|默认)?偏好(?:是|为|[:：])?|"
+    r"我(?:一直|一贯|通常)?(?:更)?(?:偏好|倾向于)|"
+    r"我默认(?:要求|希望|选择|采用|使用|需要)"
+    r")"
+)
+CHINESE_FUTURE_PREFERENCE_PATTERN = re.compile(r"(?:从今以后|以后|今后|往后|将来|未来)")
+CHINESE_USER_SPECIFIC_PATTERN = re.compile(
+    r"(?:给我|替我|为我|对我(?:来说)?|我(?:希望|要求|需要|默认|偏好|倾向于)|我的)"
+)
+CHINESE_AGENT_DIRECTED_PATTERN = re.compile(
+    r"(?:你|请)(?:给(?:出)?|提供|编写|起草|生成|写|回复|回答|制定|设计)"
+)
+CHINESE_NORMATIVE_PREFERENCE_PATTERN = re.compile(
+    r"(?:必须|不得|不要|不能|应该|需要|优先|默认|始终|总是|一律|"
+    r"每(?:次|回|个)|都(?:要|应|必须|得)?|只(?:能|要|用|保留|输出))"
+)
+CHINESE_RECURRING_PREFERENCE_PATTERN = re.compile(
+    r"(?:每(?:次|回|个)|始终|总是|一律|默认|(?:时|时候).{0,80}(?:必须|不得|不要|应该|需要|优先))"
+)
+CHINESE_TEMPORARY_PREFERENCE_PATTERN = re.compile(
+    r"(?:这次|此次|本次|今天|今日|本轮|眼下|"
+    r"当前(?:这个|这次|这项)?(?:任务|对话|会话|工作|修改|编辑|回答|回复|运行|测试|审查)|"
+    r"这(?:一)?个(?:任务|对话|会话|工作|修改|编辑|回答|回复)|临时|暂时|一次性|"
+    r"仅限(?:这次|本次|当前)|只(?:在)?(?:这次|本次))"
+)
+CHINESE_LIVE_STATE_PREFERENCE_PATTERN = re.compile(
+    r"(?:当前|最新)\s*(?:HEAD|测试|已审(?:代码|状态)|分支|仓库|代码状态|状态)|"
+    r"(?:分支|测试|代码|审查).{0,24}(?:已经|已)(?:合并|通过|完成|审完|验证)"
+)
+CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN = re.compile(
+    r"^\s*(?:如果|假如|假设|要是|倘若|比如说?)|"
+    r"(?:可能|也许|或许|大概|尚未决定|还没决定|没有决定|未决定|不确定)|"
+    r"(?:是否|是不是|能否|可否|可不可以|会不会|要不要)|(?:吗|呢)?[？?]\s*$|(?:吗|呢)[。.!！]?\s*$"
+)
+CHINESE_QUOTED_PROMPT_PATTERN = re.compile(
+    r"(?:^|[，,。；;\s])(?:引用|转述|示例|例子)(?:的)?(?:提示词|指令|文本|原文|话术)|"
+    r"^\s*(?:引用|转述)(?:如下|内容如下|为)(?=\s*$|\s*[，,:：。；;])|"
+    r"^\s*(?:提示词|指令|原文)\s*[:：]|"
+    r"^\s*(?:示例|例子|举例|例如|比如说?)\s*[，,:：]"
+)
+CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
+    r"^\s*(?:(?i:ok(?:ay)?)|好(?:的)?|明白(?:了)?|收到|知道了|了解(?:了)?|可以|行|没问题|同意|认可)"
+    r"(?:[，,。.!！；;\s]*|"
+    r"[，,。.!！；;\s]+(?:谢谢|感谢|就这样|按(?:这个|你说的)(?:来)?|"
+    r"我(?:(?:会|将|已)?(?:记住|记下|遵循)|(?:会|将)?按(?:这个|你说的)(?:要求)?).{0,160}|"
+    r"已记住(?:了)?.{0,160}|"
+    r"(?:后续|后面|接下来|以后).{0,80}(?:每(?:个|次|回)|我(?:会|将)|按(?:这个|你说的)(?:要求)?).{0,80}))"
+    r"[。.!！]?\s*$"
+)
 ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
     r"(?i)^\s*(?:understood|got it|noted|sure|okay|ok)[,;:.! ]+"
     r".{0,120}\b(?:i\s+will|i'll|i’ll|keep\s+it\s+in\s+mind|this\s+edit|next\s+step)\b"
@@ -1325,6 +1377,8 @@ def is_non_durable_natural_memory_text(text: str) -> bool:
         return False
     if ACKNOWLEDGEMENT_ONLY_PATTERN.search(compacted):
         return True
+    if CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN.fullmatch(compacted):
+        return True
     if HYPOTHETICAL_MEMORY_PATTERN.search(compacted):
         return True
     if TEMPORARY_LOCAL_MEMORY_PATTERN.search(compacted):
@@ -1669,14 +1723,14 @@ def source_event_for_text(events: list[MemoryEvent], text: str) -> MemoryEvent |
     if not target:
         return None
     for event in events:
+        if event.kind == "user" and source_text_key(natural_user_memory_fact(event.text)) == target:
+            return event
+    for event in events:
         candidates = {
             source_text_key(event.text),
             source_text_key(durable_memory_text(event.text)),
         }
         if target in candidates:
-            return event
-    for event in events:
-        if event.kind == "user" and source_text_key(natural_user_memory_fact(event.text)) == target:
             return event
     return None
 
@@ -2206,6 +2260,8 @@ def natural_user_memory_fact(text: str) -> str:
     compacted = compact_whitespace(strip_process_clauses(text))
     if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
         return ""
+    if is_sensitive_explicit_memory_text(compacted):
+        return ""
     for pattern, template in NATURAL_USER_MEMORY_PATTERNS:
         match = pattern.match(compacted)
         if not match:
@@ -2215,7 +2271,40 @@ def natural_user_memory_fact(text: str) -> str:
         if not tail or is_sensitive_explicit_memory_text(tail):
             return ""
         return durable_memory_text(template.format(text=sentence_case_tail(tail)))
+    if is_durable_chinese_user_preference(compacted):
+        return durable_memory_text(f"用户偏好：{normalize_memory_text(compacted)}")
     return ""
+
+
+def is_durable_chinese_user_preference(text: str) -> bool:
+    if not CHINESE_TEXT_PATTERN.search(text):
+        return False
+    if (
+        is_negated_explicit_memory_directive(text)
+        or CHINESE_TEMPORARY_PREFERENCE_PATTERN.search(text)
+        or CHINESE_LIVE_STATE_PREFERENCE_PATTERN.search(text)
+        or CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN.search(text)
+        or CHINESE_QUOTED_PROMPT_PATTERN.search(text)
+        or CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN.fullmatch(text)
+    ):
+        return False
+    if CHINESE_DIRECT_USER_PREFERENCE_PATTERN.search(text):
+        return True
+    user_specific = CHINESE_USER_SPECIFIC_PATTERN.search(text) is not None
+    normative_count = len(CHINESE_NORMATIVE_PREFERENCE_PATTERN.findall(text))
+    if CHINESE_FUTURE_PREFERENCE_PATTERN.search(text) and user_specific:
+        explicit_cue = re.search(r"我(?:希望|偏好|倾向于|默认(?:要求|选择|使用))", text)
+        if explicit_cue or (
+            normative_count >= 1 and CHINESE_RECURRING_PREFERENCE_PATTERN.search(text)
+        ):
+            return True
+    return bool(
+        CHINESE_RECURRING_PREFERENCE_PATTERN.search(text)
+        and (
+            (user_specific and normative_count >= 1)
+            or (CHINESE_AGENT_DIRECTED_PATTERN.search(text) and normative_count >= 3)
+        )
+    )
 
 
 def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5) -> list[str]:
@@ -2224,9 +2313,9 @@ def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5)
         fact = natural_user_memory_fact(text)
         if fact and fact not in facts:
             facts.append(fact)
-        if len(facts) >= limit:
-            break
-    return facts
+    if limit <= 0:
+        return []
+    return facts[-limit:]
 
 
 def extract_tags(project_name: str, texts: list[str]) -> list[str]:

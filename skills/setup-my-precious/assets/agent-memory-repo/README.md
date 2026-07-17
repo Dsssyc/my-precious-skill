@@ -382,6 +382,13 @@ Automatic induction is the default path for ordinary source records. When a user
 or governing prompt explicitly asks to remember, force-save, or distill a short
 fact, use the explicit capture adapter with agent-neutral JSONL:
 
+The ordinary updater scans the complete event stream for high-confidence,
+durable user preferences in supported English and Chinese forms. Derived facts
+keep the user's original language and user-event source anchor. Current-task,
+tentative, hypothetical, question, quoted-example, process, and assistant
+acknowledgement text remains rejected. This is deterministic bounded
+extraction, not translation or arbitrary semantic inference.
+
 ```jsonl
 {"text":"Prefer evidence-bound memories over unsupported recollection.","layer":"global","scope":"global","source":"explicit_request"}
 ```

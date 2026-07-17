@@ -2597,6 +2597,117 @@ It is not vector search, not ontology discovery, and not V2.39/V2.40 deployment 
 The adapter is an isolated skill-side addition; V2.38 remains deployed and its
 existing 19-tool runtime bundle is not changed by this public gate.
 
+## V2.49 Real-Use Recall Utility Closure
+
+Date: 2026-07-17
+
+The aggregate-only pre-change real-use probe showed the practical failure that
+motivated this slice: exact or short controls were supported in `2/2` cases,
+while natural or multi-intent forms were supported in `0/2` cases. The archive
+already contained 54 goal-related memory-index rows and four decision rows
+containing the convergence term, but the durable goal-writing preference had
+not entered automatic induction or review. The frozen fail-first reproduced
+both the missing durable Chinese preference and missing broad-query
+decomposition signal without rendering query text, memory text, IDs, refs, or
+private paths.
+
+The write-path candidate adds high-precision English and Chinese durable-user
+preference extraction over the complete event stream. It preserves the user's
+original language and source user-event anchor. Temporary/current-task,
+tentative, hypothetical, question, quoted-example, process, and assistant
+acknowledgement text remains rejected. The read-path candidate adds only
+`query.decomposition_recommended` and `query.decomposition_reason`; it does not
+weaken package or per-hit support, active/current, lifecycle, scope, drilldown,
+or privacy checks. `using-my-precious` now bounds global-preference and
+project-history facets to at most two context-package queries each and routes
+current HEAD, tests, and reviewed-code state to repository inspection.
+
+`python3 benchmarks/real_use_recall_utility_gate.py` creates clean packaged
+archives, invokes the copied updater for three synthetic source records, and
+consumes only `memory_recall_context_package` output from the copied search
+tool. Two internal runs produce identical aggregate reports:
+
+| Metric | Result |
+| --- | ---: |
+| `synthetic_case_count` | 12 |
+| `durable_chinese_preference_extraction_recall` | 1.0 |
+| `durable_english_preference_regression_rate` | 1.0 |
+| `long_session_middle_preference_recall` | 1.0 |
+| `noise_insertion_stability_rate` | 1.0 |
+| `temporary_constraint_rejection_rate` | 1.0 |
+| `hypothetical_statement_rejection_rate` | 1.0 |
+| `quoted_prompt_rejection_rate` | 1.0 |
+| `assistant_acknowledgement_promotion_count` | 0 |
+| `global_preference_scope_accuracy` | 1.0 |
+| `bounded_facet_plan_accuracy` | 1.0 |
+| `natural_goal_preference_supported_recall` | 1.0 |
+| `project_history_supported_recall` | 1.0 |
+| `live_state_memory_answer_count` | 0 |
+| `wrong_project_supported_hit_count` | 0 |
+| `broad_query_false_answer_count` | 0 |
+| `max_query_variants_per_facet` | 2 |
+| `unsupported_claim_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The deterministic decision harness separately rejects malformed packages,
+inactive-only support, weak support, missing drill paths, wrong-project scope,
+and excess query variants. Free-form output never supplies answerability.
+
+This public result proves only the bounded synthetic real-use slice.
+It is not general semantic-memory quality, ranking quality, vector search, private
+archive correctness, live repository truth, public leaderboard parity, or LLM
+answer quality. More explicitly, it is not ranking quality, not vector search,
+not private archive correctness, not public leaderboard parity, and not LLM answer quality.
+
+### Private shadow result: `deployment_no_go`
+
+After the public release gate and production review passed, the three-skill
+runtime candidate was frozen at
+`dad6e085d1cfe6c56f396659c49d6e33e4b87bf745cd6c7238481498cccf1d32`.
+One aggregate-only shadow copied a fixed, complete-event prefix from the real
+source stream and the canonical archive into temporary storage. The candidate
+setup path produced `19/19` runtime parity in that copy before the copied
+updater and package-first search path ran.
+
+| Private shadow metric | Result |
+| --- | ---: |
+| `private_preference_materialization_count` | 0 |
+| `private_preference_source_binding_rate` | 0.0 |
+| `private_goal_preference_supported` | 0 |
+| `private_project_history_supported` | 1 |
+| `private_live_state_memory_answer_count` | 0 |
+| `private_wrong_project_supported_hit_count` | 0 |
+| `max_query_variants_per_facet` | 2 |
+| `unsupported_claim_count` | 0 |
+| `canonical_archive_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The aggregate-only read-side diagnosis found 37 target-bearing user-event
+representations, but the frozen extractor qualified zero user preferences.
+Exactly one target was rejected by the raw-prompt/local-path boundary, and
+that same target qualified when the already existing skill-invocation prefix
+normalizer was applied first. This is a source-normalization ordering boundary,
+not a last-five selection failure and not a package answerability relaxation
+request. No private text, query, path, ID, or raw ref was retained in the
+reports.
+
+The one-shot holdout rule forbade retuning the candidate after this result.
+Consequently `install_attempt_count=0` and
+`private_transaction_invocation_count=0`; the automation remained ACTIVE and
+the canonical archive remained clean and current. Installed skills and the
+private deployment retained their prior `19/19` runtime parity, while the
+frozen candidate matched only `16/19`, proving that it was not installed.
+Rollback was unnecessary because no private runtime or archive mutation
+occurred. V2.39/V2.40 therefore remain source-integrated but not deployment
+approved.
+
+V2.49 proves the public synthetic preference/facet slice and records a real
+source-adapter `deployment_no_go`. It does not prove private preference recall,
+general semantic-memory quality, ranking quality, vector search, public
+leaderboard parity, or LLM answer quality. A future bounded goal may test
+prefix normalization before raw-prompt rejection with a new frozen candidate;
+that change is not part of V2.49.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
