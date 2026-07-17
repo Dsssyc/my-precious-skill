@@ -110,6 +110,7 @@ python3 benchmarks/scheduled_publish_search_gate.py
 python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
 python3 benchmarks/scheduled_update_single_writer_gate.py
+python3 benchmarks/scheduled_reboot_replay_gate.py
 python3 benchmarks/scheduled_update_throughput_gate.py
 python3 benchmarks/selected_record_materialization_gate.py
 python3 benchmarks/durable_event_projection_gate.py
@@ -183,6 +184,7 @@ python3 -m py_compile \
   benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/live_automation_prompt_alignment_gate.py \
   benchmarks/scheduled_update_single_writer_gate.py \
+  benchmarks/scheduled_reboot_replay_gate.py \
   benchmarks/scheduled_update_throughput_gate.py \
   benchmarks/selected_record_materialization_gate.py \
   benchmarks/durable_event_projection_gate.py \
@@ -211,6 +213,7 @@ python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \
+  skills/update-my-precious/scripts/run_scheduled_memory_transaction.py \
   skills/using-my-precious/scripts/search_memory.py \
   skills/using-my-precious/scripts/resolve_memory_source.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \

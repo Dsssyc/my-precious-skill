@@ -922,6 +922,103 @@ class DocumentationContractTests(unittest.TestCase):
             re.search(r"durable[_\s-]*semantic[_\s-]*index", runtime_text, flags=re.IGNORECASE)
         )
 
+    def test_docs_record_v248_reboot_safe_transactional_replay_contract(self):
+        section = self.evaluation_section(
+            "## V2.48 Reboot-Safe Scheduled Update Transactional Replay Closure"
+        )
+        for phrase in (
+            "benchmarks/scheduled_reboot_replay_gate.py",
+            "live_automation_prompt_alignment_gate.py",
+            "run_scheduled_memory_transaction.py",
+            "transaction_adapter_alignment_pass",
+            "single_transaction_adapter_invocation_present",
+            "strict_transaction_report_contract_present",
+            "duplicate_transaction_adapter_rejection_count",
+            "same_line_duplicate_transaction_adapter_rejection_count",
+            "missing_transaction_report_rejection_count",
+            "Initial private operational recovery result: `published`",
+            "pre-final-review adapter",
+            "first private attempt",
+            "5400-second final-candidate attempt",
+            "`staging_reset_failed`",
+            "checkout-first",
+            "Final-candidate private acceptance result: `published`",
+            "9081.302 seconds",
+            "recovery_action=stale_staging_replayed",
+            "recovery_count=1",
+            "remote_publish_count=1",
+            "canonical_mutation_count=1",
+            "repair_attempt_count=1",
+            "canonical and staging worktrees were clean",
+            "transaction state was cleared",
+            "19/19",
+            "existing automation remained `status: ACTIVE`",
+            "live_automation_alignment_pass=true",
+            "transaction_case_count",
+            "clean_publish_accuracy",
+            "no_op_decision_accuracy",
+            "reboot_replay_success_rate",
+            "canonical_clean_after_interruption_rate",
+            "stale_staging_recovery_rate",
+            "post_push_receipt_reconciliation_rate",
+            "concurrent_transaction_rejection_rate",
+            "dirty_canonical_rejection_rate",
+            "malformed_state_rejection_rate",
+            "unsafe_state_path_rejection_rate",
+            "remote_race_rejection_rate",
+            "repository_scoped_lock_rejection_rate",
+            "git_common_dir_lock_rejection_rate",
+            "nested_writer_lock_rejection_rate",
+            "canonical_fast_forward_recovery_rate",
+            "unreceipted_remote_rejection_rate",
+            "receipted_remote_advance_replay_rate",
+            "receipted_remote_tracked_overlap_count",
+            "receipted_remote_untracked_overlap_count",
+            "partial_remote_publish_count",
+            "duplicate_publish_commit_count",
+            "canonical_unverified_mutation_count",
+            "deployed_v238_tool_mutation_count",
+            "raw_source_copy_count",
+            "privacy_leak_count",
+            "not exact process continuation",
+            "not cloud scheduler uptime",
+            "not power-loss durability of the source disk",
+            "not distributed locking",
+            "not a GitHub availability SLA",
+            "not memory quality",
+            "not ranking quality",
+            "not LLM quality",
+            "not vector search",
+            "not ontology discovery",
+            "not V2.39/V2.40 deployment approval",
+            "V2.38 remains deployed",
+            "V2.48R2 is a repair and acceptance label",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        update_skill = UPDATE_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "scheduled or broad multi-project refreshes",
+            "run_scheduled_memory_transaction.py",
+            "--state-dir",
+            "persistent staging clone",
+            "canonical-repository-scoped lock",
+            "surviving nested updater",
+            "validated adapter-owned staging",
+            "hard-reset and cleaned before",
+            "receipted remote advance",
+            "unrelated dirty paths remain untouched",
+            "Same-path user edits",
+            "Remote inspection does not advance canonical",
+            "published",
+            "no_op_current",
+            "blocked",
+            "exactly one JSON",
+            "on-demand single-project",
+        ):
+            self.assert_contains(update_skill, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

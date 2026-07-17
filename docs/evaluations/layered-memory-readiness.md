@@ -2452,6 +2452,151 @@ skills, alter the private archive, change the automation prompt, rerun a private
 72-target timing shadow, or claim that a source pull request has already been
 merged.
 
+## V2.48 Reboot-Safe Scheduled Update Transactional Replay Closure
+
+Date: 2026-07-16
+
+V2.48 adds the skill-side
+`skills/update-my-precious/scripts/run_scheduled_memory_transaction.py`
+adapter and `benchmarks/scheduled_reboot_replay_gate.py`. Scheduled generation
+runs in an adapter-owned persistent staging clone rather than the canonical
+archive checkout. Aggregate phase state and staging live in an explicit
+mode-`0700` state directory outside both the archive and source trees. The
+exclusive lock is keyed by the canonical repository's Git common directory, so
+changing `--state-dir` cannot create a second writer. Before resetting staging,
+the adapter also probes the deployed V2.38 updater lock, which remains held by a
+surviving nested updater child even if the adapter and runner disappear. The
+staging clone invokes the deployment repository's existing runtime tools; the
+canonical checkout changes only after a matching remote publication receipt.
+
+The public gate uses sixteen synthetic cases and synthetic source records.
+It performs real `SIGKILL` interruption during update, after the staging commit
+but before push, and after push but before canonical fast-forward. The next
+invocation must either regenerate unpublished work from current `origin/main`
+or reconcile the already-pushed commit without publishing a duplicate. It also
+checks clean publish, no-op, repository-scoped concurrent writers using both
+the same and different state directories, a linked worktree sharing the same
+Git common directory, a surviving nested updater child, dirty canonical,
+malformed state, symlinked staging, remote-race behavior, and an unreceipted
+remote advance. Remote inspection uses a non-mutating receipt query, so a
+rejected unreceipted advance leaves both canonical `HEAD` and `origin/main`
+unchanged. The sixteenth case combines an interrupted `updating` transaction
+without a candidate, dirty adapter-owned tracked and untracked staging paths,
+and a separately receipted remote advance that overlaps both path classes. Once
+ownership, remote identity, writer exclusion, and fetch all pass, staging is
+hard-reset and cleaned before `main` checkout. Replay then returns
+`no_op_current` from the latest receipt with no duplicate publication. The
+canonical-fast-forward case waits until the real two-stage protocol has applied
+the candidate checkout while retaining the base ref, then sends `SIGKILL`;
+replay accepts only worktree and index entries whose blob and mode exactly match
+the base or verified candidate. Same-path user edits fail closed and remain
+untouched. Two consecutive gate runs produced identical metrics:
+
+| Metric | Result |
+| --- | ---: |
+| `transaction_case_count` | 16 |
+| `clean_publish_accuracy` | 1.0 |
+| `no_op_decision_accuracy` | 1.0 |
+| `reboot_replay_success_rate` | 1.0 |
+| `canonical_clean_after_interruption_rate` | 1.0 |
+| `stale_staging_recovery_rate` | 1.0 |
+| `post_push_receipt_reconciliation_rate` | 1.0 |
+| `concurrent_transaction_rejection_rate` | 1.0 |
+| `dirty_canonical_rejection_rate` | 1.0 |
+| `malformed_state_rejection_rate` | 1.0 |
+| `unsafe_state_path_rejection_rate` | 1.0 |
+| `remote_race_rejection_rate` | 1.0 |
+| `repository_scoped_lock_rejection_rate` | 1.0 |
+| `git_common_dir_lock_rejection_rate` | 1.0 |
+| `nested_writer_lock_rejection_rate` | 1.0 |
+| `canonical_fast_forward_recovery_rate` | 1.0 |
+| `unreceipted_remote_rejection_rate` | 1.0 |
+| `receipted_remote_advance_replay_rate` | 1.0 |
+| `receipted_remote_tracked_overlap_count` | 1 |
+| `receipted_remote_untracked_overlap_count` | 1 |
+| `partial_remote_publish_count` | 0 |
+| `duplicate_publish_commit_count` | 0 |
+| `canonical_unverified_mutation_count` | 0 |
+| `deployed_v238_tool_mutation_count` | 0 |
+| `raw_source_copy_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+`benchmarks/live_automation_prompt_alignment_gate.py` now keeps the legacy
+agent-native prompt regression while separately validating the V2.48
+parity-preflight plus single-adapter contract. Its synthetic transaction cases
+report `transaction_adapter_alignment_pass=true`,
+`single_transaction_adapter_invocation_present=true`,
+`strict_transaction_report_contract_present=true`,
+`duplicate_transaction_adapter_rejection_count=1`,
+`same_line_duplicate_transaction_adapter_rejection_count=1`, and
+`missing_transaction_report_rejection_count=1`. This prevents a live automation
+from passing merely because it retains the superseded prose-driven direct
+updater/audit/sync chain.
+
+Initial private operational recovery result: `published`. This run used the
+pre-final-review adapter and therefore proves the quarantine and deployment
+workflow, not acceptance of the final source candidate. Before the run, the
+interrupted generated-only working state was quarantined in one local, unpushed
+stash and the canonical checkout was restored to its previously published
+commit. The first private attempt then completed with one terminal transaction report:
+`remote_publish_count=1`, `canonical_mutation_count=1`,
+`repair_attempt_count=1`, `recovery_count=0`, and `privacy_leak_count=0`.
+After a fresh remote fetch, canonical and staging worktrees were clean and each
+matched `origin/main`; transaction state was cleared. Archive audit,
+publish-readiness, search health, and reviewed sync dry-run all passed.
+
+Final-candidate acceptance then proceeded through three bounded, fail-closed
+steps. The 5400-second final-candidate attempt timed out while the durable phase
+was still `updating`; it had no candidate commit, left canonical and remote at
+the same clean receipt, terminated the process group, restored the prior
+adapter and automation definition, and created no source commit. A later
+10800-second reopening returned after 3.709 seconds with
+`staging_reset_failed`: the checkout-first staging sequence encountered 51
+dirty tracked paths and 45 untracked paths after a separately verified remote
+publication changed 106 paths, including 36 tracked and 35 untracked overlaps.
+It produced no candidate, publication, canonical mutation, or privacy leak and
+again rolled deployment back. A fail-first synthetic case reproduced that exact
+boundary before the implementation was changed.
+
+V2.48R2 changes only the validated adapter-owned staging normalization order:
+hard reset and clean now precede `main` checkout after all safety checks and a
+successful fetch. The repaired sixteen-case gate reports the three new metrics
+above while every prior required rate remains `1.0` and every safety/privacy
+count remains zero. Existing unreceipted remote advance, remote race, unsafe
+staging, dirty canonical, nested-writer, interruption, and post-push cases retain
+their previous fail-closed behavior.
+
+Final-candidate private acceptance result: `published`. Exactly one repaired
+candidate invocation completed in 9081.302 seconds and emitted one valid
+transaction JSON object with `recovery_action=stale_staging_replayed`,
+`recovery_count=1`, `remote_publish_count=1`,
+`canonical_mutation_count=1`, `repair_attempt_count=1`, and
+`privacy_leak_count=0`. Transaction state was cleared; canonical and staging
+worktrees were clean and matched the freshly queried remote receipt. Archive
+audit, publish-readiness, search health, reviewed sync dry-run, 19/19 runtime
+parity, and the pinned V2.38 runner and scheduler hashes all passed afterward.
+V2.48R2 is a repair and acceptance label, not a new memory feature or runtime
+tool-bundle version.
+
+Installed-to-deployment runtime parity remained `19/19`, with equal V2.38 bundle
+fingerprints and unchanged pinned runner/scheduler hashes. The existing automation remained `status: ACTIVE`
+with its name, schedule, model, reasoning effort, local environment, and
+workspace preserved. Only its prompt changed: it now runs parity preflight plus
+exactly one transaction adapter command. The saved definition passed the live gate with
+`live_automation_alignment_pass=true`, one adapter invocation, strict JSON
+validation, zero direct publish-chain commands, and zero privacy leaks.
+
+This is local, single-host reboot-safe transactional replay, not exact process continuation.
+An interruption during canonical checkout may leave a transient, receipt-backed
+tracked-state mismatch; the next invocation validates its exact base/candidate
+entries and repairs it instead of being permanently blocked by dirty startup.
+It is not cloud scheduler uptime and not power-loss durability of the source disk.
+It is not distributed locking and not a GitHub availability SLA.
+It is not memory quality, not ranking quality, and not LLM quality.
+It is not vector search, not ontology discovery, and not V2.39/V2.40 deployment approval.
+The adapter is an isolated skill-side addition; V2.38 remains deployed and its
+existing 19-tool runtime bundle is not changed by this public gate.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

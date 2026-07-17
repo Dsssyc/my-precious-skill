@@ -90,6 +90,9 @@ class RunQualityGatesTests(unittest.TestCase):
             any("benchmarks/scheduled_update_single_writer_gate.py" in command for command in commands)
         )
         self.assertTrue(
+            any("benchmarks/scheduled_reboot_replay_gate.py" in command for command in commands)
+        )
+        self.assertTrue(
             any("benchmarks/scheduled_update_throughput_gate.py" in command for command in commands)
         )
         self.assertTrue(
@@ -145,6 +148,11 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/scheduled_content_noise_repair_closure_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/live_automation_prompt_alignment_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/scheduled_update_single_writer_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/scheduled_reboot_replay_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "skills/update-my-precious/scripts/run_scheduled_memory_transaction.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("benchmarks/scheduled_update_throughput_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/selected_record_materialization_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/durable_event_projection_gate.py", module.PY_COMPILE_TARGETS)
