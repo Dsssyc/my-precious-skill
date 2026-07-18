@@ -2708,6 +2708,99 @@ leaderboard parity, or LLM answer quality. A future bounded goal may test
 prefix normalization before raw-prompt rejection with a new frozen candidate;
 that change is not part of V2.49.
 
+## V2.50 Canonical Skill-Invocation Prefix Normalization
+
+Date: 2026-07-18
+
+V2.50 closes the public source-adapter boundary identified by the V2.49
+private no-go. Before the change, a durable user preference prefixed by a
+canonical skill invocation was rejected because the invocation's local path
+reached raw-prompt filtering first. The focused fail-first reproduced that
+empty result. The implementation now removes only a canonical leading skill invocation
+whose label begins with `$` and whose Markdown target ends in `SKILL.md`, then
+runs the existing process, raw-prompt, path, noise, sensitive,
+temporary, hypothetical, question, quoted-example, and acknowledgement gates.
+Ordinary Markdown links, malformed prefixes, body-local paths, and
+invocation-only events remain rejected.
+
+The normalized fact excludes the invocation artifact, while the fact source
+continues to bind to the original user-event source anchor. The existing
+`benchmarks/real_use_recall_utility_gate.py` now carries the additional cohort;
+it creates a clean packaged deployment, executes the copied updater, and uses
+only `memory_recall_context_package` output from the copied search tool for
+answerability. Free-form search output remains excluded.
+
+Two internal packaged runs produced identical aggregate reports. The
+aggregate reports match and all 23 synthetic cases passed:
+
+| Metric | Result |
+| --- | ---: |
+| `canonical_skill_prefixed_preference_recall` | 1.0 |
+| `multi_skill_prefix_recall` | 1.0 |
+| `prefixed_preference_source_binding_rate` | 1.0 |
+| `invocation_only_rejection_rate` | 1.0 |
+| `arbitrary_markdown_path_rejection_rate` | 1.0 |
+| `malformed_prefix_rejection_rate` | 1.0 |
+| `prefixed_non_durable_rejection_rate` | 1.0 |
+| `standalone_preference_regression_rate` | 1.0 |
+| `invocation_artifact_leak_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+### Private regression result: `deployment_no_go`
+
+The candidate was frozen once after the public gates at bundle SHA-256
+`338eb45311bdd2047841d32385cee8ce7593544e64329fe17962b8fbd1e3c2c8`.
+The one aggregate-only regression reused the previously diagnosed immutable
+source prefix; it was a regression check, not an unknown holdout. Candidate
+hash verification passed, setup/runtime parity was 19/19, and the shadow did
+not mutate the canonical archive.
+
+The source-adapter change behaved as intended: `private_newly_qualified_target_count`
+was 1 and `private_newly_qualified_non_target_count` was 0. The end-to-end
+criteria nevertheless failed: target preference materialization was 0, source
+binding was 0.0, and goal-preference support was 0. Project-history support
+remained 1, live-state memory answers remained 0, and wrong-project supported
+hits remained 0.
+
+A read-only pure-function diagnosis of that same consumed regression isolated
+the loss after successful normalization and summary selection:
+
+| Diagnostic metric | Result |
+| --- | ---: |
+| `target_qualified_preference_count` | 1 |
+| `summary_target_preference_count` | 1 |
+| `summary_evidence_limit` | 6 |
+| `evidence_slots_consumed_before_fact_phase` | 6 |
+| `target_evidence_count` | 0 |
+| `target_source_event_binding_count` | 1 |
+| `target_fact_source_quote_count` | 0 |
+| `target_memory_candidate_source_count` | 0 |
+| `target_memory_candidate_anchor_count` | 0 |
+| `target_memory_candidate_count` | 0 |
+
+The evidence budget was exhausted by earlier groups before the facts phase.
+Although the selected natural-user preference still resolved to its original
+user event, it received no evidence quote; the source-anchor completeness gate
+then correctly refused to create a memory candidate. A static counterfactual
+confirmed that the retained candidate would have been classified as `global`,
+so this run did not expose a second scope-classification failure.
+
+The original wrapper's conservative privacy scan also returned 1 because a
+generic preference marker collided with a fixed aggregate schema key. The
+follow-up diagnosis classified this as a schema-key collision only: neither
+report rendered queries, memory text, source content, source paths, raw refs,
+or memory IDs. The wrapper result remains fail-closed and was not reinterpreted
+as a pass.
+
+No installation was attempted, no private or canonical update transaction was
+invoked, and the automation remained `ACTIVE`. The frozen candidate was not
+retuned or rerun. A future bounded goal may address evidence/source-anchor
+allocation for selected natural-user facts; that change is outside V2.50.
+
+V2.50 proves only canonical invocation normalization in this bounded source
+shape. It is not ranking quality, not vector search, not general semantic
+memory, not public leaderboard parity, and not LLM answer quality.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

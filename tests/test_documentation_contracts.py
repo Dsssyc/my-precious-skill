@@ -1072,6 +1072,62 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(self.skill_contracts + "\n" + self.design, phrase)
 
+    def test_docs_record_v250_canonical_skill_invocation_contract(self):
+        section = self.evaluation_section(
+            "## V2.50 Canonical Skill-Invocation Prefix Normalization"
+        )
+        for phrase in (
+            "canonical leading skill invocation",
+            "label begins with `$`",
+            "target ends in `SKILL.md`",
+            "Ordinary Markdown links",
+            "original user-event source anchor",
+            "memory_recall_context_package",
+            "canonical_skill_prefixed_preference_recall",
+            "multi_skill_prefix_recall",
+            "prefixed_preference_source_binding_rate",
+            "invocation_only_rejection_rate",
+            "arbitrary_markdown_path_rejection_rate",
+            "malformed_prefix_rejection_rate",
+            "prefixed_non_durable_rejection_rate",
+            "standalone_preference_regression_rate",
+            "invocation_artifact_leak_count",
+            "privacy_leak_count",
+            "aggregate reports match",
+            "Private regression result: `deployment_no_go`",
+            "one aggregate-only regression",
+            "not an unknown holdout",
+            "private_newly_qualified_target_count",
+            "private_newly_qualified_non_target_count",
+            "evidence_slots_consumed_before_fact_phase",
+            "target_source_event_binding_count",
+            "target_memory_candidate_count",
+            "schema-key collision only",
+            "No installation was attempted",
+            "automation remained `ACTIVE`",
+            "retuned or rerun",
+            "not ranking quality",
+            "not vector search",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design_section = self.design.split(
+            "### V2.50 Canonical Skill-Invocation Prefix Normalization", 1
+        )[1]
+        for phrase in (
+            "natural_user_memory_fact",
+            "strict normalizer",
+            "raw-prompt",
+            "source anchor",
+            "real_use_recall_utility_gate.py",
+            "deployment_no_go",
+            "evidence budget",
+            "not installed",
+        ):
+            self.assert_contains(design_section, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

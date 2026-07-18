@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate the V2.49 real-use recall slice on clean packaged archives.
+"""Gate the V2.49/V2.50 real-use recall slice on clean packaged archives.
 
 The gate executes the updater and search tool copied by setup, verifies those
 copies match the current source tools, and emits aggregate metrics only.
@@ -31,6 +31,17 @@ REPORT_KIND = "real_use_recall_utility_gate"
 CONTEXT_KIND = "memory_recall_context_package"
 MAX_VARIANTS = 2
 SYNTHETIC_CASES = (
+    "canonical_skill_prefixed_preference",
+    "multi_skill_prefixed_preference",
+    "invocation_only",
+    "arbitrary_markdown_path",
+    "malformed_prefix",
+    "body_skill_link",
+    "prefixed_temporary",
+    "prefixed_hypothetical",
+    "prefixed_quoted",
+    "prefixed_acknowledgement",
+    "prefixed_sensitive",
     "durable_chinese_noisy",
     "durable_chinese_control",
     "durable_english",
@@ -48,6 +59,52 @@ SYNTHETIC_CASES = (
 CHINESE_PREFERENCE = (
     "以后编写 GoalSpec-Zeta 目标提示词时，我默认要求每个子目标都可验证、可收敛，"
     "并避免无限堆叠细节。"
+)
+CANONICAL_PREFIX = (
+    "[$using-agent-skills]"
+    "(/Users/example/.codex/skills/using-agent-skills/SKILL.md)"
+)
+SECOND_CANONICAL_PREFIX = (
+    "[$using-superpowers]"
+    "(/Users/example/.agents/skills/using-superpowers/SKILL.md)"
+)
+PREFIXED_CHINESE_BODY = (
+    "以后编写 PrefixGoal-Lambda 目标提示词时，我默认要求每个子目标都可验证、可收敛。"
+)
+PREFIXED_CHINESE_PREFERENCE = f"{CANONICAL_PREFIX} {PREFIXED_CHINESE_BODY}"
+MULTI_PREFIXED_ENGLISH_BODY = (
+    "I prefer PrefixEnglish-Lambda plans to preserve original source anchors."
+)
+MULTI_PREFIXED_ENGLISH_PREFERENCE = (
+    f"{CANONICAL_PREFIX}\n{SECOND_CANONICAL_PREFIX}\n{MULTI_PREFIXED_ENGLISH_BODY}"
+)
+INVOCATION_ONLY = CANONICAL_PREFIX
+ARBITRARY_MARKDOWN_PATH = (
+    "[notes](/Users/example/private/notes.md) "
+    "I prefer PathLeak-Lambda plans to include verification."
+)
+MALFORMED_PREFIX = (
+    "[$using-agent-skills]"
+    "(/Users/example/.codex/skills/using-agent-skills/SKILL.md "
+    "I prefer Malformed-Lambda plans to include verification."
+)
+BODY_SKILL_LINK = (
+    "I prefer BodyLink-Lambda plans to include verification "
+    "[$using-agent-skills]"
+    "(/Users/example/.codex/skills/using-agent-skills/SKILL.md)."
+)
+PREFIXED_TEMPORARY = f"{CANONICAL_PREFIX} 这次任务我希望只输出 PREFIX-TEMP-LAMBDA 三段。"
+PREFIXED_HYPOTHETICAL = (
+    f"{CANONICAL_PREFIX} 如果以后编写目标，是不是每个阶段都要包含 PREFIX-HYPOTHETICAL-LAMBDA？"
+)
+PREFIXED_QUOTED = (
+    f"{CANONICAL_PREFIX} 引用提示词：我的偏好是所有计划都包含 PREFIX-QUOTED-LAMBDA。"
+)
+PREFIXED_ACKNOWLEDGEMENT = (
+    f"{CANONICAL_PREFIX} 好的，我会记住每个计划都包含 PREFIX-ACK-LAMBDA。"
+)
+PREFIXED_SENSITIVE = (
+    f"{CANONICAL_PREFIX} My preference is that private key values use PREFIX-SENSITIVE-LAMBDA."
 )
 ENGLISH_PREFERENCE = (
     "I prefer durable English plans to separate verified history from live repository state."
@@ -73,6 +130,7 @@ GOAL_QUERIES = (
     "请按我长期偏好编写下一步 GoalSpec-Zeta 目标提示词，要求详细、可验证、可收敛，并避免无限堆叠细节",
     "GoalSpec-Zeta 可验证 可收敛",
 )
+PREFIXED_GOAL_QUERY = "PrefixGoal-Lambda 可验证 可收敛"
 ENGLISH_QUERY = "durable English plans verified"
 PROJECT_QUERY = "QuartzLedger program map P2"
 WRONG_PROJECT_QUERY = "CedarCanvas renderer ownership"
@@ -83,6 +141,8 @@ BROAD_QUERY = (
 )
 
 CHINESE_MARKERS = ("GoalSpec-Zeta", "可验证", "可收敛", "无限堆叠")
+PREFIXED_CHINESE_MARKERS = ("PrefixGoal-Lambda", "可验证", "可收敛")
+MULTI_PREFIXED_ENGLISH_MARKERS = ("PrefixEnglish-Lambda", "source anchors")
 ENGLISH_MARKERS = ("durable English plans", "verified history", "live repository state")
 PROJECT_MARKERS = ("QuartzLedger", "program map", "P2", "P5")
 REJECTION_MARKERS = {
@@ -91,8 +151,32 @@ REJECTION_MARKERS = {
     "quoted": ("QUOTED-OMEGA",),
     "acknowledgement": ("ACKPROMOTE-OMEGA",),
 }
+SOURCE_ADAPTER_REJECTION_MARKERS = {
+    "arbitrary_markdown_path": ("PathLeak-Lambda",),
+    "malformed_prefix": ("Malformed-Lambda",),
+    "body_skill_link": ("BodyLink-Lambda",),
+    "prefixed_temporary": ("PREFIX-TEMP-LAMBDA",),
+    "prefixed_hypothetical": ("PREFIX-HYPOTHETICAL-LAMBDA",),
+    "prefixed_quoted": ("PREFIX-QUOTED-LAMBDA",),
+    "prefixed_acknowledgement": ("PREFIX-ACK-LAMBDA",),
+    "prefixed_sensitive": ("PREFIX-SENSITIVE-LAMBDA",),
+}
+INVOCATION_ARTIFACT_MARKERS = ("[$using-", "/Users/example/", "SKILL.md")
 PROCESS_MARKERS = ("transient checklist item",)
 PRIVACY_MARKERS = (
+    CANONICAL_PREFIX,
+    SECOND_CANONICAL_PREFIX,
+    PREFIXED_CHINESE_PREFERENCE,
+    MULTI_PREFIXED_ENGLISH_PREFERENCE,
+    INVOCATION_ONLY,
+    ARBITRARY_MARKDOWN_PATH,
+    MALFORMED_PREFIX,
+    BODY_SKILL_LINK,
+    PREFIXED_TEMPORARY,
+    PREFIXED_HYPOTHETICAL,
+    PREFIXED_QUOTED,
+    PREFIXED_ACKNOWLEDGEMENT,
+    PREFIXED_SENSITIVE,
     CHINESE_PREFERENCE,
     ENGLISH_PREFERENCE,
     TEMPORARY,
@@ -104,6 +188,7 @@ PRIVACY_MARKERS = (
     PROJECT_HISTORY,
     PROJECT_MAP,
     *GOAL_QUERIES,
+    PREFIXED_GOAL_QUERY,
     ENGLISH_QUERY,
     PROJECT_QUERY,
     WRONG_PROJECT_QUERY,
@@ -113,6 +198,15 @@ PRIVACY_MARKERS = (
 )
 REQUIRED_METRICS = frozenset(
     {
+        "canonical_skill_prefixed_preference_recall",
+        "multi_skill_prefix_recall",
+        "prefixed_preference_source_binding_rate",
+        "invocation_only_rejection_rate",
+        "arbitrary_markdown_path_rejection_rate",
+        "malformed_prefix_rejection_rate",
+        "prefixed_non_durable_rejection_rate",
+        "standalone_preference_regression_rate",
+        "invocation_artifact_leak_count",
         "synthetic_case_count",
         "durable_chinese_preference_extraction_recall",
         "durable_english_preference_regression_rate",
@@ -158,6 +252,8 @@ class Fixture:
     neutral_project: Path
     long_turn_count: int
     noisy_user_line: int
+    prefixed_user_line: int
+    multi_prefixed_user_line: int
 
 
 @dataclass(frozen=True)
@@ -260,9 +356,20 @@ def long_events() -> list[dict[str, str]]:
     rows.extend(noise(9, 17))
     rows.append({"role": "assistant", "content": ASSISTANT_LITERAL})
     rows.append({"role": "user", "content": CHINESE_PREFERENCE})
+    rows.append({"role": "user", "content": PREFIXED_CHINESE_PREFERENCE})
+    rows.append({"role": "user", "content": MULTI_PREFIXED_ENGLISH_PREFERENCE})
     rows.extend(noise(17, 25))
     rows.extend(
         [
+            {"role": "user", "content": INVOCATION_ONLY},
+            {"role": "user", "content": ARBITRARY_MARKDOWN_PATH},
+            {"role": "user", "content": MALFORMED_PREFIX},
+            {"role": "user", "content": BODY_SKILL_LINK},
+            {"role": "user", "content": PREFIXED_TEMPORARY},
+            {"role": "user", "content": PREFIXED_HYPOTHETICAL},
+            {"role": "user", "content": PREFIXED_QUOTED},
+            {"role": "user", "content": PREFIXED_ACKNOWLEDGEMENT},
+            {"role": "user", "content": PREFIXED_SENSITIVE},
             {"role": "user", "content": ENGLISH_PREFERENCE},
             {"role": "user", "content": TEMPORARY},
             {"role": "user", "content": HYPOTHETICAL},
@@ -285,6 +392,17 @@ def create_fixture(root: Path) -> Fixture:
         for index, event in enumerate(events, 1)
         if event.get("role") == "user" and event.get("content") == CHINESE_PREFERENCE
     )
+    prefixed_user_line = next(
+        index
+        for index, event in enumerate(events, 1)
+        if event.get("role") == "user" and event.get("content") == PREFIXED_CHINESE_PREFERENCE
+    )
+    multi_prefixed_user_line = next(
+        index
+        for index, event in enumerate(events, 1)
+        if event.get("role") == "user"
+        and event.get("content") == MULTI_PREFIXED_ENGLISH_PREFERENCE
+    )
     noisy = write_record(long_source, "noisy", events, "2026-07-02T10:00:00Z")
     control = write_record(
         long_source,
@@ -305,7 +423,16 @@ def create_fixture(root: Path) -> Fixture:
         ],
         "2026-07-03T10:00:00Z",
     )
-    return Fixture(noisy, control, long_project, neutral_project, len(events), noisy_user_line)
+    return Fixture(
+        noisy,
+        control,
+        long_project,
+        neutral_project,
+        len(events),
+        noisy_user_line,
+        prefixed_user_line,
+        multi_prefixed_user_line,
+    )
 
 
 def update(repo: Path, source: Path, project: Path, name: str) -> None:
@@ -322,7 +449,7 @@ def update(repo: Path, source: Path, project: Path, name: str) -> None:
             "--project",
             name,
             "--source-agent",
-            "v249-public-synthetic",
+            "v250-public-synthetic",
             "--rewrite-existing",
         ],
         "update_archive",
@@ -561,6 +688,7 @@ def bound_user_fact(
     markers: tuple[str, ...],
     *,
     expected_line: int,
+    expected_text: str,
 ) -> bool:
     if not isinstance(meta, dict):
         return False
@@ -594,7 +722,8 @@ def bound_user_fact(
     anchors = source_map.get("evidence_source_anchors") if isinstance(source_map, dict) else None
     if not isinstance(anchors, list):
         return False
-    expected_hash = hashlib.sha256(CHINESE_PREFERENCE.encode("utf-8")).hexdigest()
+    normalized_expected = " ".join(expected_text.split())
+    expected_hash = hashlib.sha256(normalized_expected.encode("utf-8")).hexdigest()
     return any(
         isinstance(anchor, dict)
         and anchor.get("source_anchor_id") == source.get("source_anchor_id")
@@ -641,11 +770,19 @@ def run_once(root: Path) -> dict[str, Any]:
     rows = meta_rows(repo)
     noisy, control = meta_for(rows, fixture.noisy_record), meta_for(rows, fixture.control_record)
     chinese_nodes = nodes_for(repo, nodes, CHINESE_MARKERS)
+    prefixed_chinese_nodes = nodes_for(repo, nodes, PREFIXED_CHINESE_MARKERS)
+    multi_prefixed_english_nodes = nodes_for(repo, nodes, MULTI_PREFIXED_ENGLISH_MARKERS)
     english_nodes = nodes_for(repo, nodes, ENGLISH_MARKERS)
     project_nodes = nodes_for(repo, nodes, PROJECT_MARKERS)
 
     goal_packages = tuple(
         search(repo, query, scope="global", preferred="global") for query in GOAL_QUERIES
+    )
+    prefixed_package = search(
+        repo,
+        PREFIXED_GOAL_QUERY,
+        scope="global",
+        preferred="global",
     )
     english_package = search(repo, ENGLISH_QUERY, scope="global", preferred="global")
     project_package = search(
@@ -667,6 +804,7 @@ def run_once(root: Path) -> dict[str, Any]:
 
     neutral_scope = f"project:{fixture.neutral_project.resolve()}"
     goal = decide(Facet("history", goal_packages, "global", "global", False))
+    prefixed = decide(Facet("history", (prefixed_package,), "global", "global", False))
     english = decide(Facet("history", (english_package,), "global", "global", False))
     project = decide(Facet("history", (project_package,), "project", neutral_scope, True))
     wrong = decide(Facet("history", (wrong_package,), "project", neutral_scope, True))
@@ -679,8 +817,29 @@ def run_once(root: Path) -> dict[str, Any]:
         noisy,
         CHINESE_MARKERS,
         expected_line=fixture.noisy_user_line,
+        expected_text=CHINESE_PREFERENCE,
     )
-    control_bound = bound_user_fact(repo, control, CHINESE_MARKERS, expected_line=1)
+    control_bound = bound_user_fact(
+        repo,
+        control,
+        CHINESE_MARKERS,
+        expected_line=1,
+        expected_text=CHINESE_PREFERENCE,
+    )
+    prefixed_bound = bound_user_fact(
+        repo,
+        noisy,
+        PREFIXED_CHINESE_MARKERS,
+        expected_line=fixture.prefixed_user_line,
+        expected_text=PREFIXED_CHINESE_PREFERENCE,
+    )
+    multi_prefixed_bound = bound_user_fact(
+        repo,
+        noisy,
+        MULTI_PREFIXED_ENGLISH_MARKERS,
+        expected_line=fixture.multi_prefixed_user_line,
+        expected_text=MULTI_PREFIXED_ENGLISH_PREFERENCE,
+    )
     support_paths = {
         path
         for node in chinese_nodes
@@ -710,7 +869,7 @@ def run_once(root: Path) -> dict[str, Any]:
     project_scoped = any(node.get("layer") == "project" and node.get("scope") == neutral_scope for node in project_nodes)
     texts = all_candidate_texts(rows, nodes)
     bounded_accuracy, bounded_variants, bounded_unsupported = bounded_contract()
-    decisions = (goal, english, project, wrong, no_hit, broad, live)
+    decisions = (goal, prefixed, english, project, wrong, no_hit, broad, live)
     unsupported = bounded_unsupported + sum(
         decision.action == "answer" and not decision.package_supported for decision in decisions
     )
@@ -732,8 +891,25 @@ def run_once(root: Path) -> dict[str, Any]:
         for hit in wrong_hits
     )
     process_promotion_count = sum(contains(text, PROCESS_MARKERS) for text in texts)
+    invocation_artifact_count = sum(
+        any(marker.lower() in text.lower() for marker in INVOCATION_ARTIFACT_MARKERS)
+        for text in texts
+    )
+    source_adapter_rejections = {
+        name: not any(contains(text, markers) for text in texts)
+        for name, markers in SOURCE_ADAPTER_REJECTION_MARKERS.items()
+    }
+    invocation_only_rejected = not any(text.strip() == INVOCATION_ONLY for text in texts)
+    prefixed_materialized = bool(prefixed_chinese_nodes and prefixed_bound)
+    multi_prefixed_materialized = bool(multi_prefixed_english_nodes and multi_prefixed_bound)
 
     case_outcomes = {
+        "canonical_skill_prefixed_preference": bool(
+            prefixed_materialized and prefixed.action == "answer"
+        ),
+        "multi_skill_prefixed_preference": multi_prefixed_materialized,
+        "invocation_only": invocation_only_rejected,
+        **source_adapter_rejections,
         "durable_chinese_noisy": bool(chinese_materialized and noisy_bound and middle_recalled),
         "durable_chinese_control": bool(control_bound),
         "durable_english": bool(english_bound and english_global and english.action == "answer"),
@@ -763,6 +939,40 @@ def run_once(root: Path) -> dict[str, Any]:
     }
 
     metrics: dict[str, Any] = {
+        "canonical_skill_prefixed_preference_recall": float(
+            prefixed_materialized and prefixed.action == "answer"
+        ),
+        "multi_skill_prefix_recall": float(multi_prefixed_materialized),
+        "prefixed_preference_source_binding_rate": (
+            int(prefixed_bound) + int(multi_prefixed_bound)
+        )
+        / 2,
+        "invocation_only_rejection_rate": float(invocation_only_rejected),
+        "arbitrary_markdown_path_rejection_rate": float(
+            source_adapter_rejections["arbitrary_markdown_path"]
+        ),
+        "malformed_prefix_rejection_rate": float(
+            source_adapter_rejections["malformed_prefix"]
+        ),
+        "prefixed_non_durable_rejection_rate": sum(
+            source_adapter_rejections[name]
+            for name in (
+                "prefixed_temporary",
+                "prefixed_hypothetical",
+                "prefixed_quoted",
+                "prefixed_acknowledgement",
+                "prefixed_sensitive",
+            )
+        )
+        / 5,
+        "standalone_preference_regression_rate": float(
+            chinese_materialized
+            and english_bound
+            and english_global
+            and goal.action == "answer"
+            and english.action == "answer"
+        ),
+        "invocation_artifact_leak_count": invocation_artifact_count,
         "synthetic_case_count": len(case_outcomes),
         "durable_chinese_preference_extraction_recall": float(chinese_materialized),
         "durable_english_preference_regression_rate": float(
@@ -788,6 +998,17 @@ def run_once(root: Path) -> dict[str, Any]:
         "privacy_leak_count": 0,
     }
     observations = {
+        "canonical_skill_invocation_boundary_closed": bool(
+            metrics["canonical_skill_prefixed_preference_recall"] == 1.0
+            and metrics["multi_skill_prefix_recall"] == 1.0
+            and metrics["prefixed_preference_source_binding_rate"] == 1.0
+            and metrics["invocation_only_rejection_rate"] == 1.0
+            and metrics["arbitrary_markdown_path_rejection_rate"] == 1.0
+            and metrics["malformed_prefix_rejection_rate"] == 1.0
+            and metrics["prefixed_non_durable_rejection_rate"] == 1.0
+            and metrics["standalone_preference_regression_rate"] == 1.0
+            and metrics["invocation_artifact_leak_count"] == 0
+        ),
         "durable_chinese_preference_boundary_closed": bool(
             metrics["durable_chinese_preference_extraction_recall"] == 1.0
             and metrics["long_session_middle_preference_recall"] == 1.0
@@ -837,6 +1058,14 @@ def metrics_pass(metrics: dict[str, Any]) -> bool:
         and all(
             metrics[key] == 1.0
             for key in (
+                "canonical_skill_prefixed_preference_recall",
+                "multi_skill_prefix_recall",
+                "prefixed_preference_source_binding_rate",
+                "invocation_only_rejection_rate",
+                "arbitrary_markdown_path_rejection_rate",
+                "malformed_prefix_rejection_rate",
+                "prefixed_non_durable_rejection_rate",
+                "standalone_preference_regression_rate",
                 "durable_chinese_preference_extraction_recall",
                 "durable_english_preference_regression_rate",
                 "long_session_middle_preference_recall",
@@ -850,6 +1079,7 @@ def metrics_pass(metrics: dict[str, Any]) -> bool:
                 "project_history_supported_recall",
             )
         )
+        and metrics["invocation_artifact_leak_count"] == 0
         and metrics["assistant_acknowledgement_promotion_count"] == 0
         and metrics["live_state_memory_answer_count"] == 0
         and metrics["wrong_project_supported_hit_count"] == 0
@@ -865,6 +1095,8 @@ def build_report(runs: list[dict[str, Any]]) -> dict[str, Any]:
     metrics = dict(runs[0]["metrics"])
     observations = dict(runs[0]["closure_observations"])
     failures: list[str] = []
+    if not observations["canonical_skill_invocation_boundary_closed"]:
+        failures.append("canonical_skill_invocation_boundary_open")
     if not observations["durable_chinese_preference_boundary_closed"]:
         failures.append("durable_chinese_preference_boundary_open")
     if not observations["broad_query_decomposition_boundary_closed"]:
@@ -881,7 +1113,7 @@ def build_report(runs: list[dict[str, Any]]) -> dict[str, Any]:
         failures.append("aggregate_report_nondeterminism")
     return {
         "report_kind": REPORT_KIND,
-        "report_version": 1,
+        "report_version": 2,
         "status": "passed" if not failures else "failed",
         "failure_codes": failures,
         "package_source": "clean_packaged_deployment_repo",

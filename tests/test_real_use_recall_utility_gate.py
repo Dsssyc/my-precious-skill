@@ -45,6 +45,21 @@ class RealUseRecallUtilityGateTests(unittest.TestCase):
         self.assertEqual(inactive.action, "abstain")
         self.assertEqual(weak.action, "abstain")
 
+    def test_v250_source_adapter_metric_contract_is_declared(self):
+        self.assertTrue(
+            {
+                "canonical_skill_prefixed_preference_recall",
+                "multi_skill_prefix_recall",
+                "prefixed_preference_source_binding_rate",
+                "invocation_only_rejection_rate",
+                "arbitrary_markdown_path_rejection_rate",
+                "malformed_prefix_rejection_rate",
+                "prefixed_non_durable_rejection_rate",
+                "standalone_preference_regression_rate",
+                "invocation_artifact_leak_count",
+            }.issubset(self.gate.REQUIRED_METRICS)
+        )
+
     def test_gate_passes_twice_with_identical_aggregate_report(self):
         gate = self.gate
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -90,6 +105,14 @@ class RealUseRecallUtilityGateTests(unittest.TestCase):
         self.assertGreaterEqual(metrics["synthetic_case_count"], 8)
         self.assertEqual(metrics["synthetic_case_count"], len(gate.SYNTHETIC_CASES))
         for key in (
+            "canonical_skill_prefixed_preference_recall",
+            "multi_skill_prefix_recall",
+            "prefixed_preference_source_binding_rate",
+            "invocation_only_rejection_rate",
+            "arbitrary_markdown_path_rejection_rate",
+            "malformed_prefix_rejection_rate",
+            "prefixed_non_durable_rejection_rate",
+            "standalone_preference_regression_rate",
             "durable_chinese_preference_extraction_recall",
             "durable_english_preference_regression_rate",
             "long_session_middle_preference_recall",
@@ -104,6 +127,7 @@ class RealUseRecallUtilityGateTests(unittest.TestCase):
         ):
             self.assertEqual(metrics[key], 1.0, key)
         for key in (
+            "invocation_artifact_leak_count",
             "assistant_acknowledgement_promotion_count",
             "live_state_memory_answer_count",
             "wrong_project_supported_hit_count",

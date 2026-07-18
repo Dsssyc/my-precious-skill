@@ -724,6 +724,33 @@ private transaction. This source-normalization ordering boundary remains a
 future goal; the public synthetic gate does not prove private source-adapter
 coverage.
 
+### V2.50 Canonical Skill-Invocation Prefix Normalization
+
+`natural_user_memory_fact()` now applies a dedicated strict normalizer before
+raw-prompt, local-path, noise, sensitive-content, and durability checks. A
+canonical leading skill invocation has a label beginning with `$` and, for the
+Markdown form, a target ending in `SKILL.md`. Contiguous invocations may be
+removed; ordinary Markdown links, malformed invocations, local paths in the
+message body, and invocation-only events remain fail-closed. The older broad
+title-oriented helper is unchanged, so title and explicit-memory call sites do
+not inherit this source-adapter behavior.
+
+The derived memory text excludes the invocation artifact while source matching
+still resolves the fact to the original user-event source anchor. The V2.50
+cohort extends `benchmarks/real_use_recall_utility_gate.py` rather than adding a
+second packaged harness: the copied updater materializes the synthetic fact,
+the copied search tool emits a context package, and the existing package-only
+decision recipe determines support. Ranking, query support, answerability,
+scheduler behavior, and semantic retrieval are unchanged.
+
+The one frozen private regression ended in `deployment_no_go`. Prefix
+normalization qualified exactly the intended target and no non-target facts,
+but the long-session evidence budget was full before the facts phase. The
+target therefore had no evidence quote or source anchor and could not become an
+automatic memory candidate. That downstream evidence-allocation boundary is
+not changed in V2.50; the candidate was not installed and no canonical update
+transaction ran.
+
 ## End-To-End Induction-To-Recall Benchmark
 
 `benchmarks/e2e_induction_recall_benchmark.py` evaluates the minimum complete

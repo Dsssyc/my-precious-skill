@@ -1255,6 +1255,11 @@ SKILL_INVOCATION_PREFIX_PATTERN = re.compile(
     r"^(?:(?:\[[^\]]*\]\([^)]+\)|\$[A-Za-z0-9_-]+)\s*)+",
     re.IGNORECASE,
 )
+CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN = re.compile(
+    r"^(?:(?:\[\$[A-Za-z][A-Za-z0-9_-]*\]\([^)]*/SKILL\.md\)|"
+    r"\$[A-Za-z][A-Za-z0-9_-]*)\s*)+",
+    re.IGNORECASE,
+)
 
 
 def strip_skill_invocation_prefix(text: str) -> str:
@@ -1264,6 +1269,10 @@ def strip_skill_invocation_prefix(text: str) -> str:
         if cleaned == stripped:
             return cleaned
         stripped = cleaned
+
+
+def strip_canonical_skill_invocation_prefix(text: str) -> str:
+    return CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", compact_whitespace(text)).strip()
 
 
 def has_unbalanced_markdown_emphasis(text: str) -> bool:
@@ -2257,7 +2266,10 @@ def sentence_case_tail(text: str) -> str:
 def natural_user_memory_fact(text: str) -> str:
     if is_process_update(text):
         return ""
-    compacted = compact_whitespace(strip_process_clauses(text))
+    normalized = strip_canonical_skill_invocation_prefix(text)
+    if not normalized or is_process_update(normalized):
+        return ""
+    compacted = compact_whitespace(strip_process_clauses(normalized))
     if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
         return ""
     if is_sensitive_explicit_memory_text(compacted):

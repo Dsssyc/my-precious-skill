@@ -2708,6 +2708,93 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(anchor["event_sha256"], source_hash)
         self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
 
+    def test_natural_user_preference_strips_canonical_skill_invocation_before_path_rejection(self):
+        module = load_update_module()
+        preference_text = (
+            "以后给我起草 goal 提示词时，我默认要求每个 subgoal 都必须可收敛，"
+            "并以可验证指标结束。"
+        )
+        source_text = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+            f"{preference_text}"
+        )
+
+        self.assertEqual(
+            module.natural_user_memory_fact(source_text),
+            f"用户偏好：{preference_text}",
+        )
+
+    def test_natural_user_preference_strips_multiple_canonical_skill_invocations(self):
+        module = load_update_module()
+        preference_text = "I prefer goal plans to end with deterministic verification."
+        source_text = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md)\n"
+            "[$using-superpowers]"
+            "(/Users/example/.agents/skills/using-superpowers/SKILL.md)\n"
+            f"{preference_text}"
+        )
+
+        self.assertEqual(
+            module.natural_user_memory_fact(source_text),
+            "The user prefers goal plans to end with deterministic verification.",
+        )
+
+    def test_natural_user_preference_rejects_noncanonical_or_non_durable_prefixed_text(self):
+        module = load_update_module()
+        canonical_prefix = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+        )
+        rejected = (
+            canonical_prefix,
+            "[notes](/Users/example/private/notes.md) "
+            "I prefer plans to include verification.",
+            "[notes](/Users/example/.codex/skills/notes/SKILL.md) "
+            "I prefer plans to include verification.",
+            "[$using-agent-skills](/Users/example/private/notes.md) "
+            "I prefer plans to include verification.",
+            "$100 I prefer plans to include verification.",
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md "
+            "I prefer plans to include verification.",
+            "I prefer plans to include verification "
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md).",
+            canonical_prefix + "这次任务我希望只输出三段。",
+            canonical_prefix + "如果以后写 goal，是不是每个 subgoal 都应该可收敛？",
+            canonical_prefix + "引用提示词：我的偏好是所有计划只有一个阶段。",
+            canonical_prefix + "好的，我会记住每个计划都必须可验证。",
+            canonical_prefix + "My preference is that Authorization: Bearer synthetic-token-value.",
+        )
+
+        self.assertEqual(
+            [module.natural_user_memory_fact(text) for text in rejected],
+            ["" for _ in rejected],
+        )
+
+    def test_prefixed_natural_user_preference_keeps_original_user_event_anchor(self):
+        module = load_update_module()
+        preference_text = "I prefer release evidence to include quantified outcomes."
+        source_text = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+            f"{preference_text}"
+        )
+        source_hash = module.source_event_sha256(source_text)
+        events = [module.MemoryEvent("user", source_text, 1, 1, source_hash)]
+
+        summary = module.summarize_events(events, "synthetic-prefixed-preference")
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        expected_fact = "The user prefers release evidence to include quantified outcomes."
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        anchor = next(row for row in anchors if row["quote_id"] == source["evidence_quote_id"])
+        self.assertEqual(source["source"], "natural_user")
+        self.assertEqual(anchor["event_sha256"], source_hash)
+        self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
+
     def test_natural_user_preference_anchor_wins_over_assistant_literal_collision(self):
         module = load_update_module()
         source_text = "I prefer bounded plans to end in verified evidence."
