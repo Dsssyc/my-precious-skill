@@ -72,6 +72,8 @@ SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
 SOURCE_ANCHOR_VERSION = 1
+NATURAL_USER_FACT_LIMIT = 5
+SUMMARY_EVIDENCE_LIMIT = 6
 SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
 SOURCE_INVENTORY_REPORT_VERSION = 2
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
@@ -2319,7 +2321,10 @@ def is_durable_chinese_user_preference(text: str) -> bool:
     )
 
 
-def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5) -> list[str]:
+def extract_natural_user_memory_facts(
+    events: list[MemoryEvent],
+    limit: int = NATURAL_USER_FACT_LIMIT,
+) -> list[str]:
     facts: list[str] = []
     for text in event_texts(events, {"user"}):
         fact = natural_user_memory_fact(text)
@@ -2328,6 +2333,54 @@ def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5)
     if limit <= 0:
         return []
     return facts[-limit:]
+
+
+def select_summary_evidence(
+    natural_user_facts: list[str],
+    decisions: list[str],
+    retrieval_literals: list[str],
+    facts: list[str],
+    problems: list[str],
+    unresolved: list[str],
+    durable_user_lines: list[str],
+    final_state: str,
+) -> list[str]:
+    evidence: list[str] = []
+    for line in natural_user_facts[-NATURAL_USER_FACT_LIMIT:]:
+        durable = durable_memory_text(line)
+        if durable and durable not in evidence:
+            evidence.append(durable)
+
+    final_evidence = durable_memory_text(final_state)
+    filler_limit = SUMMARY_EVIDENCE_LIMIT - int(
+        bool(final_evidence and final_evidence not in evidence)
+    )
+    if len(evidence) > filler_limit:
+        evidence = evidence[-filler_limit:] if filler_limit else []
+
+    for group in (decisions, retrieval_literals, facts, problems, unresolved):
+        if len(evidence) >= filler_limit:
+            break
+        for line in group:
+            durable = durable_memory_text(line)
+            if durable and durable not in evidence:
+                evidence.append(durable)
+            if len(evidence) >= filler_limit:
+                break
+        if len(evidence) >= filler_limit:
+            break
+
+    if not evidence:
+        for line in durable_user_lines:
+            durable = durable_memory_text(line)
+            if durable and durable not in evidence:
+                evidence.append(durable)
+            if len(evidence) >= filler_limit:
+                break
+
+    if final_evidence and final_evidence not in evidence:
+        evidence.append(final_evidence)
+    return evidence[:SUMMARY_EVIDENCE_LIMIT]
 
 
 def extract_tags(project_name: str, texts: list[str]) -> list[str]:
@@ -2570,35 +2623,24 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
             facts.append(line)
     if not facts:
         facts = [durable for text in assistant_lines if (durable := durable_memory_text(text))][:3]
-    evidence = []
-    for group in (decisions, retrieval_literals, facts, problems, unresolved):
-        for line in group:
-            durable = durable_memory_text(line)
-            if durable and durable not in evidence:
-                evidence.append(durable)
-            if len(evidence) >= 6:
-                break
-        if len(evidence) >= 6:
-            break
-    if not evidence:
-        for line in durable_user_lines:
-            durable = durable_memory_text(line)
-            if durable and durable not in evidence:
-                evidence.append(durable)
-            if len(evidence) >= 3:
-                break
-
-    user_intent = durable_user_lines[0] if durable_user_lines else ""
     final_state = ""
     for text in reversed(assistant_lines):
         durable = durable_memory_text(text)
         if durable:
             final_state = durable
             break
-    if final_state and final_state not in evidence:
-        if len(evidence) >= 6:
-            evidence = evidence[:5]
-        evidence.append(final_state)
+    evidence = select_summary_evidence(
+        natural_user_facts,
+        decisions,
+        retrieval_literals,
+        facts,
+        problems,
+        unresolved,
+        durable_user_lines,
+        final_state,
+    )
+
+    user_intent = durable_user_lines[0] if durable_user_lines else ""
     summary_items = []
     summary_user_intent = durable_user_lines[0] if durable_user_lines else ""
     for line in [summary_user_intent, *decisions[:1], *facts[:1], final_state]:
@@ -2828,9 +2870,19 @@ def memory_candidate_source_entries(summary_data: dict[str, object], events: lis
         for value in summary_data.get("fact_sources") or []
         if isinstance(value, dict)
     }
+    selected_natural_user_facts = [
+        str(value.get("text") or "")
+        for value in summary_data.get("fact_sources") or []
+        if isinstance(value, dict) and value.get("source") == "natural_user"
+    ]
     entries: list[dict[str, str]] = []
     seen: set[str] = set()
-    for text, _ in iter_memory_candidate_texts(summary_data):
+    candidate_texts = [
+        (text, "Natural user fact selected from archived session.")
+        for text in selected_natural_user_facts
+    ]
+    candidate_texts.extend(iter_memory_candidate_texts(summary_data))
+    for text, _ in candidate_texts:
         key = source_text_key(text)
         if not key or key in seen:
             continue

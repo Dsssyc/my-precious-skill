@@ -60,6 +60,20 @@ class RealUseRecallUtilityGateTests(unittest.TestCase):
             }.issubset(self.gate.REQUIRED_METRICS)
         )
 
+    def test_v251_source_bound_goal_preference_metric_contract_is_declared(self):
+        self.assertTrue(
+            {
+                "selected_natural_user_fact_evidence_binding_rate",
+                "selected_natural_user_fact_source_anchor_rate",
+                "selected_natural_user_fact_candidate_materialization_rate",
+                "selected_natural_user_fact_active_memory_rate",
+                "goal_preference_context_package_support_rate",
+                "remaining_evidence_priority_regression_rate",
+                "evidence_budget_overflow_count",
+                "non_target_memory_promotion_count",
+            }.issubset(self.gate.REQUIRED_METRICS)
+        )
+
     def test_gate_passes_twice_with_identical_aggregate_report(self):
         gate = self.gate
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -108,6 +122,12 @@ class RealUseRecallUtilityGateTests(unittest.TestCase):
             "canonical_skill_prefixed_preference_recall",
             "multi_skill_prefix_recall",
             "prefixed_preference_source_binding_rate",
+            "selected_natural_user_fact_evidence_binding_rate",
+            "selected_natural_user_fact_source_anchor_rate",
+            "selected_natural_user_fact_candidate_materialization_rate",
+            "selected_natural_user_fact_active_memory_rate",
+            "goal_preference_context_package_support_rate",
+            "remaining_evidence_priority_regression_rate",
             "invocation_only_rejection_rate",
             "arbitrary_markdown_path_rejection_rate",
             "malformed_prefix_rejection_rate",
@@ -128,6 +148,8 @@ class RealUseRecallUtilityGateTests(unittest.TestCase):
             self.assertEqual(metrics[key], 1.0, key)
         for key in (
             "invocation_artifact_leak_count",
+            "evidence_budget_overflow_count",
+            "non_target_memory_promotion_count",
             "assistant_acknowledgement_promotion_count",
             "live_state_memory_answer_count",
             "wrong_project_supported_hit_count",

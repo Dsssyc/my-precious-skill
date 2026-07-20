@@ -1128,6 +1128,59 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(design_section, phrase)
 
+    def test_docs_record_v251_source_bound_goal_preference_contract(self):
+        section = self.evaluation_section(
+            "## V2.51 Source-Bound Goal Preference Materialization And Real-Use Recall Closure"
+        )
+        for phrase in (
+            "bounded evidence reservation",
+            "evidence count remains at most 6",
+            "selected_natural_user_fact_evidence_binding_rate",
+            "selected_natural_user_fact_source_anchor_rate",
+            "selected_natural_user_fact_candidate_materialization_rate",
+            "selected_natural_user_fact_active_memory_rate",
+            "goal_preference_context_package_support_rate",
+            "remaining_evidence_priority_regression_rate",
+            "evidence_budget_overflow_count",
+            "non_target_memory_promotion_count",
+            "unsupported_claim_count",
+            "privacy_leak_count",
+            "known producer-shape regression",
+            "not an unseen holdout",
+            "Private regression result: `deployment_go`",
+            "target_supported_package_answer_count",
+            "wrong_project_supported_hit_count",
+            "live_repository_state_memory_answer_count",
+            "19/19",
+            "allow-list record count",
+            "consumer_intent_supported_recall",
+            "HEAD == origin/main",
+            "automation definition and schedule were unchanged",
+            "not ranking quality",
+            "not vector search",
+            "not general semantic memory",
+            "not public leaderboard parity",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design_section = self.design.split(
+            "### V2.51 Source-Bound Goal Preference Materialization", 1
+        )[1]
+        for phrase in (
+            "NATURAL_USER_FACT_LIMIT",
+            "SUMMARY_EVIDENCE_LIMIT",
+            "select_summary_evidence",
+            "final-state slot",
+            "memory_candidate_sources",
+            "materialize_source_anchors",
+            "source-anchor completeness",
+            "memory_recall_context_package",
+            "deployment_go",
+        ):
+            self.assert_contains(design_section, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

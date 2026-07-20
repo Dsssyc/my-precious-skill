@@ -751,6 +751,37 @@ automatic memory candidate. That downstream evidence-allocation boundary is
 not changed in V2.50; the candidate was not installed and no canonical update
 transaction ran.
 
+### V2.51 Source-Bound Goal Preference Materialization
+
+V2.51 closes the bounded allocation failure left by V2.50. It does not widen
+the evidence budget: `NATURAL_USER_FACT_LIMIT` remains 5 and
+`SUMMARY_EVIDENCE_LIMIT` remains 6. The pure `select_summary_evidence()` helper
+first reserves one evidence entry for every already-selected natural-user
+fact, then preserves one final-state slot when a final state exists. Any
+remaining slots retain the prior deterministic priority across decisions,
+retrieval literals, other facts, problems, and unresolved work. Deduplication
+is stable, and the result never exceeds six entries.
+
+Selection is still policy-gated before reservation. A malformed prefix,
+invocation-only message, ordinary Markdown path, temporary decision,
+hypothetical, question, quoted example, process update, acknowledgement, or
+sensitive text is rejected by the existing rules and receives no reserved
+slot. A selected durable fact keeps its original user-event identity through
+`evidence`, `fact_sources`, and `memory_candidate_sources` before
+`materialize_source_anchors()` binds the quote to that event. The existing
+source-anchor completeness check in `memory_candidates_from_meta()` is
+unchanged and remains fail-closed.
+
+The packaged gate runs the copied updater and copied search tool. Answerability
+comes only from a `memory_recall_context_package` containing a supported
+active/current hit with summary and evidence drill paths; free-form search
+output is not evidence. Public synthetic runs and one aggregate-only known
+producer-shape regression reached `deployment_go`, after which the frozen
+candidate was installed through source, installed-skill, and deployment-runtime
+parity and the bounded source record was regenerated and published. Live
+repository state remains a repository-inspection concern rather than a memory
+answer.
+
 ## End-To-End Induction-To-Recall Benchmark
 
 `benchmarks/e2e_induction_recall_benchmark.py` evaluates the minimum complete

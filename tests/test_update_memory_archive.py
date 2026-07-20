@@ -2795,6 +2795,149 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(anchor["event_sha256"], source_hash)
         self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
 
+    def test_summarize_events_reserves_source_bound_preference_under_saturated_evidence(self):
+        module = load_update_module()
+        prefix = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+        )
+        preference = "I prefer saturated goal plans to end with deterministic evidence."
+        source_text = prefix + preference
+        final_state = "Final state: Synthetic source-bound allocation remains pending review."
+        texts = [
+            *[
+                f"Decision: Synthetic {name} allocation requires review."
+                for name in ("alpha", "beta", "gamma", "delta", "epsilon")
+            ],
+            *[
+                f"Synthetic retrieval endpoint is 127.0.0.1:{port}."
+                for port in range(4100, 4108)
+            ],
+            source_text,
+            final_state,
+        ]
+        events = [
+            module.MemoryEvent(
+                "user" if text == source_text else "assistant",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(texts, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-saturated-preference")
+        repeated = module.summarize_events(events, "synthetic-saturated-preference")
+        summary["memory_candidate_sources"] = module.memory_candidate_source_entries(
+            summary,
+            events,
+        )
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        expected_fact = "The user prefers saturated goal plans to end with deterministic evidence."
+        self.assertIn(expected_fact, summary["facts"])
+        self.assertIn(expected_fact, summary["evidence"])
+        self.assertIn(final_state, summary["evidence"])
+        self.assertLessEqual(len(summary["evidence"]), 6)
+        self.assertTrue(any(line.startswith("Decision:") for line in summary["evidence"]))
+        self.assertEqual(summary["evidence"], repeated["evidence"])
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        anchor = next(row for row in anchors if row["quote_id"] == source["evidence_quote_id"])
+        self.assertEqual(source["source"], "natural_user")
+        self.assertEqual(anchor["line_number"], texts.index(source_text) + 1)
+        self.assertEqual(anchor["event_sha256"], module.source_event_sha256(source_text))
+        self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
+        candidate_sources = [
+            row
+            for row in summary["memory_candidate_sources"]
+            if row["text"] == expected_fact
+        ]
+        self.assertEqual(len(candidate_sources), 1)
+        candidate_source = candidate_sources[0]
+        self.assertEqual(candidate_source["source"], "natural_user")
+        self.assertEqual(candidate_source["evidence_quote_id"], source["evidence_quote_id"])
+        self.assertEqual(candidate_source["source_anchor_id"], source["source_anchor_id"])
+
+    def test_summarize_events_bounds_five_selected_preferences_plus_final_state(self):
+        module = load_update_module()
+        prefix = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+        )
+        markers = ("alpha", "beta", "gamma", "delta", "epsilon")
+        source_texts = [
+            prefix + f"I prefer reserved goal {marker} plans to preserve source-bound evidence."
+            for marker in markers
+        ]
+        expected_facts = [
+            f"The user prefers reserved goal {marker} plans to preserve source-bound evidence."
+            for marker in markers
+        ]
+        final_state = "Final state: Synthetic five-preference allocation is complete."
+        texts = [
+            *[
+                f"Decision: Synthetic {name} capacity requires review."
+                for name in ("one", "two", "three", "four", "five")
+            ],
+            *[
+                f"Synthetic retrieval endpoint is 127.0.0.1:{port}."
+                for port in range(4200, 4208)
+            ],
+            *source_texts,
+            source_texts[0],
+            final_state,
+        ]
+        events = [
+            module.MemoryEvent(
+                "user" if text in source_texts else "assistant",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(texts, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-five-preferences")
+        summary["memory_candidate_sources"] = module.memory_candidate_source_entries(
+            summary,
+            events,
+        )
+        module.materialize_source_anchors(summary, "b" * 64)
+
+        self.assertEqual(summary["evidence"], [*expected_facts, final_state])
+        self.assertEqual(len(summary["evidence"]), 6)
+        self.assertEqual(len(set(summary["evidence"])), 6)
+        self.assertEqual(
+            [
+                row["text"]
+                for row in summary["fact_sources"]
+                if row.get("source") == "natural_user" and row.get("evidence_quote_id")
+            ],
+            expected_facts,
+        )
+        self.assertEqual(
+            [
+                row["text"]
+                for row in summary["fact_sources"]
+                if row.get("source") == "natural_user"
+                and row.get("evidence_quote_id")
+                and row.get("source_anchor_id")
+            ],
+            expected_facts,
+        )
+        self.assertEqual(
+            [
+                row["text"]
+                for row in summary["memory_candidate_sources"]
+                if row.get("source") == "natural_user"
+                and row.get("evidence_quote_id")
+                and row.get("source_anchor_id")
+            ],
+            expected_facts,
+        )
+
     def test_natural_user_preference_anchor_wins_over_assistant_literal_collision(self):
         module = load_update_module()
         source_text = "I prefer bounded plans to end in verified evidence."

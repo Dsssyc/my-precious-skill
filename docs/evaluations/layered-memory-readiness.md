@@ -2801,6 +2801,90 @@ V2.50 proves only canonical invocation normalization in this bounded source
 shape. It is not ranking quality, not vector search, not general semantic
 memory, not public leaderboard parity, and not LLM answer quality.
 
+## V2.51 Source-Bound Goal Preference Materialization And Real-Use Recall Closure
+
+Date: 2026-07-20
+
+V2.50 qualified the intended durable Goal-writing preference but ended in
+`deployment_no_go` because all six evidence slots were consumed before the
+facts phase. V2.51 applies bounded evidence reservation to facts that have
+already passed the natural-user durability policy. Up to five selected facts
+are reserved first, one final-state slot is retained when applicable, and any
+remaining slots use the existing deterministic priority order. The evidence count remains at most 6;
+the fix does not raise the limit, weaken candidate
+source-anchor completeness, relax query support, or bypass package-first
+answerability.
+
+`benchmarks/real_use_recall_utility_gate.py` now includes a saturated synthetic
+source record with five decisions, eight retrieval literals, a canonical skill
+invocation, one durable Goal preference, and a final state. It executes the
+updater and search tool copied into a clean packaged archive and uses only
+`memory_recall_context_package` output. Two runs produced identical reports,
+all 24 synthetic cases passed, and free-form search was never used.
+
+| Public metric | Result |
+| --- | ---: |
+| `selected_natural_user_fact_evidence_binding_rate` | 1.0 |
+| `selected_natural_user_fact_source_anchor_rate` | 1.0 |
+| `selected_natural_user_fact_candidate_materialization_rate` | 1.0 |
+| `selected_natural_user_fact_active_memory_rate` | 1.0 |
+| `goal_preference_context_package_support_rate` | 1.0 |
+| `remaining_evidence_priority_regression_rate` | 1.0 |
+| `evidence_budget_overflow_count` | 0 |
+| `non_target_memory_promotion_count` | 0 |
+| `invocation_artifact_leak_count` | 0 |
+| `unsupported_claim_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+### Private regression result: `deployment_go`
+
+One frozen candidate was evaluated against a known producer-shape regression;
+this was not an unseen holdout. A complete-event prefix ending at the durable
+preference turn was copied into temporary storage, processed by the packaged
+runtime, and discarded. The report retained only aggregate counts. The
+canonical archive was unchanged during this shadow run.
+
+| Private regression metric | Result |
+| --- | ---: |
+| `target_qualification_count` | 1 |
+| `target_summary_selection_count` | 1 |
+| `target_evidence_binding_count` | 1 |
+| `target_source_anchor_binding_count` | 1 |
+| `target_candidate_materialization_count` | 1 |
+| `target_active_current_memory_count` | 1 |
+| `target_supported_package_answer_count` | 1 |
+| `context_package_parse_success_rate` | 1.0 |
+| `query_variant_count` | 2 |
+| `evidence_budget_overflow_count` | 0 |
+| `wrong_project_supported_hit_count` | 0 |
+| `live_repository_state_memory_answer_count` | 0 |
+| `free_form_search_use_count` | 0 |
+| `canonical_archive_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The same candidate was then installed through the reviewed three-layer path.
+Source and installed skill bundles matched, and installed-to-deployment runtime
+parity was `19/19` in two consecutive checks. The targeted backfill predeclared
+an allow-list record count of 1; dry-run selected 1, apply selected and rewrote
+1, and the low-signal skip count was 0. Archive audit, publish readiness, search
+health, content-noise review, and reviewed sync dry-run all passed before
+publication.
+
+After regeneration, the deployment package-first consumer check reported
+`consumer_intent_supported_recall=1.0`, one active/current target memory, valid
+summary and evidence drill paths, no supported wrong-project answer, and no
+memory answer for live repository state. The matching sync helper created and
+pushed the archive commit. The private repository finished clean with
+`HEAD == origin/main`; the automation definition and schedule were unchanged.
+No private source text, identifier, path, query, hash, memory ID, or raw ref is
+stored in this document or in the aggregate reports.
+
+V2.51 proves bounded source-bound materialization and retrieval for this real
+Goal-preference failure class. It is not ranking quality, not vector search,
+not general semantic memory, not public leaderboard parity, and not LLM answer quality.
+It also does not claim automatic ontology discovery or universal
+recall for every durable preference shape.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

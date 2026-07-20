@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate the V2.49/V2.50 real-use recall slice on clean packaged archives.
+"""Gate the V2.49-V2.51 real-use recall slice on clean packaged archives.
 
 The gate executes the updater and search tool copied by setup, verifies those
 copies match the current source tools, and emits aggregate metrics only.
@@ -32,6 +32,7 @@ CONTEXT_KIND = "memory_recall_context_package"
 MAX_VARIANTS = 2
 SYNTHETIC_CASES = (
     "canonical_skill_prefixed_preference",
+    "saturated_source_bound_goal_preference",
     "multi_skill_prefixed_preference",
     "invocation_only",
     "arbitrary_markdown_path",
@@ -78,6 +79,11 @@ MULTI_PREFIXED_ENGLISH_BODY = (
 MULTI_PREFIXED_ENGLISH_PREFERENCE = (
     f"{CANONICAL_PREFIX}\n{SECOND_CANONICAL_PREFIX}\n{MULTI_PREFIXED_ENGLISH_BODY}"
 )
+SATURATED_GOAL_BODY = (
+    "I prefer SaturatedGoal-Omega plans to preserve source-bound evidence."
+)
+SATURATED_GOAL_PREFERENCE = f"{CANONICAL_PREFIX} {SATURATED_GOAL_BODY}"
+SATURATED_FINAL_STATE = "Final state: Synthetic bounded allocation fixture is complete."
 INVOCATION_ONLY = CANONICAL_PREFIX
 ARBITRARY_MARKDOWN_PATH = (
     "[notes](/Users/example/private/notes.md) "
@@ -131,6 +137,7 @@ GOAL_QUERIES = (
     "GoalSpec-Zeta 可验证 可收敛",
 )
 PREFIXED_GOAL_QUERY = "PrefixGoal-Lambda 可验证 可收敛"
+SATURATED_GOAL_QUERY = "SaturatedGoal-Omega source-bound evidence"
 ENGLISH_QUERY = "durable English plans verified"
 PROJECT_QUERY = "QuartzLedger program map P2"
 WRONG_PROJECT_QUERY = "CedarCanvas renderer ownership"
@@ -143,6 +150,8 @@ BROAD_QUERY = (
 CHINESE_MARKERS = ("GoalSpec-Zeta", "可验证", "可收敛", "无限堆叠")
 PREFIXED_CHINESE_MARKERS = ("PrefixGoal-Lambda", "可验证", "可收敛")
 MULTI_PREFIXED_ENGLISH_MARKERS = ("PrefixEnglish-Lambda", "source anchors")
+SATURATED_GOAL_MARKERS = ("SaturatedGoal-Omega", "source-bound evidence")
+SATURATED_DECISION_MARKERS = ("SaturationDecision", "bounded review")
 ENGLISH_MARKERS = ("durable English plans", "verified history", "live repository state")
 PROJECT_MARKERS = ("QuartzLedger", "program map", "P2", "P5")
 REJECTION_MARKERS = {
@@ -168,6 +177,8 @@ PRIVACY_MARKERS = (
     SECOND_CANONICAL_PREFIX,
     PREFIXED_CHINESE_PREFERENCE,
     MULTI_PREFIXED_ENGLISH_PREFERENCE,
+    SATURATED_GOAL_PREFERENCE,
+    SATURATED_FINAL_STATE,
     INVOCATION_ONLY,
     ARBITRARY_MARKDOWN_PATH,
     MALFORMED_PREFIX,
@@ -189,6 +200,7 @@ PRIVACY_MARKERS = (
     PROJECT_MAP,
     *GOAL_QUERIES,
     PREFIXED_GOAL_QUERY,
+    SATURATED_GOAL_QUERY,
     ENGLISH_QUERY,
     PROJECT_QUERY,
     WRONG_PROJECT_QUERY,
@@ -201,6 +213,14 @@ REQUIRED_METRICS = frozenset(
         "canonical_skill_prefixed_preference_recall",
         "multi_skill_prefix_recall",
         "prefixed_preference_source_binding_rate",
+        "selected_natural_user_fact_evidence_binding_rate",
+        "selected_natural_user_fact_source_anchor_rate",
+        "selected_natural_user_fact_candidate_materialization_rate",
+        "selected_natural_user_fact_active_memory_rate",
+        "goal_preference_context_package_support_rate",
+        "remaining_evidence_priority_regression_rate",
+        "evidence_budget_overflow_count",
+        "non_target_memory_promotion_count",
         "invocation_only_rejection_rate",
         "arbitrary_markdown_path_rejection_rate",
         "malformed_prefix_rejection_rate",
@@ -248,12 +268,14 @@ class GateFailure(RuntimeError):
 class Fixture:
     noisy_record: Path
     control_record: Path
+    saturated_record: Path
     long_project: Path
     neutral_project: Path
     long_turn_count: int
     noisy_user_line: int
     prefixed_user_line: int
     multi_prefixed_user_line: int
+    saturated_user_line: int
 
 
 @dataclass(frozen=True)
@@ -381,6 +403,30 @@ def long_events() -> list[dict[str, str]]:
     return rows
 
 
+def saturated_events() -> list[dict[str, str]]:
+    rows = [
+        {
+            "role": "assistant",
+            "content": f"Decision: SaturationDecision-{name} requires bounded review.",
+        }
+        for name in ("alpha", "beta", "gamma", "delta", "epsilon")
+    ]
+    rows.extend(
+        {
+            "role": "assistant",
+            "content": f"Synthetic retrieval endpoint is 127.0.0.1:{port}.",
+        }
+        for port in range(4300, 4308)
+    )
+    rows.extend(
+        [
+            {"role": "user", "content": SATURATED_GOAL_PREFERENCE},
+            {"role": "assistant", "content": SATURATED_FINAL_STATE},
+        ]
+    )
+    return rows
+
+
 def create_fixture(root: Path) -> Fixture:
     long_source, project_source = root / "long", root / "project"
     long_project, neutral_project = root / "c", root / "q"
@@ -404,6 +450,18 @@ def create_fixture(root: Path) -> Fixture:
         and event.get("content") == MULTI_PREFIXED_ENGLISH_PREFERENCE
     )
     noisy = write_record(long_source, "noisy", events, "2026-07-02T10:00:00Z")
+    saturated = saturated_events()
+    saturated_user_line = next(
+        index
+        for index, event in enumerate(saturated, 1)
+        if event.get("role") == "user" and event.get("content") == SATURATED_GOAL_PREFERENCE
+    )
+    saturated_record = write_record(
+        long_source,
+        "saturated",
+        saturated,
+        "2026-07-04T10:00:00Z",
+    )
     control = write_record(
         long_source,
         "control",
@@ -426,12 +484,14 @@ def create_fixture(root: Path) -> Fixture:
     return Fixture(
         noisy,
         control,
+        saturated_record,
         long_project,
         neutral_project,
         len(events),
         noisy_user_line,
         prefixed_user_line,
         multi_prefixed_user_line,
+        saturated_user_line,
     )
 
 
@@ -735,6 +795,53 @@ def bound_user_fact(
     )
 
 
+def source_entry(
+    meta: dict[str, Any] | None,
+    key: str,
+    markers: tuple[str, ...],
+) -> dict[str, Any] | None:
+    if not isinstance(meta, dict):
+        return None
+    values = meta.get(key)
+    if not isinstance(values, list):
+        return None
+    return next(
+        (
+            value
+            for value in values
+            if isinstance(value, dict) and contains(value.get("text"), markers)
+        ),
+        None,
+    )
+
+
+def evidence_quote_count(repo: Path, meta: dict[str, Any] | None) -> int:
+    if not isinstance(meta, dict) or not isinstance(meta.get("evidence_path"), str):
+        return 0
+    try:
+        lines = (repo / meta["evidence_path"]).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    return sum(
+        line.startswith("ev_") and line.partition(":")[0][3:].isdigit()
+        for line in lines
+    )
+
+
+def evidence_contains(
+    repo: Path,
+    meta: dict[str, Any] | None,
+    markers: tuple[str, ...],
+) -> bool:
+    if not isinstance(meta, dict) or not isinstance(meta.get("evidence_path"), str):
+        return False
+    try:
+        text = (repo / meta["evidence_path"]).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return contains(text, markers)
+
+
 def all_candidate_texts(rows: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> list[str]:
     texts = [str(node.get("text") or "") for node in nodes]
     for row in rows:
@@ -769,9 +876,11 @@ def run_once(root: Path) -> dict[str, Any]:
     nodes = jsonl(repo / "index" / "memories.jsonl")
     rows = meta_rows(repo)
     noisy, control = meta_for(rows, fixture.noisy_record), meta_for(rows, fixture.control_record)
+    saturated = meta_for(rows, fixture.saturated_record)
     chinese_nodes = nodes_for(repo, nodes, CHINESE_MARKERS)
     prefixed_chinese_nodes = nodes_for(repo, nodes, PREFIXED_CHINESE_MARKERS)
     multi_prefixed_english_nodes = nodes_for(repo, nodes, MULTI_PREFIXED_ENGLISH_MARKERS)
+    saturated_nodes = nodes_for(repo, nodes, SATURATED_GOAL_MARKERS)
     english_nodes = nodes_for(repo, nodes, ENGLISH_MARKERS)
     project_nodes = nodes_for(repo, nodes, PROJECT_MARKERS)
 
@@ -781,6 +890,12 @@ def run_once(root: Path) -> dict[str, Any]:
     prefixed_package = search(
         repo,
         PREFIXED_GOAL_QUERY,
+        scope="global",
+        preferred="global",
+    )
+    saturated_package = search(
+        repo,
+        SATURATED_GOAL_QUERY,
         scope="global",
         preferred="global",
     )
@@ -805,6 +920,9 @@ def run_once(root: Path) -> dict[str, Any]:
     neutral_scope = f"project:{fixture.neutral_project.resolve()}"
     goal = decide(Facet("history", goal_packages, "global", "global", False))
     prefixed = decide(Facet("history", (prefixed_package,), "global", "global", False))
+    saturated_goal = decide(
+        Facet("history", (saturated_package,), "global", "global", False)
+    )
     english = decide(Facet("history", (english_package,), "global", "global", False))
     project = decide(Facet("history", (project_package,), "project", neutral_scope, True))
     wrong = decide(Facet("history", (wrong_package,), "project", neutral_scope, True))
@@ -840,6 +958,24 @@ def run_once(root: Path) -> dict[str, Any]:
         expected_line=fixture.multi_prefixed_user_line,
         expected_text=MULTI_PREFIXED_ENGLISH_PREFERENCE,
     )
+    saturated_bound = bound_user_fact(
+        repo,
+        saturated,
+        SATURATED_GOAL_MARKERS,
+        expected_line=fixture.saturated_user_line,
+        expected_text=SATURATED_GOAL_PREFERENCE,
+    )
+    saturated_fact_source = source_entry(
+        saturated,
+        "reusable_fact_sources",
+        SATURATED_GOAL_MARKERS,
+    )
+    saturated_candidate_source = source_entry(
+        saturated,
+        "memory_candidate_sources",
+        SATURATED_GOAL_MARKERS,
+    )
+    saturated_evidence_count = evidence_quote_count(repo, saturated)
     support_paths = {
         path
         for node in chinese_nodes
@@ -869,7 +1005,7 @@ def run_once(root: Path) -> dict[str, Any]:
     project_scoped = any(node.get("layer") == "project" and node.get("scope") == neutral_scope for node in project_nodes)
     texts = all_candidate_texts(rows, nodes)
     bounded_accuracy, bounded_variants, bounded_unsupported = bounded_contract()
-    decisions = (goal, prefixed, english, project, wrong, no_hit, broad, live)
+    decisions = (goal, prefixed, saturated_goal, english, project, wrong, no_hit, broad, live)
     unsupported = bounded_unsupported + sum(
         decision.action == "answer" and not decision.package_supported for decision in decisions
     )
@@ -902,10 +1038,45 @@ def run_once(root: Path) -> dict[str, Any]:
     invocation_only_rejected = not any(text.strip() == INVOCATION_ONLY for text in texts)
     prefixed_materialized = bool(prefixed_chinese_nodes and prefixed_bound)
     multi_prefixed_materialized = bool(multi_prefixed_english_nodes and multi_prefixed_bound)
+    saturated_evidence_bound = bool(
+        isinstance(saturated_fact_source, dict)
+        and saturated_fact_source.get("source") == "natural_user"
+        and saturated_fact_source.get("evidence_quote_id")
+    )
+    saturated_anchor_bound = bool(
+        saturated_bound
+        and isinstance(saturated_fact_source, dict)
+        and saturated_fact_source.get("source_anchor_id")
+    )
+    saturated_candidate_materialized = bool(
+        isinstance(saturated_candidate_source, dict)
+        and saturated_candidate_source.get("source") == "natural_user"
+        and saturated_candidate_source.get("evidence_quote_id")
+        and saturated_candidate_source.get("source_anchor_id")
+    )
+    remaining_priority_preserved = bool(
+        evidence_contains(repo, saturated, SATURATED_DECISION_MARKERS)
+    )
+    non_target_promotions = sum(
+        any(
+            contains(node.get("text"), markers)
+            for markers in SOURCE_ADAPTER_REJECTION_MARKERS.values()
+        )
+        for node in nodes
+    )
 
     case_outcomes = {
         "canonical_skill_prefixed_preference": bool(
             prefixed_materialized and prefixed.action == "answer"
+        ),
+        "saturated_source_bound_goal_preference": bool(
+            saturated_evidence_bound
+            and saturated_anchor_bound
+            and saturated_candidate_materialized
+            and saturated_nodes
+            and saturated_goal.action == "answer"
+            and remaining_priority_preserved
+            and saturated_evidence_count <= 6
         ),
         "multi_skill_prefixed_preference": multi_prefixed_materialized,
         "invocation_only": invocation_only_rejected,
@@ -947,6 +1118,22 @@ def run_once(root: Path) -> dict[str, Any]:
             int(prefixed_bound) + int(multi_prefixed_bound)
         )
         / 2,
+        "selected_natural_user_fact_evidence_binding_rate": float(
+            saturated_evidence_bound
+        ),
+        "selected_natural_user_fact_source_anchor_rate": float(saturated_anchor_bound),
+        "selected_natural_user_fact_candidate_materialization_rate": float(
+            saturated_candidate_materialized
+        ),
+        "selected_natural_user_fact_active_memory_rate": float(bool(saturated_nodes)),
+        "goal_preference_context_package_support_rate": float(
+            saturated_goal.action == "answer"
+        ),
+        "remaining_evidence_priority_regression_rate": float(
+            remaining_priority_preserved
+        ),
+        "evidence_budget_overflow_count": int(saturated_evidence_count > 6),
+        "non_target_memory_promotion_count": non_target_promotions,
         "invocation_only_rejection_rate": float(invocation_only_rejected),
         "arbitrary_markdown_path_rejection_rate": float(
             source_adapter_rejections["arbitrary_markdown_path"]
@@ -1009,6 +1196,16 @@ def run_once(root: Path) -> dict[str, Any]:
             and metrics["standalone_preference_regression_rate"] == 1.0
             and metrics["invocation_artifact_leak_count"] == 0
         ),
+        "source_bound_goal_preference_boundary_closed": bool(
+            metrics["selected_natural_user_fact_evidence_binding_rate"] == 1.0
+            and metrics["selected_natural_user_fact_source_anchor_rate"] == 1.0
+            and metrics["selected_natural_user_fact_candidate_materialization_rate"] == 1.0
+            and metrics["selected_natural_user_fact_active_memory_rate"] == 1.0
+            and metrics["goal_preference_context_package_support_rate"] == 1.0
+            and metrics["remaining_evidence_priority_regression_rate"] == 1.0
+            and metrics["evidence_budget_overflow_count"] == 0
+            and metrics["non_target_memory_promotion_count"] == 0
+        ),
         "durable_chinese_preference_boundary_closed": bool(
             metrics["durable_chinese_preference_extraction_recall"] == 1.0
             and metrics["long_session_middle_preference_recall"] == 1.0
@@ -1035,8 +1232,9 @@ def run_once(root: Path) -> dict[str, Any]:
             "packaged_runtime_hash_match_rate": 1.0,
             "packaged_updater_success_rate": 1.0,
             "context_package_parse_success_rate": 1.0,
-            "source_record_count": 3,
+            "source_record_count": 4,
             "long_session_turn_count": fixture.long_turn_count,
+            "saturated_session_turn_count": len(saturated_events()),
             "noise_turn_count": 48,
             "direct_final_memory_write_count": 0,
             "free_form_search_use_count": 0,
@@ -1046,7 +1244,13 @@ def run_once(root: Path) -> dict[str, Any]:
     }
     metrics["privacy_leak_count"] = leak_count(
         result,
-        (root, repo, fixture.noisy_record, fixture.control_record),
+        (
+            root,
+            repo,
+            fixture.noisy_record,
+            fixture.control_record,
+            fixture.saturated_record,
+        ),
     )
     return result
 
@@ -1061,6 +1265,12 @@ def metrics_pass(metrics: dict[str, Any]) -> bool:
                 "canonical_skill_prefixed_preference_recall",
                 "multi_skill_prefix_recall",
                 "prefixed_preference_source_binding_rate",
+                "selected_natural_user_fact_evidence_binding_rate",
+                "selected_natural_user_fact_source_anchor_rate",
+                "selected_natural_user_fact_candidate_materialization_rate",
+                "selected_natural_user_fact_active_memory_rate",
+                "goal_preference_context_package_support_rate",
+                "remaining_evidence_priority_regression_rate",
                 "invocation_only_rejection_rate",
                 "arbitrary_markdown_path_rejection_rate",
                 "malformed_prefix_rejection_rate",
@@ -1080,6 +1290,8 @@ def metrics_pass(metrics: dict[str, Any]) -> bool:
             )
         )
         and metrics["invocation_artifact_leak_count"] == 0
+        and metrics["evidence_budget_overflow_count"] == 0
+        and metrics["non_target_memory_promotion_count"] == 0
         and metrics["assistant_acknowledgement_promotion_count"] == 0
         and metrics["live_state_memory_answer_count"] == 0
         and metrics["wrong_project_supported_hit_count"] == 0
@@ -1097,6 +1309,8 @@ def build_report(runs: list[dict[str, Any]]) -> dict[str, Any]:
     failures: list[str] = []
     if not observations["canonical_skill_invocation_boundary_closed"]:
         failures.append("canonical_skill_invocation_boundary_open")
+    if not observations["source_bound_goal_preference_boundary_closed"]:
+        failures.append("source_bound_goal_preference_boundary_open")
     if not observations["durable_chinese_preference_boundary_closed"]:
         failures.append("durable_chinese_preference_boundary_open")
     if not observations["broad_query_decomposition_boundary_closed"]:
@@ -1113,7 +1327,7 @@ def build_report(runs: list[dict[str, Any]]) -> dict[str, Any]:
         failures.append("aggregate_report_nondeterminism")
     return {
         "report_kind": REPORT_KIND,
-        "report_version": 2,
+        "report_version": 3,
         "status": "passed" if not failures else "failed",
         "failure_codes": failures,
         "package_source": "clean_packaged_deployment_repo",
