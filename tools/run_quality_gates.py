@@ -39,6 +39,8 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_update_single_writer_gate.py",
     "benchmarks/scheduled_reboot_replay_gate.py",
     "benchmarks/scheduled_update_throughput_gate.py",
+    "benchmarks/scheduled_live_source_deferral_gate.py",
+    "benchmarks/private_live_source_inventory_ab_gate.py",
     "benchmarks/selected_record_materialization_gate.py",
     "benchmarks/durable_event_projection_gate.py",
     "benchmarks/durable_semantic_index_gate.py",
@@ -172,6 +174,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "scheduled_update_throughput",
             ("python3", "benchmarks/scheduled_update_throughput_gate.py"),
+        ),
+        CheckSpec(
+            "scheduled_live_source_deferral",
+            ("python3", "benchmarks/scheduled_live_source_deferral_gate.py"),
         ),
         CheckSpec(
             "selected_record_materialization",

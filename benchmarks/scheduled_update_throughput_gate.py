@@ -269,7 +269,7 @@ def inventory_payload(rows: list[dict[str, object]]) -> str:
 def run_inventory_rejection_cases(root: Path) -> tuple[float, list[str]]:
     outputs: list[str] = []
     passed = 0
-    for case in ("malformed", "duplicate", "outside", "symlink", "mutated"):
+    for case in ("malformed", "duplicate", "outside", "symlink"):
         case_root = root / f"inventory-{case}"
         memory_repo = case_root / "agent-memory"
         source_dir = case_root / "source-records"
@@ -307,9 +307,6 @@ def run_inventory_rejection_cases(root: Path) -> tuple[float, list[str]]:
             link = source_dir / "escape.jsonl"
             link.symlink_to(outside)
             payload = inventory_payload([inventory_row(link, source_dir)])
-        else:
-            payload = inventory_payload([inventory_row(source, source_dir)])
-            source.write_text(source.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
         result = run(
             [
                 sys.executable,
@@ -335,7 +332,7 @@ def run_inventory_rejection_cases(root: Path) -> tuple[float, list[str]]:
             and PRIVATE_SENTINEL not in output
             and str(case_root) not in output
         )
-    return passed / 5, outputs
+    return passed / 4, outputs
 
 
 def copy_template(target: Path) -> None:

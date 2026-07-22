@@ -219,7 +219,9 @@ def terminal_status_contract_present(prompt: str) -> bool:
         "finish with exactly one terminal status",
         "`published`",
         "`no_op_current`",
+        "`deferred`",
         "`blocked`",
+        "source_batch_complete",
         "canonical worktree is clean",
         "canonical head equals origin/main",
     )
@@ -237,7 +239,11 @@ def strict_transaction_report_contract_present(prompt: str) -> bool:
         "report_version 1",
         "`published`",
         "`no_op_current`",
+        "`deferred`",
         "`blocked`",
+        "source_batch_complete",
+        "failure_stage",
+        "deferred",
         "missing",
         "malformed",
         "unparsable",
@@ -586,14 +592,19 @@ def synthetic_transaction_prompt(
         lines.extend(
             [
                 "Require exactly one JSON object with report_kind scheduled_memory_transaction, "
-                "report_version 1, and status `published`, `no_op_current`, or `blocked`.",
+                "report_version 1, and status `published`, `no_op_current`, `deferred`, or `blocked`.",
                 "A nonzero exit or missing, malformed, or unparsable adapter report is `blocked`.",
+                "Consume failure_stage and aggregate processed/deferred/child-failure counts only; "
+                "never render child output or source paths.",
                 "Task completion is not publish success; never infer success from task state alone.",
                 "Finish with exactly one terminal status:",
                 "- `published`: only when the adapter verified the remote publication receipt, "
-                "the canonical worktree is clean, and canonical HEAD equals origin/main.",
+                "the canonical worktree is clean, and canonical HEAD equals origin/main; "
+                "source_batch_complete may be false when stable siblings were published.",
                 "- `no_op_current`: only when the adapter confirmed no changes, the canonical worktree is clean, "
-                "and canonical HEAD equals origin/main.",
+                "canonical HEAD equals origin/main, source_batch_complete is true, and deferred counts are zero.",
+                "- `deferred`: successful zero-exit with no publication when source_batch_complete is false "
+                "and aggregate deferred record/target counts are nonzero.",
                 "- `blocked`: for every other result.",
             ]
         )

@@ -84,9 +84,29 @@ Each unique source root is inventoried once per run. Target updates remain
 serialized and isolated, while derived archive indexes and memory-reference
 closure are rebuilt once after every target succeeds. A failed target prevents
 that finalization and leaves publication blocked.
+Inventory construction runs in a short-lived worker that writes a mode-`0600`
+metadata-only manifest and exits before target children start; source content
+is never copied into the manifest or retained by the runner parent. If a
+manifested record changes or becomes temporarily unavailable before its target
+prepares it, that record is deferred before any source-specific archive
+removal, write, or freshness advance. Stable sibling records continue and the
+finalizer still runs. Malformed manifests, unsafe paths, target mismatches,
+privacy failures, and unknown child output remain blocked.
+Never-archived deferred records are tracked in scoped generated state at
+`index/deferred_sources.jsonl`. The state contains source paths only, never
+source content or a source hash, and is not archive-current evidence. It lets a
+later stable run bypass timestamp high-water for that exact pending record and
+is removed only after successful preparation and application. Scheduled runs
+have no implicit per-target record cap; `--max-records` is an explicit manual
+bound.
 Within each scheduled child, high-water selection uses inventory metadata;
-selected JSONL records are read and redacted once and converted to compact
-archive artifacts before any archive mutation begins.
+selected JSONL records must parse completely, then are read and redacted once
+and converted to compact archive artifacts before any archive mutation begins.
+
+For an aggregate machine-readable result, add `--report-json`. The runner emits
+exactly one `memory_update_batch_report`: `updated` means the source batch is
+complete, `deferred` is a zero-exit partial-source result with record counts,
+and `blocked` is fail-closed. Do not infer the result from free-form output.
 Registered rows may include `archive_scope` to make scheduled updates use a
 stable memory domain that is not the project path. Incremental high-water and
 source-hash freshness are tracked by `source_partition` inside that archive

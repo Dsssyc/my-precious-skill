@@ -53,9 +53,22 @@ the verified candidate object and
 staging.
 
 Treat exactly one JSON object with `report_kind: scheduled_memory_transaction`
-and `report_version: 1` as the terminal result. Only `published` and
-`no_op_current` are successful scheduled outcomes. `blocked` is a failed-closed
-outcome and must not be inferred as success from automation task completion.
+and `report_version: 1` as the terminal result. `published`, `no_op_current`,
+and `deferred` are successful zero-exit scheduled outcomes. `published` may
+carry `source_batch_complete: false` when stable siblings were safely
+published while changed or temporarily unavailable source records were left
+for retry. `deferred` means no archive commit was needed or published and at
+least one such source record remains pending. `no_op_current` is valid only
+when `source_batch_complete: true` and no records are deferred. `blocked` is a
+failed-closed outcome and must not be inferred as success from automation task
+completion. The report exposes aggregate deferred-target/record counts only;
+`failure_stage` plus processed/child-failure counts identify a blocked update
+without forwarding arbitrary diagnostics. It never renders source paths,
+source content, or child output.
+An interrupted no-publication run whose persisted `complete` candidate equals
+its base is reconciled to its original `no_op_current` or `deferred` result;
+it is not a failed remote receipt. Pending-source retry state is private
+selection metadata only and never proves archived freshness or currentness.
 Do not replace this adapter with a prose-driven chain of direct updater, audit,
 or Git commands in scheduled automation.
 

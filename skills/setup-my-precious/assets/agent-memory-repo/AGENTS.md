@@ -36,7 +36,7 @@ debugging context:
 
 When the user asks to update memory now:
 
-1. For broad refreshes, run `python tools/run_memory_updates.py --source-dir "<records>" --dry-run`.
+1. For broad refreshes, run `python tools/run_memory_updates.py --source-dir "<records>" --dry-run`. For scheduled or machine-consumed execution add `--report-json` and consume only the single `memory_update_batch_report`.
 2. For a single project, run `python tools/update_memory_archive.py --source-dir "<records>" --project-path "<project>" --dry-run`.
 3. If the selected records look correct, rerun without `--dry-run`.
 4. If the updater refuses records because secret patterns were found, inspect the source records before deciding whether to rerun with `--allow-redacted-secrets`.
@@ -154,3 +154,14 @@ When the user asks to configure scheduling:
 4. Add `--project-path "<project>"` only when rendering a single-project scheduler.
 5. Agent-native automations should use the memory repository as their only working directory.
 6. Show the rendered config or prompt and ask before loading, installing, or enabling any recurring job.
+
+Scheduled consumers must treat `updated` and `deferred` runner reports as
+zero-exit outcomes, while preserving `source_batch_complete` and aggregate
+deferred counts. A missing or malformed report, unknown child failure, unsafe
+inventory, privacy failure, or nonzero unclassified child exit is blocked.
+Status/reason pairings and selected/processed/deferred counts are contractual;
+semantically impossible reports are unknown child failures. Scoped pending
+source state is retry selection metadata only and must never be treated as a
+source hash, freshness advance, archived record, or currentness proof.
+Do not expose the metadata manifest, source paths, source content, or captured
+child output.

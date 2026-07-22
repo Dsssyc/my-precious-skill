@@ -2885,6 +2885,149 @@ not general semantic memory, not public leaderboard parity, and not LLM answer q
 It also does not claim automatic ontology discovery or universal
 recall for every durable preference shape.
 
+## V2.52 Stable Live-Source Batch Closure
+
+Date: 2026-07-22
+
+V2.52 addresses the scheduled failure class in which a large live rollout can
+change or disappear after source inventory but before one target child reads
+it. Inventory now runs in a short-lived worker and crosses into the runner only
+through a private metadata-only manifest. Record preparation distinguishes
+only `changed` and `unavailable` as retryable live-source conditions; both are
+removed from the mutation set before source-specific removal, write, or
+freshness advancement. Stable siblings continue. Unsafe paths, malformed
+contracts, target/timestamp mismatch, privacy rejection, and unknown child
+output remain blocked.
+
+Final-review closure adds a scoped `index/deferred_sources.jsonl` retry ledger.
+It records only the exact pending source path under its archive scope and
+source partition, never source content or a source hash. It therefore cannot
+advance freshness or prove currentness, but it does reselect a never-archived
+record whose timestamp is older than a stable sibling's newly advanced
+high-water. The ledger entry is removed only after successful application.
+The scheduled default no longer truncates each target at 50 records, JSONL
+parsing rejects any malformed non-empty line, and target reports now enforce
+status/reason pairing plus selected/processed/deferred count conservation.
+
+The public synthetic closure command is:
+
+```bash
+python3 benchmarks/scheduled_live_source_deferral_gate.py
+```
+
+| Synthetic metric | Result |
+| --- | ---: |
+| `live_source_defer_accuracy` | 1.0 |
+| `stable_sibling_publish_accuracy` | 1.0 |
+| `deferred_retry_recall` | 1.0 |
+| `changed_source_partial_mutation_count` | 0 |
+| `changed_source_freshness_advance_count` | 0 |
+| `unknown_failure_block_accuracy` | 1.0 |
+| `aggregate_failure_reason_coverage` | 1.0 |
+| `inventory_worker_isolation_accuracy` | 1.0 |
+| `manifest_metadata_only_accuracy` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+The synthetic retry cohort now includes a never-archived deferred record at
+`08:00`, below its stable sibling at `11:00`. It is recalled on the next stable
+run after high-water advances. For previously archived changed/unavailable
+records, the partial-mutation check hashes every file in each source-owned
+archive entry rather than checking only `meta.json`. Reason coverage directly
+requires `source_records_deferred`, retry `updated`, and
+`child_failure_unclassified` reports.
+
+The scheduled transaction consumes exactly one `memory_update_batch_report`.
+`published` may report `source_batch_complete: false`; `deferred` is a
+successful zero-exit result when no publication is needed and pending records
+remain; `no_op_current` is valid only for a complete batch; and unknown or
+malformed child output becomes `blocked/child_failure_unclassified`. Deferred
+record and target counts are aggregate-only and persist in reboot-replay state.
+Blocked reports retain an allow-listed `failure_stage` and parsed aggregate
+processed/child-failure counts; arbitrary child stdout and stderr remain
+suppressed.
+If the process is interrupted after persisting a clean no-publication
+`complete` state, replay verifies base, candidate, staging, and remote equality
+and returns the original `no_op_current` or `deferred` terminal result. This
+path does not claim a remote receipt and does not rerun the transaction.
+
+Private immutable A/B evidence is generated outside this repository with:
+
+```bash
+python3 benchmarks/private_live_source_inventory_ab_gate.py \
+  --private-memory-repo /path/to/private/agent-memory \
+  --private-source-dir /path/to/immutable/source-cohort \
+  --report-file /tmp/my-precious-v252-private-ab.json
+```
+
+The final frozen private rerun used four source records totaling 272,940,639 bytes.
+Both the V2.51 baseline and V2.52 candidate completed all 74 enabled targets,
+and the candidate retained exact archive-output parity. The two sequential
+updates shared one test-only frozen wall clock so the volatile `archived_at`
+audit instant could not create false inequality; no archive field or file was
+excluded or normalized before the byte-for-byte snapshot comparison:
+
+| Private immutable A/B metric | Result |
+| --- | ---: |
+| `baseline_enabled_target_count` | 74 |
+| `baseline_completed_target_count` | 74 |
+| `candidate_enabled_target_count` | 74 |
+| `candidate_completed_target_count` | 74 |
+| `private_enabled_target_completion_rate` | 1.0 |
+| `private_full_completion_rate` | 1.0 |
+| `private_output_parity_rate` | 1.0 |
+| `private_source_immutability_rate` | 1.0 |
+| `baseline_parent_post_inventory_rss_kib` | 750128 |
+| `candidate_parent_post_inventory_rss_kib` | 29568 |
+| `parent_post_inventory_rss_reduction_rate` | 0.9605827272145554 |
+| `privacy_leak_count` | 0 |
+
+The result exceeds the required `0.50` post-inventory parent-RSS reduction
+without a full source-directory copy. The aggregate report remains outside the
+repository and never stores source content, paths, identifiers, or archive
+text.
+
+### Controlled live deployment closure
+
+After the public release gate and private immutable A/B passed, the automation
+was paused through the Codex automation API, the reviewed three-layer runtime
+was deployed, and installed-to-deployment parity reached `19/19`. The automation
+was restored active with the four-status transaction contract and passed the
+live prompt-alignment gate. Exactly one controlled transaction then replayed
+the adapter-owned stale staging state and returned:
+
+| Controlled transaction metric | Result |
+| --- | ---: |
+| `status` | `published` |
+| `failure_stage` | `none` |
+| `source_batch_complete` | `false` |
+| `update_inventory_worker_count` | 1 |
+| `update_project_processed_count` | 74 |
+| `source_record_deferred_count` | 3 |
+| `source_target_deferred_count` | 3 |
+| `update_child_failure_count` | 0 |
+| `recovery_count` | 1 |
+| `remote_publish_count` | 1 |
+| `canonical_mutation_count` | 1 |
+| `repair_attempt_count` | 1 |
+| `privacy_leak_count` | 0 |
+
+This is the real incident closure: three changing sources no longer blocked
+the 74 stable project targets or the receipted publication. It is deliberately
+not an archive-current claim. The three deferred records remain eligible for
+the next stable scheduled run; the deterministic public gate proves their
+retry closure without violating the one-controlled-invocation limit here.
+After publication, canonical and staging worktrees were clean, transaction
+state was cleared, canonical `HEAD` matched the remote receipt, runtime parity
+remained `19/19`, archive audit and search health passed, publish readiness had
+zero blockers, and reviewed sync dry-run reported no remaining publishable
+changes.
+
+V2.52 proves bounded scheduled live-source progress, retry closure, output
+parity, aggregate diagnostics, and parent-memory isolation. It is not LLM answer quality,
+not induction quality, not ranking quality, not vector search,
+not ontology discovery, not public leaderboard parity, not distributed
+scheduling, and not a whole-run rollback transaction.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

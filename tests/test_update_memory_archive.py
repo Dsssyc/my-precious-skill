@@ -6134,7 +6134,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             from_inventory.assert_called_once()
             self.assertEqual(from_inventory.call_args.args[0], "{}")
 
-    def test_source_inventory_cli_fails_closed_when_a_dispatched_record_changes(self):
+    def test_source_inventory_cli_defers_changed_record_and_archives_stable_sibling(self):
         script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6146,8 +6146,8 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             (memory_repo / "sessions").mkdir()
             source_dir.mkdir()
             project_path.mkdir()
-            source = source_dir / "PRIVATE_SOURCE_SENTINEL.jsonl"
-            source.write_text(
+            changed = source_dir / "PRIVATE_SOURCE_SENTINEL.jsonl"
+            changed.write_text(
                 json.dumps(
                     {
                         "timestamp": "2026-07-13T11:00:00Z",
@@ -6159,23 +6159,53 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            raw = source.read_bytes()
-            stat = source.stat()
+            stable = source_dir / "stable.jsonl"
+            stable.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T12:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: stable sibling remains eligible for archival.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            prior_dir = memory_repo / "sessions/2026/07/13/prior-changed-record"
+            prior_dir.mkdir(parents=True)
+            prior_meta = {
+                "project_path": str(project_path.resolve()),
+                "archive_scope": str(project_path.resolve()),
+                "source_partition": str(project_path.resolve()),
+                "source_record": str(changed.resolve()),
+                "source_record_sha256": "a" * 64,
+                "source_updated_at": "2026-07-13T10:00:00Z",
+            }
+            (prior_dir / "meta.json").write_text(
+                json.dumps(prior_meta, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            def row_for(path: Path) -> dict[str, object]:
+                raw = path.read_bytes()
+                stat = path.stat()
+                return {
+                    "relative_path": path.name,
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "source_updated_at": json.loads(raw)["timestamp"],
+                }
+
             payload = json.dumps(
                 {
                     "report_kind": "memory_source_inventory",
-                    "report_version": 1,
-                    "records": [
-                        {
-                            "relative_path": source.name,
-                            "sha256": hashlib.sha256(raw).hexdigest(),
-                            "size": stat.st_size,
-                            "mtime_ns": stat.st_mtime_ns,
-                        }
-                    ],
+                    "report_version": 2,
+                    "records": [row_for(changed), row_for(stable)],
                 }
             )
-            source.write_text(source.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
+            changed.write_text(changed.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
 
             result = subprocess.run(
                 [
@@ -6190,6 +6220,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     "--require-project-metadata",
                     "--source-inventory-stdin",
                     "--defer-global-rebuild",
+                    "--report-json",
                 ],
                 input=payload,
                 text=True,
@@ -6197,11 +6228,292 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("update_status=blocked reason=source_inventory_invalid", result.stderr)
-            self.assertNotIn(source.name, result.stdout + result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["report_kind"], "memory_update_target_report")
+            self.assertEqual(report["status"], "deferred")
+            self.assertEqual(report["reason"], "source_records_deferred")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["records_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["records_processed_count"], 1)
+            self.assertTrue((prior_dir / "meta.json").is_file())
+            meta_rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertEqual(sum(row.get("source_record") == str(changed.resolve()) for row in meta_rows), 1)
+            self.assertEqual(sum(row.get("source_record") == str(stable.resolve()) for row in meta_rows), 1)
+            self.assertNotIn(changed.name, result.stdout + result.stderr)
             self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_never_archived_older_deferred_record_retries_after_stable_high_water_advances(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            deferred = source_dir / "deferred-older.jsonl"
+            deferred.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: archive the older deferred source after it stabilizes.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stable = source_dir / "stable-newer.jsonl"
+            stable.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T12:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: let the stable sibling advance archive high-water.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            def inventory_payload() -> str:
+                rows = []
+                for path in (deferred, stable):
+                    raw = path.read_bytes()
+                    file_stat = path.stat()
+                    rows.append(
+                        {
+                            "relative_path": path.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": file_stat.st_size,
+                            "mtime_ns": file_stat.st_mtime_ns,
+                            "source_updated_at": json.loads(raw.splitlines()[0])["timestamp"],
+                        }
+                    )
+                return json.dumps(
+                    {
+                        "report_kind": "memory_source_inventory",
+                        "report_version": 2,
+                        "records": rows,
+                    }
+                )
+
+            first_inventory = inventory_payload()
+            deferred.write_text(
+                deferred.read_text(encoding="utf-8")
+                + json.dumps(
+                    {
+                        "timestamp": "2026-07-13T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "assistant",
+                        "content": "The older source changed after inventory.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            command = [
+                sys.executable,
+                str(script),
+                "--memory-repo",
+                str(memory_repo),
+                "--source-dir",
+                str(source_dir),
+                "--project-path",
+                str(project_path),
+                "--require-project-metadata",
+                "--source-inventory-stdin",
+                "--defer-global-rebuild",
+                "--report-json",
+            ]
+            first = subprocess.run(
+                command,
+                input=first_inventory,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            first_report = json.loads(first.stdout)
+            self.assertEqual(first_report["status"], "deferred")
+            self.assertEqual(first_report["metrics"]["records_deferred_count"], 1)
+            first_rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertEqual([Path(row["source_record"]).name for row in first_rows], [stable.name])
+
+            retry = subprocess.run(
+                command,
+                input=inventory_payload(),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            retry_report = json.loads(retry.stdout)
+            self.assertEqual(retry_report["status"], "updated")
+            self.assertTrue(retry_report["source_batch_complete"])
+            self.assertEqual(retry_report["metrics"]["records_selected_count"], 1)
+            retry_rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertEqual(
+                {Path(row["source_record"]).name for row in retry_rows},
+                {deferred.name, stable.name},
+            )
+            deferred_state = memory_repo / "index/deferred_sources.jsonl"
+            self.assertFalse(deferred_state.exists() and deferred_state.read_text(encoding="utf-8").strip())
+
+    def test_source_inventory_cli_rejects_malformed_jsonl_before_archive_mutation(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            source = source_dir / "malformed.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T13:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: malformed sources must fail closed.",
+                    }
+                )
+                + "\n{not-json}\n",
+                encoding="utf-8",
+            )
+            raw = source.read_bytes()
+            file_stat = source.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 2,
+                    "records": [
+                        {
+                            "relative_path": source.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": file_stat.st_size,
+                            "mtime_ns": file_stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-13T13:00:00Z",
+                        }
+                    ],
+                }
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--source-inventory-stdin",
+                    "--defer-global-rebuild",
+                    "--report-json",
+                ],
+                input=payload,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "source_inventory_invalid")
             self.assertEqual(list((memory_repo / "sessions").glob("**/meta.json")), [])
+
+    def test_default_record_limit_does_not_starve_durable_record_after_fifty_low_signal_records(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            for index in range(50):
+                (source_dir / f"low-signal-{index:02d}.jsonl").write_text(
+                    json.dumps(
+                        {
+                            "timestamp": f"2026-07-13T10:{index:02d}:00Z",
+                            "cwd": str(project_path),
+                            "role": "assistant",
+                            "content": "I will inspect the next command output.",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            durable = source_dir / "durable-51.jsonl"
+            durable.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T11:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: the default scheduled batch must not starve durable records.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--defer-global-rebuild",
+                    "--report-json",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["metrics"]["records_selected_count"], 51)
+            rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertIn(durable.name, {Path(row["source_record"]).name for row in rows})
 
     def test_update_memory_archive_archive_scope_decouples_high_water_from_project_path(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

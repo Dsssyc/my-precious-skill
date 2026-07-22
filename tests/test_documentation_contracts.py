@@ -1181,6 +1181,67 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(design_section, phrase)
 
+    def test_docs_record_v252_live_source_batch_contract(self):
+        section = self.evaluation_section("## V2.52 Stable Live-Source Batch Closure")
+        for phrase in (
+            "scheduled_live_source_deferral_gate.py",
+            "private_live_source_inventory_ab_gate.py",
+            "metadata-only manifest",
+            "live_source_defer_accuracy",
+            "stable_sibling_publish_accuracy",
+            "deferred_retry_recall",
+            "changed_source_partial_mutation_count",
+            "changed_source_freshness_advance_count",
+            "unknown_failure_block_accuracy",
+            "aggregate_failure_reason_coverage",
+            "inventory_worker_isolation_accuracy",
+            "manifest_metadata_only_accuracy",
+            "private_enabled_target_completion_rate",
+            "private_output_parity_rate",
+            "parent_post_inventory_rss_reduction_rate",
+            "all 74 enabled targets",
+            "privacy_leak_count",
+            "source_batch_complete",
+            "child_failure_unclassified",
+            "parent-RSS",
+            "Controlled live deployment closure",
+            "Exactly one controlled transaction",
+            "`update_project_processed_count`",
+            "`source_record_deferred_count`",
+            "`source_target_deferred_count`",
+            "`update_child_failure_count`",
+            "adapter-owned stale staging state",
+            "not an archive-current claim",
+            "19/19",
+            "not LLM answer quality",
+            "not vector search",
+            "not ontology discovery",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design_section = self.design.split("### V2.52 Stable Live-Source Batch Closure", 1)[1]
+        for phrase in (
+            "short-lived worker",
+            "mode-`0600` manifest",
+            "changed or became unavailable",
+            "freshness state remain untouched",
+            "child_failure_unclassified",
+            "`deferred` terminal status",
+            "no_op_current",
+        ):
+            self.assert_contains(design_section, phrase)
+
+        update_skill = UPDATE_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "published",
+            "no_op_current",
+            "deferred",
+            "source_batch_complete",
+            "aggregate deferred-target/record counts",
+        ):
+            self.assert_contains(update_skill, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",

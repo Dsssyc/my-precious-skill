@@ -95,6 +95,7 @@ def install_synthetic_runtime(canonical: Path) -> None:
     tools.mkdir()
     (tools / "run_memory_updates.py").write_text(
         """#!/usr/bin/env python3
+import json
 import os
 import sys
 import time
@@ -105,9 +106,59 @@ repo = Path(args[args.index('--memory-repo') + 1])
 mode = os.environ.get('SYNTHETIC_TRANSACTION_MODE', 'change')
 if mode == 'update_fail':
     raise SystemExit(7)
-if mode != 'noop':
+if mode == 'structured_update_fail':
+    print(json.dumps({
+        'report_kind': 'memory_update_batch_report',
+        'report_version': 1,
+        'status': 'blocked',
+        'reason': 'child_failure_unclassified',
+        'failure_stage': 'project_update',
+        'source_batch_complete': False,
+        'metrics': {
+            'records_deferred_count': 0,
+            'targets_deferred_count': 0,
+            'child_failure_count': 1,
+            'inventory_worker_count': 1,
+            'projects_updated_count': 0,
+            'source_streams_updated_count': 0,
+            'archive_finalization_count': 0,
+        },
+        'privacy': {
+            'aggregate_only': True,
+            'paths_rendered': False,
+            'source_content_rendered': False,
+            'child_output_rendered': False,
+        },
+    }, sort_keys=True, separators=(',', ':')))
+    raise SystemExit(7)
+if mode not in {'noop', 'deferred_noop'}:
     value = 'needs-repair\\n' if mode == 'repair' else 'updated\\n'
     (repo / 'INDEX.md').write_text(value, encoding='utf-8')
+deferred = 1 if mode in {'deferred_noop', 'deferred_change'} else 0
+if '--report-json' in args:
+    print(json.dumps({
+        'report_kind': 'memory_update_batch_report',
+        'report_version': 1,
+        'status': 'deferred' if deferred else 'updated',
+        'reason': 'source_records_deferred' if deferred else 'updated',
+        'failure_stage': 'none',
+        'source_batch_complete': not deferred,
+        'metrics': {
+            'records_deferred_count': deferred,
+            'targets_deferred_count': deferred,
+            'child_failure_count': 0,
+            'inventory_worker_count': 1,
+            'projects_updated_count': 1,
+            'source_streams_updated_count': 0,
+            'archive_finalization_count': 1,
+        },
+        'privacy': {
+            'aggregate_only': True,
+            'paths_rendered': False,
+            'source_content_rendered': False,
+            'child_output_rendered': False,
+        },
+    }, sort_keys=True, separators=(',', ':')))
 marker = os.environ.get('SYNTHETIC_UPDATE_STARTED')
 if marker:
     Path(marker).write_text('started\\n', encoding='utf-8')
@@ -118,7 +169,7 @@ if marker:
         encoding="utf-8",
     )
     (tools / "audit_memory_archive.py").write_text(
-        "import sys\nraise SystemExit(0)\n",
+        "import os\nraise SystemExit(1 if os.environ.get('SYNTHETIC_AUDIT_FAIL') else 0)\n",
         encoding="utf-8",
     )
     (tools / "audit_publish_readiness.py").write_text(
@@ -236,6 +287,58 @@ def interrupt_at_canonical_fast_forward(
         process.kill()
         process.communicate()
         raise AssertionError("transaction did not reach canonical_fast_forward")
+    os.killpg(process.pid, signal.SIGKILL)
+    process.communicate(timeout=10)
+    return payload
+
+
+def interrupt_at_completed_deferred_no_publish(
+    canonical: Path,
+    source: Path,
+    state: Path,
+    root: Path,
+) -> dict[str, object]:
+    release = root / "complete-release"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--memory-repo",
+            str(canonical),
+            "--source-dir",
+            str(source),
+            "--state-dir",
+            str(state),
+            "--push",
+        ],
+        cwd=canonical,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={
+            **os.environ,
+            "SYNTHETIC_TRANSACTION_MODE": "deferred_noop",
+            "MY_PRECIOUS_TRANSACTION_TEST_PAUSE_PHASE": "complete",
+            "MY_PRECIOUS_TRANSACTION_TEST_RELEASE_FILE": str(release),
+        },
+        start_new_session=True,
+    )
+    state_file = state / "transaction.json"
+    deadline = time.monotonic() + 10.0
+    payload: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        try:
+            payload = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            time.sleep(0.02)
+            continue
+        if payload.get("phase") == "complete":
+            break
+        time.sleep(0.02)
+    if payload.get("phase") != "complete":
+        process.kill()
+        process.communicate()
+        raise AssertionError("transaction did not reach complete no-publish state")
     os.killpg(process.pid, signal.SIGKILL)
     process.communicate(timeout=10)
     return payload
@@ -653,6 +756,164 @@ class ScheduledMemoryTransactionTests(unittest.TestCase):
             self.assertEqual(git(canonical, "rev-parse", "HEAD").stdout.strip(), starting)
             self.assertEqual(report["metrics"]["remote_publish_count"], 0)
 
+    def test_deferred_without_archive_change_is_successful_but_not_no_op_current(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+
+            result, report = invoke(
+                canonical,
+                source,
+                root / "state",
+                env={**os.environ, "SYNTHETIC_TRANSACTION_MODE": "deferred_noop"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report["status"], "deferred")
+            self.assertEqual(report["reason"], "source_records_deferred")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["source_record_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["remote_publish_count"], 0)
+
+    @unittest.skipUnless(os.name == "posix", "completed no-publish recovery test requires POSIX signals")
+    def test_completed_deferred_no_publish_state_recovers_after_sigkill(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+            state = root / "state"
+            starting = git(canonical, "rev-parse", "HEAD").stdout.strip()
+            payload = interrupt_at_completed_deferred_no_publish(canonical, source, state, root)
+            state_file = state / "transaction.json"
+            self.assertEqual(payload["candidate_sha"], payload["base_sha"])
+            self.assertEqual(payload["source_record_deferred_count"], 1)
+            self.assertFalse(payload["source_batch_complete"])
+
+            result, report = invoke(
+                canonical,
+                source,
+                state,
+                env={**os.environ, "SYNTHETIC_TRANSACTION_MODE": "noop"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report["status"], "deferred")
+            self.assertEqual(report["reason"], "source_records_deferred")
+            self.assertEqual(report["recovery_action"], "completed_no_publish_reconciled")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["recovery_count"], 1)
+            self.assertEqual(report["metrics"]["source_record_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["remote_publish_count"], 0)
+            self.assertFalse(state_file.exists())
+            self.assertEqual(git(canonical, "rev-parse", "HEAD").stdout.strip(), starting)
+            self.assertEqual(git(remote, "rev-parse", "main").stdout.strip(), starting)
+
+    @unittest.skipUnless(os.name == "posix", "completed no-publish recovery test requires POSIX signals")
+    def test_completed_no_publish_recovery_refuses_dirty_canonical(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+            state = root / "state"
+            interrupt_at_completed_deferred_no_publish(canonical, source, state, root)
+            (canonical / "PRIVATE_USER_EDIT.txt").write_text("unrelated user edit\n", encoding="utf-8")
+
+            result, report = invoke(
+                canonical,
+                source,
+                state,
+                env={**os.environ, "SYNTHETIC_TRANSACTION_MODE": "noop"},
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "dirty_canonical")
+            self.assertTrue((state / "transaction.json").is_file())
+            self.assertTrue((canonical / "PRIVATE_USER_EDIT.txt").is_file())
+
+    def test_publish_can_report_incomplete_source_batch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+
+            result, report = invoke(
+                canonical,
+                source,
+                root / "state",
+                env={**os.environ, "SYNTHETIC_TRANSACTION_MODE": "deferred_change"},
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report["status"], "published")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["source_record_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["remote_publish_count"], 1)
+
+    @unittest.skipUnless(os.name == "posix", "post-push interruption test requires POSIX signals")
+    def test_post_push_reconciliation_preserves_deferred_source_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+            state = root / "state"
+            release = root / "receipt-release"
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--memory-repo",
+                    str(canonical),
+                    "--source-dir",
+                    str(source),
+                    "--state-dir",
+                    str(state),
+                    "--push",
+                ],
+                cwd=canonical,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={
+                    **os.environ,
+                    "SYNTHETIC_TRANSACTION_MODE": "deferred_change",
+                    "MY_PRECIOUS_TRANSACTION_TEST_PAUSE_PHASE": "remote_receipt",
+                    "MY_PRECIOUS_TRANSACTION_TEST_RELEASE_FILE": str(release),
+                },
+                start_new_session=True,
+            )
+            state_file = state / "transaction.json"
+            deadline = time.monotonic() + 10.0
+            payload: dict[str, object] = {}
+            while time.monotonic() < deadline:
+                try:
+                    payload = json.loads(state_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    time.sleep(0.02)
+                    continue
+                if payload.get("phase") == "remote_receipt":
+                    break
+                time.sleep(0.02)
+            if payload.get("phase") != "remote_receipt":
+                process.kill()
+                process.communicate()
+                self.fail("transaction did not reach remote_receipt")
+            self.assertEqual(payload["source_record_deferred_count"], 1)
+            self.assertEqual(payload["source_target_deferred_count"], 1)
+            self.assertFalse(payload["source_batch_complete"])
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=10)
+
+            result, report = invoke(canonical, source, state)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(report["status"], "published")
+            self.assertEqual(report["recovery_action"], "post_push_reconciled")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["source_record_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["source_target_deferred_count"], 1)
+
     def test_live_sync_without_a_new_commit_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -694,7 +955,57 @@ class ScheduledMemoryTransactionTests(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(report["status"], "blocked")
-            self.assertEqual(report["reason"], "update_failed")
+            self.assertEqual(report["reason"], "child_failure_unclassified")
+            self.assertEqual(report["failure_stage"], "update")
+            self.assertEqual(report["metrics"]["update_child_failure_count"], 0)
+            self.assertEqual(git(canonical, "rev-parse", "HEAD").stdout.strip(), starting)
+            self.assertEqual(git(canonical, "rev-parse", "origin/main").stdout.strip(), starting)
+            self.assertEqual(git(canonical, "status", "--porcelain=v1", "--untracked-files=all").stdout, "")
+
+    def test_structured_update_failure_preserves_aggregate_stage_and_counts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+            starting = git(canonical, "rev-parse", "HEAD").stdout.strip()
+
+            result, report = invoke(
+                canonical,
+                source,
+                root / "state",
+                env={**os.environ, "SYNTHETIC_TRANSACTION_MODE": "structured_update_fail"},
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "child_failure_unclassified")
+            self.assertEqual(report["failure_stage"], "project_update")
+            self.assertEqual(report["metrics"]["update_inventory_worker_count"], 1)
+            self.assertEqual(report["metrics"]["update_child_failure_count"], 1)
+            self.assertEqual(git(canonical, "rev-parse", "HEAD").stdout.strip(), starting)
+            self.assertEqual(git(canonical, "status", "--porcelain=v1", "--untracked-files=all").stdout, "")
+
+    def test_post_update_gate_failure_preserves_update_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+            starting = git(canonical, "rev-parse", "HEAD").stdout.strip()
+
+            result, report = invoke(
+                canonical,
+                source,
+                root / "state",
+                env={**os.environ, "SYNTHETIC_AUDIT_FAIL": "1"},
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "archive_audit_failed")
+            self.assertEqual(report["failure_stage"], "archive_audit")
+            self.assertTrue(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["update_inventory_worker_count"], 1)
+            self.assertEqual(report["metrics"]["update_project_processed_count"], 1)
             self.assertEqual(git(canonical, "rev-parse", "HEAD").stdout.strip(), starting)
             self.assertEqual(git(canonical, "rev-parse", "origin/main").stdout.strip(), starting)
             self.assertEqual(git(canonical, "status", "--porcelain=v1", "--untracked-files=all").stdout, "")

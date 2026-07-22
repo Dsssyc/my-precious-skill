@@ -286,7 +286,8 @@ def secret_case(module: ModuleType, root: Path) -> tuple[bool, dict[str, str], s
 def mutation_case(module: ModuleType, root: Path, *, two_records: bool) -> tuple[bool, str]:
     memory_repo, source_dir, project_path = setup_case(root, two_records=two_records)
     payload = inventory_payload(module, source_dir)
-    target = sorted(source_dir.glob("*.jsonl"))[-1]
+    sources = sorted(source_dir.glob("*.jsonl"))
+    target = sources[-1]
     target.write_text(target.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
     returncode, output = invoke(
         module,
@@ -296,8 +297,18 @@ def mutation_case(module: ModuleType, root: Path, *, two_records: bool) -> tuple
         use_inventory=True,
         payload=payload,
     )
-    untouched = not list((memory_repo / "sessions").glob("**/meta.json"))
-    return returncode != 0 and untouched, output
+    rows = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (memory_repo / "sessions").glob("**/meta.json")
+    ]
+    target_key = str(target.resolve())
+    changed_source_untouched = not any(row.get("source_record") == target_key for row in rows)
+    stable_sibling_written = (
+        any(row.get("source_record") == str(sources[0].resolve()) for row in rows)
+        if two_records
+        else not rows
+    )
+    return returncode == 0 and changed_source_untouched and stable_sibling_written, output
 
 
 def gate_rate(path: Path) -> tuple[float, str]:
@@ -379,6 +390,7 @@ def build_report(root: Path) -> dict[str, object]:
         if baseline_secret_ok and candidate_secret_ok and baseline_secret_snapshot == candidate_secret_snapshot
         else 0.0,
         "selected_record_mutation_rejection_rate": 1.0 if mutation_ok else 0.0,
+        "selected_record_mutation_deferral_rate": 1.0 if mutation_ok else 0.0,
         "direct_cli_regression_pass_rate": 1.0 if baseline_direct == candidate_direct else 0.0,
         "v239_throughput_regression_pass_rate": v239_rate,
         "v238_single_writer_regression_pass_rate": v238_rate,
@@ -395,6 +407,7 @@ def build_report(root: Path) -> dict[str, object]:
         and metrics["selected_record_source_anchor_parity_rate"] == 1.0
         and metrics["selected_record_secret_policy_parity_rate"] == 1.0
         and metrics["selected_record_mutation_rejection_rate"] == 1.0
+        and metrics["selected_record_mutation_deferral_rate"] == 1.0
         and metrics["direct_cli_regression_pass_rate"] == 1.0
         and metrics["v239_throughput_regression_pass_rate"] == 1.0
         and metrics["v238_single_writer_regression_pass_rate"] == 1.0
@@ -420,7 +433,8 @@ def build_report(root: Path) -> dict[str, object]:
         },
         "claim_boundary": (
             "selected-record scheduled materialization operation counts, output/source-anchor parity, "
-            "secret and mutation safety, and V2.38/V2.39 regression only; not private wall-clock "
+            "secret safety, changed-record mutation-set rejection with stable-sibling progress, "
+            "and V2.38/V2.39 regression only; not private wall-clock "
             "performance, deployment approval, memory quality, ranking, or LLM quality"
         ),
     }

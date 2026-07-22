@@ -25,6 +25,29 @@ elif os.name == "nt":
 
 REPORT_KIND = "scheduled_memory_transaction"
 REPORT_VERSION = 1
+UPDATE_BATCH_REPORT_KIND = "memory_update_batch_report"
+UPDATE_BATCH_REPORT_VERSION = 1
+UPDATE_BATCH_METRIC_KEYS = {
+    "inventory_worker_count",
+    "projects_updated_count",
+    "source_streams_updated_count",
+    "archive_finalization_count",
+    "records_deferred_count",
+    "targets_deferred_count",
+    "child_failure_count",
+}
+KNOWN_UPDATE_BLOCK_REASONS = {
+    "source_inventory_invalid",
+    "secret_records_rejected",
+    "child_failure_unclassified",
+    "clean_worktree_unavailable",
+    "lock_unavailable",
+    "concurrent_update",
+    "interrupted",
+    "runner_internal_error",
+    "lock_release_failed",
+    "child_cleanup_failed",
+}
 CONCURRENT_EXIT = getattr(os, "EX_TEMPFAIL", 75)
 OWNER_KIND = "scheduled_memory_transaction_staging_owner"
 OWNER_VERSION = 1
@@ -55,10 +78,21 @@ _ACTIVE_TRANSACTION_LOCK_FD: int | None = None
 
 
 class TransactionBlocked(Exception):
-    def __init__(self, reason: str, *, exit_code: int = 1) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        exit_code: int = 1,
+        failure_stage: str | None = None,
+        metrics: dict[str, int] | None = None,
+        source_batch_complete: bool | None = None,
+    ) -> None:
         super().__init__(reason)
         self.reason = reason
         self.exit_code = exit_code
+        self.failure_stage = failure_stage
+        self.metrics = metrics
+        self.source_batch_complete = source_batch_complete
 
 
 class TransactionLock:
@@ -366,6 +400,13 @@ def load_state(state_dir: Path) -> dict[str, object] | None:
     candidate = payload.get("candidate_sha")
     if candidate is not None and (not isinstance(candidate, str) or not candidate):
         raise TransactionBlocked("malformed_state")
+    for key in ("source_record_deferred_count", "source_target_deferred_count"):
+        value = payload.get(key, 0)
+        if not isinstance(value, int) or value < 0:
+            raise TransactionBlocked("malformed_state")
+    source_batch_complete = payload.get("source_batch_complete", True)
+    if not isinstance(source_batch_complete, bool):
+        raise TransactionBlocked("malformed_state")
     return payload
 
 
@@ -377,7 +418,25 @@ def write_state(
     base_sha: str,
     phase: str,
     candidate_sha: str | None = None,
+    source_record_deferred_count: int | None = None,
+    source_target_deferred_count: int | None = None,
+    source_batch_complete: bool | None = None,
 ) -> dict[str, object]:
+    existing: dict[str, object] = {}
+    state_path = state_dir / "transaction.json"
+    if state_path.is_file() and not state_path.is_symlink():
+        try:
+            loaded = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            existing = loaded
+    if source_record_deferred_count is None:
+        source_record_deferred_count = int(existing.get("source_record_deferred_count", 0))
+    if source_target_deferred_count is None:
+        source_target_deferred_count = int(existing.get("source_target_deferred_count", 0))
+    if source_batch_complete is None:
+        source_batch_complete = bool(existing.get("source_batch_complete", True))
     payload: dict[str, object] = {
         "report_kind": STATE_KIND,
         "report_version": STATE_VERSION,
@@ -385,6 +444,9 @@ def write_state(
         "remote_fingerprint": expected_remote_fingerprint,
         "base_sha": base_sha,
         "phase": phase,
+        "source_record_deferred_count": source_record_deferred_count,
+        "source_target_deferred_count": source_target_deferred_count,
+        "source_batch_complete": source_batch_complete,
     }
     if candidate_sha is not None:
         payload["candidate_sha"] = candidate_sha
@@ -668,8 +730,39 @@ def empty_metrics() -> dict[str, int]:
         "canonical_mutation_count": 0,
         "remote_publish_count": 0,
         "repair_attempt_count": 0,
+        "source_record_deferred_count": 0,
+        "source_target_deferred_count": 0,
+        "update_inventory_worker_count": 0,
+        "update_project_processed_count": 0,
+        "update_source_stream_processed_count": 0,
+        "update_child_failure_count": 0,
         "privacy_leak_count": 0,
     }
+
+
+def failure_stage_for_reason(reason: str) -> str:
+    if reason in KNOWN_UPDATE_BLOCK_REASONS:
+        return "update"
+    if reason.startswith("archive_audit"):
+        return "archive_audit"
+    if reason.startswith("publish_"):
+        return "publish_readiness"
+    if reason.startswith("search_"):
+        return "search_health"
+    if reason.startswith("sync_dry"):
+        return "sync_dry_run"
+    if reason.startswith("sync_live") or reason == "push_not_requested":
+        return "sync_live"
+    if reason.startswith("remote_"):
+        return "remote_receipt"
+    if reason.startswith("canonical_") or reason == "dirty_canonical":
+        return "canonical"
+    if "staging" in reason or "state" in reason or reason in {
+        "input_unavailable",
+        "concurrent_transaction",
+    }:
+        return "preflight"
+    return "transaction"
 
 
 def report(
@@ -678,14 +771,26 @@ def report(
     *,
     recovery_action: str = "none",
     metrics: dict[str, int] | None = None,
+    source_batch_complete: bool | None = None,
+    failure_stage: str | None = None,
 ) -> dict[str, object]:
+    values = metrics or empty_metrics()
+    if source_batch_complete is None:
+        source_batch_complete = (
+            status in {"published", "no_op_current"}
+            and values["source_record_deferred_count"] == 0
+        )
     return {
         "report_kind": REPORT_KIND,
         "report_version": REPORT_VERSION,
         "status": status,
         "reason": reason,
+        "failure_stage": failure_stage or (
+            failure_stage_for_reason(reason) if status == "blocked" else "none"
+        ),
         "recovery_action": recovery_action,
-        "metrics": metrics or empty_metrics(),
+        "source_batch_complete": source_batch_complete,
+        "metrics": values,
         "privacy": {
             "aggregate_only": True,
             "paths_rendered": False,
@@ -712,6 +817,79 @@ def run_python_tool(staging: Path, name: str, *arguments: str) -> subprocess.Com
     if not script.is_file() or script.is_symlink():
         raise TransactionBlocked("runtime_tool_missing")
     return run_command([sys.executable, str(script), *arguments], cwd=staging)
+
+
+def parse_update_batch_report(result: subprocess.CompletedProcess[str]) -> dict[str, object] | None:
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+    try:
+        payload = json.loads(lines[0])
+    except json.JSONDecodeError:
+        return None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {
+            "report_kind",
+            "report_version",
+            "status",
+            "reason",
+            "failure_stage",
+            "source_batch_complete",
+            "metrics",
+            "privacy",
+        }
+        or payload.get("report_kind") != UPDATE_BATCH_REPORT_KIND
+        or payload.get("report_version") != UPDATE_BATCH_REPORT_VERSION
+        or payload.get("status") not in {"updated", "deferred", "blocked"}
+        or not isinstance(payload.get("reason"), str)
+        or payload.get("failure_stage")
+        not in {
+            "none",
+            "preflight",
+            "source_inventory",
+            "project_update",
+            "source_stream_update",
+            "archive_finalization",
+            "runner",
+            "lock_acquire",
+            "lock_release",
+            "child_cleanup",
+        }
+        or not isinstance(payload.get("source_batch_complete"), bool)
+    ):
+        return None
+    metrics = payload.get("metrics")
+    if (
+        not isinstance(metrics, dict)
+        or set(metrics) != UPDATE_BATCH_METRIC_KEYS
+        or any(not isinstance(metrics[key], int) or metrics[key] < 0 for key in UPDATE_BATCH_METRIC_KEYS)
+    ):
+        return None
+    privacy = payload.get("privacy")
+    if privacy != {
+        "aggregate_only": True,
+        "paths_rendered": False,
+        "source_content_rendered": False,
+        "child_output_rendered": False,
+    }:
+        return None
+    deferred_count = metrics["records_deferred_count"]
+    if payload["source_batch_complete"] != (payload["status"] == "updated" and deferred_count == 0):
+        return None
+    if payload["status"] == "updated" and payload["reason"] != "updated":
+        return None
+    if payload["status"] == "deferred" and (
+        payload["reason"] != "source_records_deferred" or deferred_count == 0
+    ):
+        return None
+    if payload["status"] == "blocked" and payload["reason"] not in KNOWN_UPDATE_BLOCK_REASONS:
+        return None
+    if payload["status"] == "blocked" and payload["failure_stage"] == "none":
+        return None
+    if payload["status"] != "blocked" and payload["failure_stage"] != "none":
+        return None
+    return payload
 
 
 def verify_state_identity(
@@ -759,6 +937,49 @@ def reconcile_post_push(
     staging_head = staging_head_if_owned(state_dir, repository_fingerprint, expected_remote_fingerprint)
     candidate = str(state.get("candidate_sha") or staging_head or "")
     if remote_head == base_sha:
+        if phase == "complete" and candidate == base_sha and staging_head == base_sha:
+            ensure_clean_canonical(canonical)
+            canonical_head = git_value(
+                canonical,
+                "rev-parse",
+                "HEAD",
+                reason="canonical_unavailable",
+            )
+            tracking_head = git_value(
+                canonical,
+                "rev-parse",
+                "origin/main",
+                reason="canonical_unavailable",
+            )
+            if canonical_head != base_sha or tracking_head != base_sha:
+                raise TransactionBlocked("canonical_remote_mismatch")
+            staging_status = run_git(
+                state_dir / "staging",
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            )
+            if staging_status.returncode != 0 or staging_status.stdout:
+                raise TransactionBlocked("staging_status_failed")
+            metrics = empty_metrics()
+            metrics["recovery_count"] = 1
+            metrics["source_record_deferred_count"] = int(
+                state.get("source_record_deferred_count", 0)
+            )
+            metrics["source_target_deferred_count"] = int(
+                state.get("source_target_deferred_count", 0)
+            )
+            source_batch_complete = bool(state.get("source_batch_complete", True))
+            clear_state(state_dir)
+            status = "no_op_current" if source_batch_complete else "deferred"
+            reason = "no_op_current" if source_batch_complete else "source_records_deferred"
+            return report(
+                status,
+                reason,
+                recovery_action="completed_no_publish_reconciled",
+                metrics=metrics,
+                source_batch_complete=source_batch_complete,
+            )
         if phase in {"remote_receipt", "canonical_fast_forward", "complete"}:
             raise TransactionBlocked("remote_receipt_failed")
         return None
@@ -783,12 +1004,16 @@ def reconcile_post_push(
     metrics = empty_metrics()
     metrics["recovery_count"] = 1
     metrics["canonical_mutation_count"] = 1
+    metrics["source_record_deferred_count"] = int(state.get("source_record_deferred_count", 0))
+    metrics["source_target_deferred_count"] = int(state.get("source_target_deferred_count", 0))
+    source_batch_complete = bool(state.get("source_batch_complete", True))
     clear_state(state_dir)
     return report(
         "published",
         "published",
         recovery_action="post_push_reconciled",
         metrics=metrics,
+        source_batch_complete=source_batch_complete,
     )
 
 
@@ -803,7 +1028,10 @@ def sync_arguments(args: argparse.Namespace, staging: Path, *, dry_run: bool) ->
     return values
 
 
-def execute(args: argparse.Namespace) -> dict[str, object]:
+def _execute(
+    args: argparse.Namespace,
+    update_context: dict[str, object],
+) -> dict[str, object]:
     memory_repo = Path(args.memory_repo).expanduser().resolve()
     source_dir = Path(args.source_dir).expanduser().resolve()
     if not memory_repo.is_dir() or not source_dir.is_dir():
@@ -871,6 +1099,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             "--source-dir",
             str(source_dir),
             "--require-clean-worktree",
+            "--report-json",
         ]
         if args.allow_redacted_secrets:
             update_arguments.append("--allow-redacted-secrets")
@@ -881,8 +1110,48 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             base_sha=remote_head,
             phase="updating",
         )
-        if run_python_tool(staging, "run_memory_updates.py", *update_arguments).returncode != 0:
-            raise TransactionBlocked("update_failed")
+        update_result = run_python_tool(staging, "run_memory_updates.py", *update_arguments)
+        update_report = parse_update_batch_report(update_result)
+        if update_report is None:
+            raise TransactionBlocked(
+                "child_failure_unclassified",
+                failure_stage="update",
+                metrics=dict(metrics),
+            )
+        update_metrics = update_report["metrics"]
+        assert isinstance(update_metrics, dict)
+        metrics["source_record_deferred_count"] = int(update_metrics["records_deferred_count"])
+        metrics["source_target_deferred_count"] = int(update_metrics["targets_deferred_count"])
+        metrics["update_inventory_worker_count"] = int(update_metrics["inventory_worker_count"])
+        metrics["update_project_processed_count"] = int(update_metrics["projects_updated_count"])
+        metrics["update_source_stream_processed_count"] = int(
+            update_metrics["source_streams_updated_count"]
+        )
+        metrics["update_child_failure_count"] = int(update_metrics["child_failure_count"])
+        source_batch_complete = bool(update_report["source_batch_complete"])
+        update_context["metrics"] = metrics
+        update_context["source_batch_complete"] = source_batch_complete
+        if update_result.returncode != 0:
+            if update_report["status"] != "blocked":
+                raise TransactionBlocked(
+                    "child_failure_unclassified",
+                    failure_stage="update",
+                    metrics=dict(metrics),
+                    source_batch_complete=source_batch_complete,
+                )
+            raise TransactionBlocked(
+                str(update_report["reason"]),
+                failure_stage=str(update_report["failure_stage"]),
+                metrics=dict(metrics),
+                source_batch_complete=source_batch_complete,
+            )
+        if update_report["status"] not in {"updated", "deferred"}:
+            raise TransactionBlocked(
+                "child_failure_unclassified",
+                failure_stage="update",
+                metrics=dict(metrics),
+                source_batch_complete=source_batch_complete,
+            )
 
         audit_arguments = ("--memory-repo", str(staging))
         write_state(
@@ -891,6 +1160,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             expected_remote_fingerprint=expected_remote_fingerprint,
             base_sha=remote_head,
             phase="auditing",
+            source_record_deferred_count=metrics["source_record_deferred_count"],
+            source_target_deferred_count=metrics["source_target_deferred_count"],
+            source_batch_complete=source_batch_complete,
         )
         if run_python_tool(staging, "audit_memory_archive.py", *audit_arguments).returncode != 0:
             raise TransactionBlocked("archive_audit_failed")
@@ -960,11 +1232,14 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
                 candidate_sha=remote_head,
             )
             clear_state(state_dir)
+            status = "no_op_current" if source_batch_complete else "deferred"
+            reason = "no_op_current" if source_batch_complete else "source_records_deferred"
             return report(
-                "no_op_current",
-                "no_op_current",
+                status,
+                reason,
                 recovery_action=recovery_action,
                 metrics=metrics,
+                source_batch_complete=source_batch_complete,
             )
         if "Would commit:" not in dry_sync.stdout:
             raise TransactionBlocked("sync_dry_run_ambiguous")
@@ -1057,7 +1332,22 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             "published",
             recovery_action=recovery_action,
             metrics=metrics,
+            source_batch_complete=source_batch_complete,
         )
+
+
+def execute(args: argparse.Namespace) -> dict[str, object]:
+    update_context: dict[str, object] = {}
+    try:
+        return _execute(args, update_context)
+    except TransactionBlocked as exc:
+        metrics = update_context.get("metrics")
+        if exc.metrics is None and isinstance(metrics, dict):
+            exc.metrics = dict(metrics)
+        source_batch_complete = update_context.get("source_batch_complete")
+        if exc.source_batch_complete is None and isinstance(source_batch_complete, bool):
+            exc.source_batch_complete = source_batch_complete
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1066,7 +1356,13 @@ def main(argv: list[str] | None = None) -> int:
         payload = execute(args)
         exit_code = 0
     except TransactionBlocked as exc:
-        payload = report("blocked", exc.reason)
+        payload = report(
+            "blocked",
+            exc.reason,
+            metrics=exc.metrics,
+            source_batch_complete=exc.source_batch_complete,
+            failure_stage=exc.failure_stage,
+        )
         exit_code = exc.exit_code
     except Exception:
         payload = report("blocked", "transaction_internal_error")

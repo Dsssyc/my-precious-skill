@@ -83,6 +83,7 @@ def install_synthetic_runtime(repository: Path) -> None:
     (tools / "run_memory_updates.py").write_text(
         """#!/usr/bin/env python3
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -95,6 +96,30 @@ repo = Path(args[args.index('--memory-repo') + 1])
 mode = os.environ.get('SYNTHETIC_TRANSACTION_MODE', 'change')
 if mode != 'noop':
     (repo / 'INDEX.md').write_text('synthetic scheduled update\\n', encoding='utf-8')
+if '--report-json' in args:
+    print(json.dumps({
+        'report_kind': 'memory_update_batch_report',
+        'report_version': 1,
+        'status': 'updated',
+        'reason': 'updated',
+        'failure_stage': 'none',
+        'source_batch_complete': True,
+        'metrics': {
+            'inventory_worker_count': 1,
+            'projects_updated_count': 1,
+            'source_streams_updated_count': 0,
+            'archive_finalization_count': 1,
+            'records_deferred_count': 0,
+            'targets_deferred_count': 0,
+            'child_failure_count': 0,
+        },
+        'privacy': {
+            'aggregate_only': True,
+            'paths_rendered': False,
+            'source_content_rendered': False,
+            'child_output_rendered': False,
+        },
+    }, sort_keys=True, separators=(',', ':')), flush=True)
 if mode == 'nested_writer':
     import fcntl
     uid = os.getuid() if hasattr(os, 'getuid') else 0

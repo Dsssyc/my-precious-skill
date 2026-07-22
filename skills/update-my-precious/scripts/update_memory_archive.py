@@ -76,6 +76,15 @@ NATURAL_USER_FACT_LIMIT = 5
 SUMMARY_EVIDENCE_LIMIT = 6
 SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
 SOURCE_INVENTORY_REPORT_VERSION = 2
+UPDATE_TARGET_REPORT_KIND = "memory_update_target_report"
+UPDATE_TARGET_REPORT_VERSION = 1
+DEFERRED_SOURCE_STATE_REL_PATH = Path("index/deferred_sources.jsonl")
+DEFERABLE_SOURCE_INVENTORY_ERRORS = frozenset(
+    {
+        "source inventory record changed",
+        "source inventory record is unavailable",
+    }
+)
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
     "approve_supersedes",
     "approve_contradicts",
@@ -331,6 +340,41 @@ class SourceRecord:
 
 class SourceInventoryError(ValueError):
     pass
+
+
+def update_target_report(
+    status: str,
+    reason: str,
+    *,
+    records_selected_count: int = 0,
+    records_processed_count: int = 0,
+    records_deferred_count: int = 0,
+    records_skipped_count: int = 0,
+    entries_removed_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "report_kind": UPDATE_TARGET_REPORT_KIND,
+        "report_version": UPDATE_TARGET_REPORT_VERSION,
+        "status": status,
+        "reason": reason,
+        "source_batch_complete": status == "updated" and records_deferred_count == 0,
+        "metrics": {
+            "records_selected_count": records_selected_count,
+            "records_processed_count": records_processed_count,
+            "records_deferred_count": records_deferred_count,
+            "records_skipped_count": records_skipped_count,
+            "entries_removed_count": entries_removed_count,
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "paths_rendered": False,
+            "source_content_rendered": False,
+        },
+    }
+
+
+def emit_update_target_report(payload: dict[str, object]) -> None:
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
 @dataclass(frozen=True)
@@ -891,6 +935,103 @@ def archived_project_state(
     return latest, archived_hashes, archived_source_hashes
 
 
+def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
+    path = memory_repo / DEFERRED_SOURCE_STATE_REL_PATH
+    if not path.exists():
+        return []
+    if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+        raise SourceInventoryError("deferred source state is unsafe")
+    rows: list[dict[str, str]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise SourceInventoryError("deferred source state is unavailable") from exc
+    for raw_line in lines:
+        if not raw_line.strip():
+            continue
+        try:
+            row = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("deferred source state is malformed") from exc
+        if not isinstance(row, dict) or set(row) != {
+            "archive_scope",
+            "source_partition",
+            "source_record",
+        }:
+            raise SourceInventoryError("deferred source state is malformed")
+        archive_scope = row.get("archive_scope")
+        source_partition = row.get("source_partition")
+        source_record = row.get("source_record")
+        if (
+            not isinstance(archive_scope, str)
+            or not archive_scope
+            or not isinstance(source_partition, str)
+            or not source_partition
+            or not isinstance(source_record, str)
+            or not Path(source_record).is_absolute()
+            or any(ord(char) < 32 or ord(char) == 127 for char in source_record)
+        ):
+            raise SourceInventoryError("deferred source state is malformed")
+        rows.append(
+            {
+                "archive_scope": archive_scope,
+                "source_partition": source_partition,
+                "source_record": str(Path(source_record).expanduser().resolve()),
+            }
+        )
+    return rows
+
+
+def deferred_source_paths(
+    memory_repo: Path,
+    archive_scope: str,
+    source_partition: str,
+) -> set[str]:
+    return {
+        row["source_record"]
+        for row in load_deferred_source_rows(memory_repo)
+        if row["archive_scope"] == archive_scope and row["source_partition"] == source_partition
+    }
+
+
+def update_deferred_source_paths(
+    memory_repo: Path,
+    archive_scope: str,
+    source_partition: str,
+    *,
+    add: Iterable[str] = (),
+    remove: Iterable[str] = (),
+) -> None:
+    rows = load_deferred_source_rows(memory_repo)
+    keyed = {
+        (row["archive_scope"], row["source_partition"], row["source_record"]): row
+        for row in rows
+    }
+    for value in remove:
+        source_record = str(Path(value).expanduser().resolve())
+        keyed.pop((archive_scope, source_partition, source_record), None)
+    for value in add:
+        source_record = str(Path(value).expanduser().resolve())
+        key = (archive_scope, source_partition, source_record)
+        keyed[key] = {
+            "archive_scope": archive_scope,
+            "source_partition": source_partition,
+            "source_record": source_record,
+        }
+    path = memory_repo / DEFERRED_SOURCE_STATE_REL_PATH
+    if not keyed:
+        if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+            raise SourceInventoryError("deferred source state is unsafe")
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = "".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+        for _, row in sorted(keyed.items())
+    )
+    write_safe_archive_text(memory_repo, path, text, "deferred source state")
+
+
 def latest_archived_timestamp(
     memory_repo: Path,
     project_path: Path,
@@ -923,15 +1064,15 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
                 continue
             try:
                 yield json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
+            except json.JSONDecodeError as exc:
+                raise SourceInventoryError("source record is malformed") from exc
         return
 
     if path.suffix == ".json":
         try:
             yield json.loads(text)
-        except json.JSONDecodeError:
-            return
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
         return
 
     try:
@@ -946,8 +1087,8 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
             continue
         try:
             yield json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
 
 
 def record_matches_project_values(
@@ -1068,11 +1209,13 @@ def discover_records(
     archived_hashes: set[str] | None = None,
     archived_source_hashes: dict[str, set[str]] | None = None,
     require_project_metadata: bool = False,
+    pending_source_paths: set[str] | None = None,
 ) -> list[SourceRecord]:
     records: list[SourceRecord] = []
     seen: set[Path] = set()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
+    pending_source_paths = pending_source_paths or set()
     for path in iter_candidate_files(source_dir, patterns):
         path = path.resolve()
         if path in seen:
@@ -1088,7 +1231,7 @@ def discover_records(
         source_key = str(path)
         prior_hashes_for_source = archived_source_hashes.get(source_key, set())
         source_changed_since_archive = bool(prior_hashes_for_source) and source_hash not in prior_hashes_for_source
-        if after is not None:
+        if after is not None and source_key not in pending_source_paths:
             if updated_at < after and not source_changed_since_archive:
                 continue
             if updated_at == after and source_hash in archived_hashes:
@@ -1105,6 +1248,7 @@ def discover_records_from_inventory(
     archived_hashes: set[str] | None = None,
     archived_source_hashes: dict[str, set[str]] | None = None,
     require_project_metadata: bool = False,
+    pending_source_paths: set[str] | None = None,
 ) -> list[SourceRecord]:
     try:
         payload = json.loads(payload_text)
@@ -1121,6 +1265,7 @@ def discover_records_from_inventory(
     source_root = source_dir.resolve()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
+    pending_source_paths = pending_source_paths or set()
     seen: set[Path] = set()
     records: list[SourceRecord] = []
     for row in payload["records"]:
@@ -1147,7 +1292,7 @@ def discover_records_from_inventory(
         ):
             raise SourceInventoryError("source inventory row is invalid")
         try:
-            path = (source_root / relative_path).resolve(strict=True)
+            path = (source_root / relative_path).resolve(strict=False)
             path.relative_to(source_root)
         except (OSError, ValueError) as exc:
             raise SourceInventoryError("source inventory path is unsafe") from exc
@@ -1157,7 +1302,7 @@ def discover_records_from_inventory(
         source_key = str(path)
         prior_hashes_for_source = archived_source_hashes.get(source_key, set())
         source_changed_since_archive = bool(prior_hashes_for_source) and expected_hash not in prior_hashes_for_source
-        if after is not None:
+        if after is not None and source_key not in pending_source_paths:
             if updated_at < after and not source_changed_since_archive:
                 continue
             if updated_at == after and expected_hash in archived_hashes:
@@ -2029,8 +2174,8 @@ def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[M
         if stripped_source:
             try:
                 source_value = json.loads(stripped_source)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as exc:
+                raise SourceInventoryError("source record is malformed") from exc
         if source_value is not None:
             source_values.append(source_value)
 
@@ -2039,8 +2184,8 @@ def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[M
             continue
         try:
             redacted_value = json.loads(stripped_redacted)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
         parsed_any = True
         line_events = events_from_value(redacted_value)
         hash_events = events_from_value(source_value) if source_value is not None else []
@@ -3106,11 +3251,7 @@ def prepare_inventory_record(
     source_text, source_mtime = read_validated_inventory_record(record)
     redacted_text, redaction_counts = redact_text(source_text)
     if record.path.suffix == ".jsonl":
-        try:
-            source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
-        except SourceInventoryError:
-            source_values = list(iter_source_json_values(record.path, source_text))
-            source_events = extract_source_events(record.path, redacted_text, source_text)
+        source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
     else:
         source_values = list(iter_source_json_values(record.path, source_text))
         source_events = extract_source_events(record.path, redacted_text, source_text)
@@ -5145,7 +5286,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Human-readable project name")
     parser.add_argument("--source-agent", default="agent", help="Source agent/runtime label")
     parser.add_argument("--pattern", action="append", help="Glob pattern to scan; may be repeated")
-    parser.add_argument("--max-records", type=int, default=50, help="Maximum records to archive in one run")
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        default=-1,
+        help="Maximum records to archive in one run; negative means unlimited",
+    )
     parser.add_argument("--max-excerpt-bytes", type=int, default=12000, help="Deprecated compatibility option; raw excerpts are not copied by default")
     parser.add_argument("--allow-redacted-secrets", action="store_true", help="Archive records with detected secret patterns after redaction")
     parser.add_argument(
@@ -5177,6 +5323,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--finalize-archive",
         action="store_true",
         help="Rebuild derived archive surfaces without scanning source records",
+    )
+    parser.add_argument(
+        "--report-json",
+        action="store_true",
+        help="Emit one aggregate machine-readable target report",
     )
     parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
     parser.add_argument(
@@ -5220,6 +5371,8 @@ def main(argv: list[str] | None = None) -> int:
     memory_repo = resolve_memory_repo(args.memory_repo)
     if args.finalize_archive:
         rebuild_indexes(memory_repo, reconcile_removed_refs=True)
+        if args.report_json:
+            emit_update_target_report(update_target_report("updated", "updated"))
         return 0
     if not args.source_dir:
         raise SystemExit("--source-dir is required unless --finalize-archive is used")
@@ -5296,6 +5449,15 @@ def main(argv: list[str] | None = None) -> int:
             memory_repo,
             reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
         )
+        if args.report_json:
+            emit_update_target_report(
+                update_target_report(
+                    "updated",
+                    "updated",
+                    records_selected_count=len(direct_nodes),
+                    records_processed_count=len(direct_nodes),
+                )
+            )
         return 0
 
     latest, archived_hashes, archived_source_hashes = archived_project_state(
@@ -5305,38 +5467,58 @@ def main(argv: list[str] | None = None) -> int:
         source_partition,
         include_generated_index=not args.defer_global_rebuild,
     )
+    try:
+        pending_source_paths = deferred_source_paths(memory_repo, archive_scope, source_partition)
+    except SourceInventoryError:
+        if args.report_json:
+            emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
+        else:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+        return 2
     discovery_args = (
         None if args.rewrite_existing else latest,
         project_path,
         set() if args.rewrite_existing else archived_hashes,
         {} if args.rewrite_existing else archived_source_hashes,
     )
-    if args.source_inventory_stdin:
-        try:
+    try:
+        if args.source_inventory_stdin:
             records = discover_records_from_inventory(
                 sys.stdin.read(),
                 source_dir,
                 *discovery_args,
                 require_project_metadata=args.require_project_metadata,
+                pending_source_paths=pending_source_paths,
             )
-        except SourceInventoryError:
+        else:
+            records = discover_records(
+                source_dir,
+                patterns,
+                *discovery_args,
+                require_project_metadata=args.require_project_metadata,
+                pending_source_paths=pending_source_paths,
+            )
+    except SourceInventoryError:
+        if args.report_json:
+            emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
+        else:
             print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
-            return 2
-    else:
-        records = discover_records(
-            source_dir,
-            patterns,
-            *discovery_args,
-            require_project_metadata=args.require_project_metadata,
-        )
+        return 2
     if args.max_records >= 0:
         records = records[: args.max_records]
 
+    selected_source_paths = {str(record.path.resolve()) for record in records}
+    unresolved_pending_paths = pending_source_paths - selected_source_paths
+    selected_record_count = len(records) + len(unresolved_pending_paths)
+    deferred_record_count = len(unresolved_pending_paths)
+    deferred_source_records = set(unresolved_pending_paths)
     prepared_records: list[PreparedArchiveRecord] | None = None
     if args.source_inventory_stdin and not args.dry_run:
-        try:
-            prepared_records = [
-                prepare_inventory_record(
+        prepared_records = []
+        stable_records: list[SourceRecord] = []
+        for record in records:
+            try:
+                prepared = prepare_inventory_record(
                     memory_repo,
                     project_path,
                     archive_scope,
@@ -5346,26 +5528,53 @@ def main(argv: list[str] | None = None) -> int:
                     record,
                     args.require_project_metadata,
                 )
-                for record in records
-            ]
-        except SourceInventoryError:
-            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
-            return 2
+            except SourceInventoryError as exc:
+                if str(exc) in DEFERABLE_SOURCE_INVENTORY_ERRORS:
+                    deferred_record_count += 1
+                    deferred_source_records.add(str(record.path.resolve()))
+                    continue
+                if args.report_json:
+                    emit_update_target_report(
+                        update_target_report(
+                            "blocked",
+                            "source_inventory_invalid",
+                            records_selected_count=selected_record_count,
+                        )
+                    )
+                else:
+                    print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+                return 2
+            stable_records.append(record)
+            prepared_records.append(prepared)
+        records = stable_records
 
-    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
-    print(f"Project path: {safe_diagnostic_path(project_path)}")
-    if args.archive_scope is not None:
-        print("Archive scope: configured")
-    if args.source_partition is not None:
-        print("Source partition: configured")
-    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
-    print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
-    print(f"Records selected: {len(records)}")
+    if not args.report_json:
+        print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
+        print(f"Project path: {safe_diagnostic_path(project_path)}")
+        if args.archive_scope is not None:
+            print("Archive scope: configured")
+        if args.source_partition is not None:
+            print("Source partition: configured")
+        print(f"Source dir: {safe_diagnostic_path(source_dir)}")
+        print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
+        print(f"Records selected: {len(records)}")
 
-    for record in records:
-        print(f"- {isoformat(record.updated_at)} {safe_diagnostic_path(record.path)}")
+        for record in records:
+            print(f"- {isoformat(record.updated_at)} {safe_diagnostic_path(record.path)}")
 
     if args.dry_run:
+        if args.report_json:
+            status = "deferred" if deferred_record_count else "updated"
+            reason = "source_records_deferred" if deferred_record_count else "updated"
+            emit_update_target_report(
+                update_target_report(
+                    status,
+                    reason,
+                    records_selected_count=selected_record_count,
+                    records_processed_count=len(records),
+                    records_deferred_count=deferred_record_count,
+                )
+            )
         return 0
 
     if prepared_records is not None:
@@ -5381,12 +5590,44 @@ def main(argv: list[str] | None = None) -> int:
             if counts:
                 sensitive_records.append((record, counts))
     if sensitive_records and not args.allow_redacted_secrets:
-        print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
-        for record, counts in sensitive_records:
-            labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
-            print(f"- {safe_diagnostic_path(record.path)}: {labels}", file=sys.stderr)
-        print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
+        if args.report_json:
+            emit_update_target_report(
+                update_target_report(
+                    "blocked",
+                    "secret_records_rejected",
+                    records_selected_count=selected_record_count,
+                    records_deferred_count=deferred_record_count,
+                )
+            )
+        else:
+            print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
+            for record, counts in sensitive_records:
+                labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+                print(f"- {safe_diagnostic_path(record.path)}: {labels}", file=sys.stderr)
+            print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
         return 2
+
+    if deferred_source_records:
+        try:
+            update_deferred_source_paths(
+                memory_repo,
+                archive_scope,
+                source_partition,
+                add=deferred_source_records,
+            )
+        except SourceInventoryError:
+            if args.report_json:
+                emit_update_target_report(
+                    update_target_report(
+                        "blocked",
+                        "source_inventory_invalid",
+                        records_selected_count=selected_record_count,
+                        records_deferred_count=deferred_record_count,
+                    )
+                )
+            else:
+                print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
 
     removed_entries = 0
     skipped_records = 0
@@ -5413,15 +5654,59 @@ def main(argv: list[str] | None = None) -> int:
             written = apply_prepared_record(memory_repo, prepared_records[record_index])
         if written is None:
             skipped_records += 1
+    completed_pending_paths = pending_source_paths & {
+        str(record.path.resolve()) for record in records
+    }
+    if completed_pending_paths:
+        try:
+            update_deferred_source_paths(
+                memory_repo,
+                archive_scope,
+                source_partition,
+                remove=completed_pending_paths,
+            )
+        except SourceInventoryError:
+            if args.report_json:
+                emit_update_target_report(
+                    update_target_report(
+                        "blocked",
+                        "source_inventory_invalid",
+                        records_selected_count=selected_record_count,
+                        records_processed_count=len(records),
+                        records_deferred_count=deferred_record_count,
+                        records_skipped_count=skipped_records,
+                        entries_removed_count=removed_entries,
+                    )
+                )
+            else:
+                print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
     if not args.defer_global_rebuild:
         rebuild_indexes(
             memory_repo,
             reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
         )
-    if args.rewrite_existing or removed_entries:
-        print(f"Existing entries removed: {removed_entries}")
-    print(f"Records skipped as low-signal: {skipped_records}")
-    print("Archive update complete.")
+    if args.report_json:
+        status = "deferred" if deferred_record_count else "updated"
+        reason = "source_records_deferred" if deferred_record_count else "updated"
+        emit_update_target_report(
+            update_target_report(
+                status,
+                reason,
+                records_selected_count=selected_record_count,
+                records_processed_count=len(records),
+                records_deferred_count=deferred_record_count,
+                records_skipped_count=skipped_records,
+                entries_removed_count=removed_entries,
+            )
+        )
+    else:
+        if args.rewrite_existing or removed_entries:
+            print(f"Existing entries removed: {removed_entries}")
+        if deferred_record_count:
+            print(f"Records deferred: {deferred_record_count}")
+        print(f"Records skipped as low-signal: {skipped_records}")
+        print("Archive update complete.")
     return 0
 
 
