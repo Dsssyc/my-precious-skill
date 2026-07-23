@@ -2887,7 +2887,7 @@ recall for every durable preference shape.
 
 ## V2.52 Stable Live-Source Batch Closure
 
-Date: 2026-07-22
+Date: 2026-07-23
 
 V2.52 addresses the scheduled failure class in which a large live rollout can
 change or disappear after source inventory but before one target child reads
@@ -3027,6 +3027,121 @@ parity, aggregate diagnostics, and parent-memory isolation. It is not LLM answer
 not induction quality, not ranking quality, not vector search,
 not ontology discovery, not public leaderboard parity, not distributed
 scheduling, and not a whole-run rollback transaction.
+
+## V2.53 Copyable Goal Preference Recall Closure
+
+Date: 2026-07-22
+
+V2.53 closes one real-use induction gap: repeated user corrections about a
+Markdown goal's formatting and copyability previously remained separate event
+fragments, so no durable preference was materialized for package-first recall.
+The new rule is deterministic, session-local, and limited to goal artifacts.
+It requires explicit goal context followed by at least two user-event format
+corrections, or one explicit instruction with durable language such as a
+future or default rule. A later contrary instruction wins as the latest explicit correction.
+Malformed, quoted, hypothetical, temporary, assistant-only, and non-goal
+complaints fail closed. The existing `natural_user_memory_fact()` behavior for
+single explicit preferences remains intact.
+
+The induced summary fact is normalized, but it is not rendered as a verbatim
+user quote. Instead, its candidate carries the actual bounded user-event
+evidence quote IDs and corresponding source anchors. The resulting memory is
+global, active/current, and has summary and evidence drill paths. Controlled
+retrieval aliases are attached only to this candidate so the four frozen goal
+format intents can reach complete lexical query support without a ranking
+rewrite.
+
+The public closure command is:
+
+```bash
+python3 benchmarks/copyable_goal_preference_recall_gate.py
+```
+
+`benchmarks/copyable_goal_preference_recall_gate.py` initializes two clean
+packaged archives and runs the same synthetic source through both. The
+controlled baseline executes the copied updater with only the goal-correction inducer disabled;
+it still archives the source and classifies the observed
+failure as `memory_not_materialized`. The candidate then requests
+`memory_recall_context_package` with evidence depth and accepts support only
+when the package hit has the exact target memory ID and its own summary drill
+path resolves the normalized fact. Free-form search output and unrelated supported hits
+are never answerability sources.
+
+The source-binding check independently resolves every cited source-map anchor
+back to its JSONL event. Each accepted anchor must pair with the cited evidence
+quote, carry a distinct event locator, and resolve to an actual user role;
+metadata labels alone cannot establish user provenance. The public baseline
+archived two synthetic sessions, materialized zero target memories, and
+returned zero target-supported queries. The candidate bound four evidence
+quotes to four distinct user events.
+
+| Public metric | Result |
+| --- | ---: |
+| `correction_sequence_qualification_rate` | 1.0 |
+| `correction_induced_fact_materialization_rate` | 1.0 |
+| `correction_source_anchor_binding_rate` | 1.0 |
+| `goal_format_query_supported_recall` | 1.0 |
+| `supported_summary_fact_resolution_rate` | 1.0 |
+| `global_scope_accuracy` | 1.0 |
+| `current_turn_instruction_precedence_accuracy` | 1.0 |
+| `copyable_text_block_decision_accuracy` | 1.0 |
+| `nested_fence_collision_avoidance_accuracy` | 1.0 |
+| `assistant_evidence_promotion_count` | 0 |
+| `non_target_memory_promotion_count` | 0 |
+| `free_form_answerability_use_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The runtime recipe uses a supported history preference to place the complete
+goal in one `text` fence with no prose outside it. A current-turn format
+instruction takes precedence even when history is unsupported, inactive, or
+malformed. With no supported history and no current instruction, it does not
+invent a preference. When the goal contains an inner backtick fence, the
+outer fence is deterministically longer.
+
+An optional frozen private A/B accepts the real source record and the prior
+installed updater only through external command arguments:
+
+```bash
+python3 benchmarks/copyable_goal_preference_recall_gate.py \
+  --private-source-record /path/to/external/source.jsonl \
+  --private-baseline-updater /path/to/prior/update_memory_archive.py \
+  --private-project-path /path/to/matching/project
+```
+
+That mode reports aggregate-only materialization and target-bound
+supported-query counts.
+It does not render source text, source paths, session identifiers, query text,
+memory text, or raw refs. The frozen private run passed: the prior updater had
+`baseline_no_hit_rate=1.0` and materialized zero target memories, while the
+candidate materialized one target memory and reached
+`candidate_supported_recall=1.0` across all four query variants.
+
+The reviewed three-layer deployment then matched source and installed skill
+bundles. The installed setup skill detected exactly one stale deployment tool,
+refreshed that source-owned file, and produced two consecutive `19/19`
+`current` parity reports. The targeted backfill dry-run selected one allow-listed
+source record; apply selected and rewrote one record, removed its one prior
+archive entry, and skipped zero records as low signal. Archive audit, publish
+readiness, search health, induction/consolidation review, content-noise review,
+and reviewed sync dry-run all passed. Every publish-readiness noise category
+remained zero.
+
+Runtime code deployment and generated-memory publication remained separate.
+The runtime deployment admitted only the one source-owned tool that matched the
+installed setup asset. `sync_memory_archive.py --include-reviewed-memory-nodes`
+was the only stage, commit, and push path for generated archive data. After
+publication, both the deployment search tool and the installed read skill
+returned supported active/current packages for all four query variants. All
+four resolved to one global current memory; summary-drill, evidence-drill, and
+summary-fact resolution rates were `1.0`, and free-form answerability use and
+privacy leaks remained zero. The private repository finished clean with
+`HEAD == origin/main`; the automation definition and schedule were unchanged.
+No private source text, identifier, path, query, hash, memory ID, or raw ref is
+stored in this document or in the aggregate reports.
+
+V2.53 proves this bounded correction-to-delivery path. It is not ranking quality,
+not vector search, not general complaint understanding, not ontology discovery,
+not public leaderboard parity, and not LLM answer quality.
 
 ## Current Baseline
 

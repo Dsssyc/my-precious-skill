@@ -22,6 +22,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/packaged_lifecycle_gate.py",
     "benchmarks/using_my_precious_runtime_gate.py",
     "benchmarks/real_use_recall_utility_gate.py",
+    "benchmarks/copyable_goal_preference_recall_gate.py",
     "benchmarks/query_support_recall_gate.py",
     "benchmarks/progressive_source_drilldown_gate.py",
     "benchmarks/authorized_original_source_gate.py",
@@ -122,6 +123,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec("packaged_lifecycle", ("python3", "benchmarks/packaged_lifecycle_gate.py")),
         CheckSpec("using_my_precious_runtime", ("python3", "benchmarks/using_my_precious_runtime_gate.py")),
         CheckSpec("real_use_recall_utility", ("python3", "benchmarks/real_use_recall_utility_gate.py")),
+        CheckSpec(
+            "copyable_goal_preference_recall",
+            ("python3", "benchmarks/copyable_goal_preference_recall_gate.py"),
+        ),
         CheckSpec("query_support_recall", ("python3", "benchmarks/query_support_recall_gate.py")),
         CheckSpec("progressive_source_drilldown", ("python3", "benchmarks/progressive_source_drilldown_gate.py")),
         CheckSpec("authorized_original_source", ("python3", "benchmarks/authorized_original_source_gate.py")),

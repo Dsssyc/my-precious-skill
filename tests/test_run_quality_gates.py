@@ -73,6 +73,9 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any("benchmarks/packaged_lifecycle_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/using_my_precious_runtime_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/real_use_recall_utility_gate.py" in command for command in commands))
+        self.assertTrue(
+            any("benchmarks/copyable_goal_preference_recall_gate.py" in command for command in commands)
+        )
         self.assertTrue(any("benchmarks/query_support_recall_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/progressive_source_drilldown_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/authorized_original_source_gate.py" in command for command in commands))
@@ -138,6 +141,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any(command == "git diff --check" for command in commands))
         self.assertIn("benchmarks/using_my_precious_runtime_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/real_use_recall_utility_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/copyable_goal_preference_recall_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/query_support_recall_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/progressive_source_drilldown_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/authorized_original_source_gate.py", module.PY_COMPILE_TARGETS)

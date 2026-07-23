@@ -3050,6 +3050,376 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             f"用户偏好：{source_text}",
         )
 
+    def test_repeated_goal_format_corrections_induce_source_bound_copyable_preference(self):
+        module = load_update_module()
+        rows = (
+            ("user", "给一个 Markdown 版本的 goal。"),
+            ("assistant", "Here is a rendered goal with surrounding explanation."),
+            ("user", "注意排版一定要正确，不然我无法复制。"),
+            ("assistant", "I will explain the formatting before trying again."),
+            ("user", "你看看你给的是纯 Markdown 吗，这个格式已经乱了。"),
+            ("assistant", module.COPYABLE_GOAL_PREFERENCE_TEXT),
+            ("user", "那你倒是把完整 goal 给我，不要继续解释。"),
+        )
+        events = [
+            module.MemoryEvent(
+                kind,
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, (kind, text) in enumerate(rows, 1)
+        ]
+
+        induced = module.induce_copyable_goal_preference(events)
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+        self.assertGreaterEqual(len(induced.support_events), 2)
+        self.assertTrue(all(event.kind == "user" for event in induced.support_events))
+        self.assertIn(3, {event.line_number for event in induced.support_events})
+        self.assertIn(5, {event.line_number for event in induced.support_events})
+
+        summary = module.summarize_events(events, "synthetic-copyable-goal")
+        summary["memory_candidate_sources"] = module.memory_candidate_source_entries(summary, events)
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        self.assertIn(module.COPYABLE_GOAL_PREFERENCE_TEXT, summary["facts"])
+        self.assertNotIn(module.COPYABLE_GOAL_PREFERENCE_TEXT, summary["evidence"])
+        source = next(
+            row
+            for row in summary["fact_sources"]
+            if row["text"] == module.COPYABLE_GOAL_PREFERENCE_TEXT
+        )
+        self.assertEqual(source["source"], "natural_user_correction")
+        self.assertGreaterEqual(len(source["evidence_quote_ids"]), 2)
+        self.assertEqual(len(source["evidence_quote_ids"]), len(source["source_anchor_ids"]))
+        anchored_quote_ids = {
+            row["quote_id"]
+            for row in anchors
+            if row["quote_id"] in source["evidence_quote_ids"]
+        }
+        self.assertEqual(anchored_quote_ids, set(source["evidence_quote_ids"]))
+        self.assertEqual(
+            {
+                row["line_number"]
+                for row in anchors
+                if row["quote_id"] in source["evidence_quote_ids"]
+            },
+            {event.line_number for event in induced.support_events},
+        )
+        candidate_source = next(
+            row
+            for row in summary["memory_candidate_sources"]
+            if row["text"] == module.COPYABLE_GOAL_PREFERENCE_TEXT
+        )
+        self.assertEqual(candidate_source["evidence_quote_ids"], source["evidence_quote_ids"])
+        self.assertEqual(candidate_source["source_anchor_ids"], source["source_anchor_ids"])
+
+    def test_single_durable_goal_format_instruction_induces_canonical_preference(self):
+        module = load_update_module()
+        source_text = (
+            "以后给我写 goal 时，默认把完整 goal 放在单独的 text 代码块里，"
+            "块外不要解释，方便一键复制。"
+        )
+        event = module.MemoryEvent(
+            "user",
+            source_text,
+            1,
+            1,
+            module.source_event_sha256(source_text),
+        )
+
+        induced = module.induce_copyable_goal_preference([event])
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+        self.assertEqual(induced.support_events, (event,))
+
+    def test_identical_goal_corrections_keep_distinct_event_provenance(self):
+        module = load_update_module()
+        rows = (
+            "给我一个 Markdown goal。",
+            "注意排版一定要正确，不然无法复制。",
+            "注意排版一定要正确，不然无法复制。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-identical-corrections")
+        anchors = module.materialize_source_anchors(summary, "b" * 64)
+        source = next(
+            row
+            for row in summary["fact_sources"]
+            if row["text"] == module.COPYABLE_GOAL_PREFERENCE_TEXT
+        )
+
+        quote_ids = source["evidence_quote_ids"]
+        self.assertEqual(len(quote_ids), len(set(quote_ids)))
+        anchored_lines = {
+            row["line_number"]
+            for row in anchors
+            if row["quote_id"] in quote_ids
+        }
+        self.assertTrue({2, 3}.issubset(anchored_lines))
+        self.assertEqual(len(source["source_anchor_ids"]), len(quote_ids))
+
+    def test_compact_chinese_goal_and_rhetorical_correction_match_real_producer_shape(self):
+        module = load_update_module()
+        rows = (
+            "给一个markdown版本的goal，注意排版一定要正确，不然我无法复制",
+            "你看看你给的是纯markdown吗。",
+            "不是，之前就能给出正确的md格式的goal，怎么现在又出错？",
+            "那你倒是把goal给我啊",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        induced = module.induce_copyable_goal_preference(events)
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+        self.assertGreaterEqual(len(induced.support_events), 2)
+        self.assertIn(events[0], induced.support_events)
+        self.assertIn(events[1], induced.support_events)
+
+    def test_goal_format_correction_induction_fails_closed_for_non_target_sequences(self):
+        module = load_update_module()
+
+        cases = {
+            "assistant_only": (
+                ("user", "给我一个 goal。"),
+                ("assistant", "注意排版一定要正确，不然无法复制。"),
+                ("assistant", "应该把完整 goal 放进 text 代码块。"),
+            ),
+            "ordinary_complaint": (
+                ("user", "给我一个 goal。"),
+                ("user", "这个页面排版很乱。"),
+                ("user", "表格内容无法复制。"),
+            ),
+            "quoted": (
+                ("user", "给我一个 goal。"),
+                ("user", "同事说：“注意排版一定要正确，不然无法复制。”"),
+                ("user", "同事还说：“应该把完整 goal 放进 text 代码块。”"),
+            ),
+            "hypothetical": (
+                ("user", "给我一个 goal。"),
+                ("user", "你看看如果这样排版是不是无法复制？"),
+                ("user", "你看看是不是应该放进 text 代码块？"),
+            ),
+            "temporary": (
+                ("user", "给我一个 goal。"),
+                ("user", "这次把完整 goal 放进 text 代码块。"),
+                ("user", "本轮块外不要解释，方便复制。"),
+            ),
+            "malformed": (
+                ("user", "给我一个 goal。"),
+                ("user", "```text 注意排版一定要正确，不然无法复制。"),
+                ("user", "```text 你看看你给的是纯 Markdown 吗。"),
+            ),
+            "markdown_blockquote": (
+                ("user", "给我一个 goal。"),
+                ("user", "> 注意排版一定要正确，不然无法复制。"),
+                ("user", "> 应该把完整 goal 放进 text 代码块。"),
+            ),
+            "inline_code_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", "`注意排版一定要正确，不然无法复制。`"),
+                ("user", "`应该把完整 goal 放进 text 代码块。`"),
+            ),
+            "unclosed_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", "“注意排版一定要正确，不然无法复制。"),
+                ("user", "「应该把完整 goal 放进 text 代码块。"),
+            ),
+            "unclosed_ascii_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", '"注意排版一定要正确，不然无法复制。'),
+                ("user", '"应该把完整 goal 放进 text 代码块。'),
+            ),
+            "conditional_question": (
+                ("user", "给我一个 goal。"),
+                ("user", "如果 goal 格式乱了，为什么还是无法复制？"),
+                ("user", "如果 goal 没放进 text 代码块，为什么会不能复制？"),
+            ),
+            "topic_switch": (
+                ("user", "给我一个 goal。"),
+                ("user", "现在请写一段 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "topic_switch_without_request_verb": (
+                ("user", "给我一个 goal。"),
+                ("user", "接下来改做一段 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "filtered_topic_switch": (
+                ("user", "给我一个 goal。"),
+                ("user", "现在请写一段 `Python 代码`。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "goal_abandonment_topic_switch": (
+                ("user", "给我一个 goal。"),
+                ("user", "先不做 goal 了，接下来写 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "goal_abandonment_topic_switch_spoken": (
+                ("user", "给我一个 goal。"),
+                ("user", "先不说 goal，接下来写 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "goal_abandonment_topic_switch_ignore": (
+                ("user", "给我一个 goal。"),
+                ("user", "别管 goal 了，现在写 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "fenced_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", "```text\n注意排版一定要正确，不然无法复制。\n```"),
+                ("user", "```text\n应该把完整 goal 放进 text 代码块。\n```"),
+            ),
+            "unclosed_inline_code": (
+                ("user", "给我一个 goal。"),
+                ("user", "`注意排版一定要正确，不然无法复制。"),
+                ("user", "`应该把完整 goal 放进 text 代码块。"),
+            ),
+            "invalid_fence_close": (
+                ("user", "给我一个 goal。"),
+                ("user", "```text\n注意排版一定要正确，不然无法复制。\n```not-a-valid-close"),
+                ("user", "```text\n应该把完整 goal 放进 text 代码块。\n```not-a-valid-close"),
+            ),
+            "trailing_attribution": (
+                ("user", "给我一个 goal。"),
+                ("user", "“注意排版一定要正确，不然无法复制。”这是同事说的。"),
+                ("user", "“应该把完整 goal 放进 text 代码块。”这也是同事要求的。"),
+            ),
+            "trailing_attribution_without_speech_verb": (
+                ("user", "给我一个 goal。"),
+                ("user", "“注意排版一定要正确，不然无法复制。”这是同事的原话。"),
+                ("user", "“应该把完整 goal 放进 text 代码块。”引用自同事。"),
+            ),
+        }
+
+        for case_id, rows in cases.items():
+            with self.subTest(case_id=case_id):
+                events = [
+                    module.MemoryEvent(
+                        kind,
+                        text,
+                        index,
+                        1,
+                        module.source_event_sha256(text),
+                    )
+                    for index, (kind, text) in enumerate(rows, 1)
+                ]
+                self.assertIsNone(module.induce_copyable_goal_preference(events))
+                summary = module.summarize_events(events, f"synthetic-{case_id}")
+                self.assertNotIn(module.COPYABLE_GOAL_PREFERENCE_TEXT, summary["facts"])
+
+    def test_latest_explicit_goal_format_correction_is_current_source_of_truth(self):
+        module = load_update_module()
+        rows = (
+            "给一个 Markdown 版本的 goal。",
+            "注意排版一定要正确，不然我无法复制。",
+            "你给的纯 Markdown 格式又乱了。",
+            "不对，别用代码块了，直接渲染 Markdown。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        self.assertIsNone(module.induce_copyable_goal_preference(events))
+
+    def test_balanced_nested_fence_does_not_invalidate_durable_goal_preference(self):
+        module = load_update_module()
+        text = (
+            "以后给我写 goal 时，默认把完整 goal 放进 text 代码块，方便复制。\n\n"
+            "````text\n# Goal\n\n```bash\npython3 verify.py\n```\n````"
+        )
+        event = module.MemoryEvent(
+            "user",
+            text,
+            1,
+            1,
+            module.source_event_sha256(text),
+        )
+
+        induced = module.induce_copyable_goal_preference([event])
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+
+    def test_quoted_format_label_does_not_hide_durable_goal_preference(self):
+        module = load_update_module()
+        text = (
+            "以后给我写 goal 时，默认放进单独的“text”代码块，"
+            "块外不要解释，方便复制。"
+        )
+        event = module.MemoryEvent(
+            "user",
+            text,
+            1,
+            1,
+            module.source_event_sha256(text),
+        )
+
+        induced = module.induce_copyable_goal_preference([event])
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+
+    def test_goal_content_independence_is_not_a_topic_abandonment(self):
+        module = load_update_module()
+        rows = (
+            "不管 goal 里有没有 Python 代码，接下来都必须保证 Markdown 排版正确，方便复制。",
+            "注意排版一定要正确，不然无法复制。",
+            "你看看你给的是纯 Markdown 吗，这个格式已经乱了。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        induced = module.induce_copyable_goal_preference(events)
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+
     def test_summarize_events_does_not_promote_chinese_assistant_acknowledgement(self):
         module = load_update_module()
         acknowledgements = (

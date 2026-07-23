@@ -1253,6 +1253,45 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(self.skill_contracts, phrase)
 
+    def test_docs_record_v253_copyable_goal_preference_recall_closure(self):
+        section = self.evaluation_section(
+            "## V2.53 Copyable Goal Preference Recall Closure"
+        )
+        for phrase in (
+            "copyable_goal_preference_recall_gate.py",
+            "session-local",
+            "latest explicit correction",
+            "natural_user_memory_fact()",
+            "at least two user-event",
+            "memory_recall_context_package",
+            "controlled baseline",
+            "goal-correction inducer disabled",
+            "exact target memory ID",
+            "actual user role",
+            "unrelated supported hits",
+            "correction_sequence_qualification_rate",
+            "correction_induced_fact_materialization_rate",
+            "correction_source_anchor_binding_rate",
+            "goal_format_query_supported_recall",
+            "supported_summary_fact_resolution_rate",
+            "global_scope_accuracy",
+            "current_turn_instruction_precedence_accuracy",
+            "copyable_text_block_decision_accuracy",
+            "nested_fence_collision_avoidance_accuracy",
+            "assistant_evidence_promotion_count",
+            "non_target_memory_promotion_count",
+            "free_form_answerability_use_count",
+            "privacy_leak_count",
+            "aggregate-only",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (
             "explicit revision path",

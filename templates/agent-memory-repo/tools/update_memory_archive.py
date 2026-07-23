@@ -74,6 +74,23 @@ INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
 SOURCE_ANCHOR_VERSION = 1
 NATURAL_USER_FACT_LIMIT = 5
 SUMMARY_EVIDENCE_LIMIT = 6
+GOAL_CORRECTION_USER_WINDOW = 12
+GOAL_CORRECTION_SUPPORT_LIMIT = 4
+COPYABLE_GOAL_PREFERENCE_TEXT = (
+    "用户偏好：goal 提示词格式偏好是，默认将完整 Markdown goal 放入单独的 text 代码块，"
+    "以可直接复制的纯文本形式交付，方便复制；代码块外不添加解释性前言或结语，"
+    "内部存在代码围栏时使用更长且不冲突的外层围栏。"
+)
+COPYABLE_GOAL_RETRIEVAL_TERMS = (
+    "可直接复制",
+    "markdown",
+    "goal",
+    "提示词格式偏好",
+    "纯文本",
+    "方便复制",
+    "我的",
+    "应该怎样交付",
+)
 SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
 SOURCE_INVENTORY_REPORT_VERSION = 2
 UPDATE_TARGET_REPORT_KIND = "memory_update_target_report"
@@ -135,7 +152,9 @@ INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
 )
 MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
 STALE_LOW_SUPPORT_REVIEW_AGE_DAYS = 180
-NATURAL_FACT_SOURCE_LABELS = frozenset({"natural_user", "natural_assistant", "natural_record"})
+NATURAL_FACT_SOURCE_LABELS = frozenset(
+    {"natural_user", "natural_user_correction", "natural_assistant", "natural_record"}
+)
 LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN = re.compile(
     r"(?i)\b(?:review\s+candidate|reviewable|reviewer\s+confirmation|before\s+(?:automatic\s+)?promotion|"
     r"wait\s+for\s+repeated\s+support|until\s+supporting\s+evidence\s+repeats|provisional|unconfirmed)\b"
@@ -248,6 +267,60 @@ CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
     r"已记住(?:了)?.{0,160}|"
     r"(?:后续|后面|接下来|以后).{0,80}(?:每(?:个|次|回)|我(?:会|将)|按(?:这个|你说的)(?:要求)?).{0,80}))"
     r"[。.!！]?\s*$"
+)
+GOAL_ARTIFACT_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9_])goal(?:spec)?(?![A-Za-z0-9_])|目标(?:提示词|文档|计划)"
+)
+GOAL_FORMAT_SIGNAL_PATTERN = re.compile(
+    r"(?i)markdown|\bmd\b|纯\s*markdown|排版|格式|复制|粘贴|代码块|围栏|反引号|纯文本|text\s*(?:block|fence|代码块)"
+)
+GOAL_SPECIFIC_FORMAT_SIGNAL_PATTERN = re.compile(
+    r"(?i)markdown|\bmd\b|纯\s*markdown|代码块|围栏|反引号|纯文本|text\s*(?:block|fence|代码块)"
+)
+GOAL_COPY_SIGNAL_PATTERN = re.compile(r"(?:无法|不能|方便|直接|一键)?\s*(?:复制|粘贴)|copy(?:able)?", re.IGNORECASE)
+GOAL_CORRECTION_SIGNAL_PATTERN = re.compile(
+    r"(?:你看看|注意|一定|必须|应该|不然|无法|不能|不对|不是|出错|搞错|乱|正确|正常|重新|又|仍然|还是|倒是|不要|别|直接)"
+)
+GOAL_RHETORICAL_CORRECTION_PATTERN = re.compile(
+    r"(?:你看看(?:你|这|刚才|上面).{0,48}(?:给|写|输出|交付).{0,48}(?:吗|呢|乱|错|不对|复制)|"
+    r"不是[，,].{0,80}(?:怎么|为什么).{0,32}(?:错|乱|复制)|"
+    r"这都.{0,24}(?:乱|错)|疯狂出错)"
+)
+GOAL_NON_TARGET_ARTIFACT_PATTERN = re.compile(
+    r"(?i)python|代码(?!块)|脚本|函数|页面|网页|表格|电子表格|幻灯片|演示文稿|文档|readme|"
+    r"\b(?:code|script|function|page|table|spreadsheet|slide|deck|document|readme)\b"
+)
+GOAL_QUOTED_SPEECH_PATTERN = re.compile(
+    r"(?:同事|别人|他人|他|她|他们|有人).{0,12}(?:说|提到|写道|建议|要求)\s*[:：]?[“\"「『]|"
+    r"[”\"」』].{0,24}(?:这是|这句是|这话是|这也是)?(?:同事|别人|他人|他|她|他们|有人)"
+    r".{0,12}(?:说|提到|写道|建议|要求)(?:的)?"
+)
+GOAL_MARKDOWN_BLOCKQUOTE_PATTERN = re.compile(r"(?m)^\s*>")
+MARKDOWN_FENCE_OPEN_PATTERN = re.compile(
+    r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)$"
+)
+GOAL_CONTEXT_SWITCH_CUE_PATTERN = re.compile(
+    r"(?i)接下来|现在|然后|另外|换个话题|先不说|改做|改为|转而|next|switch"
+)
+GOAL_NON_TARGET_REQUEST_VERB_PATTERN = re.compile(
+    r"(?i)给我|请写|写一段|写个|做一段|改做|生成|实现|修改|处理|build|write|create"
+)
+GOAL_ABANDONMENT_PATTERN = re.compile(
+    r"(?i)(?:先不做|先不说|不再做|别再做|别管|停止|放弃|暂时不做).{0,16}"
+    r"(?<![A-Za-z0-9_])goal(?![A-Za-z0-9_])|"
+    r"(?<![A-Za-z0-9_])goal(?![A-Za-z0-9_]).{0,16}(?:先不做|不做了|结束|算了|放弃)"
+)
+GOAL_ARTIFACT_FIRST_PATTERN = re.compile(
+    r"(?i)(?:把|将).{0,24}(?<![A-Za-z0-9_])goal(?![A-Za-z0-9_]).{0,24}(?:给我|交付|输出)|"
+    r"(?:不要|别).{0,20}(?:解释|前言|结语|说明|讨论)|artifact\s+first"
+)
+GOAL_TEXT_FENCE_PATTERN = re.compile(
+    r"(?i)text\s*(?:代码块|围栏|block|fence)|(?:单独|独立).{0,12}(?:代码块|围栏)|"
+    r"纯文本.{0,16}(?:复制|交付)|(?:代码块|围栏).{0,16}(?:复制|交付)"
+)
+GOAL_TEXT_FENCE_REJECTION_PATTERN = re.compile(
+    r"(?i)(?:不要|别|不再|无需|不用).{0,24}(?:text\s*)?(?:代码块|围栏|反引号)|"
+    r"直接.{0,12}(?:渲染|输出).{0,16}(?:markdown|goal)"
 )
 ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
     r"(?i)^\s*(?:understood|got it|noted|sure|okay|ok)[,;:.! ]+"
@@ -395,6 +468,13 @@ class MemoryEvent:
 
 
 @dataclass(frozen=True)
+class InducedNaturalUserFact:
+    text: str
+    support_events: tuple[MemoryEvent, ...]
+    retrieval_terms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class MemoryCandidate:
     text: str
     rationale: str
@@ -413,6 +493,8 @@ class MemoryCandidate:
     deprecates_texts: tuple[str, ...] = ()
     evidence_quote_id: str = "ev_001"
     source_anchor_id: str = ""
+    evidence_quote_ids: tuple[str, ...] = ()
+    source_anchor_ids: tuple[str, ...] = ()
 
 
 NOISE_MARKERS = (
@@ -1879,7 +1961,14 @@ def source_event_for_text(events: list[MemoryEvent], text: str) -> MemoryEvent |
     if not target:
         return None
     for event in events:
-        if event.kind == "user" and source_text_key(natural_user_memory_fact(event.text)) == target:
+        if event.kind != "user":
+            continue
+        candidates = {
+            source_text_key(event.text),
+            source_text_key(durable_user_memory_text(event.text)),
+            source_text_key(natural_user_memory_fact(event.text)),
+        }
+        if target in candidates:
             return event
     for event in events:
         candidates = {
@@ -1899,10 +1988,38 @@ def evidence_quote_id_for_text(evidence: list[str], text: str) -> str:
     return ""
 
 
-def evidence_source_entries(evidence: list[str], events: list[MemoryEvent]) -> list[dict[str, object]]:
+def evidence_quote_ids_for_events(
+    evidence: list[str],
+    support_events: tuple[MemoryEvent, ...],
+) -> list[str]:
+    available: dict[str, list[str]] = {}
+    for index, evidence_text in enumerate(evidence, 1):
+        key = source_text_key(evidence_text)
+        if key:
+            available.setdefault(key, []).append(f"ev_{index:03d}")
+    quote_ids: list[str] = []
+    for event in support_events:
+        key = source_text_key(induced_goal_support_text(event))
+        matches = available.get(key) or []
+        if matches:
+            quote_ids.append(matches.pop(0))
+    return quote_ids
+
+
+def evidence_source_entries(
+    evidence: list[str],
+    events: list[MemoryEvent],
+    preferred_events: tuple[MemoryEvent, ...] = (),
+) -> list[dict[str, object]]:
+    preferred_by_text: dict[str, list[MemoryEvent]] = {}
+    for event in preferred_events:
+        key = source_text_key(induced_goal_support_text(event))
+        if key:
+            preferred_by_text.setdefault(key, []).append(event)
     entries: list[dict[str, object]] = []
     for index, evidence_text in enumerate(evidence, 1):
-        event = source_event_for_text(events, evidence_text)
+        preferred = preferred_by_text.get(source_text_key(evidence_text)) or []
+        event = preferred.pop(0) if preferred else source_event_for_text(events, evidence_text)
         if event is None or event.line_number <= 0 or event.event_ordinal <= 0 or not event.event_sha256:
             continue
         entries.append(
@@ -1958,15 +2075,23 @@ def fact_source_entries(
     natural_user_facts: list[str],
     retrieval_literals: list[str],
     evidence: list[str],
-) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+    induced_user_facts: list[InducedNaturalUserFact] | None = None,
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
     natural_user_keys = {normalize_memory_text(text).lower() for text in natural_user_facts}
     retrieval_literal_keys = {normalize_memory_text(text).lower() for text in retrieval_literals}
+    induced_by_key = {
+        normalize_memory_text(fact.text).lower(): fact
+        for fact in induced_user_facts or []
+    }
     for fact in facts:
         fact_key = normalize_memory_text(fact).lower()
         if not fact_key:
             continue
-        if fact_key in natural_user_keys:
+        induced = induced_by_key.get(fact_key)
+        if induced is not None:
+            source = "natural_user_correction"
+        elif fact_key in natural_user_keys:
             source = "natural_user"
         elif fact_key in retrieval_literal_keys:
             source = "retrieval_literal"
@@ -1978,6 +2103,12 @@ def fact_source_entries(
         quote_id = evidence_quote_id_for_text(evidence, fact)
         if quote_id:
             entry["evidence_quote_id"] = quote_id
+        if induced is not None:
+            quote_ids = evidence_quote_ids_for_events(evidence, induced.support_events)
+            if quote_ids:
+                entry["evidence_quote_id"] = quote_ids[0]
+                entry["evidence_quote_ids"] = quote_ids
+            entry["retrieval_terms"] = list(induced.retrieval_terms)
         entries.append(entry)
     return entries
 
@@ -2466,6 +2597,297 @@ def is_durable_chinese_user_preference(text: str) -> bool:
     )
 
 
+def goal_correction_event_text(event: MemoryEvent) -> str:
+    if event.kind != "user":
+        return ""
+    raw = CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", event.text).strip()
+    normalized = normalize_memory_text(raw)
+    compacted = compact_whitespace(normalized)
+    malformed_markdown, quoted_markdown = markdown_event_shape(raw)
+    if (
+        not compacted
+        or is_noisy_text(compacted)
+        or is_sensitive_explicit_memory_text(compacted)
+        or malformed_markdown
+        or quoted_markdown
+        or has_quoted_goal_correction(raw)
+        or CHINESE_TEMPORARY_PREFERENCE_PATTERN.search(compacted)
+        or (
+            CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN.search(compacted)
+            and not GOAL_RHETORICAL_CORRECTION_PATTERN.search(compacted)
+        )
+        or CHINESE_QUOTED_PROMPT_PATTERN.search(compacted)
+    ):
+        return ""
+    return clip(compacted)
+
+
+def markdown_meaningful_text(text: str) -> str:
+    return re.sub(r"[\s，,。.!！?？:：;；()（）\[\]{}*_#>+-]+", "", text)
+
+
+def inline_code_shape(text: str) -> tuple[bool, bool]:
+    runs = list(re.finditer(r"`+", text))
+    if not runs:
+        return False, False
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(runs):
+        opening = runs[index]
+        closing_index = next(
+            (
+                candidate
+                for candidate in range(index + 1, len(runs))
+                if len(runs[candidate].group(0)) == len(opening.group(0))
+            ),
+            None,
+        )
+        if closing_index is None:
+            return True, False
+        spans.append((opening.start(), runs[closing_index].end()))
+        index = closing_index + 1
+    remaining = text
+    for start, end in reversed(spans):
+        remaining = remaining[:start] + " " + remaining[end:]
+    return False, not markdown_meaningful_text(remaining)
+
+
+def markdown_event_shape(text: str) -> tuple[bool, bool]:
+    opening_fence = ""
+    outside_lines: list[str] = []
+    fenced_block_count = 0
+    for line in text.splitlines():
+        if opening_fence:
+            stripped = line.lstrip(" \t")
+            indentation = len(line) - len(stripped)
+            closing = re.match(rf"{re.escape(opening_fence[0])}{{{len(opening_fence)},}}(?P<tail>.*)$", stripped)
+            if indentation <= 3 and closing and not closing.group("tail").strip():
+                opening_fence = ""
+            continue
+        opening = MARKDOWN_FENCE_OPEN_PATTERN.fullmatch(line)
+        if opening:
+            fence = opening.group("fence")
+            info = opening.group("info")
+            if fence[0] == "`" and "`" in info:
+                outside_lines.append(line)
+                continue
+            opening_fence = fence
+            fenced_block_count += 1
+            continue
+        outside_lines.append(line)
+    if opening_fence:
+        return True, False
+    outside = "\n".join(outside_lines).strip()
+    malformed_inline, wholly_inline = inline_code_shape(outside)
+    if malformed_inline:
+        return True, False
+    wholly_fenced = fenced_block_count > 0 and not markdown_meaningful_text(outside)
+    return False, wholly_fenced or wholly_inline
+
+
+def has_quoted_goal_correction(text: str) -> bool:
+    if GOAL_MARKDOWN_BLOCKQUOTE_PATTERN.search(text):
+        return True
+    if GOAL_QUOTED_SPEECH_PATTERN.search(text):
+        return True
+    stripped = text.strip()
+    for opening, closing in (("“", "”"), ("「", "」"), ("『", "』")):
+        if stripped.startswith(opening):
+            return True
+        if text.count(opening) != text.count(closing):
+            return True
+    if text.count('"') % 2:
+        return True
+    if stripped.startswith('"'):
+        return True
+    return False
+
+
+def goal_format_has_durable_cue(text: str) -> bool:
+    return bool(
+        CHINESE_FUTURE_PREFERENCE_PATTERN.search(text)
+        or CHINESE_RECURRING_PREFERENCE_PATTERN.search(text)
+        or re.search(r"(?i)\b(?:always|by default|from now on|every time|whenever)\b", text)
+    )
+
+
+def induced_goal_support_text(event: MemoryEvent) -> str:
+    return clip(normalize_memory_text(strip_canonical_skill_invocation_prefix(event.text)))
+
+
+def is_assistant_goal_format_preference_claim(text: str) -> bool:
+    normalized = normalize_memory_text(text)
+    return bool(
+        GOAL_ARTIFACT_PATTERN.search(normalized)
+        and GOAL_FORMAT_SIGNAL_PATTERN.search(normalized)
+        and ("用户偏好" in normalized or re.search(r"(?i)\buser(?:'s)?\s+preference\b", normalized))
+    )
+
+
+def is_goal_context_break(text: str) -> bool:
+    plain = re.sub(r"[`\"“”「」『』]", "", text)
+    switches_to_non_target = bool(
+        GOAL_NON_TARGET_ARTIFACT_PATTERN.search(plain)
+        and (
+            GOAL_CONTEXT_SWITCH_CUE_PATTERN.search(plain)
+            or GOAL_NON_TARGET_REQUEST_VERB_PATTERN.search(plain)
+        )
+    )
+    return bool(
+        switches_to_non_target
+        and (
+            not GOAL_ARTIFACT_PATTERN.search(plain)
+            or GOAL_ABANDONMENT_PATTERN.search(plain)
+        )
+    )
+
+
+def induce_copyable_goal_preference(events: list[MemoryEvent]) -> InducedNaturalUserFact | None:
+    all_user_events: list[tuple[int, MemoryEvent, str]] = []
+    user_events: list[tuple[int, MemoryEvent, str]] = []
+    for index, event in enumerate(events):
+        if event.kind == "user":
+            raw = CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", event.text).strip()
+            normalized = clip(normalize_memory_text(raw))
+            if normalized:
+                all_user_events.append((index, event, normalized))
+        text = goal_correction_event_text(event)
+        if text:
+            user_events.append((index, event, text))
+    if not user_events:
+        return None
+
+    def has_active_goal_context(position: int) -> bool:
+        prior_goal_positions = [
+            index
+            for index, _, text in user_events
+            if index < position and GOAL_ARTIFACT_PATTERN.search(text)
+        ]
+        if not prior_goal_positions:
+            return False
+        last_goal = prior_goal_positions[-1]
+        return not any(
+            last_goal < index < position and is_goal_context_break(text)
+            for index, _, text in all_user_events
+        )
+
+    negative_positions = [
+        index
+        for index, _, text in user_events
+        if GOAL_TEXT_FENCE_REJECTION_PATTERN.search(text)
+        and GOAL_FORMAT_SIGNAL_PATTERN.search(text)
+        and (
+            GOAL_ARTIFACT_PATTERN.search(text)
+            or goal_format_has_durable_cue(text)
+            or has_active_goal_context(index)
+        )
+        and not GOAL_NON_TARGET_ARTIFACT_PATTERN.search(text)
+    ]
+    durable_directives = [
+        (index, event, text)
+        for index, event, text in user_events
+        if GOAL_ARTIFACT_PATTERN.search(text)
+        and GOAL_FORMAT_SIGNAL_PATTERN.search(text)
+        and GOAL_TEXT_FENCE_PATTERN.search(text)
+        and (GOAL_COPY_SIGNAL_PATTERN.search(text) or GOAL_ARTIFACT_FIRST_PATTERN.search(text))
+        and goal_format_has_durable_cue(text)
+        and not GOAL_TEXT_FENCE_REJECTION_PATTERN.search(text)
+    ]
+    if durable_directives:
+        index, event, _ = durable_directives[-1]
+        if negative_positions and negative_positions[-1] > index:
+            return None
+        return InducedNaturalUserFact(
+            text=COPYABLE_GOAL_PREFERENCE_TEXT,
+            support_events=(event,),
+            retrieval_terms=COPYABLE_GOAL_RETRIEVAL_TERMS,
+        )
+
+    qualified: tuple[int, tuple[MemoryEvent, ...]] | None = None
+    for end in range(len(user_events)):
+        window = user_events[max(0, end - GOAL_CORRECTION_USER_WINDOW + 1) : end + 1]
+        goal_context = [
+            row
+            for row in window
+            if GOAL_ARTIFACT_PATTERN.search(row[2]) and not is_goal_context_break(row[2])
+        ]
+        context_row: tuple[int, MemoryEvent, str] | None = None
+        corrections: list[tuple[int, MemoryEvent, str]] = []
+        for candidate_context in reversed(goal_context):
+            context_break_positions = [
+                row[0]
+                for row in all_user_events
+                if row[0] > candidate_context[0] and is_goal_context_break(row[2])
+            ]
+            context_end = min(context_break_positions) if context_break_positions else None
+            eligible = [
+                row
+                for row in window
+                if row[0] >= candidate_context[0]
+                and (context_end is None or row[0] < context_end)
+                and GOAL_FORMAT_SIGNAL_PATTERN.search(row[2])
+                and GOAL_CORRECTION_SIGNAL_PATTERN.search(row[2])
+                and not GOAL_TEXT_FENCE_REJECTION_PATTERN.search(row[2])
+                and not (
+                    GOAL_NON_TARGET_ARTIFACT_PATTERN.search(row[2])
+                    and not GOAL_ARTIFACT_PATTERN.search(row[2])
+                )
+            ]
+            linked: list[tuple[int, MemoryEvent, str]] = []
+            first_post_context_text = ""
+            for row in eligible:
+                mentions_goal = GOAL_ARTIFACT_PATTERN.search(row[2]) is not None
+                has_specific_format = GOAL_SPECIFIC_FORMAT_SIGNAL_PATTERN.search(row[2]) is not None
+                is_first_post_context = row[0] > candidate_context[0] and not linked
+                repeats_first = bool(
+                    first_post_context_text
+                    and source_text_key(row[2]) == first_post_context_text
+                )
+                if mentions_goal or has_specific_format or is_first_post_context or repeats_first:
+                    linked.append(row)
+                    if row[0] > candidate_context[0] and not first_post_context_text:
+                        first_post_context_text = source_text_key(row[2])
+            if len(linked) < 2:
+                continue
+            if not any(
+                GOAL_COPY_SIGNAL_PATTERN.search(row[2]) or GOAL_TEXT_FENCE_PATTERN.search(row[2])
+                for row in linked
+            ):
+                continue
+            context_row = candidate_context
+            corrections = linked
+            break
+        if context_row is None:
+            continue
+
+        supports: list[tuple[int, MemoryEvent, str]] = []
+        supports.append(context_row)
+        supports.extend(corrections[-2:])
+        artifact_first = [row for row in window if GOAL_ARTIFACT_FIRST_PATTERN.search(row[2])]
+        if artifact_first:
+            supports.append(artifact_first[-1])
+
+        support_by_position = {row[0]: row for row in supports}
+        ordered_supports = [support_by_position[key] for key in sorted(support_by_position)]
+        if len(ordered_supports) > GOAL_CORRECTION_SUPPORT_LIMIT:
+            ordered_supports = ordered_supports[-GOAL_CORRECTION_SUPPORT_LIMIT:]
+        qualified = (
+            corrections[-1][0],
+            tuple(row[1] for row in ordered_supports),
+        )
+
+    if qualified is None:
+        return None
+    latest_positive_position, support_events = qualified
+    if negative_positions and negative_positions[-1] > latest_positive_position:
+        return None
+    return InducedNaturalUserFact(
+        text=COPYABLE_GOAL_PREFERENCE_TEXT,
+        support_events=support_events,
+        retrieval_terms=COPYABLE_GOAL_RETRIEVAL_TERMS,
+    )
+
+
 def extract_natural_user_memory_facts(
     events: list[MemoryEvent],
     limit: int = NATURAL_USER_FACT_LIMIT,
@@ -2489,19 +2911,25 @@ def select_summary_evidence(
     unresolved: list[str],
     durable_user_lines: list[str],
     final_state: str,
+    pinned_evidence: list[str] | None = None,
 ) -> list[str]:
     evidence: list[str] = []
-    for line in natural_user_facts[-NATURAL_USER_FACT_LIMIT:]:
+    final_evidence = durable_memory_text(final_state)
+    filler_limit = SUMMARY_EVIDENCE_LIMIT - int(bool(final_evidence))
+    for line in (pinned_evidence or [])[-filler_limit:]:
         durable = durable_memory_text(line)
-        if durable and durable not in evidence:
+        if durable:
             evidence.append(durable)
 
-    final_evidence = durable_memory_text(final_state)
     filler_limit = SUMMARY_EVIDENCE_LIMIT - int(
         bool(final_evidence and final_evidence not in evidence)
     )
-    if len(evidence) > filler_limit:
-        evidence = evidence[-filler_limit:] if filler_limit else []
+    for line in natural_user_facts[-NATURAL_USER_FACT_LIMIT:]:
+        if len(evidence) >= filler_limit:
+            break
+        durable = durable_memory_text(line)
+        if durable and durable not in evidence:
+            evidence.append(durable)
 
     for group in (decisions, retrieval_literals, facts, problems, unresolved):
         if len(evidence) >= filler_limit:
@@ -2733,14 +3161,42 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         durable = durable_user_memory_text(line)
         if durable:
             durable_user_lines.append(durable)
-    assistant_lines = event_texts(events, {"assistant", "record"})
-    natural_user_facts = extract_natural_user_memory_facts(events)
-    decisions = select_event_texts(
-        events,
-        r"\b(decision|decide|decided|chosen|selected|root cause)\b|原因|根因|决定|选择",
-        kinds={"assistant", "record"},
-        limit=5,
-    )
+    assistant_lines = [
+        text
+        for text in event_texts(events, {"assistant", "record"})
+        if not is_assistant_goal_format_preference_claim(text)
+    ]
+    induced_user_facts = [
+        fact
+        for fact in [induce_copyable_goal_preference(events)]
+        if fact is not None
+    ]
+    induced_support_event_ids = {
+        id(event)
+        for fact in induced_user_facts
+        for event in fact.support_events
+    }
+    natural_user_facts = []
+    for fact in extract_natural_user_memory_facts(events):
+        source_event = source_event_for_text(events, fact)
+        if source_event is None or id(source_event) not in induced_support_event_ids:
+            natural_user_facts.append(fact)
+    natural_user_facts.extend(fact.text for fact in induced_user_facts)
+    natural_user_facts = natural_user_facts[-NATURAL_USER_FACT_LIMIT:]
+    induced_fact_keys = {
+        normalize_memory_text(fact.text).lower()
+        for fact in induced_user_facts
+    }
+    decisions = [
+        text
+        for text in select_event_texts(
+            events,
+            r"\b(decision|decide|decided|chosen|selected|root cause)\b|原因|根因|决定|选择",
+            kinds={"assistant", "record"},
+            limit=5,
+        )
+        if not is_assistant_goal_format_preference_claim(text)
+    ]
     problems = select_event_texts(
         events,
         r"\b(error|failed|failure|blocked|exception|traceback|problem|issue|bug|importerror)\b|失败|错误|阻塞",
@@ -2753,12 +3209,16 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         kinds={"assistant", "record"},
         limit=5,
     )
-    facts = select_event_texts(
-        events,
-        r"\b(root cause|verified|must|should|require|requires|constraint|convention|policy|rule|prefer|expected|finding|findings|changes_requested|approved|proxy|proxies|outbound proxy|global outbound proxy|local routing|socks5|http_proxy|https_proxy)\b|127\.0\.0\.1|原因|根因|验证|约定|偏好|必须|应该|阻塞|索引|高质量|只能做|做不到|还没有达到|摘要器|代理|全局出站代理|本地代理",
-        kinds={"assistant", "record"},
-        limit=12,
-    )
+    facts = [
+        text
+        for text in select_event_texts(
+            events,
+            r"\b(root cause|verified|must|should|require|requires|constraint|convention|policy|rule|prefer|expected|finding|findings|changes_requested|approved|proxy|proxies|outbound proxy|global outbound proxy|local routing|socks5|http_proxy|https_proxy)\b|127\.0\.0\.1|原因|根因|验证|约定|偏好|必须|应该|阻塞|索引|高质量|只能做|做不到|还没有达到|摘要器|代理|全局出站代理|本地代理",
+            kinds={"assistant", "record"},
+            limit=12,
+        )
+        if not is_assistant_goal_format_preference_claim(text)
+    ]
     for line in reversed(natural_user_facts):
         if line not in facts:
             facts.insert(0, line)
@@ -2771,18 +3231,29 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
     final_state = ""
     for text in reversed(assistant_lines):
         durable = durable_memory_text(text)
-        if durable:
+        if durable and normalize_memory_text(durable).lower() not in induced_fact_keys:
             final_state = durable
             break
+    natural_user_evidence = [
+        fact
+        for fact in natural_user_facts
+        if fact not in {induced.text for induced in induced_user_facts}
+    ]
+    induced_support_evidence = [
+        induced_goal_support_text(event)
+        for induced in induced_user_facts
+        for event in induced.support_events
+    ]
     evidence = select_summary_evidence(
-        natural_user_facts,
+        natural_user_evidence,
         decisions,
         retrieval_literals,
-        facts,
+        [fact for fact in facts if normalize_memory_text(fact).lower() not in induced_fact_keys],
         problems,
         unresolved,
         durable_user_lines,
         final_state,
+        induced_support_evidence,
     )
 
     user_intent = durable_user_lines[0] if durable_user_lines else ""
@@ -2803,12 +3274,27 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         "summary": summary,
         "context": context[:5],
         "facts": facts,
-        "fact_sources": fact_source_entries(facts, events, natural_user_facts, retrieval_literals, evidence),
+        "fact_sources": fact_source_entries(
+            facts,
+            events,
+            natural_user_facts,
+            retrieval_literals,
+            evidence,
+            induced_user_facts,
+        ),
         "decisions": decisions,
         "problems": problems,
         "unresolved": unresolved,
         "evidence": evidence,
-        "evidence_sources": evidence_source_entries(evidence, events),
+        "evidence_sources": evidence_source_entries(
+            evidence,
+            events,
+            tuple(
+                event
+                for induced in induced_user_facts
+                for event in induced.support_events
+            ),
+        ),
         "tags": extract_tags(project_name, [*retrieval_literals, *facts, *decisions, *problems, *unresolved, final_state]),
         "final_state": final_state or summary,
     }
@@ -3006,19 +3492,19 @@ def source_anchor_id(source_record_sha256: str, row: dict[str, object]) -> str:
     return f"srca_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
 
 
-def memory_candidate_source_entries(summary_data: dict[str, object], events: list[MemoryEvent]) -> list[dict[str, str]]:
+def memory_candidate_source_entries(summary_data: dict[str, object], events: list[MemoryEvent]) -> list[dict[str, object]]:
     evidence = summary_data.get("evidence")
     if not isinstance(evidence, list):
         return []
     fact_sources = {
-        source_text_key(str(value.get("text") or "")): str(value.get("source") or "")
+        source_text_key(str(value.get("text") or "")): value
         for value in summary_data.get("fact_sources") or []
         if isinstance(value, dict)
     }
     selected_natural_user_facts = [
         str(value.get("text") or "")
         for value in summary_data.get("fact_sources") or []
-        if isinstance(value, dict) and value.get("source") == "natural_user"
+        if isinstance(value, dict) and value.get("source") in {"natural_user", "natural_user_correction"}
     ]
     entries: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -3031,14 +3517,34 @@ def memory_candidate_source_entries(summary_data: dict[str, object], events: lis
         key = source_text_key(text)
         if not key or key in seen:
             continue
-        quote_id = evidence_quote_id_for_text(evidence, text)
+        source_detail = fact_sources.get(key, {})
+        quote_ids = [
+            str(value)
+            for value in source_detail.get("evidence_quote_ids") or []
+            if isinstance(value, str) and value
+        ]
+        quote_id = str(source_detail.get("evidence_quote_id") or evidence_quote_id_for_text(evidence, text))
+        if not quote_ids and quote_id:
+            quote_ids = [quote_id]
         event = source_event_for_text(events, text)
-        if not quote_id or event is None:
+        if not quote_ids or (event is None and source_detail.get("source") != "natural_user_correction"):
             continue
-        entry = {"text": text, "evidence_quote_id": quote_id}
-        source = fact_sources.get(key, "")
+        entry: dict[str, object] = {
+            "text": text,
+            "evidence_quote_id": quote_ids[0],
+        }
+        if len(quote_ids) > 1:
+            entry["evidence_quote_ids"] = quote_ids
+        source = str(source_detail.get("source") or "")
         if source:
             entry["source"] = source
+        retrieval_terms = source_detail.get("retrieval_terms")
+        if isinstance(retrieval_terms, list):
+            entry["retrieval_terms"] = [
+                str(value)
+                for value in retrieval_terms
+                if isinstance(value, str) and value
+            ]
         entries.append(entry)
         seen.add(key)
     return entries
@@ -3076,6 +3582,15 @@ def materialize_source_anchors(summary_data: dict[str, object], source_record_sh
             quote_id = value.get("evidence_quote_id")
             if isinstance(quote_id, str) and quote_id in anchor_by_quote:
                 value["source_anchor_id"] = anchor_by_quote[quote_id]
+            quote_ids = value.get("evidence_quote_ids")
+            if isinstance(quote_ids, list):
+                source_anchor_ids = [
+                    anchor_by_quote[quote]
+                    for quote in quote_ids
+                    if isinstance(quote, str) and quote in anchor_by_quote
+                ]
+                if source_anchor_ids:
+                    value["source_anchor_ids"] = source_anchor_ids
     explicit_sources = summary_data.get("explicit_sources")
     if isinstance(explicit_sources, list):
         for value in explicit_sources:
@@ -3582,7 +4097,7 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
         tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
         summary_path = str(row.get("summary_path", ""))
         evidence_path = str(row.get("evidence_path", ""))
-        fact_sources: dict[str, dict[str, str]] = {}
+        fact_sources: dict[str, dict[str, object]] = {}
         for item in row.get("reusable_fact_sources") or []:
             if not isinstance(item, dict):
                 continue
@@ -3593,8 +4108,11 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     "source": source,
                     "evidence_quote_id": str(item.get("evidence_quote_id") or ""),
                     "source_anchor_id": str(item.get("source_anchor_id") or ""),
+                    "evidence_quote_ids": item.get("evidence_quote_ids") or [],
+                    "source_anchor_ids": item.get("source_anchor_ids") or [],
+                    "retrieval_terms": item.get("retrieval_terms") or [],
                 }
-        candidate_sources: dict[str, dict[str, str]] = {}
+        candidate_sources: dict[str, dict[str, object]] = {}
         for item in row.get("memory_candidate_sources") or []:
             if not isinstance(item, dict):
                 continue
@@ -3605,6 +4123,9 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                 "source": str(item.get("source") or ""),
                 "evidence_quote_id": str(item.get("evidence_quote_id") or ""),
                 "source_anchor_id": str(item.get("source_anchor_id") or ""),
+                "evidence_quote_ids": item.get("evidence_quote_ids") or [],
+                "source_anchor_ids": item.get("source_anchor_ids") or [],
+                "retrieval_terms": item.get("retrieval_terms") or [],
             }
         if not summary_path or not evidence_path:
             continue
@@ -3613,11 +4134,32 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                 normalize_memory_text(text).lower(),
                 {},
             )
+            evidence_quote_ids = tuple(
+                str(value)
+                for value in source_detail.get("evidence_quote_ids") or []
+                if isinstance(value, str) and value
+            )
+            if not evidence_quote_ids and source_detail.get("evidence_quote_id"):
+                evidence_quote_ids = (str(source_detail["evidence_quote_id"]),)
+            source_anchor_ids = tuple(
+                str(value)
+                for value in source_detail.get("source_anchor_ids") or []
+                if isinstance(value, str) and value
+            )
+            if not source_anchor_ids and source_detail.get("source_anchor_id"):
+                source_anchor_ids = (str(source_detail["source_anchor_id"]),)
             if row.get("source_anchor_version") == SOURCE_ANCHOR_VERSION and (
-                not source_detail.get("evidence_quote_id") or not source_detail.get("source_anchor_id")
+                not evidence_quote_ids
+                or not source_anchor_ids
+                or len(evidence_quote_ids) != len(source_anchor_ids)
             ):
                 continue
             provenance = source_detail.get("source", "")
+            retrieval_terms = tuple(
+                str(value)
+                for value in source_detail.get("retrieval_terms") or []
+                if isinstance(value, str) and value
+            )
             text, supersedes_texts = parse_memory_refresh_text(text, is_noisy_text)
             text, deprecates_texts = parse_memory_deprecation_text(text, is_noisy_text)
             if deprecates_texts:
@@ -3637,12 +4179,14 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     source_record=str(row.get("source_record", "")),
                     source_map_path=str(row.get("source_map_path", "")),
                     source_updated_at=str(row.get("source_updated_at", "")),
-                    tags=tags,
-                    provenance=provenance,
+                    tags=tuple(sorted(set(tags) | set(retrieval_terms))),
+                    provenance=str(provenance),
                     supersedes_texts=supersedes_texts,
                     deprecates_texts=deprecates_texts,
                     evidence_quote_id=source_detail.get("evidence_quote_id", "") or "ev_001",
                     source_anchor_id=source_detail.get("source_anchor_id", ""),
+                    evidence_quote_ids=evidence_quote_ids,
+                    source_anchor_ids=source_anchor_ids,
                 )
             )
     return candidates
@@ -3665,12 +4209,38 @@ def evidence_ref_for_path(
 
 
 def evidence_ref_for_candidate(memory_repo: Path | None, candidate: MemoryCandidate) -> dict[str, str] | None:
-    return evidence_ref_for_path(memory_repo, candidate.evidence_path, candidate.evidence_quote_id)
+    refs = evidence_refs_for_candidate(memory_repo, candidate)
+    return refs[0] if refs else None
 
 
 def raw_ref_for_candidate(candidate: MemoryCandidate) -> dict[str, str] | None:
-    anchor = candidate.source_anchor_id or "source_record"
-    return raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, anchor)
+    refs = raw_refs_for_candidate(candidate)
+    return refs[0] if refs else None
+
+
+def evidence_refs_for_candidate(
+    memory_repo: Path | None,
+    candidate: MemoryCandidate,
+) -> list[dict[str, str]]:
+    quote_ids = candidate.evidence_quote_ids or (candidate.evidence_quote_id,)
+    refs = [
+        ref
+        for quote_id in quote_ids
+        if (ref := evidence_ref_for_path(memory_repo, candidate.evidence_path, quote_id)) is not None
+    ]
+    return refs
+
+
+def raw_refs_for_candidate(candidate: MemoryCandidate) -> list[dict[str, str]]:
+    anchors = candidate.source_anchor_ids or (
+        (candidate.source_anchor_id,) if candidate.source_anchor_id else ("source_record",)
+    )
+    refs = [
+        ref
+        for anchor in anchors
+        if (ref := raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, anchor)) is not None
+    ]
+    return refs
 
 
 def is_natural_memory_candidate(candidate: MemoryCandidate) -> bool:
@@ -3747,12 +4317,8 @@ def natural_induction_review_candidate_row(
         "support_count": 1,
         "source_updated_at": candidate.source_updated_at,
         "derived_from": [candidate.summary_path] if archive_relative_ref_exists(memory_repo, candidate.summary_path) else [],
-        "evidence_refs": [
-            ref
-            for ref in [evidence_ref_for_candidate(memory_repo, candidate)]
-            if ref is not None
-        ],
-        "raw_refs": [ref for ref in [raw_ref_for_candidate(candidate)] if ref is not None],
+        "evidence_refs": evidence_refs_for_candidate(memory_repo, candidate),
+        "raw_refs": raw_refs_for_candidate(candidate),
     }
     if related is not None:
         row["related_candidate_text_sha256"] = natural_candidate_text_sha256(related.text)
@@ -3917,11 +4483,9 @@ def build_memory_nodes_and_induction_review_candidates(
         evidence_refs_by_key: dict[tuple[str, str], dict[str, str]] = {}
         raw_refs_by_key: dict[tuple[str, str], dict[str, str]] = {}
         for candidate in candidates:
-            evidence_ref = evidence_ref_for_candidate(memory_repo, candidate)
-            if evidence_ref is not None:
+            for evidence_ref in evidence_refs_for_candidate(memory_repo, candidate):
                 evidence_refs_by_key[(evidence_ref["path"], evidence_ref["quote_id"])] = evidence_ref
-            raw_ref = raw_ref_for_candidate(candidate)
-            if raw_ref is not None:
+            for raw_ref in raw_refs_for_candidate(candidate):
                 raw_refs_by_key[(raw_ref["path"], raw_ref["anchor"])] = raw_ref
         evidence_refs = [evidence_refs_by_key[key] for key in sorted(evidence_refs_by_key)]
         raw_refs = [raw_refs_by_key[key] for key in sorted(raw_refs_by_key)]

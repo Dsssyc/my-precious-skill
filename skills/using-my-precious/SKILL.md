@@ -189,6 +189,16 @@ cross-language translations.
 10. If search returns no relevant result, say that explicitly instead of
    inferring historical facts.
 
+11. Apply supported delivery preferences only after the package decision.
+    For a supported copyable goal artifact preference, return the complete
+    artifact first inside a single `text` code fence, with no explanatory preamble or epilogue outside the fence.
+    Choose an outer fence longer than every backtick run inside the goal so
+    nested code examples remain part of one copyable artifact.
+    current-turn format instructions take precedence over historical
+    preferences: archive abstention does not erase a current-turn instruction.
+    If history is unsupported and the current turn
+    gives no format instruction, do not invent a historical preference.
+
 ## Privacy Rules
 
 - Do not read source events unless the user explicitly asks and the exact-ref
