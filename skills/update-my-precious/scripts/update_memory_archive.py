@@ -1436,6 +1436,57 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
     return redacted, counts
 
 
+def redact_json_value(value: object, counts: dict[str, int]) -> object:
+    if isinstance(value, str):
+        redacted, value_counts = redact_text(value)
+        for name, count in value_counts.items():
+            counts[name] = counts.get(name, 0) + count
+        return redacted
+    if isinstance(value, list):
+        return [redact_json_value(child, counts) for child in value]
+    if isinstance(value, dict):
+        return {key: redact_json_value(child, counts) for key, child in value.items()}
+    return value
+
+
+def redact_source_text(path: Path, text: str) -> tuple[str, dict[str, int]]:
+    if path.suffix not in {".json", ".jsonl"}:
+        return redact_text(text)
+
+    counts: dict[str, int] = {}
+    trailing_newline = text.endswith(("\n", "\r"))
+    if path.suffix == ".json":
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
+        redacted = json.dumps(
+            redact_json_value(value, counts),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return redacted + ("\n" if trailing_newline else ""), counts
+
+    redacted_lines: list[str] = []
+    for raw_line in text.splitlines():
+        if not raw_line.strip():
+            redacted_lines.append(raw_line)
+            continue
+        try:
+            value = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
+        redacted_lines.append(
+            json.dumps(
+                redact_json_value(value, counts),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+        )
+    redacted = "\n".join(redacted_lines)
+    return redacted + ("\n" if trailing_newline else ""), counts
+
+
 def safe_diagnostic_path(path: Path) -> str:
     display = path.name or "<path>"
     if has_sensitive_identifier_token(display):
@@ -3764,7 +3815,7 @@ def prepare_inventory_record(
     require_project_metadata: bool,
 ) -> PreparedArchiveRecord:
     source_text, source_mtime = read_validated_inventory_record(record)
-    redacted_text, redaction_counts = redact_text(source_text)
+    redacted_text, redaction_counts = redact_source_text(record.path, source_text)
     if record.path.suffix == ".jsonl":
         source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
     else:
@@ -3817,7 +3868,7 @@ def write_record(
     record: SourceRecord,
 ) -> Path | None:
     source_text = read_record_text(record.path)
-    redacted_text, redaction_counts = redact_text(source_text)
+    redacted_text, redaction_counts = redact_source_text(record.path, source_text)
     source_events = extract_source_events(record.path, redacted_text, source_text)
     prepared = prepare_record(
         memory_repo,
@@ -6150,7 +6201,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sensitive_records = []
         for record in records:
-            _, counts = redact_text(read_record_text(record.path))
+            _, counts = redact_source_text(record.path, read_record_text(record.path))
             if counts:
                 sensitive_records.append((record, counts))
     if sensitive_records and not args.allow_redacted_secrets:

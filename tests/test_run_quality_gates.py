@@ -106,6 +106,9 @@ class RunQualityGatesTests(unittest.TestCase):
             any("benchmarks/selected_record_materialization_gate.py" in command for command in commands)
         )
         self.assertTrue(
+            any("benchmarks/structured_redaction_integrity_gate.py" in command for command in commands)
+        )
+        self.assertTrue(
             any("benchmarks/durable_event_projection_gate.py" in command for command in commands)
         )
         self.assertTrue(
@@ -166,6 +169,7 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/scheduled_live_source_deferral_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/private_live_source_inventory_ab_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/selected_record_materialization_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/structured_redaction_integrity_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/durable_event_projection_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/durable_semantic_index_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/private_lifecycle_governance_shadow_gate.py", module.PY_COMPILE_TARGETS)

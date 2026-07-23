@@ -32,6 +32,210 @@ AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT = Path("templates/agent-memory-repo/too
 
 
 class UpdateMemoryArchiveTests(unittest.TestCase):
+    def test_redact_source_text_preserves_jsonl_structure_for_cookie_header(self):
+        module = load_update_module()
+        source = (
+            json.dumps(
+                {
+                    "timestamp": "2026-07-23T01:00:00Z",
+                    "role": "user",
+                    "content": "Cookie: session=synthetic-cookie",
+                    "ok": True,
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+
+        row = json.loads(redacted)
+        self.assertEqual(row["content"], "Cookie: [REDACTED_COOKIE]")
+        self.assertTrue(row["ok"])
+        self.assertEqual(counts, {"cookie": 1})
+        self.assertNotIn("synthetic-cookie", redacted)
+
+    def test_redact_source_text_preserves_jsonl_lines_and_source_event_hashes(self):
+        module = load_update_module()
+        original_content = (
+            "Decision: structured source redaction must preserve event locators. "
+            "Cookie: session=synthetic-cookie\nKeep this durable detail."
+        )
+        rows = [
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": original_content,
+            },
+            {
+                "timestamp": "2026-07-23T01:00:01Z",
+                "role": "assistant",
+                "content": "The structured source contract is recorded.",
+            },
+        ]
+        source = json.dumps(rows[0], separators=(",", ":")) + "\n\n"
+        source += json.dumps(rows[1], separators=(",", ":")) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        events, values = module.analyze_selected_jsonl(source, redacted)
+
+        self.assertEqual(len(source.splitlines()), len(redacted.splitlines()))
+        self.assertEqual([json.loads(line) for line in redacted.splitlines() if line], [
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": (
+                    "Decision: structured source redaction must preserve event locators. "
+                    "Cookie: [REDACTED_COOKIE]\nKeep this durable detail."
+                ),
+            },
+            rows[1],
+        ])
+        self.assertEqual(values, rows)
+        user_event = next(event for event in events if event.kind == "user")
+        self.assertEqual((user_event.line_number, user_event.event_ordinal), (1, 1))
+        self.assertEqual(user_event.event_sha256, module.source_event_sha256(original_content))
+        self.assertEqual(counts, {"cookie": 1})
+
+    def test_redact_source_text_keeps_json_valid_for_cookie_text_variants(self):
+        module = load_update_module()
+        secrets = (
+            "session=synthetic-newline",
+            "session=synthetic-escapes",
+            "session=synthetic-narrative",
+        )
+        values = (
+            f"Cookie: {secrets[0]}\nNarrative remains.",
+            f'Cookie: {secrets[1]} with "quoted" and \\escaped values',
+            f"Cookie: {secrets[2]} followed by ordinary narrative",
+        )
+        source = "".join(
+            json.dumps({"content": value, "ok": True}, separators=(",", ":")) + "\n"
+            for value in values
+        )
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        rows = [json.loads(line) for line in redacted.splitlines()]
+
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(row["ok"] for row in rows))
+        self.assertEqual(rows[0]["content"], "Cookie: [REDACTED_COOKIE]\nNarrative remains.")
+        self.assertEqual(counts, {"cookie": 3})
+        for secret in secrets:
+            self.assertNotIn(secret, redacted)
+
+    def test_redact_source_text_keeps_escaped_unicode_separators_on_one_jsonl_line(self):
+        module = load_update_module()
+        content = (
+            "Cookie: session=synthetic-unicode-separators\n"
+            "Preserve escaped separators: \u0085 \u2028 \u2029."
+        )
+        source = json.dumps(
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": content,
+                "ok": True,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        events, _ = module.analyze_selected_jsonl(source, redacted)
+
+        self.assertEqual(len(redacted.splitlines()), 1)
+        row = json.loads(redacted)
+        self.assertTrue(row["ok"])
+        self.assertEqual(
+            row["content"],
+            "Cookie: [REDACTED_COOKIE]\nPreserve escaped separators: \u0085 \u2028 \u2029.",
+        )
+        user_event = next(event for event in events if event.kind == "user")
+        self.assertEqual((user_event.line_number, user_event.event_ordinal), (1, 1))
+        self.assertEqual(counts, {"cookie": 1})
+        self.assertNotIn("synthetic-unicode-separators", redacted)
+
+    def test_redact_source_text_redacts_nested_structured_secret_values(self):
+        module = load_update_module()
+        github_token = "ghp_" + "A" * 24
+        openai_key = "sk-" + "b" * 24
+        source_value = {
+            "timestamp": "2026-07-23T01:00:00Z",
+            "payload": {
+                "headers": [
+                    "Cookie: session=synthetic-cookie",
+                    "Authorization: Bearer synthetic.bearer-token",
+                ],
+                "credentials": {
+                    "github": github_token,
+                    "openai": openai_key,
+                },
+            },
+            "ok": True,
+        }
+        source = json.dumps(source_value, separators=(",", ":")) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        row = json.loads(redacted)
+
+        self.assertEqual(row["payload"]["headers"], [
+            "Cookie: [REDACTED_COOKIE]",
+            "Authorization: Bearer [REDACTED_BEARER_TOKEN]",
+        ])
+        self.assertEqual(row["payload"]["credentials"], {
+            "github": "[REDACTED_GITHUB_TOKEN]",
+            "openai": "[REDACTED_OPENAI_KEY]",
+        })
+        self.assertTrue(row["ok"])
+        self.assertEqual(counts, {
+            "bearer_token": 1,
+            "cookie": 1,
+            "github_token": 1,
+            "openai_key": 1,
+        })
+        for secret in ("synthetic-cookie", "synthetic.bearer-token", github_token, openai_key):
+            self.assertNotIn(secret, redacted)
+
+    def test_redact_source_text_preserves_json_object_structure(self):
+        module = load_update_module()
+        source = json.dumps(
+            {
+                "message": "Cookie: session=synthetic-cookie",
+                "nested": {"ok": True},
+            },
+            indent=2,
+        ) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.json"), source)
+
+        self.assertEqual(json.loads(redacted), {
+            "message": "Cookie: [REDACTED_COOKIE]",
+            "nested": {"ok": True},
+        })
+        self.assertEqual(counts, {"cookie": 1})
+
+    def test_redact_source_text_keeps_nonstructured_cookie_line_behavior(self):
+        module = load_update_module()
+        source = "Cookie: session=synthetic-cookie\nDurable text remains.\n"
+
+        redacted, counts = module.redact_source_text(Path("record.log"), source)
+
+        self.assertEqual(redacted, "Cookie: [REDACTED_COOKIE]\nDurable text remains.\n")
+        self.assertEqual(counts, {"cookie": 1})
+
+    def test_redact_source_text_rejects_malformed_structured_sources(self):
+        module = load_update_module()
+
+        for path, source in (
+            (Path("record.jsonl"), '{"ok":true}\n{not-json}\n'),
+            (Path("record.json"), '{"ok":true'),
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(module.SourceInventoryError) as raised:
+                    module.redact_source_text(path, source)
+                self.assertEqual(str(raised.exception), "source record is malformed")
+
     def synthetic_memory_node(
         self,
         memory_id: str,
@@ -6817,6 +7021,97 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             self.assertEqual(report["status"], "blocked")
             self.assertEqual(report["reason"], "source_inventory_invalid")
             self.assertEqual(list((memory_repo / "sessions").glob("**/meta.json")), [])
+
+    def test_source_inventory_cli_materializes_structured_cookie_record(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            secret = "session=synthetic-cookie"
+            source = source_dir / "structured-cookie.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-23T01:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": (
+                            "Decision: selected structured sources must remain parseable. "
+                            f"Cookie: {secret}\nKeep escaped separators: \u0085 \u2028 \u2029."
+                        ),
+                        "ok": True,
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raw = source.read_bytes()
+            file_stat = source.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 2,
+                    "records": [
+                        {
+                            "relative_path": source.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": file_stat.st_size,
+                            "mtime_ns": file_stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-23T01:00:00Z",
+                        }
+                    ],
+                }
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--source-inventory-stdin",
+                    "--defer-global-rebuild",
+                    "--allow-redacted-secrets",
+                    "--report-json",
+                ],
+                input=payload,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "updated")
+            self.assertEqual(report["reason"], "updated")
+            self.assertEqual(report["metrics"]["records_selected_count"], 1)
+            self.assertEqual(report["metrics"]["records_processed_count"], 1)
+            entry_dir = next((memory_repo / "sessions").glob("**/meta.json")).parent
+            meta = json.loads((entry_dir / "meta.json").read_text(encoding="utf-8"))
+            source_map = json.loads((entry_dir / "source-map.json").read_text(encoding="utf-8"))
+            self.assertEqual(meta["source_record_sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(source_map["source_record_sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertTrue(source_map["evidence_source_anchors"])
+            combined = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in entry_dir.iterdir()
+                if path.is_file()
+            )
+            self.assertNotIn(secret, combined)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
 
     def test_default_record_limit_does_not_starve_durable_record_after_fifty_low_signal_records(self):
         script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()

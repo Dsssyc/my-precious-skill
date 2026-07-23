@@ -486,7 +486,7 @@ def build_plan(
     source_text, actual_hash = read_strict_jsonl(source_path)
     if actual_hash != expected_hash:
         raise UpgradeBlocked("source_hash_mismatch")
-    redacted_text, redaction_counts = updater.redact_text(source_text)
+    redacted_text, redaction_counts = updater.redact_source_text(source_path, source_text)
     if redaction_counts and not allow_redacted_secrets:
         raise UpgradeBlocked("secret_policy_authorization_required")
     events = updater.extract_source_events(source_path, redacted_text, source_text)

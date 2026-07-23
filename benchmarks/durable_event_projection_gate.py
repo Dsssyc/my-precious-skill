@@ -339,7 +339,7 @@ def counterfactual_projection_metrics(
     source_partition: str,
 ) -> dict[str, float]:
     source_text, _ = module.read_validated_inventory_record(record)
-    redacted_text, redaction_counts = module.redact_text(source_text)
+    redacted_text, redaction_counts = module.redact_source_text(record.path, source_text)
     events, _ = module.analyze_selected_jsonl(source_text, redacted_text)
     projected = [event for event in events if event.kind in DURABLE_EVENT_KINDS]
     original_now = module.utc_now

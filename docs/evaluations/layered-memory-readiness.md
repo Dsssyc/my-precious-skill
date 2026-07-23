@@ -3143,6 +3143,132 @@ V2.53 proves this bounded correction-to-delivery path. It is not ranking quality
 not vector search, not general complaint understanding, not ontology discovery,
 not public leaderboard parity, and not LLM answer quality.
 
+## V2.54 Structure-Preserving Redaction And Scheduled Recovery Closure
+
+Date: 2026-07-23
+
+V2.54 closes one observed scheduled-update blocker. The prior updater applied
+the non-structured `Cookie:` pattern directly to serialized JSONL, so the
+pattern could consume the closing quote and object delimiter. Raw records were
+valid, but selected-record preparation then rejected the damaged redacted text
+as `source_inventory_invalid`.
+
+The updater now distinguishes source formats. JSON is parsed as one value and
+JSONL is parsed one physical record at a time; existing secret patterns are
+applied recursively only to decoded string values. Each JSONL input record
+produces one output record, blank-line positions remain stable, and the
+redacted output is parsed again by the tests and gate. Structured output uses
+ASCII-safe JSON encoding so escaped `U+0085`, `U+2028`, and `U+2029` values do
+not become physical line separators during re-encoding. Non-structured text
+continues to use the existing text redaction behavior. Source hashes,
+timestamps, inventory validation, and source anchors still derive from the
+original source bytes.
+
+All structured callers use the path-aware boundary, including selected-record
+preparation, direct archive writes, secret preflight, backfill, source-anchor
+upgrade, and the two attribution benchmarks. The template, setup asset, and
+update-skill copies remain byte-for-byte synchronized.
+
+The bounded public-data-free gate is:
+
+```bash
+python3 benchmarks/structured_redaction_integrity_gate.py
+```
+
+It covers JSON and multi-record JSONL, nested string values, Cookie plus
+Bearer/GitHub/OpenAI secrets, blank-line and ordinal preservation, actual
+`--source-inventory-stdin` materialization, malformed input, automation-source
+rejection, and target-metadata rejection.
+
+| Synthetic metric | Result |
+| --- | ---: |
+| `structured_source_parse_success_rate` | 1.0 |
+| `structured_redaction_parse_success_rate` | 1.0 |
+| `cookie_redaction_success_rate` | 1.0 |
+| `jsonl_boundary_preservation_rate` | 1.0 |
+| `selected_record_materialization_success_rate` | 1.0 |
+| `malformed_source_fail_closed_rate` | 1.0 |
+| `inventory_rejection_boundary_pass_rate` | 1.0 |
+| `source_inventory_invalid_count` for valid cases | 0 |
+| `expected_source_inventory_rejection_count` | 3 |
+| `privacy_leak_count` | 0 |
+
+One frozen aggregate-only private redaction A/B used the same 53-record target
+cohort exactly once per implementation. Raw parsing had zero failures. The
+pre-fix updater produced five redacted parse failures; the candidate produced
+zero.
+
+The A/B harness's isolated materialization substep was invalid because that
+temporary harness truncated microseconds from an mtime-derived
+`source_updated_at`, producing a separate `source inventory timestamp
+mismatch`. It was not rerun and is not counted as a passing materialization
+probe. The required single live scheduled transaction subsequently supplied
+the actual target-update evidence using the production runner's
+precision-preserving inventory payload.
+
+| Aggregate private closure metric | Result |
+| --- | ---: |
+| `private_source_record_count` | 53 |
+| `private_raw_parse_failure_count` | 0 |
+| `private_baseline_redaction_parse_failure_count` | 5 |
+| `private_candidate_redaction_parse_failure_count` | 0 |
+| `private_selected_target_update_success_count` | 1 |
+| `private_source_inventory_invalid_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The source skills were installed through a rollback-backed copy. The installed
+setup skill then detected and refreshed exactly three stale source-owned
+deployment tools. Post-refresh runtime parity was `19/19 current`:
+`missing_tool_count=0`, `stale_tool_count=0`, `unsafe_target_count=0`,
+`changed_tool_count=0`, equal source/target bundle fingerprints, and
+`privacy_leak_count=0`.
+
+Exactly one real scheduled transaction was invoked after clean canonical,
+remote-head, parity, and single-writer preflights. Its terminal aggregate
+report was:
+
+| Scheduled metric | Result |
+| --- | ---: |
+| `status` | `published` |
+| `reason` | `published` |
+| `failure_stage` | `none` |
+| `update_project_processed_count` | 74 |
+| `update_source_stream_processed_count` | 0 |
+| `update_child_failure_count` | 0 |
+| `update_inventory_worker_count` | 1 |
+| `source_record_deferred_count` | 2 |
+| `source_target_deferred_count` | 2 |
+| `canonical_mutation_count` | 1 |
+| `remote_publish_count` | 1 |
+| `recovery_count` | 1 |
+| `repair_attempt_count` | 1 |
+| `privacy_leak_count` | 0 |
+
+The two live-source deferrals make `source_batch_complete=false`; they do not
+change the published terminal status. The prior selected target was processed
+within all 74 successful project updates, no child failed, and the original
+`project_update/source_inventory_invalid` blocker did not recur. After the
+terminal report, the canonical repository was clean, its local and remote
+heads matched, runtime parity remained current, and no updater or adapter
+process survived.
+
+An independent post-transaction review then found the escaped Unicode line
+separator edge case described above. Fail-first helper, CLI, and gate cases
+reproduced it before the ASCII-safe encoding change. The focused gates and full
+release gate were rerun after the change, and the final runtime bundle was
+deployed with current parity. The scheduled transaction was deliberately not
+run a second time. Consequently, the live transaction proves recovery for the
+observed private Cookie cohort; the escaped-separator hardening has synthetic,
+packaged, and deployed-parity evidence, not a second live publication claim.
+
+V2.54 proves structure-preserving redaction for the supported JSON, JSONL, and
+non-structured source boundaries; selected-record materialization; and
+scheduled recovery from this exact blocker. It does not prove complete secret
+detection, a general DLP system, arbitrary structured formats, ranking or
+memory-recall improvement, goal-preference improvement, vector search,
+ontology discovery, LLM answer quality, public leaderboard parity, or that all
+future automation failures are solved.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

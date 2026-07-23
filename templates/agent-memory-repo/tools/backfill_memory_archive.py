@@ -18,7 +18,7 @@ from update_memory_archive import (
     project_name_from_path,
     read_record_text,
     rebuild_indexes,
-    redact_text,
+    redact_source_text,
     is_safe_archive_entry_dir,
     prune_empty_session_dirs,
     sha256_file,
@@ -233,7 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     for group in groups:
         record = record_from_source(group.source_record)
         records.append((group, record))
-        _, counts = redact_text(read_record_text(group.source_record))
+        _, counts = redact_source_text(
+            group.source_record,
+            read_record_text(group.source_record),
+        )
         if counts:
             sensitive.append((group, counts))
     if sensitive and not args.allow_redacted_secrets:
