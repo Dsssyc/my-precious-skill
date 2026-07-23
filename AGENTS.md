@@ -134,6 +134,15 @@ python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
 
+V2.55 is an evaluation-only `no_go`. Its frozen holdout intentionally returns
+nonzero and is therefore not part of the passing canonical release gate. Run
+the dedicated calibration and holdout commands when reviewing that candidate:
+
+```bash
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
+```
+
 Run the external LongMemEval source-to-induction measurement only with a
 downloaded dataset and generated archives outside this repository:
 
@@ -175,6 +184,7 @@ python3 -m py_compile \
   benchmarks/using_my_precious_runtime_gate.py \
   benchmarks/real_use_recall_utility_gate.py \
   benchmarks/copyable_goal_preference_recall_gate.py \
+  benchmarks/general_durable_preference_recall_gate.py \
   benchmarks/query_support_recall_gate.py \
   benchmarks/progressive_source_drilldown_gate.py \
   benchmarks/authorized_original_source_gate.py \

@@ -217,6 +217,111 @@ class SearchMemoryTests(unittest.TestCase):
                 self.assertFalse(package["query"]["decomposition_recommended"])
                 self.assertEqual(package["query"]["decomposition_reason"], "focused_query")
 
+    def test_cjk_partial_matching_uses_bounded_substantive_units(self):
+        search_memory = load_search_memory_module()
+        query_tokens = search_memory.unique_query_tokens(
+            "审查建议里风险等级和修复办法按什么顺序"
+        )
+
+        score, matched = search_memory.score_text(
+            query_tokens,
+            "用户偏好：我默认偏好在代码审查意见中先写风险等级，再写修复建议。",
+            weight=10,
+        )
+
+        self.assertGreater(score, 0)
+        self.assertEqual(matched, query_tokens)
+        generic_score, generic_matched = search_memory.score_text(
+            search_memory.unique_query_tokens("我的长期偏好是什么"),
+            "用户偏好：图例始终放在右侧。",
+            weight=10,
+        )
+        self.assertEqual(generic_score, 0)
+        self.assertEqual(generic_matched, [])
+
+    def test_generic_chinese_query_framing_does_not_block_domain_token(self):
+        search_memory = load_search_memory_module()
+
+        self.assertEqual(
+            search_memory.unique_query_tokens("我的 goal 偏好是什么"),
+            ["goal"],
+        )
+
+    def test_preference_applicability_support_is_scoped_and_does_not_lower_default(self):
+        search_memory = load_search_memory_module()
+        query_tokens = ["goal", "下一步目标内容"]
+        matched_tokens = ["goal"]
+
+        ordinary = search_memory.context_query_support(
+            query_tokens,
+            matched_tokens,
+        )
+        applicable = search_memory.context_query_support(
+            query_tokens,
+            matched_tokens,
+            preference_applicable=True,
+        )
+
+        self.assertEqual(ordinary["status"], "weak")
+        self.assertEqual(applicable["status"], "supported")
+        self.assertEqual(
+            ordinary["policy"],
+            "strict_meaningful_or_important_query_token_coverage",
+        )
+        self.assertEqual(
+            applicable["policy"],
+            "scoped_global_preference_applicability",
+        )
+        self.assertFalse(ordinary["preference_applicability"])
+        self.assertTrue(applicable["preference_applicability"])
+
+    def test_preference_applicability_rejects_multi_facet_query(self):
+        search_memory = load_search_memory_module()
+        query = (
+            "Combine my global preference, project history, and current repository state"
+        )
+        hit = search_memory.Hit(
+            path=Path("index/memories.jsonl/mem_preference"),
+            score=100,
+            source="memory",
+            title="The user prefers plans to include verification.",
+            memory_id="mem_preference",
+            layer="global",
+            scope="global",
+            matched_tokens=("preference",),
+            why=[],
+        )
+
+        self.assertFalse(
+            search_memory.preference_memory_applicable(
+                query,
+                search_memory.unique_query_tokens(query),
+                hit,
+            )
+        )
+
+    def test_preference_applicability_preserves_domain_hit_before_package_support(self):
+        search_memory = load_search_memory_module()
+        query = "下一份 goal 应按什么形式给我"
+        query_tokens = search_memory.unique_query_tokens(query)
+        record = synthetic_memory_row(
+            "mem_goal_preference",
+            "用户偏好：请直接把完整 goal 给我，别再解释。",
+            layer="global",
+            scope="global",
+        )
+        record["source"] = "automatic"
+
+        score, matched, _ = search_memory.score_index_record(
+            query_tokens,
+            record,
+            [],
+            query=query,
+        )
+
+        self.assertGreater(score, 0)
+        self.assertIn("goal", matched)
+
     def test_context_package_decomposition_signal_is_answerability_orthogonal(self):
         search_memory = load_search_memory_module()
         query_tokens = [

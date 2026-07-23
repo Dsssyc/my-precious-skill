@@ -3269,6 +3269,120 @@ memory-recall improvement, goal-preference improvement, vector search,
 ontology discovery, LLM answer quality, public leaderboard parity, or that all
 future automation failures are solved.
 
+## V2.55 General Durable Preference Recall Holdout Closure
+
+Date: 2026-07-23
+
+V2.55 evaluates one bounded candidate for recalling durable user preferences
+without adding benchmark query strings, per-domain canonical facts, or another
+goal-query alias list. The public-data-free gate is:
+
+```bash
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
+```
+
+The frozen calibration fingerprint is
+`9cc208235c44c99a1ad9e13c04662d1907a23a268e249b15ee919b9b2286862b`.
+The frozen holdout fingerprint is
+`2e0c4b9ab2515c368843d651217487595ab683f4068df7dc57c12ba742b16147`.
+Each cohort has nine positive and nine negative cases; their case IDs and
+source records are disjoint.
+
+The baseline first-loss distributions were:
+
+| Cohort | First-loss distribution |
+| --- | --- |
+| calibration | `durable_preference_qualified=2`, `retrieved_at_5=3`, `query_support_accepted=3`, `none=1` |
+| holdout | `durable_preference_qualified=2`, `retrieved_at_5=3`, `query_support_accepted=4` |
+
+The single candidate combines only stages identified by that attribution:
+
+- generic repeated-correction induction over user events with source-bound
+  evidence and source anchors;
+- bounded CJK substantive-unit matching rather than an unbounded token or
+  embedding index;
+- global preference applicability restricted to active/current, source-backed
+  preference memories and rejected for multi-facet queries;
+- continued precedence for the existing V2.53 goal-specific inducer so legacy
+  behavior remains compatible.
+
+Answerability remains package-first. Every decision consumes
+`memory_recall_context_package`; free-form search output is not an
+answerability source. The candidate adds no persistent vector or embedding
+store. Applicability support is explicitly labeled
+`scoped_global_preference_applicability`; it is not mislabeled as the existing
+strict query-support policy. The V2.37 packaged parity check therefore remains
+strict for strict-policy hits while separately counting non-baseline-policy
+hits.
+
+Calibration passed all frozen thresholds. The public holdout was run twice and
+reproduced the same quality result. All nine ordinary candidate positives had
+no first loss, but the independent generic path failed when the legacy
+goal-specific inducer and aliases were ablated.
+
+| Public candidate metric | Calibration | Holdout |
+| --- | ---: | ---: |
+| `generic_preference_qualification_recall` | 1.0 | 1.0 |
+| `generic_preference_materialization_recall` | 1.0 | 1.0 |
+| `generic_preference_source_anchor_binding_rate` | 1.0 | 1.0 |
+| `generic_preference_scope_accuracy` | 1.0 | 1.0 |
+| `unseen_paraphrase_recall_at_5` | 1.0 | 1.0 |
+| `unseen_paraphrase_supported_recall` | 1.0 | 1.0 |
+| `supported_decision_precision` | 1.0 | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `inactive_preference_rejection_rate` | 1.0 | 1.0 |
+| `current_turn_precedence_accuracy` | 1.0 | 1.0 |
+| `legacy_goal_preference_regression_rate` | 1.0 | 1.0 |
+| `legacy_goal_alias_ablation_supported_recall` | 1.0 | **0.0** |
+| `free_form_answerability_use_count` | 0 | 0 |
+| `new_case_specific_runtime_literal_count` | 0 | 0 |
+| `holdout_query_literal_overlap_count` | 0 | 0 |
+| `preference_specific_candidate_branch_count` | 0 | 0 |
+| `deterministic_result_ordering_rate` | 1.0 | 1.0 |
+| `performance_runtime_ratio` | 1.059 | 1.014 |
+| `performance_peak_memory_ratio` | 1.008 | 0.996-1.017 |
+| `privacy_leak_count` | 0 | 0 |
+
+The private shadow used one frozen external manifest with six positive and six
+negative cases against one immutable archive snapshot. The report is
+aggregate-only and excludes queries, memory text, source paths, IDs, raw refs,
+and context packages.
+
+| Private candidate metric | Result |
+| --- | ---: |
+| `private_context_package_parse_success_rate` | 1.0 |
+| `private_unseen_preference_supported_recall` | 1.0 |
+| `private_supported_decision_precision` | **0.8571428571428571** |
+| `private_false_support_count` | **1** |
+| `private_wrong_scope_supported_count` | 0 |
+| `private_inactive_answer_count` | 0 |
+| `private_free_form_answerability_use_count` | 0 |
+| `canonical_archive_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+Decision: `no_go`. The public
+`legacy_goal_alias_ablation_supported_recall` threshold required at least
+`0.75` and observed `0.0`; the private precision threshold required `1.0` and
+one of six negative cases was falsely supported. These are quality failures,
+not permission to add case-specific cues or a second candidate.
+
+The candidate exists only on the V2.55 evaluation branch. It was not installed
+or deployed. The three installed skills remain byte-for-byte equal to V2.54,
+and their private deployment bundle remains `19/19 current` with a clean
+repository and matching local/remote heads. The canonical release gate does
+not execute this known-failing holdout; it compiles the evaluation gate and
+continues to protect the active V2.54 release contract. Its final run passed
+all 48 checks, including all 853 unit tests, both v1 readiness scorecards,
+script compilation, and template synchronization.
+
+This result is evidence for one synthetic durable-preference slice and one
+aggregate private shadow only. It is not general LongMemEval quality.
+It is not universal semantic memory. It is not LLM answer quality.
+It is not vector-search quality. It is not ontology discovery.
+It is not unrestricted raw-transcript recall.
+It is not distributed scheduler uptime. It is not public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

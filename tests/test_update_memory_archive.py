@@ -3254,6 +3254,196 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             f"用户偏好：{source_text}",
         )
 
+    def test_repeated_user_corrections_induce_generic_source_bound_preferences(self):
+        module = load_update_module()
+        cases = (
+            (
+                (
+                    "结果又埋在背景后面了，先给结论。",
+                    "不要再把结论放到最后，我要先看到结论再看背景。",
+                ),
+                "用户偏好：不要再把结论放到最后，我要先看到结论再看背景。",
+            ),
+            (
+                (
+                    "You buried the risk table after the narrative again; put the risk table first.",
+                    "I asked for the risk table first, before the narrative.",
+                ),
+                "The user prefers the risk table first, before the narrative.",
+            ),
+        )
+
+        for texts, expected_fact in cases:
+            with self.subTest(expected_fact=expected_fact):
+                events = [
+                    module.MemoryEvent(
+                        "user",
+                        text,
+                        index,
+                        1,
+                        module.source_event_sha256(text),
+                    )
+                    for index, text in enumerate(texts, 1)
+                ]
+
+                induced = module.induce_repeated_user_preference(events)
+
+                self.assertIsNotNone(induced)
+                self.assertEqual(induced.text, expected_fact)
+                self.assertEqual(induced.support_events, tuple(events))
+
+                summary = module.summarize_events(events, "synthetic-general-preference")
+                summary["memory_candidate_sources"] = module.memory_candidate_source_entries(
+                    summary,
+                    events,
+                )
+                anchors = module.materialize_source_anchors(summary, "a" * 64)
+                source = next(
+                    row
+                    for row in summary["fact_sources"]
+                    if row["text"] == expected_fact
+                )
+                self.assertEqual(source["source"], "natural_user_correction")
+                self.assertEqual(len(source["evidence_quote_ids"]), 2)
+                self.assertEqual(len(source["source_anchor_ids"]), 2)
+                self.assertEqual(
+                    {
+                        row["line_number"]
+                        for row in anchors
+                        if row["quote_id"] in source["evidence_quote_ids"]
+                    },
+                    {1, 2},
+                )
+
+    def test_source_cleaning_preserves_valid_correction_after_process_like_phrase(self):
+        module = load_update_module()
+        text = "不要再把验证结果藏在过程描述后，我要先看到验证结果再看过程。"
+        event = module.MemoryEvent(
+            "user",
+            text,
+            7,
+            1,
+            module.source_event_sha256(text),
+        )
+
+        cleaned = module.clean_source_events([event])
+
+        self.assertEqual([item.text for item in cleaned], [text])
+        self.assertEqual(cleaned[0].line_number, 7)
+        self.assertEqual(cleaned[0].event_sha256, event.event_sha256)
+
+    def test_source_bound_correction_survives_generic_process_candidate_filter(self):
+        module = load_update_module()
+        fact = "用户偏好：不要再把验证结果藏在过程描述后，我要先看到验证结果再看过程。"
+        row = {
+            "reusable_facts": [fact],
+            "reusable_fact_sources": [
+                {
+                    "text": fact,
+                    "source": "natural_user_correction",
+                    "evidence_quote_ids": ["ev_001", "ev_002"],
+                    "source_anchor_ids": ["srca_one", "srca_two"],
+                }
+            ],
+            "decisions": [],
+            "unresolved_tasks": [],
+        }
+
+        candidates = list(module.iter_memory_candidate_texts(row))
+
+        self.assertEqual(candidates, [(fact, "Reusable fact from archived session.")])
+
+    def test_generic_repeated_preference_induction_rejects_unsafe_sequences(self):
+        module = load_update_module()
+        cases = (
+            (
+                ("这次先给结论。", "本轮不要再把结论放到最后。"),
+                ("user", "user"),
+            ),
+            (
+                (
+                    "如果报告很长，是不是应该先给结论？",
+                    "要不要把结论放在背景前面？",
+                ),
+                ("user", "user"),
+            ),
+            (
+                (
+                    "同事说：“先给结论，再给背景。”",
+                    "同事还说：“不要再把结论放在最后。”",
+                ),
+                ("user", "user"),
+            ),
+            (
+                (
+                    "The risk table should be first again.",
+                    "I asked for the risk table before the narrative.",
+                ),
+                ("assistant", "assistant"),
+            ),
+            (
+                (
+                    "这个页面又坏了，请修复表格。",
+                    "这段代码还是报错，请修复函数。",
+                ),
+                ("user", "user"),
+            ),
+            (
+                (
+                    "这个页面又坏了，请修复表格。",
+                    "这段代码还是报错，请修复函数。",
+                    "配置文件仍然错误，请修复路径。",
+                ),
+                ("user", "user", "user"),
+            ),
+        )
+
+        for texts, roles in cases:
+            with self.subTest(texts=texts):
+                events = [
+                    module.MemoryEvent(
+                        role,
+                        text,
+                        index,
+                        1,
+                        module.source_event_sha256(text),
+                    )
+                    for index, (role, text) in enumerate(zip(roles, texts), 1)
+                ]
+
+                self.assertIsNone(module.induce_repeated_user_preference(events))
+
+    def test_specialized_inducer_keeps_precedence_over_generic_correction_fact(self):
+        module = load_update_module()
+        rows = (
+            "给一个 Markdown 版本的 goal。",
+            "注意排版一定要正确，不然我无法复制。",
+            "你看看你给的是纯 Markdown 吗，这个格式已经乱了。",
+            "那你倒是把完整 goal 给我，不要继续解释。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-compatible-preference")
+
+        correction_sources = [
+            row
+            for row in summary["fact_sources"]
+            if row.get("source") == "natural_user_correction"
+        ]
+        self.assertEqual(
+            [row["text"] for row in correction_sources],
+            [module.COPYABLE_GOAL_PREFERENCE_TEXT],
+        )
+
     def test_repeated_goal_format_corrections_induce_source_bound_copyable_preference(self):
         module = load_update_module()
         rows = (

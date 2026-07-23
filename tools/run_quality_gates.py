@@ -23,6 +23,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/using_my_precious_runtime_gate.py",
     "benchmarks/real_use_recall_utility_gate.py",
     "benchmarks/copyable_goal_preference_recall_gate.py",
+    "benchmarks/general_durable_preference_recall_gate.py",
     "benchmarks/query_support_recall_gate.py",
     "benchmarks/progressive_source_drilldown_gate.py",
     "benchmarks/authorized_original_source_gate.py",

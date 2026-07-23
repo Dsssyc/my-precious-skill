@@ -1292,6 +1292,34 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v255_general_preference_no_go(self):
+        section = self.evaluation_section(
+            "## V2.55 General Durable Preference Recall Holdout Closure"
+        )
+        for phrase in (
+            "general_durable_preference_recall_gate.py",
+            "calibration fingerprint",
+            "holdout fingerprint",
+            "repeated-correction induction",
+            "bounded CJK",
+            "memory_recall_context_package",
+            "legacy_goal_alias_ablation_supported_recall",
+            "private_false_support_count",
+            "`no_go`",
+            "V2.54",
+            "19/19 current",
+            "not universal semantic memory",
+            "not general LongMemEval quality",
+            "not LLM answer quality",
+            "not vector-search quality",
+            "not ontology discovery",
+            "not unrestricted raw-transcript recall",
+            "not distributed scheduler uptime",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (
             "explicit revision path",

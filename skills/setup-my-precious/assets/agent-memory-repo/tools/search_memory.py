@@ -197,6 +197,35 @@ QUERY_STOP_TOKENS = {
     "would",
     "why",
 }
+CJK_QUERY_FRAMING_PATTERN = re.compile(
+    r"(?:用户|我的|个人|长期|偏好|是什么|什么|怎么|怎样|如何|是否|应该|"
+    r"需要|默认|当前|请问|给我|一下)"
+)
+CJK_GENERIC_MATCH_UNITS = {
+    "个人",
+    "什么",
+    "偏好",
+    "如何",
+    "怎样",
+    "应该",
+    "当前",
+    "我的",
+    "是否",
+    "用户",
+    "请问",
+    "长期",
+    "默认",
+}
+PREFERENCE_QUERY_INTENT_PATTERN = re.compile(
+    r"(?i)\b(?:default|prefer|preference|should|format|order|first|current|"
+    r"draft|write|create|provide|give|deliver|copy)\b|"
+    r"偏好|默认|应该|如何|怎样|什么|顺序|次序|当前|交付|复制|"
+    r"(?:给出|提供|起草|编写|生成|写).{0,32}(?:内容|文本|文档|计划|目标|goal)"
+)
+PREFERENCE_MEMORY_PREFIX_PATTERN = re.compile(
+    r"(?i)^(?:the user (?:prefers|wants)|user (?:preference|prefers|wants)|"
+    r"用户(?:偏好|希望|默认))"
+)
 QUERY_FACET_PATTERNS = (
     re.compile(
         r"\b(?:(?:global|user|personal)\s+)?preferences?\b|\bprefer\b|"
@@ -233,7 +262,41 @@ def unique_tokens(text: str) -> list[str]:
 
 def unique_query_tokens(text: str) -> list[str]:
     tokens = unique_tokens(text)
-    return [token for token in tokens if token not in QUERY_STOP_TOKENS]
+    return [
+        token
+        for token in tokens
+        if token not in QUERY_STOP_TOKENS and not is_generic_cjk_query_token(token)
+    ]
+
+
+def cjk_substantive_units(text: str) -> set[str]:
+    units: set[str] = set()
+    for run in re.findall(r"[\u3400-\u9fff]+", text.casefold()):
+        reduced = CJK_QUERY_FRAMING_PATTERN.sub("", run)
+        if len(reduced) < 2:
+            continue
+        candidates = {reduced} if len(reduced) == 2 else {
+            reduced[index : index + 2]
+            for index in range(len(reduced) - 1)
+        }
+        units.update(
+            unit
+            for unit in candidates
+            if unit not in CJK_GENERIC_MATCH_UNITS
+        )
+    return units
+
+
+def is_generic_cjk_query_token(token: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff]", token)) and not cjk_substantive_units(token)
+
+
+def cjk_partial_token_match(haystack: str, token: str) -> bool:
+    query_units = cjk_substantive_units(token)
+    if len(query_units) < 2:
+        return False
+    matched_units = query_units & cjk_substantive_units(haystack)
+    return len(matched_units) >= 2
 
 
 def compact_whitespace(text: str) -> str:
@@ -326,7 +389,12 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
 
 
 def token_occurrence_count(haystack: str, token: str) -> int:
-    if any(ord(char) > 127 for char in token) or any(char in token for char in "_.-"):
+    if any(ord(char) > 127 for char in token):
+        exact_count = haystack.count(token)
+        if exact_count:
+            return exact_count
+        return int(cjk_partial_token_match(haystack, token))
+    if any(char in token for char in "_.-"):
         return haystack.count(token)
     return len(re.findall(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", haystack))
 
@@ -582,10 +650,13 @@ def meaningful_coverage_tokens(query_tokens: list[str]) -> list[str]:
     return tokens
 
 
+def query_facet_count(query: str) -> int:
+    return sum(1 for pattern in QUERY_FACET_PATTERNS if pattern.search(query))
+
+
 def query_decomposition_recommended(query: str, query_tokens: list[str]) -> bool:
     meaningful_tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
-    facet_count = sum(1 for pattern in QUERY_FACET_PATTERNS if pattern.search(query))
-    return len(meaningful_tokens) > 5 or facet_count >= 2
+    return len(meaningful_tokens) > 5 or query_facet_count(query) >= 2
 
 
 def has_meaningful_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
@@ -799,7 +870,39 @@ def result_title_quality(text: str) -> int:
     return score
 
 
-def score_index_record(query_tokens: list[str], record: dict, context_terms: list[str] | None = None) -> tuple[int, list[str], list[str]]:
+def preference_applicability_match(
+    query: str,
+    query_tokens: list[str],
+    matched_tokens: list[str] | tuple[str, ...],
+    *,
+    memory_text: str,
+    layer: str,
+    source: str,
+) -> bool:
+    if (
+        source not in {"automatic", "explicit", "memory"}
+        or layer != "global"
+        or not PREFERENCE_MEMORY_PREFIX_PATTERN.search(memory_text)
+        or not PREFERENCE_QUERY_INTENT_PATTERN.search(query)
+        or query_facet_count(query) >= 2
+    ):
+        return False
+    matched = set(matched_tokens)
+    return any(
+        token in matched
+        and token not in GENERIC_SEARCH_TOKENS
+        and not is_generic_cjk_query_token(token)
+        for token in query_tokens
+    )
+
+
+def score_index_record(
+    query_tokens: list[str],
+    record: dict,
+    context_terms: list[str] | None = None,
+    *,
+    query: str = "",
+) -> tuple[int, list[str], list[str]]:
     field_weights = (
         ("text", 15),
         ("decision", 14),
@@ -902,8 +1005,22 @@ def score_index_record(query_tokens: list[str], record: dict, context_terms: lis
     if quality_reason:
         add_reason(reasons, quality_reason)
         return 0, matched_tokens, reasons
-    if matched_tokens and not should_keep_match(query_tokens, matched_tokens, context_terms):
+    preference_applicable = preference_applicability_match(
+        query,
+        query_tokens,
+        matched_tokens,
+        memory_text=scalar_field_lower(record, "text"),
+        layer=scalar_field_lower(record, "layer"),
+        source=scalar_field_lower(record, "source"),
+    )
+    if (
+        matched_tokens
+        and not should_keep_match(query_tokens, matched_tokens, context_terms)
+        and not preference_applicable
+    ):
         return 0, matched_tokens, reasons
+    if preference_applicable:
+        add_reason(reasons, "scoped-preference-applicability")
     return score, matched_tokens, reasons
 
 
@@ -1586,6 +1703,7 @@ def collect_memory_hits(
     context_terms: list[str] | None = None,
     scope: str = "all",
     preferred_scope: str = "",
+    query: str = "",
 ) -> list[Hit]:
     hits: list[Hit] = []
     index_path = repo / "index" / "memories.jsonl"
@@ -1617,7 +1735,12 @@ def collect_memory_hits(
             continue
         if not has_valid_memory_lifecycle(record):
             continue
-        score, matched, reasons = score_index_record(query_tokens, record, context_terms)
+        score, matched, reasons = score_index_record(
+            query_tokens,
+            record,
+            context_terms,
+            query=query,
+        )
         if not score:
             continue
         if "low-signal-only" in reasons and "project-context" not in reasons:
@@ -1677,6 +1800,7 @@ def inactive_memory_match_count(
     query_tokens: list[str],
     context_terms: list[str] | None = None,
     scope: str = "all",
+    query: str = "",
 ) -> int:
     index_path = repo / "index" / "memories.jsonl"
     if not is_safe_repo_file(repo, index_path):
@@ -1705,7 +1829,12 @@ def inactive_memory_match_count(
             continue
         if memory_id not in inactive_ids and has_valid_memory_lifecycle(record):
             continue
-        score, matched, _ = score_index_record(query_tokens, record, context_terms)
+        score, matched, _ = score_index_record(
+            query_tokens,
+            record,
+            context_terms,
+            query=query,
+        )
         if score and should_keep_match(query_tokens, matched, context_terms):
             count += 1
     return count
@@ -2026,13 +2155,20 @@ def context_query_support_tokens(query_tokens: list[str]) -> list[str]:
     return strict_coverage_tokens(query_tokens)
 
 
-def context_query_support(query_tokens: list[str], matched_tokens: list[str]) -> dict[str, object]:
+def context_query_support(
+    query_tokens: list[str],
+    matched_tokens: list[str],
+    *,
+    preference_applicable: bool = False,
+) -> dict[str, object]:
     required_tokens = context_query_support_tokens(query_tokens)
     matched_required = [token for token in required_tokens if token in matched_tokens]
     missing_tokens = [token for token in required_tokens if token not in matched_tokens]
     strict_supported = has_strict_token_coverage(query_tokens, matched_tokens)
     meaningful_supported = has_meaningful_token_coverage(query_tokens, matched_tokens)
     context_supported = bool(required_tokens) and not missing_tokens
+    baseline_supported = strict_supported or meaningful_supported or context_supported
+    preference_override = preference_applicable and not baseline_supported
     if required_tokens and not missing_tokens:
         coverage = "complete"
     elif matched_required:
@@ -2040,14 +2176,38 @@ def context_query_support(query_tokens: list[str], matched_tokens: list[str]) ->
     else:
         coverage = "none"
     return {
-        "status": "supported" if strict_supported or meaningful_supported or context_supported else "weak",
-        "policy": "strict_meaningful_or_important_query_token_coverage",
+        "status": (
+            "supported"
+            if baseline_supported or preference_applicable
+            else "weak"
+        ),
+        "policy": (
+            "scoped_global_preference_applicability"
+            if preference_override
+            else "strict_meaningful_or_important_query_token_coverage"
+        ),
         "coverage": coverage,
         "matched_tokens": [token for token in matched_tokens if token in required_tokens],
         "missing_tokens": missing_tokens,
         "strict_token_coverage": strict_supported,
         "meaningful_token_coverage": meaningful_supported,
+        "preference_applicability": preference_applicable,
     }
+
+
+def preference_memory_applicable(
+    query: str,
+    query_tokens: list[str],
+    hit: Hit,
+) -> bool:
+    return preference_applicability_match(
+        query,
+        query_tokens,
+        hit.matched_tokens,
+        memory_text=hit.title,
+        layer=hit.layer,
+        source=hit.source,
+    )
 
 
 def context_hit(
@@ -2056,13 +2216,18 @@ def context_hit(
     rank: int,
     depth: str,
     query_tokens: list[str],
+    query: str = "",
 ) -> dict[str, object]:
     drill_paths = tuple(path for path in hit.drill_paths if safe_display_path(path) != UNSAFE_DISPLAY_FIELD)
     summary_drill_paths = [path for path in drill_paths if is_summary_drill_path(path)]
     evidence_drill_paths = [path for path in drill_paths if is_evidence_drill_path(path)]
     active_current = hit.source == "memory" and bool(hit.memory_id)
     support_path_count = len(summary_drill_paths) + len(evidence_drill_paths)
-    query_support = context_query_support(query_tokens, list(hit.matched_tokens))
+    query_support = context_query_support(
+        query_tokens,
+        list(hit.matched_tokens),
+        preference_applicable=preference_memory_applicable(query, query_tokens, hit),
+    )
     query_supported = query_support["status"] == "supported"
     if active_current and support_path_count and query_supported:
         answerability_status = "supported"
@@ -2154,7 +2319,7 @@ def build_context_package(
     inactive_match_count: int,
 ) -> dict[str, object]:
     context_hits = [
-        context_hit(repo, hit, rank, depth, query_tokens)
+        context_hit(repo, hit, rank, depth, query_tokens, query)
         for rank, hit in enumerate(context_package_hits(hits, limit), 1)
     ]
     decomposition_recommended = query_decomposition_recommended(query, query_tokens)
@@ -2269,7 +2434,14 @@ def main(argv: list[str] | None = None) -> int:
         selected_hits = session_hits
     else:
         preferred_scope = "" if args.scope != "all" else args.preferred_scope
-        memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope, preferred_scope)
+        memory_hits = collect_memory_hits(
+            repo,
+            query_tokens,
+            context_terms,
+            args.scope,
+            preferred_scope,
+            args.query,
+        )
         if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
             if args.depth in ("session", "evidence", "source"):
                 session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, args.depth)
@@ -2284,7 +2456,13 @@ def main(argv: list[str] | None = None) -> int:
     display_query = safe_display_text(args.query)
 
     if args.context_json:
-        inactive_count = inactive_memory_match_count(repo, query_tokens, context_terms, args.scope)
+        inactive_count = inactive_memory_match_count(
+            repo,
+            query_tokens,
+            context_terms,
+            args.scope,
+            args.query,
+        )
         print(
             json.dumps(
                 build_context_package(

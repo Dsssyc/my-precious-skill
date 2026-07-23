@@ -268,6 +268,44 @@ CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
     r"(?:后续|后面|接下来|以后).{0,80}(?:每(?:个|次|回)|我(?:会|将)|按(?:这个|你说的)(?:要求)?).{0,80}))"
     r"[。.!！]?\s*$"
 )
+REPEATED_PREFERENCE_CORRECTION_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"\bagain\b|\bstill\b|\bi\s+(?:asked|keep asking|need|want)\b|"
+    r"\bplease\s+stop\b|\bdo\s+not\b|\bdon't\b|\binstead\b|"
+    r"\b(?:wrong|incorrect|cannot|can't)\b|"
+    r"\b(?:put|place|show|state|lead|start|end)\b.{0,80}\b(?:first|last|before|after)\b|"
+    r"不要再|别再|又|仍然|还是|不对|不是|我要|我说过|为什么还|"
+    r"一定|必须|不然|无法|不能|正确|排版|格式|复制|"
+    r"先(?:给|写|列|放|说|展示|看到)|直接(?:给|写|列|放|说|展示)|"
+    r"放到最后|藏在.{0,40}(?:后面|最后)"
+    r")"
+)
+REPEATED_PREFERENCE_ENGLISH_CANONICAL_PATTERN = re.compile(
+    r"(?i)^\s*i\s+(?:asked\s+for|keep\s+asking\s+for|need|want)\s+(?P<text>.+)$"
+)
+REPEATED_PREFERENCE_SEMANTIC_STOP_WORDS = {
+    "again",
+    "asked",
+    "before",
+    "could",
+    "first",
+    "keep",
+    "last",
+    "need",
+    "please",
+    "should",
+    "still",
+    "this",
+    "want",
+    "would",
+    "不要",
+    "还是",
+    "我要",
+    "直接",
+    "修复",
+    "报错",
+    "请修",
+}
 GOAL_ARTIFACT_PATTERN = re.compile(
     r"(?i)(?<![A-Za-z0-9_])goal(?:spec)?(?![A-Za-z0-9_])|目标(?:提示词|文档|计划)"
 )
@@ -2327,8 +2365,21 @@ def clean_source_events(events: Iterable[MemoryEvent]) -> list[MemoryEvent]:
         if is_injected_context_text(event_text):
             continue
         for piece in split_memory_text(event_text):
-            text = strip_process_clauses(piece)
-            if text and not is_noisy_text(text) and not is_process_update(text):
+            preference_correction = repeated_preference_event_text(
+                MemoryEvent(
+                    event.kind,
+                    piece,
+                    event.line_number,
+                    event.event_ordinal,
+                    event.event_sha256,
+                )
+            )
+            text = preference_correction or strip_process_clauses(piece)
+            if (
+                text
+                and not is_noisy_text(text)
+                and (preference_correction or not is_process_update(text))
+            ):
                 cleaned.append(
                     MemoryEvent(
                         event.kind,
@@ -2645,6 +2696,130 @@ def is_durable_chinese_user_preference(text: str) -> bool:
             (user_specific and normative_count >= 1)
             or (CHINESE_AGENT_DIRECTED_PATTERN.search(text) and normative_count >= 3)
         )
+    )
+
+
+def repeated_preference_semantic_units(text: str) -> set[str]:
+    lowered = text.casefold()
+    units = {
+        token
+        for token in re.findall(r"[a-z][a-z0-9_-]{2,}", lowered)
+        if token not in REPEATED_PREFERENCE_SEMANTIC_STOP_WORDS
+    }
+    for run in re.findall(r"[\u3400-\u9fff]+", lowered):
+        if len(run) == 1:
+            continue
+        candidates = {run} if len(run) == 2 else {
+            run[index : index + 2]
+            for index in range(len(run) - 1)
+        }
+        units.update(
+            unit
+            for unit in candidates
+            if unit not in REPEATED_PREFERENCE_SEMANTIC_STOP_WORDS
+        )
+    return units
+
+
+def repeated_preference_context_text(event: MemoryEvent) -> str:
+    if event.kind != "user":
+        return ""
+    raw = CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", event.text).strip()
+    normalized = compact_whitespace(normalize_memory_text(raw))
+    malformed_markdown, quoted_markdown = markdown_event_shape(raw)
+    if (
+        not normalized
+        or is_noisy_text(normalized)
+        or is_sensitive_explicit_memory_text(normalized)
+        or malformed_markdown
+        or quoted_markdown
+        or has_quoted_goal_correction(raw)
+        or CHINESE_TEMPORARY_PREFERENCE_PATTERN.search(normalized)
+        or CHINESE_LIVE_STATE_PREFERENCE_PATTERN.search(normalized)
+        or CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN.search(normalized)
+        or CHINESE_QUOTED_PROMPT_PATTERN.search(normalized)
+        or CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN.fullmatch(normalized)
+    ):
+        return ""
+    return clip(normalized)
+
+
+def repeated_preference_event_text(event: MemoryEvent) -> str:
+    text = repeated_preference_context_text(event)
+    if not text or not REPEATED_PREFERENCE_CORRECTION_PATTERN.search(text):
+        return ""
+    return text
+
+
+def canonical_repeated_preference_text(text: str) -> str:
+    if CHINESE_TEXT_PATTERN.search(text):
+        candidate = f"用户偏好：{text}"
+    else:
+        match = REPEATED_PREFERENCE_ENGLISH_CANONICAL_PATTERN.match(text)
+        tail = match.group("text").strip() if match else text.strip()
+        candidate = f"The user prefers {sentence_case_tail(tail)}" if tail else ""
+    if (
+        not candidate
+        or is_noisy_text(candidate)
+        or is_raw_prompt_text(candidate)
+        or is_sensitive_explicit_memory_text(candidate)
+    ):
+        return ""
+    return clip(normalize_memory_text(candidate))
+
+
+def induce_repeated_user_preference(
+    events: list[MemoryEvent],
+) -> InducedNaturalUserFact | None:
+    contexts = [
+        (event, text, repeated_preference_semantic_units(text))
+        for event in events
+        if (text := repeated_preference_context_text(event))
+    ]
+    candidates = [
+        (event, text, repeated_preference_semantic_units(text))
+        for event in events
+        if (text := repeated_preference_event_text(event))
+    ]
+    if len(candidates) < 2:
+        return None
+    support: tuple[tuple[MemoryEvent, str, set[str]], ...] = ()
+    for end in range(1, len(candidates)):
+        window = candidates[max(0, end - GOAL_CORRECTION_USER_WINDOW + 1) : end + 1]
+        current = window[-1]
+        overlapping = [
+            candidate
+            for candidate in window[:-1]
+            if len(candidate[2] & current[2]) >= 2
+        ]
+        if overlapping:
+            support = (overlapping[-1], current)
+        elif len(window) >= 3:
+            correction_support = tuple(window[-3:])
+            correction_event_ids = {id(row[0]) for row in correction_support}
+            bridge = next(
+                (
+                    context
+                    for context in reversed(contexts)
+                    if id(context[0]) not in correction_event_ids
+                    and sum(
+                        bool(context[2] & candidate[2])
+                        for candidate in correction_support
+                    )
+                    >= 2
+                ),
+                None,
+            )
+            if bridge is not None:
+                support = (bridge, *correction_support)
+    if not support:
+        return None
+    fact = canonical_repeated_preference_text(support[-1][1])
+    if not fact:
+        return None
+    return InducedNaturalUserFact(
+        text=fact,
+        support_events=tuple(row[0] for row in support),
     )
 
 
@@ -2969,6 +3144,14 @@ def select_summary_evidence(
     filler_limit = SUMMARY_EVIDENCE_LIMIT - int(bool(final_evidence))
     for line in (pinned_evidence or [])[-filler_limit:]:
         durable = durable_memory_text(line)
+        if (
+            not durable
+            and line
+            and not is_noisy_text(line)
+            and not is_raw_prompt_text(line)
+            and not is_sensitive_explicit_memory_text(line)
+        ):
+            durable = clip(normalize_memory_text(line))
         if durable:
             evidence.append(durable)
 
@@ -3217,11 +3400,9 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         for text in event_texts(events, {"assistant", "record"})
         if not is_assistant_goal_format_preference_claim(text)
     ]
-    induced_user_facts = [
-        fact
-        for fact in [induce_copyable_goal_preference(events)]
-        if fact is not None
-    ]
+    specialized_user_fact = induce_copyable_goal_preference(events)
+    induced_user_fact = specialized_user_fact or induce_repeated_user_preference(events)
+    induced_user_facts = [induced_user_fact] if induced_user_fact is not None else []
     induced_support_event_ids = {
         id(event)
         for fact in induced_user_facts
@@ -3945,6 +4126,14 @@ def raw_ref_for_source_fields(source_record: str, source_map_path: str, anchor: 
 
 
 def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, str]]:
+    source_bound_corrections = {
+        source_text_key(str(item.get("text") or ""))
+        for item in row.get("reusable_fact_sources") or []
+        if isinstance(item, dict)
+        and item.get("source") == "natural_user_correction"
+        and item.get("evidence_quote_ids")
+        and item.get("source_anchor_ids")
+    }
     fields = (
         ("reusable_facts", "Reusable fact from archived session."),
         ("decisions", "Decision captured in archived session."),
@@ -3956,12 +4145,18 @@ def iter_memory_candidate_texts(row: dict[str, object]) -> Iterable[tuple[str, s
             continue
         for item in value:
             text = normalize_memory_text(strip_reusable_fact_prefix(str(item)))
+            source_bound_correction = source_text_key(text) in source_bound_corrections
             if (
                 text
                 and not is_noisy_text(text)
                 and not is_raw_prompt_text(text)
-                and not is_process_update(text)
-                and not is_low_signal_memory_text(text)
+                and (
+                    source_bound_correction
+                    or (
+                        not is_process_update(text)
+                        and not is_low_signal_memory_text(text)
+                    )
+                )
             ):
                 yield text, rationale
 

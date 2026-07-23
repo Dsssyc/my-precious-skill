@@ -145,6 +145,10 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/using_my_precious_runtime_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/real_use_recall_utility_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/copyable_goal_preference_recall_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "benchmarks/general_durable_preference_recall_gate.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("benchmarks/query_support_recall_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/progressive_source_drilldown_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/authorized_original_source_gate.py", module.PY_COMPILE_TARGETS)
