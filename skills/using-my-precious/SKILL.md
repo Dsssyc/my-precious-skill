@@ -42,9 +42,12 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
 Before searching, divide the requested claims into bounded facets:
 
-- Global user preferences are historical facets. Query them in the user's
-  original language, retaining stable technical identifiers, and do not pass
-  project context.
+- Artifact delivery format is a global-preference facet: for example, how the
+  completed artifact is fenced or handed off. Query it separately from what
+  the artifact should contain.
+- Artifact content structure is a separate global-preference facet: for
+  example, required sections, ordering, and convergence constraints. Do not
+  merge it with delivery format merely because both concern one artifact.
 - Project history is a historical facet. Query it in the user's original
   language, retaining stable technical identifiers, and pass project context.
 - Live repository state is not a memory facet. Inspect the repository for the
@@ -54,8 +57,11 @@ Before searching, divide the requested claims into bounded facets:
 Use at most two context-package queries for each historical facet. An
 unsupported broad package with `query.decomposition_recommended: true` is a
 bounded split signal, not answer support: split it into the applicable facets
-above and retry only within that limit. Do not add unlimited paraphrases or
-cross-language translations.
+above and retry only within that limit. A second preference query must contain
+only the stable subject plus preference intent, such as `<artifact subject>
+delivery preference` or `<artifact subject> content-structure preference`.
+Do not enumerate guessed answer attributes in that retry. Do not add unlimited
+paraphrases or cross-language translations.
 
 1. Before answering a historical fact, run the machine-readable context package
    first:
@@ -102,7 +108,15 @@ cross-language translations.
    Decide each historical facet independently: answer a supported facet and
    abstain on an unsupported facet without promoting one facet's evidence into
    another. `query.decomposition_recommended` never changes package or per-hit
-   answerability. Free-form output never determines answerability.
+   answerability. `candidate_match` explains normalized candidate retrieval only;
+   its score or coverage never authorizes an answer. For
+   `source_bound_subject_preference_support_v1`, require the package's
+   active/current, source-bound, layer/scope, drill-path, focused-intent,
+   subject-anchor, and polarity checks to have produced supported
+   `query_support`. Exact token coverage never bypasses those
+   source/provenance/scope/lifecycle/polarity/intent checks; exact and
+   normalized preference hits share the same support boundary. Free-form
+   output never determines answerability.
 
 4. If package-supported evidence needs human-readable exploration, use
    free-form search after the decision:

@@ -3383,6 +3383,122 @@ It is not vector-search quality. It is not ontology discovery.
 It is not unrestricted raw-transcript recall.
 It is not distributed scheduler uptime. It is not public leaderboard parity.
 
+## V2.56 Subject-Anchored Hybrid Preference Recall Closure
+
+Date: 2026-07-24
+
+V2.56 evaluates a bounded read-path candidate over already materialized,
+active/current, source-bound preference memories. It replaces V2.55's broad
+preference override with two explicitly separated stages:
+
+- `normalized_subject_candidate_v1` applies Unicode NFKC, casefolding,
+  Latin/CJK boundary normalization, coarse subject-segment coverage, and
+  bounded CJK bigram/trigram overlap for candidate retrieval and ranking;
+- `source_bound_subject_preference_support_v1` is the only preference-memory
+  authorization policy. It requires focused preference intent,
+  automatic/explicit provenance, global layer and scope, summary/evidence
+  drill paths, stable subject anchors, polarity, currentness, and either an
+  independent attribute-support unit or an open-ended subject lookup.
+
+The exact lexical path remains available for retrieval, and exact `matched_tokens`
+now contains exact matches only. Exact coverage does not
+bypass the preference support policy. Normalized overlap is emitted separately
+as aggregate-safe `candidate_match` metadata; candidate retrieval is not answerability:
+candidate score, normalized coverage, subject coverage, and
+exact lexical coverage alone cannot produce a supported preference package.
+
+The gate now uses pre-materialized source-bound read-path fixtures rather than
+calling the V2.55 no-go updater candidate. The final production updater copies
+retain V2.54 write-path behavior. The V2.55 calibration fingerprint remains
+`9cc208235c44c99a1ad9e13c04662d1907a23a268e249b15ee919b9b2286862b`;
+the V2.55 holdout fingerprint remains
+`2e0c4b9ab2515c368843d651217487595ab683f4068df7dc57c12ba742b16147`.
+Both remain historical `no_go` evidence and are included in the V2.56 report.
+
+The V2.56 calibration fingerprint is
+`d44005ef4f618e6344d3465112cab412d4e70291afe348e56b2b73d0c58725d5`.
+The regression holdout fingerprint is
+`cda9f4d448934636151d27e94fb1f8d3cc316532f7bf7759a01194cad1f20cb3`.
+Each contains 13 positive and 16 negative synthetic cases. They returned
+`calibration_passed` and `regression_passed`; neither status authorizes
+deployment.
+
+The public deployment holdout uses the separate `deployment-holdout` cohort,
+which was frozen before execution with fingerprint
+`63b837382d0b698daafdbb4f183358a5a62567b73a130f82278b65d305acecaf`.
+It contains 8 positive and 13 negative cases. Its first and only execution
+returned `status: failed` and `decision: no_go`.
+
+| Public candidate metric | Calibration | Regression | Deployment holdout |
+| --- | ---: | ---: | ---: |
+| `normalized_surface_variant_recall_at_5` | 1.0 | 1.0 | 0.5 |
+| `normalized_surface_variant_supported_recall` | 1.0 | 1.0 | 0.5 |
+| `open_ended_subject_preference_supported_recall` | 1.0 | 1.0 | 1.0 |
+| `unseen_paraphrase_recall_at_5` | 1.0 | 1.0 | 0.875 |
+| `unseen_paraphrase_supported_recall` | 0.9166666666666666 | 0.8333333333333334 | 0.75 |
+| `supported_decision_precision` | 1.0 | 1.0 | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `negation_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `inactive_preference_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `wrong_scope_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `current_turn_precedence_accuracy` | 1.0 | 1.0 | 1.0 |
+| `legacy_goal_preference_regression_rate` | 1.0 | 1.0 | 0.0 |
+| `legacy_goal_alias_ablation_supported_recall` | 0.75 | 0.75 | 0.0 |
+| `candidate_only_answer_count` | 0 | 0 | 0 |
+| `candidate_only_safety_eligible_rate` | 1.0 | 1.0 | 0.0 |
+| `candidate_only_subject_support_count` | 0 | 0 | 0 |
+| `bare_subject_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `free_form_answerability_use_count` | 0 | 0 | 0 |
+| `new_case_specific_runtime_literal_count` | 0 | 0 | 0 |
+| `deterministic_result_ordering_rate` | 1.0 | 1.0 | 1.0 |
+| `performance_runtime_ratio` | 1.333 | 1.314 | 1.319 |
+| `performance_peak_memory_ratio` | 1.054 | 1.040 | 1.027 |
+| `privacy_leak_count` | 0 | 0 | 0 |
+
+The deployment first-loss distribution contains one
+`retrieved_at_5` loss and one `query_support_accepted` loss among the eight
+positive cases. The two zero-valued legacy metrics also expose a gate
+construction defect: the deployment cohort does not contain the legacy
+ablation shape even though the shared threshold set requires those metrics.
+The candidate-only fixture likewise did not demonstrate the required
+safety-eligible near-miss in this cohort. These construction issues do not
+convert the result to a pass. The untouched normalized recall failure alone is
+sufficient for `no_go`, and the frozen cohort was not changed or rerun.
+
+The frozen private deployment manifest has fingerprint
+`f3f0cf92a3afb54c07add2e1f89c411378036e3721ffb7f4afcfc55505313753`
+and contains 11 positive and 15 negative cases. The private deployment holdout was not executed
+because the public deployment hard gate had already failed.
+No private query, memory text, memory ID, source path, raw ref, or context
+package was rendered.
+
+The clean packaged runtime gate covers normalized and exact source-bound
+preferences, a safety-eligible candidate-only hit, bare subject, wrong scope,
+current-turn override, inactive state, weak/no-hit support, and malformed
+packages. Supported preference cases map deterministically to
+`single_text_fence_no_outer_text`; all negative cases abstain.
+Runtime supported-decision, abstention, preference-delivery, and context-package
+parse accuracy are 1.0. Candidate-only safety-eligible count is 1, its subject
+support count is 0, bare-subject rejection count is 1, and
+`privacy_leak_count=0`. Free-form output is not used.
+
+The final decision: `no_go`. The V2.56 candidate was not installed or deployed.
+The existing private runtime remains `19/19 current`; its repository is clean
+and its local and remote main heads match. V2.54 remains the production
+write-path truth. `remaining_semantic_only_failure_count` is not claimed
+because the observed residue includes lexical retrieval and gate-construction
+failures, not only semantic paraphrases.
+
+The evaluation branch itself remains regression-clean: 863 unit tests passed,
+all three skill folders validated, the packaged V1 readiness scorecard passed
+6/6 required dimensions, template/runtime copies matched, and the canonical
+release-contract runner passed 48/48 checks. Those results protect the existing
+release baseline; they do not override the failed V2.56 deployment holdout.
+
+V2.56 is not embedding quality, not vector search, not LLM answer quality,
+not ontology discovery, and not public leaderboard parity. It is also not a
+ranking overhaul, automatic induction quality, or unrestricted semantic recall.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

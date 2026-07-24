@@ -10,6 +10,7 @@ UPDATE_SKILL = Path("skills/update-my-precious/SKILL.md")
 USING_SKILL = Path("skills/using-my-precious/SKILL.md")
 SETUP_SKILL = Path("skills/setup-my-precious/SKILL.md")
 TEMPLATE_AGENTS = Path("templates/agent-memory-repo/AGENTS.md")
+SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py")
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -1180,6 +1181,55 @@ class DocumentationContractTests(unittest.TestCase):
             "deployment_go",
         ):
             self.assert_contains(design_section, phrase)
+
+    def test_docs_record_v256_subject_anchored_hybrid_recall_contract(self):
+        section = self.evaluation_section(
+            "## V2.56 Subject-Anchored Hybrid Preference Recall Closure"
+        )
+        for phrase in (
+            "normalized_subject_candidate_v1",
+            "source_bound_subject_preference_support_v1",
+            "exact `matched_tokens`",
+            "candidate retrieval is not answerability",
+            "pre-materialized source-bound read-path fixtures",
+            "V2.55 calibration fingerprint",
+            "V2.55 holdout fingerprint",
+            "V2.54 write-path behavior",
+            "normalized_surface_variant_recall_at_5",
+            "open_ended_subject_preference_supported_recall",
+            "supported_decision_precision",
+            "candidate_only_answer_count",
+            "candidate_only_safety_eligible_rate",
+            "bare_subject_rejection_rate",
+            "deployment-holdout",
+            "public deployment holdout",
+            "final decision: `no_go`",
+            "private deployment holdout was not executed",
+            "not installed or deployed",
+            "single_text_fence_no_outer_text",
+            "not embedding quality",
+            "not vector search",
+            "not LLM answer quality",
+            "not ontology discovery",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        skill = USING_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "Artifact delivery format",
+            "Artifact content structure",
+            "only the stable subject plus preference intent",
+            "`candidate_match` explains normalized candidate retrieval only",
+            "`source_bound_subject_preference_support_v1`",
+            "Exact token coverage never bypasses",
+            "single `text` code fence",
+        ):
+            self.assert_contains(skill, phrase)
+
+        runtime = SEARCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn("scoped_global_preference_applicability", runtime)
 
     def test_docs_record_v252_live_source_batch_contract(self):
         section = self.evaluation_section("## V2.52 Stable Live-Source Batch Closure")

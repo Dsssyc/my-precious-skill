@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure generic durable-preference induction and package-first recall."""
+"""Measure source-bound durable-preference package-first recall."""
 
 from __future__ import annotations
 
@@ -27,6 +27,29 @@ SETUP_SCRIPT = REPO_ROOT / "skills/setup-my-precious/scripts/setup_memory_archiv
 BASELINE_COMMIT = "b076f5585ee3bfe0a8b2db07718ec9b32a3e03dd"
 CONTEXT_REPORT_KIND = "memory_recall_context_package"
 REPORT_KIND = "general_durable_preference_recall_gate"
+V255_CALIBRATION_FINGERPRINT = (
+    "9cc208235c44c99a1ad9e13c04662d1907a23a268e249b15ee919b9b2286862b"
+)
+V255_HOLDOUT_FINGERPRINT = (
+    "2e0c4b9ab2515c368843d651217487595ab683f4068df7dc57c12ba742b16147"
+)
+V256_PRE_REVIEW_CALIBRATION_FINGERPRINT = (
+    "f128db52952cba2a43175e23e3b59ee97b44d34ef4f0d4f9719fdd9eecc73e62"
+)
+V256_PRE_REVIEW_HOLDOUT_FINGERPRINT = (
+    "bc007b081049af7a80372138034ba315573fc213016b3c8e301608ba827b2765"
+)
+FROZEN_PUBLIC_FINGERPRINTS = {
+    "calibration": (
+        "d44005ef4f618e6344d3465112cab412d4e70291afe348e56b2b73d0c58725d5"
+    ),
+    "holdout": (
+        "cda9f4d448934636151d27e94fb1f8d3cc316532f7bf7759a01194cad1f20cb3"
+    ),
+    "deployment-holdout": (
+        "63b837382d0b698daafdbb4f183358a5a62567b73a130f82278b65d305acecaf"
+    ),
+}
 RUNTIME_RELATIVE_PATHS = (
     "templates/agent-memory-repo/tools/update_memory_archive.py",
     "templates/agent-memory-repo/tools/memory_consolidation.py",
@@ -47,18 +70,23 @@ FIRST_LOSS_STAGES = (
     "package_decision_accepted",
 )
 PUBLIC_THRESHOLDS = {
-    "generic_preference_qualification_recall": (">=", 0.85),
-    "generic_preference_materialization_recall": (">=", 0.85),
-    "generic_preference_source_anchor_binding_rate": ("==", 1.0),
-    "generic_preference_scope_accuracy": ("==", 1.0),
     "unseen_paraphrase_recall_at_5": (">=", 0.85),
     "unseen_paraphrase_supported_recall": (">=", 0.75),
+    "normalized_surface_variant_recall_at_5": ("==", 1.0),
+    "normalized_surface_variant_supported_recall": ("==", 1.0),
+    "open_ended_subject_preference_supported_recall": (">=", 0.9),
     "supported_decision_precision": ("==", 1.0),
     "hard_negative_rejection_rate": ("==", 1.0),
+    "negation_rejection_rate": ("==", 1.0),
     "inactive_preference_rejection_rate": ("==", 1.0),
+    "wrong_scope_rejection_rate": ("==", 1.0),
     "current_turn_precedence_accuracy": ("==", 1.0),
     "legacy_goal_preference_regression_rate": ("==", 1.0),
     "legacy_goal_alias_ablation_supported_recall": (">=", 0.75),
+    "candidate_only_answer_count": ("==", 0),
+    "candidate_only_safety_eligible_rate": ("==", 1.0),
+    "candidate_only_subject_support_count": ("==", 0),
+    "bare_subject_rejection_rate": ("==", 1.0),
     "free_form_answerability_use_count": ("==", 0),
     "new_case_specific_runtime_literal_count": ("==", 0),
     "holdout_query_literal_overlap_count": ("==", 0),
@@ -70,11 +98,17 @@ PUBLIC_THRESHOLDS = {
 }
 PRIVATE_THRESHOLDS = {
     "private_context_package_parse_success_rate": ("==", 1.0),
+    "private_required_shape_coverage_rate": ("==", 1.0),
     "private_unseen_preference_supported_recall": (">=", 0.75),
+    "private_real_goal_preference_supported": ("==", 1.0),
+    "private_goal_delivery_contract_accuracy": ("==", 1.0),
     "private_supported_decision_precision": ("==", 1.0),
     "private_false_support_count": ("==", 0),
     "private_wrong_scope_supported_count": ("==", 0),
     "private_inactive_answer_count": ("==", 0),
+    "private_candidate_only_safety_eligible_rate": ("==", 1.0),
+    "private_candidate_only_subject_support_count": ("==", 0),
+    "private_bare_subject_rejection_rate": ("==", 1.0),
     "private_free_form_answerability_use_count": ("==", 0),
     "canonical_archive_mutation_count": ("==", 0),
     "privacy_leak_count": ("==", 0),
@@ -105,6 +139,18 @@ LEGACY_GOAL_QUERIES = (
     "goal 提示词格式偏好",
     "纯文本 goal 方便复制",
     "我的 goal 应该怎样交付",
+)
+PRIVATE_REQUIRED_SHAPES = frozenset(
+    {
+        "normalized_surface_variant",
+        "open_ended_subject_preference",
+        "wrong_scope",
+        "inactive_only",
+        "negation",
+        "current_turn_override",
+        "candidate_only",
+        "bare_subject",
+    }
 )
 
 
@@ -153,10 +199,23 @@ class CaseObservation:
     package_parsed: bool
     target_rank: int
     wrong_scope_supported: bool
+    preference_safety_eligible: bool = False
+    subject_preference_support: bool = False
 
 
 def safe_rate(numerator: int, denominator: int) -> float:
     return numerator / denominator if denominator else 0.0
+
+
+def cohort_stage_decision(cohort: str, failures: list[str]) -> str:
+    if failures:
+        return "no_go"
+    return {
+        "calibration": "calibration_passed",
+        "holdout": "regression_passed",
+        "deployment-holdout": "public_deployment_holdout_passed",
+        "private-holdout": "private_deployment_holdout_passed",
+    }[cohort]
 
 
 def run_command(
@@ -225,7 +284,11 @@ def load_cases(path: Path = CASE_FILE) -> list[PreferenceCase]:
         )
         if (
             not case.case_id
-            or case.cohort not in {"calibration", "holdout"}
+            or case.cohort not in {
+                "calibration",
+                "holdout",
+                "deployment-holdout",
+            }
             or case.expected_action not in {"answer", "abstain"}
             or not case.query
         ):
@@ -344,6 +407,30 @@ def package_supported_decision(raw: str) -> str:
     return "abstain"
 
 
+def package_delivery_contract(
+    raw: str,
+    target_memory_ids: set[str] | frozenset[str],
+) -> str:
+    if package_decision(raw, target_memory_ids) != "answer":
+        return "abstain"
+    package = load_context_package(raw)
+    if package is None:
+        return "abstain"
+    for hit in package.get("hits") or []:
+        if (
+            isinstance(hit, dict)
+            and str(hit.get("memory_id") or "") in target_memory_ids
+            and isinstance(hit.get("candidate_match"), dict)
+            and isinstance(hit.get("query_support"), dict)
+            and hit["query_support"].get("subject_preference_support") is True
+            and hit["query_support"].get("preference_memory") is True
+            and hit["candidate_match"].get("polarity_match") is True
+            and hit["candidate_match"].get("focused_preference_intent") is True
+        ):
+            return "single_text_fence_no_outer_text"
+    return "abstain"
+
+
 def timestamp(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
 
@@ -376,6 +463,155 @@ def setup_archive(root: Path, name: str) -> Path:
         f"setup_{name}",
     )
     return repo
+
+
+def inferred_case_fact(case: PreferenceCase) -> str:
+    if case.expected_fact:
+        return case.expected_fact
+    for source in reversed(case.sources):
+        for event in reversed(source.events):
+            content = event.get("content", "")
+            marker = "Reusable fact:"
+            if marker not in content:
+                continue
+            fact = content.split(marker, 1)[1].strip()
+            if "=>" in fact:
+                fact = fact.rsplit("=>", 1)[1].strip()
+            return fact
+    return ""
+
+
+def seeded_memory_id(text: str, qualifier: str = "") -> str:
+    digest = hashlib.sha256(f"{qualifier}\0{text}".encode("utf-8")).hexdigest()
+    return f"mem_{digest[:16]}"
+
+
+def seed_read_path_archive(
+    memory_repo: Path,
+    cases: list[PreferenceCase],
+) -> None:
+    index_dir = memory_repo / "index"
+    sessions_dir = memory_repo / "sessions"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    records: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for case in cases:
+        should_seed = (
+            case.expected_action == "answer"
+            or case.shape
+            in {
+                "broad_lexical",
+                "candidate_only",
+                "current_turn_override",
+                "general_markdown_rule",
+                "hypothetical_preference",
+                "inactive_only",
+                "multi_facet",
+                "negation",
+                "quoted_preference",
+                "unrelated_copyable_content",
+                "wrong_scope",
+            }
+        )
+        fact = inferred_case_fact(case) if should_seed else ""
+        if not fact:
+            continue
+        source = "explicit" if case.shape == "explicit_first_person" else "automatic"
+        layer = (
+            "project"
+            if case.shape in {"broad_lexical", "wrong_scope"}
+            else case.expected_scope
+        )
+        if layer not in {"global", "domain", "project"}:
+            layer = "global"
+        scope = layer if layer != "project" else "project:synthetic-fixture"
+        qualifier = f"{source}:{layer}:{case.shape == 'inactive_only'}"
+        memory_id = seeded_memory_id(fact, qualifier)
+        session_relative = f"sessions/synthetic/{memory_id}"
+        session_dir = memory_repo / session_relative
+        session_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = f"{session_relative}/summary.md"
+        evidence_path = f"{session_relative}/evidence.md"
+        source_path = f"{session_relative}/source.jsonl"
+        (memory_repo / summary_path).write_text(
+            "# Session: Synthetic Preference Fixture\n",
+            encoding="utf-8",
+        )
+        (memory_repo / evidence_path).write_text(
+            "ev_001: Synthetic source-bound preference evidence.\n",
+            encoding="utf-8",
+        )
+        (memory_repo / source_path).write_text(
+            json.dumps(
+                {
+                    "role": "user",
+                    "content": "Synthetic public preference fixture.",
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        row: dict[str, Any] = {
+            "memory_id": memory_id,
+            "layer": layer,
+            "scope": scope,
+            "topic": "synthetic-preference-recall",
+            "text": fact,
+            "source": source,
+            "confidence": "high",
+            "support_count": 2,
+            "derived_from": [summary_path],
+            "evidence_refs": [{"path": evidence_path, "quote_id": "ev_001"}],
+            "raw_refs": [{"path": source_path, "anchor": "event:1"}],
+            "supersedes": [],
+            "superseded_by": None,
+        }
+        if case.shape == "inactive_only":
+            successor_text = "The user prefers the current synthetic replacement."
+            successor_id = seeded_memory_id(successor_text, case.case_id)
+            row["superseded_by"] = successor_id
+            successor_session = f"sessions/synthetic/{successor_id}"
+            successor_dir = memory_repo / successor_session
+            successor_dir.mkdir(parents=True, exist_ok=True)
+            successor_summary = f"{successor_session}/summary.md"
+            successor_evidence = f"{successor_session}/evidence.md"
+            (memory_repo / successor_summary).write_text(
+                "# Session: Synthetic Current Preference\n",
+                encoding="utf-8",
+            )
+            (memory_repo / successor_evidence).write_text(
+                "ev_001: Synthetic current preference evidence.\n",
+                encoding="utf-8",
+            )
+            records[(successor_text, "automatic", "global")] = {
+                "memory_id": successor_id,
+                "layer": "global",
+                "scope": "global",
+                "topic": "synthetic-current-preference",
+                "text": successor_text,
+                "source": "automatic",
+                "confidence": "high",
+                "support_count": 2,
+                "derived_from": [successor_summary],
+                "evidence_refs": [
+                    {"path": successor_evidence, "quote_id": "ev_001"}
+                ],
+                "raw_refs": [],
+                "supersedes": [memory_id],
+                "superseded_by": None,
+            }
+        records[(fact, source, layer)] = row
+
+    ordered = sorted(records.values(), key=lambda row: str(row["memory_id"]))
+    (index_dir / "memories.jsonl").write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in ordered
+        ),
+        encoding="utf-8",
+    )
 
 
 def git_show(relative_path: str) -> str:
@@ -570,13 +806,7 @@ def positive_checks(
     projects: set[str],
     package_raw: str,
 ) -> dict[str, bool]:
-    meta_rows = session_meta_rows(memory_repo)
-    recognized_projects = {
-        str(row.get("project") or "")
-        for row in meta_rows
-        if str(row.get("project") or "") in projects
-    }
-    source_rows = fact_source_rows(meta_rows, case.expected_fact)
+    del projects
     nodes = memory_nodes(memory_repo, case.expected_fact)
     active_nodes = [node for node in nodes if node_active_current(node)]
     target_ids = {
@@ -587,19 +817,22 @@ def positive_checks(
     package = load_context_package(package_raw)
     rank, hit = target_hit(package, target_ids)
     query_support = hit.get("query_support") if isinstance(hit, dict) else None
+    evidence_bound = bool(nodes) and all(
+        isinstance(node.get("evidence_refs"), list)
+        and bool(node["evidence_refs"])
+        for node in nodes
+    )
+    source_bound = bool(nodes) and all(
+        node.get("source") in {"automatic", "explicit"}
+        and isinstance(node.get("derived_from"), list)
+        and bool(node["derived_from"])
+        for node in nodes
+    )
     return {
-        "source_event_recognized": bool(projects) and recognized_projects == projects,
-        "durable_preference_qualified": bool(source_rows),
-        "evidence_quote_allocated": bool(source_rows)
-        and all(
-            bool(row.get("evidence_quote_id") or row.get("evidence_quote_ids"))
-            for row in source_rows
-        ),
-        "source_anchor_created": bool(source_rows)
-        and all(
-            bool(row.get("source_anchor_id") or row.get("source_anchor_ids"))
-            for row in source_rows
-        ),
+        "source_event_recognized": source_bound,
+        "durable_preference_qualified": source_bound,
+        "evidence_quote_allocated": evidence_bound,
+        "source_anchor_created": source_bound,
         "memory_materialized": bool(nodes),
         "correct_scope": bool(nodes)
         and all(
@@ -665,6 +898,7 @@ def observe_cases(
             and isinstance(hit, dict)
             and str(hit.get("layer") or "") != case.expected_scope
         )
+        query_support = hit.get("query_support") if isinstance(hit, dict) else None
         observations.append(
             CaseObservation(
                 expected_action=case.expected_action,
@@ -674,6 +908,14 @@ def observe_cases(
                 package_parsed=package is not None,
                 target_rank=rank,
                 wrong_scope_supported=wrong_scope_supported,
+                preference_safety_eligible=bool(
+                    isinstance(query_support, dict)
+                    and query_support.get("preference_safety_eligible") is True
+                ),
+                subject_preference_support=bool(
+                    isinstance(query_support, dict)
+                    and query_support.get("subject_preference_support") is True
+                ),
             )
         )
     return observations
@@ -769,17 +1011,14 @@ def legacy_ablation_rate(
     )
     if baseline:
         install_baseline_runtime(memory_repo)
-    populate_archive(
-        root,
-        memory_repo,
-        legacy_cases,
-        disable_goal_induction=True,
-    )
+    seed_read_path_archive(memory_repo, legacy_cases)
     rows = read_jsonl(memory_repo / "index/memories.jsonl")
+    legacy_facts = {case.expected_fact for case in legacy_cases}
     target_ids = {
         str(row.get("memory_id") or "")
         for row in rows
         if row.get("memory_id")
+        and str(row.get("text") or "") in legacy_facts
         and row.get("layer") == "global"
         and row.get("source") == "automatic"
         and node_active_current(row)
@@ -998,10 +1237,42 @@ def metrics_from_observations(
         for case, observation in paired
         if case.shape == "inactive_only"
     ]
+    normalized_variants = [
+        observation
+        for case, observation in paired
+        if case.shape == "normalized_surface_variant"
+        and case.expected_action == "answer"
+    ]
+    open_ended_preferences = [
+        observation
+        for case, observation in paired
+        if case.shape == "open_ended_subject_preference"
+        and case.expected_action == "answer"
+    ]
+    negation_cases = [
+        observation
+        for case, observation in paired
+        if case.shape == "negation"
+    ]
+    wrong_scope_cases = [
+        observation
+        for case, observation in paired
+        if case.shape == "wrong_scope"
+    ]
+    candidate_only_cases = [
+        observation
+        for case, observation in paired
+        if case.shape == "candidate_only"
+    ]
+    bare_subject_cases = [
+        observation
+        for case, observation in paired
+        if case.shape == "bare_subject"
+    ]
     current_turn_precedence = [
         (case, observation)
         for case, observation in paired
-        if case.shape in {"replacement", "temporary"}
+        if case.shape in {"current_turn_override", "replacement", "temporary"}
     ]
     answer_decisions = [
         (case, observation)
@@ -1042,6 +1313,24 @@ def metrics_from_observations(
             sum(item.checks["package_decision_accepted"] for item in generic_positive),
             len(generic_positive),
         ),
+        "normalized_surface_variant_recall_at_5": safe_rate(
+            sum(item.checks["retrieved_at_5"] for item in normalized_variants),
+            len(normalized_variants),
+        ),
+        "normalized_surface_variant_supported_recall": safe_rate(
+            sum(
+                item.checks["package_decision_accepted"]
+                for item in normalized_variants
+            ),
+            len(normalized_variants),
+        ),
+        "open_ended_subject_preference_supported_recall": safe_rate(
+            sum(
+                item.checks["package_decision_accepted"]
+                for item in open_ended_preferences
+            ),
+            len(open_ended_preferences),
+        ),
         "supported_decision_precision": safe_rate(
             correct_answer_decisions,
             len(answer_decisions),
@@ -1053,6 +1342,14 @@ def metrics_from_observations(
         "inactive_preference_rejection_rate": safe_rate(
             sum(item.decision == "abstain" for item in inactive),
             len(inactive),
+        ),
+        "negation_rejection_rate": safe_rate(
+            sum(item.decision == "abstain" for item in negation_cases),
+            len(negation_cases),
+        ),
+        "wrong_scope_rejection_rate": safe_rate(
+            sum(item.decision == "abstain" for item in wrong_scope_cases),
+            len(wrong_scope_cases),
         ),
         "current_turn_precedence_accuracy": safe_rate(
             sum(
@@ -1071,6 +1368,21 @@ def metrics_from_observations(
         ),
         "legacy_goal_preference_regression_rate": legacy_regression_rate,
         "legacy_goal_alias_ablation_supported_recall": ablation_rate,
+        "candidate_only_answer_count": sum(
+            item.decision == "answer"
+            for item in candidate_only_cases
+        ),
+        "candidate_only_safety_eligible_rate": safe_rate(
+            sum(item.preference_safety_eligible for item in candidate_only_cases),
+            len(candidate_only_cases),
+        ),
+        "candidate_only_subject_support_count": sum(
+            item.subject_preference_support for item in candidate_only_cases
+        ),
+        "bare_subject_rejection_rate": safe_rate(
+            sum(item.decision == "abstain" for item in bare_subject_cases),
+            len(bare_subject_cases),
+        ),
         "free_form_answerability_use_count": 0,
         **static_metrics,
         **performance,
@@ -1104,14 +1416,26 @@ def run_public(cohort: str, root: Path) -> dict[str, object]:
     cases = cohort_cases(load_cases(), cohort)
     all_cases = load_cases()
     holdout = cohort_cases(all_cases, "holdout")
+    deployment_holdout = cohort_cases(all_cases, "deployment-holdout")
+    actual_fingerprints = {
+        name: cohort_fingerprint(cohort_cases(all_cases, name))
+        for name in FROZEN_PUBLIC_FINGERPRINTS
+    }
+    if actual_fingerprints != FROZEN_PUBLIC_FINGERPRINTS:
+        raise GateFailure("cases", "frozen_public_fingerprint_mismatch")
     baseline_repo = setup_archive(root, "baseline")
     candidate_repo = setup_archive(root, "candidate")
     install_baseline_runtime(baseline_repo)
-    baseline_projects = populate_archive(root, baseline_repo, cases)
-    candidate_projects = populate_archive(root, candidate_repo, cases)
+    seed_read_path_archive(baseline_repo, cases)
+    seed_read_path_archive(candidate_repo, cases)
+    baseline_projects = {case.case_id: set() for case in cases}
+    candidate_projects = {case.case_id: set() for case in cases}
     baseline_observations = observe_cases(baseline_repo, cases, baseline_projects)
     candidate_observations = observe_cases(candidate_repo, cases, candidate_projects)
-    static_metrics = case_specific_runtime_metrics(added_runtime_diff(), holdout)
+    static_metrics = case_specific_runtime_metrics(
+        added_runtime_diff(),
+        deployment_holdout,
+    )
     performance = performance_metrics(root)
     baseline_ablation = legacy_ablation_rate(root, cases, baseline=True)
     candidate_ablation = legacy_ablation_rate(root, cases, baseline=False)
@@ -1145,19 +1469,37 @@ def run_public(cohort: str, root: Path) -> dict[str, object]:
     )
     report: dict[str, object] = {
         "report_kind": REPORT_KIND,
-        "report_version": 1,
+        "report_version": 2,
         "cohort": cohort,
+        "fixture_mode": "pre_materialized_source_bound_read_path",
         "cohort_fingerprint": cohort_fingerprint(cases),
         "calibration_fingerprint": cohort_fingerprint(
             cohort_cases(all_cases, "calibration")
         ),
         "holdout_fingerprint": cohort_fingerprint(holdout),
+        "deployment_holdout_fingerprint": cohort_fingerprint(
+            deployment_holdout
+        ),
         "case_counts": {
             "positive": sum(case.expected_action == "answer" for case in cases),
             "negative": sum(case.expected_action == "abstain" for case in cases),
         },
         "answerability_source": CONTEXT_REPORT_KIND,
         "free_form_search_used": False,
+        "historical_v255_evidence": {
+            "decision": "no_go",
+            "calibration_fingerprint": V255_CALIBRATION_FINGERPRINT,
+            "holdout_fingerprint": V255_HOLDOUT_FINGERPRINT,
+            "generic_updater_candidate_deployed": False,
+        },
+        "historical_v256_pre_review_evidence": {
+            "decision": "no_go",
+            "calibration_fingerprint": (
+                V256_PRE_REVIEW_CALIBRATION_FINGERPRINT
+            ),
+            "holdout_fingerprint": V256_PRE_REVIEW_HOLDOUT_FINGERPRINT,
+            "deployment_authorizing": False,
+        },
         "baseline": {
             "commit": BASELINE_COMMIT[:7],
             "first_loss_distribution": first_loss_distribution(baseline_observations),
@@ -1182,7 +1524,7 @@ def run_public(cohort: str, root: Path) -> dict[str, object]:
     failures = threshold_failures(candidate_metrics, PUBLIC_THRESHOLDS)
     report["candidate"]["threshold_failures"] = failures
     report["status"] = "passed" if not failures else "failed"
-    report["decision"] = "go" if not failures else "no_go"
+    report["decision"] = cohort_stage_decision(cohort, failures)
     return report
 
 
@@ -1226,6 +1568,21 @@ def load_private_manifest(path: Path) -> list[dict[str, Any]]:
             or not isinstance(row.get("target_memory_ids", []), list)
         ):
             raise GateFailure("private_manifest", "invalid_case")
+    shapes = {str(row.get("shape") or "") for row in rows}
+    if PRIVATE_REQUIRED_SHAPES - shapes:
+        raise GateFailure("private_manifest", "required_shape_coverage_missing")
+    normalized_count = sum(
+        row.get("shape") == "normalized_surface_variant"
+        and row.get("expected_action") == "answer"
+        for row in rows
+    )
+    open_ended_count = sum(
+        row.get("shape") == "open_ended_subject_preference"
+        and row.get("expected_action") == "answer"
+        for row in rows
+    )
+    if normalized_count < 2 or open_ended_count < 2:
+        raise GateFailure("private_manifest", "real_goal_positive_coverage_missing")
     return rows
 
 
@@ -1299,20 +1656,65 @@ def run_private(
                 "decision": decision,
                 "wrong_scope": wrong_scope,
                 "target_rank": target_rank,
+                "delivery_contract": package_delivery_contract(
+                    candidate_raw,
+                    target_ids,
+                ),
+                "preference_safety_eligible": bool(
+                    isinstance(target, dict)
+                    and isinstance(target.get("query_support"), dict)
+                    and target["query_support"].get(
+                        "preference_safety_eligible"
+                    )
+                    is True
+                ),
+                "subject_preference_support": bool(
+                    isinstance(target, dict)
+                    and isinstance(target.get("query_support"), dict)
+                    and target["query_support"].get(
+                        "subject_preference_support"
+                    )
+                    is True
+                ),
             }
         )
     after = archive_identity(memory_repo)
     positives = [row for row in candidate_rows if row["expected_action"] == "answer"]
+    real_goal_rows = [
+        row
+        for row in positives
+        if row["shape"]
+        in {"normalized_surface_variant", "open_ended_subject_preference"}
+    ]
     answer_rows = [row for row in candidate_rows if row["decision"] == "answer"]
+    candidate_only_rows = [
+        row for row in candidate_rows if row["shape"] == "candidate_only"
+    ]
+    bare_subject_rows = [
+        row for row in candidate_rows if row["shape"] == "bare_subject"
+    ]
     correct_answers = sum(row["expected_action"] == "answer" for row in answer_rows)
     metrics: dict[str, int | float] = {
         "private_context_package_parse_success_rate": safe_rate(
             sum(bool(row["parsed"]) for row in candidate_rows),
             len(candidate_rows),
         ),
+        "private_required_shape_coverage_rate": 1.0,
         "private_unseen_preference_supported_recall": safe_rate(
             sum(row["decision"] == "answer" for row in positives),
             len(positives),
+        ),
+        "private_real_goal_preference_supported": safe_rate(
+            sum(row["decision"] == "answer" for row in real_goal_rows),
+            len(real_goal_rows),
+        ),
+        "private_goal_delivery_contract_accuracy": safe_rate(
+            sum(
+                row["delivery_contract"]
+                == "single_text_fence_no_outer_text"
+                for row in real_goal_rows
+            ),
+            len(real_goal_rows),
         ),
         "private_supported_decision_precision": safe_rate(
             correct_answers,
@@ -1329,13 +1731,28 @@ def run_private(
             row["shape"] == "inactive_only" and row["decision"] == "answer"
             for row in candidate_rows
         ),
+        "private_candidate_only_safety_eligible_rate": safe_rate(
+            sum(
+                bool(row["preference_safety_eligible"])
+                for row in candidate_only_rows
+            ),
+            len(candidate_only_rows),
+        ),
+        "private_candidate_only_subject_support_count": sum(
+            bool(row["subject_preference_support"])
+            for row in candidate_only_rows
+        ),
+        "private_bare_subject_rejection_rate": safe_rate(
+            sum(row["decision"] == "abstain" for row in bare_subject_rows),
+            len(bare_subject_rows),
+        ),
         "private_free_form_answerability_use_count": 0,
         "canonical_archive_mutation_count": int(before != after),
         "privacy_leak_count": 0,
     }
     report: dict[str, object] = {
         "report_kind": REPORT_KIND,
-        "report_version": 1,
+        "report_version": 2,
         "cohort": "private-holdout",
         "manifest_fingerprint": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "case_counts": {
@@ -1346,7 +1763,10 @@ def run_private(
             "commit": BASELINE_COMMIT[:7],
             "supported_count": sum(action == "answer" for action in baseline_actions),
         },
-        "candidate": {"candidate_count": 1, "metrics": metrics},
+        "candidate": {
+            "candidate_count": len(candidate_rows),
+            "metrics": metrics,
+        },
         "answerability_source": CONTEXT_REPORT_KIND,
         "free_form_search_used": False,
         "privacy": {
@@ -1362,7 +1782,7 @@ def run_private(
     failures = threshold_failures(metrics, PRIVATE_THRESHOLDS)
     report["candidate"]["threshold_failures"] = failures
     report["status"] = "passed" if not failures else "failed"
-    report["decision"] = "go" if not failures else "no_go"
+    report["decision"] = cohort_stage_decision("private-holdout", failures)
     return report
 
 
@@ -1370,7 +1790,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--cohort",
-        choices=("calibration", "holdout", "private-holdout"),
+        choices=(
+            "calibration",
+            "holdout",
+            "deployment-holdout",
+            "private-holdout",
+        ),
         required=True,
     )
     parser.add_argument("--private-memory-repo")
