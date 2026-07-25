@@ -922,6 +922,84 @@ class DocumentationContractTests(unittest.TestCase):
             re.search(r"durable[_\s-]*semantic[_\s-]*index", runtime_text, flags=re.IGNORECASE)
         )
 
+    def test_docs_record_v244_public_induction_first_loss_contract(self):
+        section = self.evaluation_section(
+            "## V2.44 Public Induction First-Loss Attribution And Bounded Repair"
+        )
+        for phrase in (
+            "public_induction_first_loss_gate.py",
+            "source_rejected",
+            "update_failed",
+            "archive_audit_failed",
+            "session_support_omitted",
+            "memory_induction_omitted_or_overcompressed",
+            "memory_present_not_top5",
+            "top1_not_query_supported",
+            "supported",
+            "positive_first_loss_attribution_coverage_rate",
+            "baseline_retrievable_positive_count",
+            "previously_unexplained_positive_count",
+            "previously_unexplained_first_loss_attribution_coverage_rate",
+            "previously_unexplained_first_loss_partition_invariant_violation_count",
+            "session_support_event_preservation_rate",
+            "pre_retrieval_induction_loss_count",
+            "memory_present_not_top5_rate",
+            "top1_not_query_supported_rate",
+            "abstention_accuracy",
+            "hard_negative_rejection_rate",
+            "false_promotion_count",
+            "privacy_leak_count",
+            "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+            "c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19",
+            "4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7",
+            "scorer-only",
+            "calibration",
+            "frozen holdout",
+            "Terminal public decision:",
+            "not LLM answer quality",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+            "does not install or deploy",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_docs_record_v245_session_support_preservation_contract(self):
+        section = self.evaluation_section(
+            "## V2.45 Session Support Preservation Attribution And One-Shot Repair"
+        )
+        for phrase in (
+            "session_support_preservation_gate.py",
+            "source_event_missing_after_extraction",
+            "durability_filter_rejected",
+            "no_summary_channel_candidate",
+            "evidence_budget_evicted",
+            "evidence_bound_to_wrong_ordinal",
+            "evidence_source_entry_missing",
+            "source_anchor_materialization_failed",
+            "preserved",
+            "support_event_attribution_coverage_rate",
+            "support_event_partition_invariant_violation_count",
+            "v244_locator_support_status_disagreement_count",
+            "latest_noninitial_user_declaration_v1",
+            "archive_audit_failed",
+            "safety_regression",
+            "candidate production change and candidate-only tests were removed",
+            "holdout was not run",
+            "Terminal public decision:",
+            "not LLM answer quality",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+            "does not prove private deployment readiness",
+            "does not prove scheduler reliability",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
