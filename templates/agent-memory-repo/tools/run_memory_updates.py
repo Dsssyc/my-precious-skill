@@ -416,6 +416,23 @@ def should_skip(path: Path) -> bool:
     return any(part in SKIP_DIRS for part in path.parts)
 
 
+def jsonl_physical_lines(text: str) -> list[str]:
+    """Split JSONL records only at LF or CRLF physical boundaries."""
+    if not text:
+        return []
+    trailing_lf = text.endswith("\n")
+    lines = text.split("\n")
+    if trailing_lf:
+        lines.pop()
+    last_index = len(lines) - 1
+    return [
+        line[:-1]
+        if line.endswith("\r") and (index < last_index or trailing_lf)
+        else line
+        for index, line in enumerate(lines)
+    ]
+
+
 def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterable[Path]:
     for pattern in patterns:
         for path in source_dir.rglob(pattern):
@@ -425,7 +442,7 @@ def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterabl
 
 def iter_json_values(path: Path, text: str) -> Iterable[object]:
     if path.suffix == ".jsonl":
-        for raw_line in text.splitlines():
+        for raw_line in jsonl_physical_lines(text):
             raw_line = raw_line.strip()
             if not raw_line:
                 continue
@@ -448,7 +465,7 @@ def iter_json_values(path: Path, text: str) -> Iterable[object]:
     except json.JSONDecodeError:
         pass
 
-    for raw_line in text.splitlines():
+    for raw_line in jsonl_physical_lines(text):
         raw_line = raw_line.strip()
         if not raw_line:
             continue

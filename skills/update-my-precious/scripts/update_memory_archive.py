@@ -1128,6 +1128,23 @@ def should_skip(path: Path) -> bool:
     return any(part in SKIP_DIRS for part in path.parts)
 
 
+def jsonl_physical_lines(text: str) -> list[str]:
+    """Split JSONL records only at LF or CRLF physical boundaries."""
+    if not text:
+        return []
+    trailing_lf = text.endswith("\n")
+    lines = text.split("\n")
+    if trailing_lf:
+        lines.pop()
+    last_index = len(lines) - 1
+    return [
+        line[:-1]
+        if line.endswith("\r") and (index < last_index or trailing_lf)
+        else line
+        for index, line in enumerate(lines)
+    ]
+
+
 def walk_json_values(value: object) -> Iterable[tuple[str, object]]:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -1140,7 +1157,7 @@ def walk_json_values(value: object) -> Iterable[tuple[str, object]]:
 
 def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
     if path.suffix == ".jsonl":
-        for raw_line in text.splitlines():
+        for raw_line in jsonl_physical_lines(text):
             raw_line = raw_line.strip()
             if not raw_line:
                 continue
@@ -1163,7 +1180,7 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
     except json.JSONDecodeError:
         pass
 
-    for raw_line in text.splitlines():
+    for raw_line in jsonl_physical_lines(text):
         raw_line = raw_line.strip()
         if not raw_line:
             continue
@@ -1468,7 +1485,7 @@ def redact_source_text(path: Path, text: str) -> tuple[str, dict[str, int]]:
         return redacted + ("\n" if trailing_newline else ""), counts
 
     redacted_lines: list[str] = []
-    for raw_line in text.splitlines():
+    for raw_line in jsonl_physical_lines(text):
         if not raw_line.strip():
             redacted_lines.append(raw_line)
             continue
@@ -2270,9 +2287,9 @@ def source_event_sha256(text: str) -> str:
 
 
 def jsonl_events_with_locators(text: str, hash_text: str | None = None) -> list[MemoryEvent]:
-    hash_lines = hash_text.splitlines() if hash_text is not None else []
+    hash_lines = jsonl_physical_lines(hash_text) if hash_text is not None else []
     events: list[MemoryEvent] = []
-    for line_number, raw_line in enumerate(text.splitlines(), 1):
+    for line_number, raw_line in enumerate(jsonl_physical_lines(text), 1):
         stripped = raw_line.strip()
         if not stripped:
             continue
@@ -2308,7 +2325,7 @@ def jsonl_events_with_locators(text: str, hash_text: str | None = None) -> list[
 
 
 def jsonl_contains_value(text: str) -> bool:
-    for raw_line in text.splitlines():
+    for raw_line in jsonl_physical_lines(text):
         stripped = raw_line.strip()
         if not stripped:
             continue
@@ -2342,8 +2359,8 @@ def clean_source_events(events: Iterable[MemoryEvent]) -> list[MemoryEvent]:
 
 
 def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[MemoryEvent], list[object]]:
-    source_lines = source_text.splitlines()
-    redacted_lines = redacted_text.splitlines()
+    source_lines = jsonl_physical_lines(source_text)
+    redacted_lines = jsonl_physical_lines(redacted_text)
     if len(source_lines) != len(redacted_lines):
         raise SourceInventoryError("source redaction changed JSONL boundaries")
 

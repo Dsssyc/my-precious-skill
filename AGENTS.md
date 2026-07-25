@@ -117,6 +117,7 @@ python3 benchmarks/scheduled_update_throughput_gate.py
 python3 benchmarks/scheduled_live_source_deferral_gate.py
 python3 benchmarks/selected_record_materialization_gate.py
 python3 benchmarks/structured_redaction_integrity_gate.py
+python3 benchmarks/jsonl_record_boundary_recovery_gate.py
 python3 benchmarks/durable_event_projection_gate.py
 python3 benchmarks/durable_semantic_index_gate.py
 python3 benchmarks/induction_consolidation_gate.py
@@ -196,6 +197,7 @@ python3 -m py_compile \
   benchmarks/private_live_source_inventory_ab_gate.py \
   benchmarks/selected_record_materialization_gate.py \
   benchmarks/structured_redaction_integrity_gate.py \
+  benchmarks/jsonl_record_boundary_recovery_gate.py \
   benchmarks/durable_event_projection_gate.py \
   benchmarks/durable_semantic_index_gate.py \
   benchmarks/induction_consolidation_gate.py \
