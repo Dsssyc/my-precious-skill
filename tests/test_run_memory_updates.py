@@ -197,6 +197,43 @@ class RunMemoryUpdatesTests(unittest.TestCase):
 
             self.assertEqual(str(raised.exception), "source_inventory_malformed")
 
+    def test_source_inventory_treats_literal_unicode_separators_as_json_string_content(self):
+        module = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            rows = [
+                {
+                    "timestamp": "2026-07-13T01:00:00Z",
+                    "cwd": str(project_path),
+                    "role": "user",
+                    "content": "Literal separators stay inside JSON: A\u0085B\u2028C\u2029D.",
+                },
+                {
+                    "timestamp": "2026-07-13T01:00:01Z",
+                    "cwd": str(project_path),
+                    "role": "assistant",
+                    "content": "Second physical record.",
+                },
+            ]
+            source = "\r\n".join(
+                json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                for row in rows
+            ) + "\r\n"
+            source_path = source_dir / "unicode-separators.jsonl"
+            source_path.write_text(source, encoding="utf-8")
+
+            parsed = list(module.iter_json_values(source_path, source))
+            inventory = module.build_source_inventory(source_dir, ("*.jsonl",))
+
+            self.assertEqual(parsed, rows)
+            self.assertEqual(len(inventory), 1)
+            self.assertEqual(inventory[0].source_updated_at, "2026-07-13T01:00:01Z")
+
     def test_runner_classifies_unsafe_source_inventory_before_child_launch(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -156,6 +156,51 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(counts, {"cookie": 1})
         self.assertNotIn("synthetic-unicode-separators", redacted)
 
+    def test_jsonl_physical_lines_preserve_literal_unicode_separators_and_crlf_records(self):
+        module = load_update_module()
+        rows = [
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": (
+                    "Cookie: session=synthetic-physical-lines\n"
+                    "Literal separators stay in this value: A\u0085B\u2028C\u2029D."
+                ),
+            },
+            {
+                "timestamp": "2026-07-23T01:00:01Z",
+                "role": "assistant",
+                "content": "Second physical record.",
+            },
+        ]
+        source = (
+            json.dumps(rows[0], ensure_ascii=False, separators=(",", ":"))
+            + "\r\n\r\n"
+            + json.dumps(rows[1], ensure_ascii=False, separators=(",", ":"))
+            + "\r\n"
+        )
+
+        parsed = list(module.iter_source_json_values(Path("record.jsonl"), source))
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        events, values = module.analyze_selected_jsonl(source, redacted)
+
+        self.assertEqual(parsed, rows)
+        self.assertEqual(values, rows)
+        self.assertEqual(len(redacted.split("\n")), 4)
+        redacted_rows = [json.loads(line) for line in redacted.split("\n") if line]
+        self.assertEqual(len(redacted_rows), 2)
+        self.assertEqual(
+            redacted_rows[0]["content"],
+            "Cookie: [REDACTED_COOKIE]\nLiteral separators stay in this value: A\u0085B\u2028C\u2029D.",
+        )
+        user_event = next(event for event in events if event.kind == "user")
+        assistant_event = next(event for event in events if event.kind == "assistant")
+        self.assertEqual((user_event.line_number, user_event.event_ordinal), (1, 1))
+        self.assertEqual((assistant_event.line_number, assistant_event.event_ordinal), (3, 1))
+        self.assertTrue(module.jsonl_contains_value(source))
+        self.assertEqual(counts, {"cookie": 1})
+        self.assertNotIn("synthetic-physical-lines", redacted)
+
     def test_redact_source_text_redacts_nested_structured_secret_values(self):
         module = load_update_module()
         github_token = "ghp_" + "A" * 24

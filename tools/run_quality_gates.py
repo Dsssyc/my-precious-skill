@@ -45,6 +45,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/private_live_source_inventory_ab_gate.py",
     "benchmarks/selected_record_materialization_gate.py",
     "benchmarks/structured_redaction_integrity_gate.py",
+    "benchmarks/jsonl_record_boundary_recovery_gate.py",
     "benchmarks/durable_event_projection_gate.py",
     "benchmarks/durable_semantic_index_gate.py",
     "benchmarks/induction_consolidation_gate.py",
@@ -195,6 +196,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "structured_redaction_integrity",
             ("python3", "benchmarks/structured_redaction_integrity_gate.py"),
+        ),
+        CheckSpec(
+            "jsonl_record_boundary_recovery",
+            ("python3", "benchmarks/jsonl_record_boundary_recovery_gate.py"),
         ),
         CheckSpec(
             "durable_event_projection",

@@ -3839,6 +3839,92 @@ V2.56 is not embedding quality, not vector search, not LLM answer quality,
 not ontology discovery, and not public leaderboard parity. It is also not a
 ranking overhaul, automatic induction quality, or unrestricted semantic recall.
 
+## V2.57 JSONL Physical-Line Recovery And Dev-Feature Convergence
+
+Date: 2026-07-25
+
+V2.57 closes a distinct record-boundary defect found after V2.54. Valid JSONL
+may contain literal U+0085, U+2028, or U+2029 characters inside a JSON string.
+Python `str.splitlines()` treats those characters as line boundaries, so the
+inventory runner and updater could split a valid physical record in the middle
+of a string and fail it as `source_inventory_invalid`.
+
+The JSONL contract is now explicit: only LF and CRLF delimit physical records.
+Literal U+0085, U+2028, and U+2029 remain JSON string content. The focused
+change covers inventory parsing, updater parsing, structured redaction,
+selected-record analysis, value detection, and source-event locators. Ordinary
+text and command-output uses of `str.splitlines()` are unchanged. Missing,
+truncated, and otherwise malformed JSONL still fails closed.
+
+V2.57 is based on the V2.54 production truth. V2.56 remains `no_go`; its
+read-path candidate is retained as evaluation history and is neither installed
+nor treated as production authorization.
+
+The bounded public-data-free gate is:
+
+```bash
+python3 benchmarks/jsonl_record_boundary_recovery_gate.py
+```
+
+It covers LF, CRLF, multi-record input, blank records, all three literal
+Unicode separators, an isolated inventory worker, selected-record
+materialization, truly malformed JSONL, and stale `phase=updating` transaction
+replay.
+
+| Synthetic metric | Result |
+| --- | ---: |
+| `unicode_separator_inventory_acceptance_rate` | 1.0 |
+| `unicode_separator_materialization_rate` | 1.0 |
+| `physical_record_count_accuracy` | 1.0 |
+| `crlf_compatibility_rate` | 1.0 |
+| `malformed_jsonl_fail_closed_rate` | 1.0 |
+| `stale_replay_recovery_rate` | 1.0 |
+| `valid_case_source_inventory_invalid_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The three production-safe skills were installed through a rollback-backed
+copy, after which all three source and installed skill trees matched. The new
+installed setup skill reported exactly two stale deployment tools in both its
+read-only check and repair dry-run. The transactional refresh changed only the
+runner and updater, and the reviewed tool-only deployment was committed and
+published. Installed-to-private deployment parity then returned `19/19
+current`: missing, stale, unsafe, and extra tool counts were zero, source and
+target bundle fingerprints matched, and `privacy_leak_count=0`.
+
+After clean canonical, remote-head, parity, and single-writer preflights,
+exactly one controlled transaction was invoked. Its terminal aggregate was:
+
+| Controlled transaction metric | Result |
+| --- | ---: |
+| `status` | `published` |
+| `reason` | `published` |
+| `failure_stage` | `none` |
+| `recovery_action` | `stale_staging_replayed` |
+| `update_inventory_worker_count` | 1 |
+| `update_project_processed_count` | 76 |
+| `update_source_stream_processed_count` | 0 |
+| `update_child_failure_count` | 0 |
+| `source_record_deferred_count` | 3 |
+| `source_target_deferred_count` | 2 |
+| `canonical_mutation_count` | 1 |
+| `remote_publish_count` | 1 |
+| `recovery_count` | 1 |
+| `repair_attempt_count` | 1 |
+| `source_batch_complete` | false |
+| `privacy_leak_count` | 0 |
+
+The transaction crossed source inventory and published stable source siblings;
+the three deferred records across two targets explain
+`source_batch_complete=false` and remain eligible for a later scheduled run.
+No retry or fallback was used. Postflight found no surviving writer, the
+canonical worktree was clean, canonical HEAD matched the freshly fetched
+remote receipt, persistent transaction state had been cleared by the adapter,
+and runtime parity remained `19/19 current`.
+
+V2.57 proves the bounded JSONL physical-line contract and recovery path. It is
+not overall semantic recall closure, ranking quality, vector search, ontology
+discovery, public leaderboard parity, or LLM answer quality.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

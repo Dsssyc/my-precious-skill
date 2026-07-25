@@ -1448,6 +1448,34 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v257_jsonl_physical_line_recovery(self):
+        section = self.evaluation_section(
+            "## V2.57 JSONL Physical-Line Recovery And Dev-Feature Convergence"
+        )
+        for phrase in (
+            "benchmarks/jsonl_record_boundary_recovery_gate.py",
+            "str.splitlines()",
+            "LF and CRLF",
+            "U+0085",
+            "U+2028",
+            "U+2029",
+            "V2.54 production truth",
+            "V2.56 remains `no_go`",
+            "unicode_separator_inventory_acceptance_rate",
+            "unicode_separator_materialization_rate",
+            "physical_record_count_accuracy",
+            "crlf_compatibility_rate",
+            "malformed_jsonl_fail_closed_rate",
+            "stale_replay_recovery_rate",
+            "valid_case_source_inventory_invalid_count",
+            "privacy_leak_count",
+            "19/19",
+            "exactly one controlled transaction",
+            "not overall semantic recall closure",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (
             "explicit revision path",
