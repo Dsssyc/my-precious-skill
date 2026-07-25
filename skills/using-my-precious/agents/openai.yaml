@@ -1,4 +1,4 @@
 interface:
   display_name: "Using My Precious"
   short_description: "Search private agent session archives"
-  default_prompt: "Use $using-my-precious to request memory_recall_context_package via search_memory.py --depth evidence --context-json before answering; use answerability.status, answer only from supported active/current hits, and abstain when unsupported."
+  default_prompt: "Use $using-my-precious to request memory_recall_context_package via search_memory.py --depth evidence --context-json before answering; use answerability.status, answer only from supported active/current hits, and abstain when unsupported. Apply current-turn format instructions first; when a supported preference calls for a copyable goal, return only the complete artifact in one collision-free text fence."

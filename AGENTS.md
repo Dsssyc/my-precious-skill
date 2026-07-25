@@ -95,6 +95,8 @@ Run packaged lifecycle/readiness gates when readiness contract changes:
 ```bash
 python3 benchmarks/packaged_lifecycle_gate.py
 python3 benchmarks/using_my_precious_runtime_gate.py
+python3 benchmarks/real_use_recall_utility_gate.py
+python3 benchmarks/copyable_goal_preference_recall_gate.py
 python3 benchmarks/query_support_recall_gate.py
 python3 benchmarks/progressive_source_drilldown_gate.py
 python3 benchmarks/authorized_original_source_gate.py
@@ -110,8 +112,11 @@ python3 benchmarks/scheduled_publish_search_gate.py
 python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
 python3 benchmarks/scheduled_update_single_writer_gate.py
+python3 benchmarks/scheduled_reboot_replay_gate.py
 python3 benchmarks/scheduled_update_throughput_gate.py
+python3 benchmarks/scheduled_live_source_deferral_gate.py
 python3 benchmarks/selected_record_materialization_gate.py
+python3 benchmarks/structured_redaction_integrity_gate.py
 python3 benchmarks/durable_event_projection_gate.py
 python3 benchmarks/durable_semantic_index_gate.py
 python3 benchmarks/induction_consolidation_gate.py
@@ -129,6 +134,15 @@ python3 benchmarks/active_support_recall_closure_gate.py
 python3 benchmarks/reviewed_automatic_memory_publish_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+```
+
+V2.55 is an evaluation-only `no_go`. Its frozen holdout intentionally returns
+nonzero and is therefore not part of the passing canonical release gate. Run
+the dedicated calibration and holdout commands when reviewing that candidate:
+
+```bash
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
 ```
 
 Run the external LongMemEval source-to-induction measurement only with a
@@ -190,6 +204,9 @@ python3 -m py_compile \
   tools/run_quality_gates.py \
   benchmarks/packaged_lifecycle_gate.py \
   benchmarks/using_my_precious_runtime_gate.py \
+  benchmarks/real_use_recall_utility_gate.py \
+  benchmarks/copyable_goal_preference_recall_gate.py \
+  benchmarks/general_durable_preference_recall_gate.py \
   benchmarks/query_support_recall_gate.py \
   benchmarks/progressive_source_drilldown_gate.py \
   benchmarks/authorized_original_source_gate.py \
@@ -205,8 +222,12 @@ python3 -m py_compile \
   benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/live_automation_prompt_alignment_gate.py \
   benchmarks/scheduled_update_single_writer_gate.py \
+  benchmarks/scheduled_reboot_replay_gate.py \
   benchmarks/scheduled_update_throughput_gate.py \
+  benchmarks/scheduled_live_source_deferral_gate.py \
+  benchmarks/private_live_source_inventory_ab_gate.py \
   benchmarks/selected_record_materialization_gate.py \
+  benchmarks/structured_redaction_integrity_gate.py \
   benchmarks/durable_event_projection_gate.py \
   benchmarks/durable_semantic_index_gate.py \
   benchmarks/induction_consolidation_gate.py \
@@ -235,6 +256,7 @@ python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \
+  skills/update-my-precious/scripts/run_scheduled_memory_transaction.py \
   skills/using-my-precious/scripts/search_memory.py \
   skills/using-my-precious/scripts/resolve_memory_source.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \

@@ -175,6 +175,17 @@ class UsingMyPreciousRuntimeContractTests(unittest.TestCase):
         ):
             self.assert_contains(self.search_workflow, phrase)
 
+    def test_runtime_contract_applies_copyable_goal_preference_after_package_decision(self):
+        for phrase in (
+            "copyable goal artifact",
+            "single `text` code fence",
+            "no explanatory preamble or epilogue outside the fence",
+            "outer fence longer than every backtick run inside the goal",
+            "current-turn format instructions take precedence",
+            "archive abstention does not erase a current-turn instruction",
+        ):
+            self.assert_contains(self.search_workflow, phrase)
+
 
 if __name__ == "__main__":
     unittest.main()

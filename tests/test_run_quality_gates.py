@@ -72,6 +72,10 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("tools/validate_skills.py", commands[0])
         self.assertTrue(any("benchmarks/packaged_lifecycle_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/using_my_precious_runtime_gate.py" in command for command in commands))
+        self.assertTrue(any("benchmarks/real_use_recall_utility_gate.py" in command for command in commands))
+        self.assertTrue(
+            any("benchmarks/copyable_goal_preference_recall_gate.py" in command for command in commands)
+        )
         self.assertTrue(any("benchmarks/query_support_recall_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/progressive_source_drilldown_gate.py" in command for command in commands))
         self.assertTrue(any("benchmarks/authorized_original_source_gate.py" in command for command in commands))
@@ -90,10 +94,19 @@ class RunQualityGatesTests(unittest.TestCase):
             any("benchmarks/scheduled_update_single_writer_gate.py" in command for command in commands)
         )
         self.assertTrue(
+            any("benchmarks/scheduled_reboot_replay_gate.py" in command for command in commands)
+        )
+        self.assertTrue(
             any("benchmarks/scheduled_update_throughput_gate.py" in command for command in commands)
         )
         self.assertTrue(
+            any("benchmarks/scheduled_live_source_deferral_gate.py" in command for command in commands)
+        )
+        self.assertTrue(
             any("benchmarks/selected_record_materialization_gate.py" in command for command in commands)
+        )
+        self.assertTrue(
+            any("benchmarks/structured_redaction_integrity_gate.py" in command for command in commands)
         )
         self.assertTrue(
             any("benchmarks/durable_event_projection_gate.py" in command for command in commands)
@@ -142,6 +155,12 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(any(command.startswith("cmp -s ") for command in commands))
         self.assertTrue(any(command == "git diff --check" for command in commands))
         self.assertIn("benchmarks/using_my_precious_runtime_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/real_use_recall_utility_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/copyable_goal_preference_recall_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "benchmarks/general_durable_preference_recall_gate.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("benchmarks/query_support_recall_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/progressive_source_drilldown_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/authorized_original_source_gate.py", module.PY_COMPILE_TARGETS)
@@ -157,8 +176,16 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/scheduled_content_noise_repair_closure_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/live_automation_prompt_alignment_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/scheduled_update_single_writer_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/scheduled_reboot_replay_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "skills/update-my-precious/scripts/run_scheduled_memory_transaction.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("benchmarks/scheduled_update_throughput_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/scheduled_live_source_deferral_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/private_live_source_inventory_ab_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/selected_record_materialization_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/structured_redaction_integrity_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/durable_event_projection_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/durable_semantic_index_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/private_lifecycle_governance_shadow_gate.py", module.PY_COMPILE_TARGETS)

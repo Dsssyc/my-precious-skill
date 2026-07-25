@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,6 +72,22 @@ SOURCE_MAP_ANCHOR_ALIASES = {
 }
 
 
+@dataclass(frozen=True)
+class CandidateMatch:
+    is_candidate: bool = False
+    policy: str = "normalized_subject_candidate_v1"
+    subject_anchor_coverage: float = 0.0
+    normalized_unit_coverage: float = 0.0
+    subject_anchor_match_count: int = 0
+    query_subject_anchor_count: int = 0
+    independent_support_unit_count: int = 0
+    stable_subject_anchor: bool = False
+    focused_preference_intent: bool = False
+    open_ended_subject_preference: bool = False
+    polarity_match: bool = True
+    ranking_contribution: int = 0
+
+
 @dataclass
 class Hit:
     path: Path
@@ -87,6 +104,9 @@ class Hit:
     evidence_refs: tuple[str, ...] = ()
     raw_refs: tuple[str, ...] = ()
     matched_tokens: tuple[str, ...] = ()
+    provenance_source: str = ""
+    preference_memory: bool = False
+    candidate_match: CandidateMatch | None = None
 
 
 @dataclass(frozen=True)
@@ -197,10 +217,430 @@ QUERY_STOP_TOKENS = {
     "would",
     "why",
 }
+CJK_QUERY_FRAMING_PATTERN = re.compile(
+    r"(?:用户|我的|个人|长期|偏好|是什么|什么|怎么|怎样|如何|是否|应该|"
+    r"需要|默认|当前|请问|给我|一下)"
+)
+CJK_GENERIC_MATCH_UNITS = {
+    "个人",
+    "什么",
+    "偏好",
+    "如何",
+    "怎样",
+    "应该",
+    "当前",
+    "我的",
+    "是否",
+    "用户",
+    "请问",
+    "长期",
+    "默认",
+}
+PREFERENCE_MEMORY_PREFIX_PATTERN = re.compile(
+    r"(?i)^(?:the user (?:prefers|wants)|user (?:preference|prefers|wants)|"
+    r"i (?:prefer|require|want)|my preference|"
+    r"用户(?:偏好|希望|默认|要求)|我(?:偏好|希望|默认|要求))"
+)
+EXPLICIT_PREFERENCE_LOOKUP_PATTERN = re.compile(
+    r"(?i)\b(?:prefer|preference|preferences|requirement|requirements|habit)\b|"
+    r"(?:偏好|要求|习惯)"
+)
+THIRD_PARTY_REQUIREMENT_PATTERN = re.compile(
+    r"(?i)\b(?:guide|guideline|standard|spec|documentation|project|system)"
+    r"\b.{0,24}\b(?:requires?|prefers?)\b|"
+    r"(?:指南|规范|标准|文档|规则|项目|系统).{0,16}(?:要求|偏好)"
+)
+OPEN_SUBJECT_PREFERENCE_PATTERN = re.compile(
+    r"(?i)\bmy\b.{0,48}\bpreferences?\b|"
+    r"\bwhat\b.{0,48}\b(?:do i prefer|is my preference)\b|"
+    r"\bhow\b.{0,48}\bdo i prefer\b|"
+    r"\bhow should (?:you|the agent)\b.{0,48}\b(?:format|deliver|write|provide)\b|"
+    r"\bwhat\b.{0,48}\b(?:format|style)\b.{0,32}\bshould\b|"
+    r"(?:我的|我以前|用户).{0,32}(?:偏好|要求|习惯)|"
+    r"(?:我的|用户的).{0,32}(?:应该|如何|怎么|怎样).{0,24}"
+    r"(?:交付|呈现|组织|排序)|"
+    r"(?:偏好|要求|习惯).{0,24}(?:是什么|什么|如何|怎么)|"
+    r"(?:什么|哪种|如何|怎么|怎样).{0,16}(?:形式|格式|方式).{0,16}"
+    r"(?:给|交付|呈现)?"
+)
+FOCUSED_DELIVERY_REQUEST_PATTERN = re.compile(
+    r"(?i)\b(?:draft|write|create|provide|give|deliver|format)\b.{0,72}|"
+    r"(?:起草|编写|写|生成|给出|提供|交付).{0,48}(?:内容|文本|文档|计划|目标|goal)"
+)
+PREFERENCE_LOOKUP_QUESTION_PATTERN = re.compile(
+    r"(?i)\b(?:what|which|how|should)\b|[?？]|"
+    r"(?:是什么|什么|如何|怎么|怎样|应该|应当|该采用|时该)"
+)
+FOCUSED_ORDERING_QUERY_PATTERN = re.compile(
+    r"(?i)\b(?:which|what|how|should)\b.{0,64}\b(?:first|before|order|arrang|organiz)|"
+    r"\bwhat\b.{0,64}\bshould\b.{0,48}\b(?:display|include|show|use)\b|"
+    r"\bare\b.{0,64}\bcurrent\b|"
+    r"(?:按什么顺序|如何排序|怎么排序|谁在前|默认顺序|默认次序|顺序|次序)"
+)
+QUOTED_OR_HYPOTHETICAL_QUERY_PATTERN = re.compile(
+    r"(?i)\b(?:example prompt|quoted example|hypothetical|suppose|someday)\b|"
+    r"^\s*if\b|(?:示例提示词|示例内容|假如|假设|如果)"
+)
+PREFERENCE_WITHDRAWAL_PATTERN = re.compile(
+    r"(?i)\b(?:no longer|stop requiring|withdraw|cancel|do not|don't|"
+    r"never|must not|should not|avoid|not use)\b.{0,48}"
+    r"(?:prefer|preference|require|use|format|deliver|fence)|"
+    r"(?:不再|取消|撤销|停止|不要|别|不可|不能|无需|避免).{0,32}"
+    r"(?:偏好|要求|需要|使用|采用|格式|交付|围栏)"
+)
+CURRENT_TURN_OVERRIDE_PATTERN = re.compile(
+    r"(?i)\b(?:for this task|this task|current task|for the current task|"
+    r"in this turn|right now)\b.{0,64}"
+    r"(?:prefer|preference|require|use|uses|instead|format|deliver)|"
+    r"(?:这次|本次|这一轮|当前对话|这个任务|当前任务|本任务|这一个任务)"
+    r".{0,40}(?:偏好|要求|使用|采用|改为|不要|格式|交付)"
+)
+SUBJECT_LATIN_STOP_TOKENS = QUERY_STOP_TOKENS | GENERIC_SEARCH_TOKENS | {
+    "copy",
+    "copyable",
+    "continue",
+    "create",
+    "default",
+    "deliver",
+    "delivery",
+    "direct",
+    "directly",
+    "draft",
+    "easy",
+    "format",
+    "give",
+    "given",
+    "habit",
+    "i",
+    "prefer",
+    "preference",
+    "preferences",
+    "preferred",
+    "provide",
+    "provided",
+    "require",
+    "required",
+    "so",
+    "style",
+    "use",
+    "used",
+    "want",
+    "write",
+    "you",
+}
+SUBJECT_CJK_FRAMING_PATTERN = re.compile(
+    r"(?:用户偏好|我的偏好|我以前要求|默认偏好|可直接复制|直接可复制|"
+    r"按什么顺序|如何排序|怎么排序|默认顺序|默认次序|"
+    r"用户|我的|我以前|以前|长期|偏好|默认|要求|希望|习惯|"
+    r"是什么|什么|怎么|怎样|如何|是否|应该|应按|时该|采用|给我|方便|"
+    r"直接|复制|粘贴|纯文本|文本|完整|形式|格式|交付|起草|下一份|"
+    r"编写|生成|给出|提供|使用|内容|顺序|次序|成可|给)"
+)
+QUERY_FACET_PATTERNS = (
+    re.compile(
+        r"\b(?:(?:global|user|personal)\s+)?preferences?\b|\bprefer\b|"
+        r"(?:全局|用户|我的|个人)?(?:长期)?偏好|默认(?:要求|选择|使用)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:project\s+history|historical\s+(?:decision|context)|program\s+map|roadmap)\b|"
+        r"项目历史|历史(?:决策|上下文)|路线图|阶段(?:计划|历史)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:current\s+(?:head|tests?|reviewed(?:[ -]code)?|repository|repo|state|status)|"
+        r"live\s+(?:repository|repo|state|status))\b|"
+        r"(?:当前|最新)\s*(?:HEAD|测试|已审(?:代码|状态)|仓库|代码状态|状态)",
+        re.IGNORECASE,
+    ),
+)
 
 
 def tokenize(text: str) -> list[str]:
     return [token.lower() for token in re.findall(r"[\w.-]+", text) if token.strip()]
+
+
+def normalized_surface(text: str) -> str:
+    value = unicodedata.normalize("NFKC", text).casefold()
+    value = re.sub(
+        r"(?<=[a-z0-9])(?=[\u3400-\u9fff])|"
+        r"(?<=[\u3400-\u9fff])(?=[a-z0-9])",
+        " ",
+        value,
+    )
+    return re.sub(r"[^\w.\-\u3400-\u9fff]+", " ", value)
+
+
+def bounded_cjk_units(text: str) -> set[str]:
+    units: set[str] = set()
+    for run in re.findall(r"[\u3400-\u9fff]+", text):
+        for size in (2, 3):
+            units.update(
+                run[index : index + size]
+                for index in range(len(run) - size + 1)
+            )
+    return {
+        unit
+        for unit in units
+        if unit not in CJK_GENERIC_MATCH_UNITS
+    }
+
+
+def normalized_latin_units(
+    surface: str,
+    stop_tokens: set[str],
+) -> set[str]:
+    units: set[str] = set()
+    for raw_token in re.findall(
+        r"(?<![\w])([a-z0-9][a-z0-9_.-]*)(?![\w])",
+        surface,
+    ):
+        token = raw_token.strip(".-")
+        if token and token not in stop_tokens:
+            units.add(token)
+    return units
+
+
+def normalized_match_units(text: str) -> set[str]:
+    surface = normalized_surface(text)
+    latin_units = normalized_latin_units(surface, QUERY_STOP_TOKENS)
+    return latin_units | bounded_cjk_units(surface)
+
+
+def stable_subject_anchor_units(text: str) -> set[str]:
+    surface = SUBJECT_CJK_FRAMING_PATTERN.sub(" ", normalized_surface(text))
+    latin_units = normalized_latin_units(surface, SUBJECT_LATIN_STOP_TOKENS)
+    return latin_units | bounded_cjk_units(surface)
+
+
+def subject_anchor_segments(text: str) -> set[str]:
+    surface = SUBJECT_CJK_FRAMING_PATTERN.sub(" ", normalized_surface(text))
+    segments = normalized_latin_units(surface, SUBJECT_LATIN_STOP_TOKENS)
+    cjk_surface = re.sub(
+        r"[的对有在为将以把从与和或及来中里上下一本这那]+",
+        " ",
+        surface,
+    )
+    segments.update(
+        segment
+        for segment in re.findall(r"[\u3400-\u9fff]{2,}", cjk_surface)
+        if segment not in CJK_GENERIC_MATCH_UNITS
+    )
+    return segments
+
+
+def matched_subject_anchor_segments(
+    query_segments: set[str],
+    memory_segments: set[str],
+) -> set[str]:
+    matched: set[str] = set()
+    memory_cjk_units = {
+        segment: bounded_cjk_units(segment)
+        for segment in memory_segments
+        if re.fullmatch(r"[\u3400-\u9fff]+", segment)
+    }
+    for query_segment in query_segments:
+        if query_segment in memory_segments:
+            matched.add(query_segment)
+            continue
+        if not re.fullmatch(r"[\u3400-\u9fff]+", query_segment):
+            continue
+        query_units = bounded_cjk_units(query_segment)
+        if any(
+            query_units
+            and query_units & memory_units
+            for memory_units in memory_cjk_units.values()
+        ):
+            matched.add(query_segment)
+    return matched
+
+
+def preference_memory_subject_text(text: str) -> str:
+    compact = compact_whitespace(text)
+    english = re.match(
+        r"(?i)^(?:the user|user|i)\s+"
+        r"(?:prefers?|wants?|requires?)\s+(.+?)\s+"
+        r"(?:to|that|with|using|before|after)\b",
+        compact,
+    )
+    if english:
+        return english.group(1)
+    chinese = re.sub(
+        r"^(?:用户偏好|我的偏好|我偏好)\s*[：:]?\s*",
+        "",
+        compact,
+    )
+    for pattern in (
+        r"(?:以后)?(?:编写|写|整理|生成|制作|汇报|回答)\s*"
+        r"(.{2,48}?)(?:时|的时候)[，,]",
+        r"(?:默认)?(?:偏好|要求|希望)?在(.{2,32}?)(?:里|中)"
+        r"(?:先|再|默认|应该|应当)",
+        r"^(.{2,48}?)(?:格式)?偏好(?:是|为|[：:])",
+        r"^(.{2,48}?)(?:默认|通常)(?:以|将|采用|使用)",
+    ):
+        match = re.search(pattern, chinese)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def attribute_support_chunk_count(
+    query: str,
+    memory_attribute_units: set[str],
+) -> int:
+    count = 0
+    for chunk in re.findall(
+        r"[a-z0-9][a-z0-9_.-]*|[\u3400-\u9fff]+",
+        normalized_surface(query),
+    ):
+        chunk_units = normalized_match_units(chunk)
+        residual = {
+            unit
+            for unit in chunk_units
+            if unit not in SUBJECT_LATIN_STOP_TOKENS
+        }
+        if residual & memory_attribute_units:
+            count += 1
+    return count
+
+
+def normalized_subject_candidate_match(
+    query: str,
+    memory_text: str,
+) -> CandidateMatch:
+    query_units = normalized_match_units(query)
+    memory_units = normalized_match_units(memory_text)
+    memory_subject_text = preference_memory_subject_text(memory_text)
+    memory_subject_units = stable_subject_anchor_units(memory_subject_text)
+    memory_attribute_units = (
+        memory_units - memory_subject_units
+        if memory_subject_units
+        else set()
+    )
+    memory_subject_segments = (
+        subject_anchor_segments(memory_subject_text)
+        if memory_subject_units
+        else subject_anchor_segments(memory_text)
+    )
+    raw_query_subject_segments = subject_anchor_segments(query)
+    subject_like_query_segments = matched_subject_anchor_segments(
+        raw_query_subject_segments,
+        memory_subject_segments,
+    )
+    query_subject_segments = {
+        segment
+        for segment in raw_query_subject_segments
+        if (
+            segment in subject_like_query_segments
+            or not (
+                normalized_match_units(segment)
+                & memory_attribute_units
+            )
+        )
+    }
+    matched_subject_segments = matched_subject_anchor_segments(
+        query_subject_segments,
+        memory_subject_segments,
+    )
+    unit_overlap = query_units & memory_units
+    anchor_count = len(query_subject_segments)
+    anchor_match_count = len(matched_subject_segments)
+    subject_coverage = (
+        anchor_match_count / anchor_count
+        if anchor_count
+        else 0.0
+    )
+    normalized_coverage = (
+        len(unit_overlap) / len(query_units)
+        if query_units
+        else 0.0
+    )
+    attribute_support = attribute_support_chunk_count(
+        query,
+        memory_attribute_units,
+    )
+    independent_support = attribute_support
+    open_ended = bool(OPEN_SUBJECT_PREFERENCE_PATTERN.search(query))
+    delivery_request = bool(FOCUSED_DELIVERY_REQUEST_PATTERN.search(query))
+    explicit_preference_lookup = bool(
+        EXPLICIT_PREFERENCE_LOOKUP_PATTERN.search(query)
+        and not THIRD_PARTY_REQUIREMENT_PATTERN.search(query)
+    )
+    delivery_lookup = bool(
+        delivery_request
+        and PREFERENCE_LOOKUP_QUESTION_PATTERN.search(query)
+    )
+    open_ended = open_ended or delivery_lookup
+    polarity_match = not any(
+        pattern.search(query)
+        for pattern in (
+            QUOTED_OR_HYPOTHETICAL_QUERY_PATTERN,
+            PREFERENCE_WITHDRAWAL_PATTERN,
+            CURRENT_TURN_OVERRIDE_PATTERN,
+        )
+    )
+    compact_query = compact_whitespace(query)
+    focused_fragment = bool(
+        len(compact_query) <= 64
+        and attribute_support
+        and subject_coverage == 1.0
+        and not re.search(r"[?？]|\bshould\b|应该", compact_query, re.IGNORECASE)
+    )
+    focused_intent = bool(
+        open_ended
+        or explicit_preference_lookup
+        or delivery_lookup
+        or FOCUSED_ORDERING_QUERY_PATTERN.search(query)
+        or focused_fragment
+    )
+    stable_anchor = bool(
+        anchor_match_count
+        and (
+            anchor_count == 1
+            or subject_coverage >= 0.5
+        )
+    )
+    is_candidate = bool(stable_anchor and unit_overlap)
+    ranking_contribution = (
+        min(
+            180,
+            24
+            + anchor_match_count * 18
+            + independent_support * 4,
+        )
+        if is_candidate
+        else 0
+    )
+    return CandidateMatch(
+        is_candidate=is_candidate,
+        subject_anchor_coverage=round(subject_coverage, 6),
+        normalized_unit_coverage=round(normalized_coverage, 6),
+        subject_anchor_match_count=anchor_match_count,
+        query_subject_anchor_count=anchor_count,
+        independent_support_unit_count=independent_support,
+        stable_subject_anchor=stable_anchor,
+        focused_preference_intent=focused_intent,
+        open_ended_subject_preference=open_ended,
+        polarity_match=polarity_match,
+        ranking_contribution=ranking_contribution,
+    )
+
+
+def candidate_match_payload(candidate: CandidateMatch | None) -> dict[str, object]:
+    value = candidate or CandidateMatch()
+    return {
+        "policy": value.policy,
+        "subject_anchor_coverage": value.subject_anchor_coverage,
+        "normalized_unit_coverage": value.normalized_unit_coverage,
+        "subject_anchor_match_count": value.subject_anchor_match_count,
+        "query_subject_anchor_count": value.query_subject_anchor_count,
+        "independent_support_unit_count": value.independent_support_unit_count,
+        "stable_subject_anchor": value.stable_subject_anchor,
+        "focused_preference_intent": value.focused_preference_intent,
+        "open_ended_subject_preference": value.open_ended_subject_preference,
+        "polarity_match": value.polarity_match,
+        "ranking_contribution": value.ranking_contribution,
+    }
 
 
 def unique_tokens(text: str) -> list[str]:
@@ -215,7 +655,33 @@ def unique_tokens(text: str) -> list[str]:
 
 def unique_query_tokens(text: str) -> list[str]:
     tokens = unique_tokens(text)
-    return [token for token in tokens if token not in QUERY_STOP_TOKENS]
+    return [
+        token
+        for token in tokens
+        if token not in QUERY_STOP_TOKENS and not is_generic_cjk_query_token(token)
+    ]
+
+
+def cjk_substantive_units(text: str) -> set[str]:
+    units: set[str] = set()
+    for run in re.findall(r"[\u3400-\u9fff]+", text.casefold()):
+        reduced = CJK_QUERY_FRAMING_PATTERN.sub("", run)
+        if len(reduced) < 2:
+            continue
+        candidates = {reduced} if len(reduced) == 2 else {
+            reduced[index : index + 2]
+            for index in range(len(reduced) - 1)
+        }
+        units.update(
+            unit
+            for unit in candidates
+            if unit not in CJK_GENERIC_MATCH_UNITS
+        )
+    return units
+
+
+def is_generic_cjk_query_token(token: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff]", token)) and not cjk_substantive_units(token)
 
 
 def compact_whitespace(text: str) -> str:
@@ -308,7 +774,9 @@ def iter_jsonl(path: Path) -> Iterable[dict]:
 
 
 def token_occurrence_count(haystack: str, token: str) -> int:
-    if any(ord(char) > 127 for char in token) or any(char in token for char in "_.-"):
+    if any(ord(char) > 127 for char in token):
+        return haystack.count(token)
+    if any(char in token for char in "_.-"):
         return haystack.count(token)
     return len(re.findall(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", haystack))
 
@@ -564,6 +1032,15 @@ def meaningful_coverage_tokens(query_tokens: list[str]) -> list[str]:
     return tokens
 
 
+def query_facet_count(query: str) -> int:
+    return sum(1 for pattern in QUERY_FACET_PATTERNS if pattern.search(query))
+
+
+def query_decomposition_recommended(query: str, query_tokens: list[str]) -> bool:
+    meaningful_tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
+    return len(meaningful_tokens) > 5 or query_facet_count(query) >= 2
+
+
 def has_meaningful_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
     required_tokens = meaningful_coverage_tokens(query_tokens)
     return bool(required_tokens) and all(token in matched_tokens for token in required_tokens)
@@ -775,7 +1252,13 @@ def result_title_quality(text: str) -> int:
     return score
 
 
-def score_index_record(query_tokens: list[str], record: dict, context_terms: list[str] | None = None) -> tuple[int, list[str], list[str]]:
+def score_index_record(
+    query_tokens: list[str],
+    record: dict,
+    context_terms: list[str] | None = None,
+    *,
+    query: str = "",
+) -> tuple[int, list[str], list[str]]:
     field_weights = (
         ("text", 15),
         ("decision", 14),
@@ -874,11 +1357,26 @@ def score_index_record(query_tokens: list[str], record: dict, context_terms: lis
     if structured_matched_tokens and project_context_match(record, context_terms or []):
         score += 1200
         add_reason(reasons, "project-context")
+    candidate = (
+        normalized_subject_candidate_match(
+            query,
+            combined_record_text(record, ("text",)),
+        )
+        if query
+        else CandidateMatch()
+    )
+    if candidate.is_candidate:
+        score += candidate.ranking_contribution
+        add_reason(reasons, "normalized-subject-candidate")
     quality_reason = search_quality_noise_reason(record)
     if quality_reason:
         add_reason(reasons, quality_reason)
         return 0, matched_tokens, reasons
-    if matched_tokens and not should_keep_match(query_tokens, matched_tokens, context_terms):
+    if (
+        matched_tokens
+        and not should_keep_match(query_tokens, matched_tokens, context_terms)
+        and not candidate.is_candidate
+    ):
         return 0, matched_tokens, reasons
     return score, matched_tokens, reasons
 
@@ -1562,6 +2060,7 @@ def collect_memory_hits(
     context_terms: list[str] | None = None,
     scope: str = "all",
     preferred_scope: str = "",
+    query: str = "",
 ) -> list[Hit]:
     hits: list[Hit] = []
     index_path = repo / "index" / "memories.jsonl"
@@ -1593,7 +2092,12 @@ def collect_memory_hits(
             continue
         if not has_valid_memory_lifecycle(record):
             continue
-        score, matched, reasons = score_index_record(query_tokens, record, context_terms)
+        score, matched, reasons = score_index_record(
+            query_tokens,
+            record,
+            context_terms,
+            query=query,
+        )
         if not score:
             continue
         if "low-signal-only" in reasons and "project-context" not in reasons:
@@ -1608,6 +2112,7 @@ def collect_memory_hits(
         raw_text = compact_whitespace(str(record.get("text") or ""))
         text = safe_display_text(raw_text)
         title = text or display_title(record, query_tokens)
+        candidate_match = normalized_subject_candidate_match(query, raw_text)
         memory_id = safe_display_scalar(raw_memory_id, 120)
         source_kind = safe_display_scalar(record.get("source") or "", 60)
         confidence = safe_display_scalar(record.get("confidence") or "", 60)
@@ -1640,6 +2145,9 @@ def collect_memory_hits(
                 evidence_refs=support_refs.evidence_refs,
                 raw_refs=support_refs.raw_refs,
                 matched_tokens=tuple(matched),
+                provenance_source=source_kind,
+                preference_memory=bool(PREFERENCE_MEMORY_PREFIX_PATTERN.search(raw_text)),
+                candidate_match=candidate_match,
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
@@ -1653,6 +2161,7 @@ def inactive_memory_match_count(
     query_tokens: list[str],
     context_terms: list[str] | None = None,
     scope: str = "all",
+    query: str = "",
 ) -> int:
     index_path = repo / "index" / "memories.jsonl"
     if not is_safe_repo_file(repo, index_path):
@@ -1681,8 +2190,20 @@ def inactive_memory_match_count(
             continue
         if memory_id not in inactive_ids and has_valid_memory_lifecycle(record):
             continue
-        score, matched, _ = score_index_record(query_tokens, record, context_terms)
-        if score and should_keep_match(query_tokens, matched, context_terms):
+        score, matched, _ = score_index_record(
+            query_tokens,
+            record,
+            context_terms,
+            query=query,
+        )
+        candidate = normalized_subject_candidate_match(
+            query,
+            compact_whitespace(str(record.get("text") or "")),
+        )
+        if score and (
+            should_keep_match(query_tokens, matched, context_terms)
+            or candidate.is_candidate
+        ):
             count += 1
     return count
 
@@ -1835,6 +2356,18 @@ def merge_hits(repo: Path, hits: Iterable[Hit]) -> list[Hit]:
         current.evidence_refs = unique_ordered((*current.evidence_refs, *hit.evidence_refs))
         current.raw_refs = unique_ordered((*current.raw_refs, *hit.raw_refs))
         current.matched_tokens = unique_ordered((*current.matched_tokens, *hit.matched_tokens))
+        if hit.provenance_source and not current.provenance_source:
+            current.provenance_source = hit.provenance_source
+        current.preference_memory = current.preference_memory or hit.preference_memory
+        if (
+            hit.candidate_match is not None
+            and (
+                current.candidate_match is None
+                or hit.candidate_match.ranking_contribution
+                > current.candidate_match.ranking_contribution
+            )
+        ):
+            current.candidate_match = hit.candidate_match
         if current.source != hit.source:
             current.source = "mixed"
     return sorted(
@@ -2002,13 +2535,25 @@ def context_query_support_tokens(query_tokens: list[str]) -> list[str]:
     return strict_coverage_tokens(query_tokens)
 
 
-def context_query_support(query_tokens: list[str], matched_tokens: list[str]) -> dict[str, object]:
+def context_query_support(
+    query_tokens: list[str],
+    matched_tokens: list[str],
+    *,
+    subject_preference_supported: bool = False,
+    preference_memory: bool = False,
+    preference_safety_eligible: bool = False,
+) -> dict[str, object]:
     required_tokens = context_query_support_tokens(query_tokens)
     matched_required = [token for token in required_tokens if token in matched_tokens]
     missing_tokens = [token for token in required_tokens if token not in matched_tokens]
     strict_supported = has_strict_token_coverage(query_tokens, matched_tokens)
     meaningful_supported = has_meaningful_token_coverage(query_tokens, matched_tokens)
     context_supported = bool(required_tokens) and not missing_tokens
+    baseline_supported = strict_supported or meaningful_supported or context_supported
+    if preference_memory:
+        supported = preference_safety_eligible and subject_preference_supported
+    else:
+        supported = baseline_supported
     if required_tokens and not missing_tokens:
         coverage = "complete"
     elif matched_required:
@@ -2016,14 +2561,72 @@ def context_query_support(query_tokens: list[str], matched_tokens: list[str]) ->
     else:
         coverage = "none"
     return {
-        "status": "supported" if strict_supported or meaningful_supported or context_supported else "weak",
-        "policy": "strict_meaningful_or_important_query_token_coverage",
+        "status": (
+            "supported"
+            if supported
+            else "weak"
+        ),
+        "policy": (
+            "source_bound_subject_preference_support_v1"
+            if preference_memory
+            else "strict_meaningful_or_important_query_token_coverage"
+        ),
         "coverage": coverage,
         "matched_tokens": [token for token in matched_tokens if token in required_tokens],
         "missing_tokens": missing_tokens,
         "strict_token_coverage": strict_supported,
         "meaningful_token_coverage": meaningful_supported,
+        "subject_preference_support": subject_preference_supported,
+        "preference_memory": preference_memory,
+        "preference_safety_eligible": preference_safety_eligible,
     }
+
+
+def source_bound_preference_safety_eligible(
+    query: str,
+    hit: Hit,
+    *,
+    summary_drill_paths: list[str],
+    evidence_drill_paths: list[str],
+) -> bool:
+    candidate = hit.candidate_match or CandidateMatch()
+    return bool(
+        hit.source == "memory"
+        and hit.memory_id
+        and hit.preference_memory
+        and hit.provenance_source in {"automatic", "explicit"}
+        and hit.layer == "global"
+        and hit.scope == "global"
+        and summary_drill_paths
+        and evidence_drill_paths
+        and query_facet_count(query) < 2
+        and candidate.is_candidate
+        and candidate.stable_subject_anchor
+        and candidate.focused_preference_intent
+        and candidate.polarity_match
+    )
+
+
+def source_bound_subject_preference_supported(
+    query: str,
+    hit: Hit,
+    *,
+    summary_drill_paths: list[str],
+    evidence_drill_paths: list[str],
+) -> bool:
+    candidate = hit.candidate_match or CandidateMatch()
+    return bool(
+        source_bound_preference_safety_eligible(
+            query,
+            hit,
+            summary_drill_paths=summary_drill_paths,
+            evidence_drill_paths=evidence_drill_paths,
+        )
+        and (
+            candidate.independent_support_unit_count > 0
+            or candidate.open_ended_subject_preference
+        )
+    )
 
 
 def context_hit(
@@ -2032,13 +2635,32 @@ def context_hit(
     rank: int,
     depth: str,
     query_tokens: list[str],
+    query: str = "",
 ) -> dict[str, object]:
     drill_paths = tuple(path for path in hit.drill_paths if safe_display_path(path) != UNSAFE_DISPLAY_FIELD)
     summary_drill_paths = [path for path in drill_paths if is_summary_drill_path(path)]
     evidence_drill_paths = [path for path in drill_paths if is_evidence_drill_path(path)]
     active_current = hit.source == "memory" and bool(hit.memory_id)
     support_path_count = len(summary_drill_paths) + len(evidence_drill_paths)
-    query_support = context_query_support(query_tokens, list(hit.matched_tokens))
+    preference_safety_eligible = source_bound_preference_safety_eligible(
+        query,
+        hit,
+        summary_drill_paths=summary_drill_paths,
+        evidence_drill_paths=evidence_drill_paths,
+    )
+    subject_preference_supported = source_bound_subject_preference_supported(
+        query,
+        hit,
+        summary_drill_paths=summary_drill_paths,
+        evidence_drill_paths=evidence_drill_paths,
+    )
+    query_support = context_query_support(
+        query_tokens,
+        list(hit.matched_tokens),
+        subject_preference_supported=subject_preference_supported,
+        preference_memory=hit.preference_memory,
+        preference_safety_eligible=preference_safety_eligible,
+    )
     query_supported = query_support["status"] == "supported"
     if active_current and support_path_count and query_supported:
         answerability_status = "supported"
@@ -2065,6 +2687,8 @@ def context_hit(
         "scope": hit.scope,
         "topic": hit.topic,
         "why": list(hit.why),
+        "provenance_source": hit.provenance_source,
+        "candidate_match": candidate_match_payload(hit.candidate_match),
         "query_support": query_support,
         "summary_drill_paths": summary_drill_paths,
         "evidence_drill_paths": evidence_drill_paths,
@@ -2130,9 +2754,10 @@ def build_context_package(
     inactive_match_count: int,
 ) -> dict[str, object]:
     context_hits = [
-        context_hit(repo, hit, rank, depth, query_tokens)
+        context_hit(repo, hit, rank, depth, query_tokens, query)
         for rank, hit in enumerate(context_package_hits(hits, limit), 1)
     ]
+    decomposition_recommended = query_decomposition_recommended(query, query_tokens)
     return {
         "report_kind": "memory_recall_context_package",
         "report_version": 1,
@@ -2149,6 +2774,10 @@ def build_context_package(
             "preferred_scope": preferred_scope,
             "legacy_sessions": legacy_sessions,
             "project_context_provided": bool(project_path),
+            "decomposition_recommended": decomposition_recommended,
+            "decomposition_reason": (
+                "broad_or_multi_intent_query" if decomposition_recommended else "focused_query"
+            ),
         },
         "answerability": context_answerability(context_hits, inactive_match_count),
         "hits": context_hits,
@@ -2240,7 +2869,14 @@ def main(argv: list[str] | None = None) -> int:
         selected_hits = session_hits
     else:
         preferred_scope = "" if args.scope != "all" else args.preferred_scope
-        memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope, preferred_scope)
+        memory_hits = collect_memory_hits(
+            repo,
+            query_tokens,
+            context_terms,
+            args.scope,
+            preferred_scope,
+            args.query,
+        )
         if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
             if args.depth in ("session", "evidence", "source"):
                 session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, args.depth)
@@ -2255,7 +2891,13 @@ def main(argv: list[str] | None = None) -> int:
     display_query = safe_display_text(args.query)
 
     if args.context_json:
-        inactive_count = inactive_memory_match_count(repo, query_tokens, context_terms, args.scope)
+        inactive_count = inactive_memory_match_count(
+            repo,
+            query_tokens,
+            context_terms,
+            args.scope,
+            args.query,
+        )
         print(
             json.dumps(
                 build_context_package(

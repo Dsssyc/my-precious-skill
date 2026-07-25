@@ -72,8 +72,36 @@ SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 INDUCTION_REVIEW_CANDIDATE_ID_PATTERN = re.compile(r"^indrev_[0-9a-f]{16}$")
 SOURCE_ANCHOR_VERSION = 1
+NATURAL_USER_FACT_LIMIT = 5
+SUMMARY_EVIDENCE_LIMIT = 6
+GOAL_CORRECTION_USER_WINDOW = 12
+GOAL_CORRECTION_SUPPORT_LIMIT = 4
+COPYABLE_GOAL_PREFERENCE_TEXT = (
+    "用户偏好：goal 提示词格式偏好是，默认将完整 Markdown goal 放入单独的 text 代码块，"
+    "以可直接复制的纯文本形式交付，方便复制；代码块外不添加解释性前言或结语，"
+    "内部存在代码围栏时使用更长且不冲突的外层围栏。"
+)
+COPYABLE_GOAL_RETRIEVAL_TERMS = (
+    "可直接复制",
+    "markdown",
+    "goal",
+    "提示词格式偏好",
+    "纯文本",
+    "方便复制",
+    "我的",
+    "应该怎样交付",
+)
 SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
 SOURCE_INVENTORY_REPORT_VERSION = 2
+UPDATE_TARGET_REPORT_KIND = "memory_update_target_report"
+UPDATE_TARGET_REPORT_VERSION = 1
+DEFERRED_SOURCE_STATE_REL_PATH = Path("index/deferred_sources.jsonl")
+DEFERABLE_SOURCE_INVENTORY_ERRORS = frozenset(
+    {
+        "source inventory record changed",
+        "source inventory record is unavailable",
+    }
+)
 MEMORY_REVIEW_APPROVAL_ACTIONS = {
     "approve_supersedes",
     "approve_contradicts",
@@ -124,7 +152,9 @@ INDUCTION_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
 )
 MIN_AMBIGUOUS_SCOPE_REVIEW_OVERLAP_RATIO = 0.45
 STALE_LOW_SUPPORT_REVIEW_AGE_DAYS = 180
-NATURAL_FACT_SOURCE_LABELS = frozenset({"natural_user", "natural_assistant", "natural_record"})
+NATURAL_FACT_SOURCE_LABELS = frozenset(
+    {"natural_user", "natural_user_correction", "natural_assistant", "natural_record"}
+)
 LOW_CONFIDENCE_NATURAL_REVIEW_PATTERN = re.compile(
     r"(?i)\b(?:review\s+candidate|reviewable|reviewer\s+confirmation|before\s+(?:automatic\s+)?promotion|"
     r"wait\s+for\s+repeated\s+support|until\s+supporting\s+evidence\s+repeats|provisional|unconfirmed)\b"
@@ -185,6 +215,112 @@ NATURAL_USER_MEMORY_PATTERNS = (
     (re.compile(r"(?i)^\s*i\s+prefer\s+(?P<text>.+)$"), "The user prefers {text}"),
     (re.compile(r"(?i)^\s*my\s+preference\s+is\s+(?:that\s+)?(?P<text>.+)$"), "The user prefers {text}"),
     (re.compile(r"(?i)^\s*i\s+want\s+(?P<text>.+)$"), "The user wants {text}"),
+)
+CHINESE_TEXT_PATTERN = re.compile(r"[\u3400-\u9fff]")
+CHINESE_DIRECT_USER_PREFERENCE_PATTERN = re.compile(
+    r"(?:^|[，,。；;])\s*(?:"
+    r"我(?:的)?(?:长期|默认)?偏好(?:是|为|[:：])?|"
+    r"我(?:一直|一贯|通常)?(?:更)?(?:偏好|倾向于)|"
+    r"我默认(?:要求|希望|选择|采用|使用|需要)"
+    r")"
+)
+CHINESE_FUTURE_PREFERENCE_PATTERN = re.compile(r"(?:从今以后|以后|今后|往后|将来|未来)")
+CHINESE_USER_SPECIFIC_PATTERN = re.compile(
+    r"(?:给我|替我|为我|对我(?:来说)?|我(?:希望|要求|需要|默认|偏好|倾向于)|我的)"
+)
+CHINESE_AGENT_DIRECTED_PATTERN = re.compile(
+    r"(?:你|请)(?:给(?:出)?|提供|编写|起草|生成|写|回复|回答|制定|设计)"
+)
+CHINESE_NORMATIVE_PREFERENCE_PATTERN = re.compile(
+    r"(?:必须|不得|不要|不能|应该|需要|优先|默认|始终|总是|一律|"
+    r"每(?:次|回|个)|都(?:要|应|必须|得)?|只(?:能|要|用|保留|输出))"
+)
+CHINESE_RECURRING_PREFERENCE_PATTERN = re.compile(
+    r"(?:每(?:次|回|个)|始终|总是|一律|默认|(?:时|时候).{0,80}(?:必须|不得|不要|应该|需要|优先))"
+)
+CHINESE_TEMPORARY_PREFERENCE_PATTERN = re.compile(
+    r"(?:这次|此次|本次|今天|今日|本轮|眼下|"
+    r"当前(?:这个|这次|这项)?(?:任务|对话|会话|工作|修改|编辑|回答|回复|运行|测试|审查)|"
+    r"这(?:一)?个(?:任务|对话|会话|工作|修改|编辑|回答|回复)|临时|暂时|一次性|"
+    r"仅限(?:这次|本次|当前)|只(?:在)?(?:这次|本次))"
+)
+CHINESE_LIVE_STATE_PREFERENCE_PATTERN = re.compile(
+    r"(?:当前|最新)\s*(?:HEAD|测试|已审(?:代码|状态)|分支|仓库|代码状态|状态)|"
+    r"(?:分支|测试|代码|审查).{0,24}(?:已经|已)(?:合并|通过|完成|审完|验证)"
+)
+CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN = re.compile(
+    r"^\s*(?:如果|假如|假设|要是|倘若|比如说?)|"
+    r"(?:可能|也许|或许|大概|尚未决定|还没决定|没有决定|未决定|不确定)|"
+    r"(?:是否|是不是|能否|可否|可不可以|会不会|要不要)|(?:吗|呢)?[？?]\s*$|(?:吗|呢)[。.!！]?\s*$"
+)
+CHINESE_QUOTED_PROMPT_PATTERN = re.compile(
+    r"(?:^|[，,。；;\s])(?:引用|转述|示例|例子)(?:的)?(?:提示词|指令|文本|原文|话术)|"
+    r"^\s*(?:引用|转述)(?:如下|内容如下|为)(?=\s*$|\s*[，,:：。；;])|"
+    r"^\s*(?:提示词|指令|原文)\s*[:：]|"
+    r"^\s*(?:示例|例子|举例|例如|比如说?)\s*[，,:：]"
+)
+CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
+    r"^\s*(?:(?i:ok(?:ay)?)|好(?:的)?|明白(?:了)?|收到|知道了|了解(?:了)?|可以|行|没问题|同意|认可)"
+    r"(?:[，,。.!！；;\s]*|"
+    r"[，,。.!！；;\s]+(?:谢谢|感谢|就这样|按(?:这个|你说的)(?:来)?|"
+    r"我(?:(?:会|将|已)?(?:记住|记下|遵循)|(?:会|将)?按(?:这个|你说的)(?:要求)?).{0,160}|"
+    r"已记住(?:了)?.{0,160}|"
+    r"(?:后续|后面|接下来|以后).{0,80}(?:每(?:个|次|回)|我(?:会|将)|按(?:这个|你说的)(?:要求)?).{0,80}))"
+    r"[。.!！]?\s*$"
+)
+GOAL_ARTIFACT_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9_])goal(?:spec)?(?![A-Za-z0-9_])|目标(?:提示词|文档|计划)"
+)
+GOAL_FORMAT_SIGNAL_PATTERN = re.compile(
+    r"(?i)markdown|\bmd\b|纯\s*markdown|排版|格式|复制|粘贴|代码块|围栏|反引号|纯文本|text\s*(?:block|fence|代码块)"
+)
+GOAL_SPECIFIC_FORMAT_SIGNAL_PATTERN = re.compile(
+    r"(?i)markdown|\bmd\b|纯\s*markdown|代码块|围栏|反引号|纯文本|text\s*(?:block|fence|代码块)"
+)
+GOAL_COPY_SIGNAL_PATTERN = re.compile(r"(?:无法|不能|方便|直接|一键)?\s*(?:复制|粘贴)|copy(?:able)?", re.IGNORECASE)
+GOAL_CORRECTION_SIGNAL_PATTERN = re.compile(
+    r"(?:你看看|注意|一定|必须|应该|不然|无法|不能|不对|不是|出错|搞错|乱|正确|正常|重新|又|仍然|还是|倒是|不要|别|直接)"
+)
+GOAL_RHETORICAL_CORRECTION_PATTERN = re.compile(
+    r"(?:你看看(?:你|这|刚才|上面).{0,48}(?:给|写|输出|交付).{0,48}(?:吗|呢|乱|错|不对|复制)|"
+    r"不是[，,].{0,80}(?:怎么|为什么).{0,32}(?:错|乱|复制)|"
+    r"这都.{0,24}(?:乱|错)|疯狂出错)"
+)
+GOAL_NON_TARGET_ARTIFACT_PATTERN = re.compile(
+    r"(?i)python|代码(?!块)|脚本|函数|页面|网页|表格|电子表格|幻灯片|演示文稿|文档|readme|"
+    r"\b(?:code|script|function|page|table|spreadsheet|slide|deck|document|readme)\b"
+)
+GOAL_QUOTED_SPEECH_PATTERN = re.compile(
+    r"(?:同事|别人|他人|他|她|他们|有人).{0,12}(?:说|提到|写道|建议|要求)\s*[:：]?[“\"「『]|"
+    r"[”\"」』].{0,24}(?:这是|这句是|这话是|这也是)?(?:同事|别人|他人|他|她|他们|有人)"
+    r".{0,12}(?:说|提到|写道|建议|要求)(?:的)?"
+)
+GOAL_MARKDOWN_BLOCKQUOTE_PATTERN = re.compile(r"(?m)^\s*>")
+MARKDOWN_FENCE_OPEN_PATTERN = re.compile(
+    r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)$"
+)
+GOAL_CONTEXT_SWITCH_CUE_PATTERN = re.compile(
+    r"(?i)接下来|现在|然后|另外|换个话题|先不说|改做|改为|转而|next|switch"
+)
+GOAL_NON_TARGET_REQUEST_VERB_PATTERN = re.compile(
+    r"(?i)给我|请写|写一段|写个|做一段|改做|生成|实现|修改|处理|build|write|create"
+)
+GOAL_ABANDONMENT_PATTERN = re.compile(
+    r"(?i)(?:先不做|先不说|不再做|别再做|别管|停止|放弃|暂时不做).{0,16}"
+    r"(?<![A-Za-z0-9_])goal(?![A-Za-z0-9_])|"
+    r"(?<![A-Za-z0-9_])goal(?![A-Za-z0-9_]).{0,16}(?:先不做|不做了|结束|算了|放弃)"
+)
+GOAL_ARTIFACT_FIRST_PATTERN = re.compile(
+    r"(?i)(?:把|将).{0,24}(?<![A-Za-z0-9_])goal(?![A-Za-z0-9_]).{0,24}(?:给我|交付|输出)|"
+    r"(?:不要|别).{0,20}(?:解释|前言|结语|说明|讨论)|artifact\s+first"
+)
+GOAL_TEXT_FENCE_PATTERN = re.compile(
+    r"(?i)text\s*(?:代码块|围栏|block|fence)|(?:单独|独立).{0,12}(?:代码块|围栏)|"
+    r"纯文本.{0,16}(?:复制|交付)|(?:代码块|围栏).{0,16}(?:复制|交付)"
+)
+GOAL_TEXT_FENCE_REJECTION_PATTERN = re.compile(
+    r"(?i)(?:不要|别|不再|无需|不用).{0,24}(?:text\s*)?(?:代码块|围栏|反引号)|"
+    r"直接.{0,12}(?:渲染|输出).{0,16}(?:markdown|goal)"
 )
 ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
     r"(?i)^\s*(?:understood|got it|noted|sure|okay|ok)[,;:.! ]+"
@@ -279,6 +415,41 @@ class SourceInventoryError(ValueError):
     pass
 
 
+def update_target_report(
+    status: str,
+    reason: str,
+    *,
+    records_selected_count: int = 0,
+    records_processed_count: int = 0,
+    records_deferred_count: int = 0,
+    records_skipped_count: int = 0,
+    entries_removed_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "report_kind": UPDATE_TARGET_REPORT_KIND,
+        "report_version": UPDATE_TARGET_REPORT_VERSION,
+        "status": status,
+        "reason": reason,
+        "source_batch_complete": status == "updated" and records_deferred_count == 0,
+        "metrics": {
+            "records_selected_count": records_selected_count,
+            "records_processed_count": records_processed_count,
+            "records_deferred_count": records_deferred_count,
+            "records_skipped_count": records_skipped_count,
+            "entries_removed_count": entries_removed_count,
+        },
+        "privacy": {
+            "aggregate_only": True,
+            "paths_rendered": False,
+            "source_content_rendered": False,
+        },
+    }
+
+
+def emit_update_target_report(payload: dict[str, object]) -> None:
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+
+
 @dataclass(frozen=True)
 class PreparedArchiveRecord:
     record: SourceRecord
@@ -294,6 +465,13 @@ class MemoryEvent:
     line_number: int = 0
     event_ordinal: int = 0
     event_sha256: str = ""
+
+
+@dataclass(frozen=True)
+class InducedNaturalUserFact:
+    text: str
+    support_events: tuple[MemoryEvent, ...]
+    retrieval_terms: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -315,6 +493,8 @@ class MemoryCandidate:
     deprecates_texts: tuple[str, ...] = ()
     evidence_quote_id: str = "ev_001"
     source_anchor_id: str = ""
+    evidence_quote_ids: tuple[str, ...] = ()
+    source_anchor_ids: tuple[str, ...] = ()
 
 
 NOISE_MARKERS = (
@@ -837,6 +1017,103 @@ def archived_project_state(
     return latest, archived_hashes, archived_source_hashes
 
 
+def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
+    path = memory_repo / DEFERRED_SOURCE_STATE_REL_PATH
+    if not path.exists():
+        return []
+    if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+        raise SourceInventoryError("deferred source state is unsafe")
+    rows: list[dict[str, str]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise SourceInventoryError("deferred source state is unavailable") from exc
+    for raw_line in lines:
+        if not raw_line.strip():
+            continue
+        try:
+            row = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("deferred source state is malformed") from exc
+        if not isinstance(row, dict) or set(row) != {
+            "archive_scope",
+            "source_partition",
+            "source_record",
+        }:
+            raise SourceInventoryError("deferred source state is malformed")
+        archive_scope = row.get("archive_scope")
+        source_partition = row.get("source_partition")
+        source_record = row.get("source_record")
+        if (
+            not isinstance(archive_scope, str)
+            or not archive_scope
+            or not isinstance(source_partition, str)
+            or not source_partition
+            or not isinstance(source_record, str)
+            or not Path(source_record).is_absolute()
+            or any(ord(char) < 32 or ord(char) == 127 for char in source_record)
+        ):
+            raise SourceInventoryError("deferred source state is malformed")
+        rows.append(
+            {
+                "archive_scope": archive_scope,
+                "source_partition": source_partition,
+                "source_record": str(Path(source_record).expanduser().resolve()),
+            }
+        )
+    return rows
+
+
+def deferred_source_paths(
+    memory_repo: Path,
+    archive_scope: str,
+    source_partition: str,
+) -> set[str]:
+    return {
+        row["source_record"]
+        for row in load_deferred_source_rows(memory_repo)
+        if row["archive_scope"] == archive_scope and row["source_partition"] == source_partition
+    }
+
+
+def update_deferred_source_paths(
+    memory_repo: Path,
+    archive_scope: str,
+    source_partition: str,
+    *,
+    add: Iterable[str] = (),
+    remove: Iterable[str] = (),
+) -> None:
+    rows = load_deferred_source_rows(memory_repo)
+    keyed = {
+        (row["archive_scope"], row["source_partition"], row["source_record"]): row
+        for row in rows
+    }
+    for value in remove:
+        source_record = str(Path(value).expanduser().resolve())
+        keyed.pop((archive_scope, source_partition, source_record), None)
+    for value in add:
+        source_record = str(Path(value).expanduser().resolve())
+        key = (archive_scope, source_partition, source_record)
+        keyed[key] = {
+            "archive_scope": archive_scope,
+            "source_partition": source_partition,
+            "source_record": source_record,
+        }
+    path = memory_repo / DEFERRED_SOURCE_STATE_REL_PATH
+    if not keyed:
+        if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+            raise SourceInventoryError("deferred source state is unsafe")
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = "".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+        for _, row in sorted(keyed.items())
+    )
+    write_safe_archive_text(memory_repo, path, text, "deferred source state")
+
+
 def latest_archived_timestamp(
     memory_repo: Path,
     project_path: Path,
@@ -869,15 +1146,15 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
                 continue
             try:
                 yield json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
+            except json.JSONDecodeError as exc:
+                raise SourceInventoryError("source record is malformed") from exc
         return
 
     if path.suffix == ".json":
         try:
             yield json.loads(text)
-        except json.JSONDecodeError:
-            return
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
         return
 
     try:
@@ -892,8 +1169,8 @@ def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
             continue
         try:
             yield json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
 
 
 def record_matches_project_values(
@@ -1014,11 +1291,13 @@ def discover_records(
     archived_hashes: set[str] | None = None,
     archived_source_hashes: dict[str, set[str]] | None = None,
     require_project_metadata: bool = False,
+    pending_source_paths: set[str] | None = None,
 ) -> list[SourceRecord]:
     records: list[SourceRecord] = []
     seen: set[Path] = set()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
+    pending_source_paths = pending_source_paths or set()
     for path in iter_candidate_files(source_dir, patterns):
         path = path.resolve()
         if path in seen:
@@ -1034,7 +1313,7 @@ def discover_records(
         source_key = str(path)
         prior_hashes_for_source = archived_source_hashes.get(source_key, set())
         source_changed_since_archive = bool(prior_hashes_for_source) and source_hash not in prior_hashes_for_source
-        if after is not None:
+        if after is not None and source_key not in pending_source_paths:
             if updated_at < after and not source_changed_since_archive:
                 continue
             if updated_at == after and source_hash in archived_hashes:
@@ -1051,6 +1330,7 @@ def discover_records_from_inventory(
     archived_hashes: set[str] | None = None,
     archived_source_hashes: dict[str, set[str]] | None = None,
     require_project_metadata: bool = False,
+    pending_source_paths: set[str] | None = None,
 ) -> list[SourceRecord]:
     try:
         payload = json.loads(payload_text)
@@ -1067,6 +1347,7 @@ def discover_records_from_inventory(
     source_root = source_dir.resolve()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
+    pending_source_paths = pending_source_paths or set()
     seen: set[Path] = set()
     records: list[SourceRecord] = []
     for row in payload["records"]:
@@ -1093,7 +1374,7 @@ def discover_records_from_inventory(
         ):
             raise SourceInventoryError("source inventory row is invalid")
         try:
-            path = (source_root / relative_path).resolve(strict=True)
+            path = (source_root / relative_path).resolve(strict=False)
             path.relative_to(source_root)
         except (OSError, ValueError) as exc:
             raise SourceInventoryError("source inventory path is unsafe") from exc
@@ -1103,7 +1384,7 @@ def discover_records_from_inventory(
         source_key = str(path)
         prior_hashes_for_source = archived_source_hashes.get(source_key, set())
         source_changed_since_archive = bool(prior_hashes_for_source) and expected_hash not in prior_hashes_for_source
-        if after is not None:
+        if after is not None and source_key not in pending_source_paths:
             if updated_at < after and not source_changed_since_archive:
                 continue
             if updated_at == after and expected_hash in archived_hashes:
@@ -1155,6 +1436,57 @@ def redact_text(text: str) -> tuple[str, dict[str, int]]:
     return redacted, counts
 
 
+def redact_json_value(value: object, counts: dict[str, int]) -> object:
+    if isinstance(value, str):
+        redacted, value_counts = redact_text(value)
+        for name, count in value_counts.items():
+            counts[name] = counts.get(name, 0) + count
+        return redacted
+    if isinstance(value, list):
+        return [redact_json_value(child, counts) for child in value]
+    if isinstance(value, dict):
+        return {key: redact_json_value(child, counts) for key, child in value.items()}
+    return value
+
+
+def redact_source_text(path: Path, text: str) -> tuple[str, dict[str, int]]:
+    if path.suffix not in {".json", ".jsonl"}:
+        return redact_text(text)
+
+    counts: dict[str, int] = {}
+    trailing_newline = text.endswith(("\n", "\r"))
+    if path.suffix == ".json":
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
+        redacted = json.dumps(
+            redact_json_value(value, counts),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return redacted + ("\n" if trailing_newline else ""), counts
+
+    redacted_lines: list[str] = []
+    for raw_line in text.splitlines():
+        if not raw_line.strip():
+            redacted_lines.append(raw_line)
+            continue
+        try:
+            value = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
+        redacted_lines.append(
+            json.dumps(
+                redact_json_value(value, counts),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+        )
+    redacted = "\n".join(redacted_lines)
+    return redacted + ("\n" if trailing_newline else ""), counts
+
+
 def safe_diagnostic_path(path: Path) -> str:
     display = path.name or "<path>"
     if has_sensitive_identifier_token(display):
@@ -1203,6 +1535,11 @@ SKILL_INVOCATION_PREFIX_PATTERN = re.compile(
     r"^(?:(?:\[[^\]]*\]\([^)]+\)|\$[A-Za-z0-9_-]+)\s*)+",
     re.IGNORECASE,
 )
+CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN = re.compile(
+    r"^(?:(?:\[\$[A-Za-z][A-Za-z0-9_-]*\]\([^)]*/SKILL\.md\)|"
+    r"\$[A-Za-z][A-Za-z0-9_-]*)\s*)+",
+    re.IGNORECASE,
+)
 
 
 def strip_skill_invocation_prefix(text: str) -> str:
@@ -1212,6 +1549,10 @@ def strip_skill_invocation_prefix(text: str) -> str:
         if cleaned == stripped:
             return cleaned
         stripped = cleaned
+
+
+def strip_canonical_skill_invocation_prefix(text: str) -> str:
+    return CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", compact_whitespace(text)).strip()
 
 
 def has_unbalanced_markdown_emphasis(text: str) -> bool:
@@ -1324,6 +1665,8 @@ def is_non_durable_natural_memory_text(text: str) -> bool:
     if not compacted:
         return False
     if ACKNOWLEDGEMENT_ONLY_PATTERN.search(compacted):
+        return True
+    if CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN.fullmatch(compacted):
         return True
     if HYPOTHETICAL_MEMORY_PATTERN.search(compacted):
         return True
@@ -1669,14 +2012,21 @@ def source_event_for_text(events: list[MemoryEvent], text: str) -> MemoryEvent |
     if not target:
         return None
     for event in events:
+        if event.kind != "user":
+            continue
+        candidates = {
+            source_text_key(event.text),
+            source_text_key(durable_user_memory_text(event.text)),
+            source_text_key(natural_user_memory_fact(event.text)),
+        }
+        if target in candidates:
+            return event
+    for event in events:
         candidates = {
             source_text_key(event.text),
             source_text_key(durable_memory_text(event.text)),
         }
         if target in candidates:
-            return event
-    for event in events:
-        if event.kind == "user" and source_text_key(natural_user_memory_fact(event.text)) == target:
             return event
     return None
 
@@ -1689,10 +2039,38 @@ def evidence_quote_id_for_text(evidence: list[str], text: str) -> str:
     return ""
 
 
-def evidence_source_entries(evidence: list[str], events: list[MemoryEvent]) -> list[dict[str, object]]:
+def evidence_quote_ids_for_events(
+    evidence: list[str],
+    support_events: tuple[MemoryEvent, ...],
+) -> list[str]:
+    available: dict[str, list[str]] = {}
+    for index, evidence_text in enumerate(evidence, 1):
+        key = source_text_key(evidence_text)
+        if key:
+            available.setdefault(key, []).append(f"ev_{index:03d}")
+    quote_ids: list[str] = []
+    for event in support_events:
+        key = source_text_key(induced_goal_support_text(event))
+        matches = available.get(key) or []
+        if matches:
+            quote_ids.append(matches.pop(0))
+    return quote_ids
+
+
+def evidence_source_entries(
+    evidence: list[str],
+    events: list[MemoryEvent],
+    preferred_events: tuple[MemoryEvent, ...] = (),
+) -> list[dict[str, object]]:
+    preferred_by_text: dict[str, list[MemoryEvent]] = {}
+    for event in preferred_events:
+        key = source_text_key(induced_goal_support_text(event))
+        if key:
+            preferred_by_text.setdefault(key, []).append(event)
     entries: list[dict[str, object]] = []
     for index, evidence_text in enumerate(evidence, 1):
-        event = source_event_for_text(events, evidence_text)
+        preferred = preferred_by_text.get(source_text_key(evidence_text)) or []
+        event = preferred.pop(0) if preferred else source_event_for_text(events, evidence_text)
         if event is None or event.line_number <= 0 or event.event_ordinal <= 0 or not event.event_sha256:
             continue
         entries.append(
@@ -1748,15 +2126,23 @@ def fact_source_entries(
     natural_user_facts: list[str],
     retrieval_literals: list[str],
     evidence: list[str],
-) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
+    induced_user_facts: list[InducedNaturalUserFact] | None = None,
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
     natural_user_keys = {normalize_memory_text(text).lower() for text in natural_user_facts}
     retrieval_literal_keys = {normalize_memory_text(text).lower() for text in retrieval_literals}
+    induced_by_key = {
+        normalize_memory_text(fact.text).lower(): fact
+        for fact in induced_user_facts or []
+    }
     for fact in facts:
         fact_key = normalize_memory_text(fact).lower()
         if not fact_key:
             continue
-        if fact_key in natural_user_keys:
+        induced = induced_by_key.get(fact_key)
+        if induced is not None:
+            source = "natural_user_correction"
+        elif fact_key in natural_user_keys:
             source = "natural_user"
         elif fact_key in retrieval_literal_keys:
             source = "retrieval_literal"
@@ -1768,6 +2154,12 @@ def fact_source_entries(
         quote_id = evidence_quote_id_for_text(evidence, fact)
         if quote_id:
             entry["evidence_quote_id"] = quote_id
+        if induced is not None:
+            quote_ids = evidence_quote_ids_for_events(evidence, induced.support_events)
+            if quote_ids:
+                entry["evidence_quote_id"] = quote_ids[0]
+                entry["evidence_quote_ids"] = quote_ids
+            entry["retrieval_terms"] = list(induced.retrieval_terms)
         entries.append(entry)
     return entries
 
@@ -1964,8 +2356,8 @@ def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[M
         if stripped_source:
             try:
                 source_value = json.loads(stripped_source)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as exc:
+                raise SourceInventoryError("source record is malformed") from exc
         if source_value is not None:
             source_values.append(source_value)
 
@@ -1974,8 +2366,8 @@ def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[M
             continue
         try:
             redacted_value = json.loads(stripped_redacted)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source record is malformed") from exc
         parsed_any = True
         line_events = events_from_value(redacted_value)
         hash_events = events_from_value(source_value) if source_value is not None else []
@@ -2203,8 +2595,13 @@ def sentence_case_tail(text: str) -> str:
 def natural_user_memory_fact(text: str) -> str:
     if is_process_update(text):
         return ""
-    compacted = compact_whitespace(strip_process_clauses(text))
+    normalized = strip_canonical_skill_invocation_prefix(text)
+    if not normalized or is_process_update(normalized):
+        return ""
+    compacted = compact_whitespace(strip_process_clauses(normalized))
     if not compacted or is_noisy_text(compacted) or is_raw_prompt_text(compacted):
+        return ""
+    if is_sensitive_explicit_memory_text(compacted):
         return ""
     for pattern, template in NATURAL_USER_MEMORY_PATTERNS:
         match = pattern.match(compacted)
@@ -2215,18 +2612,399 @@ def natural_user_memory_fact(text: str) -> str:
         if not tail or is_sensitive_explicit_memory_text(tail):
             return ""
         return durable_memory_text(template.format(text=sentence_case_tail(tail)))
+    if is_durable_chinese_user_preference(compacted):
+        return durable_memory_text(f"用户偏好：{normalize_memory_text(compacted)}")
     return ""
 
 
-def extract_natural_user_memory_facts(events: list[MemoryEvent], limit: int = 5) -> list[str]:
+def is_durable_chinese_user_preference(text: str) -> bool:
+    if not CHINESE_TEXT_PATTERN.search(text):
+        return False
+    if (
+        is_negated_explicit_memory_directive(text)
+        or CHINESE_TEMPORARY_PREFERENCE_PATTERN.search(text)
+        or CHINESE_LIVE_STATE_PREFERENCE_PATTERN.search(text)
+        or CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN.search(text)
+        or CHINESE_QUOTED_PROMPT_PATTERN.search(text)
+        or CHINESE_ACKNOWLEDGEMENT_ONLY_PATTERN.fullmatch(text)
+    ):
+        return False
+    if CHINESE_DIRECT_USER_PREFERENCE_PATTERN.search(text):
+        return True
+    user_specific = CHINESE_USER_SPECIFIC_PATTERN.search(text) is not None
+    normative_count = len(CHINESE_NORMATIVE_PREFERENCE_PATTERN.findall(text))
+    if CHINESE_FUTURE_PREFERENCE_PATTERN.search(text) and user_specific:
+        explicit_cue = re.search(r"我(?:希望|偏好|倾向于|默认(?:要求|选择|使用))", text)
+        if explicit_cue or (
+            normative_count >= 1 and CHINESE_RECURRING_PREFERENCE_PATTERN.search(text)
+        ):
+            return True
+    return bool(
+        CHINESE_RECURRING_PREFERENCE_PATTERN.search(text)
+        and (
+            (user_specific and normative_count >= 1)
+            or (CHINESE_AGENT_DIRECTED_PATTERN.search(text) and normative_count >= 3)
+        )
+    )
+
+
+def goal_correction_event_text(event: MemoryEvent) -> str:
+    if event.kind != "user":
+        return ""
+    raw = CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", event.text).strip()
+    normalized = normalize_memory_text(raw)
+    compacted = compact_whitespace(normalized)
+    malformed_markdown, quoted_markdown = markdown_event_shape(raw)
+    if (
+        not compacted
+        or is_noisy_text(compacted)
+        or is_sensitive_explicit_memory_text(compacted)
+        or malformed_markdown
+        or quoted_markdown
+        or has_quoted_goal_correction(raw)
+        or CHINESE_TEMPORARY_PREFERENCE_PATTERN.search(compacted)
+        or (
+            CHINESE_HYPOTHETICAL_OR_QUESTION_PATTERN.search(compacted)
+            and not GOAL_RHETORICAL_CORRECTION_PATTERN.search(compacted)
+        )
+        or CHINESE_QUOTED_PROMPT_PATTERN.search(compacted)
+    ):
+        return ""
+    return clip(compacted)
+
+
+def markdown_meaningful_text(text: str) -> str:
+    return re.sub(r"[\s，,。.!！?？:：;；()（）\[\]{}*_#>+-]+", "", text)
+
+
+def inline_code_shape(text: str) -> tuple[bool, bool]:
+    runs = list(re.finditer(r"`+", text))
+    if not runs:
+        return False, False
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(runs):
+        opening = runs[index]
+        closing_index = next(
+            (
+                candidate
+                for candidate in range(index + 1, len(runs))
+                if len(runs[candidate].group(0)) == len(opening.group(0))
+            ),
+            None,
+        )
+        if closing_index is None:
+            return True, False
+        spans.append((opening.start(), runs[closing_index].end()))
+        index = closing_index + 1
+    remaining = text
+    for start, end in reversed(spans):
+        remaining = remaining[:start] + " " + remaining[end:]
+    return False, not markdown_meaningful_text(remaining)
+
+
+def markdown_event_shape(text: str) -> tuple[bool, bool]:
+    opening_fence = ""
+    outside_lines: list[str] = []
+    fenced_block_count = 0
+    for line in text.splitlines():
+        if opening_fence:
+            stripped = line.lstrip(" \t")
+            indentation = len(line) - len(stripped)
+            closing = re.match(rf"{re.escape(opening_fence[0])}{{{len(opening_fence)},}}(?P<tail>.*)$", stripped)
+            if indentation <= 3 and closing and not closing.group("tail").strip():
+                opening_fence = ""
+            continue
+        opening = MARKDOWN_FENCE_OPEN_PATTERN.fullmatch(line)
+        if opening:
+            fence = opening.group("fence")
+            info = opening.group("info")
+            if fence[0] == "`" and "`" in info:
+                outside_lines.append(line)
+                continue
+            opening_fence = fence
+            fenced_block_count += 1
+            continue
+        outside_lines.append(line)
+    if opening_fence:
+        return True, False
+    outside = "\n".join(outside_lines).strip()
+    malformed_inline, wholly_inline = inline_code_shape(outside)
+    if malformed_inline:
+        return True, False
+    wholly_fenced = fenced_block_count > 0 and not markdown_meaningful_text(outside)
+    return False, wholly_fenced or wholly_inline
+
+
+def has_quoted_goal_correction(text: str) -> bool:
+    if GOAL_MARKDOWN_BLOCKQUOTE_PATTERN.search(text):
+        return True
+    if GOAL_QUOTED_SPEECH_PATTERN.search(text):
+        return True
+    stripped = text.strip()
+    for opening, closing in (("“", "”"), ("「", "」"), ("『", "』")):
+        if stripped.startswith(opening):
+            return True
+        if text.count(opening) != text.count(closing):
+            return True
+    if text.count('"') % 2:
+        return True
+    if stripped.startswith('"'):
+        return True
+    return False
+
+
+def goal_format_has_durable_cue(text: str) -> bool:
+    return bool(
+        CHINESE_FUTURE_PREFERENCE_PATTERN.search(text)
+        or CHINESE_RECURRING_PREFERENCE_PATTERN.search(text)
+        or re.search(r"(?i)\b(?:always|by default|from now on|every time|whenever)\b", text)
+    )
+
+
+def induced_goal_support_text(event: MemoryEvent) -> str:
+    return clip(normalize_memory_text(strip_canonical_skill_invocation_prefix(event.text)))
+
+
+def is_assistant_goal_format_preference_claim(text: str) -> bool:
+    normalized = normalize_memory_text(text)
+    return bool(
+        GOAL_ARTIFACT_PATTERN.search(normalized)
+        and GOAL_FORMAT_SIGNAL_PATTERN.search(normalized)
+        and ("用户偏好" in normalized or re.search(r"(?i)\buser(?:'s)?\s+preference\b", normalized))
+    )
+
+
+def is_goal_context_break(text: str) -> bool:
+    plain = re.sub(r"[`\"“”「」『』]", "", text)
+    switches_to_non_target = bool(
+        GOAL_NON_TARGET_ARTIFACT_PATTERN.search(plain)
+        and (
+            GOAL_CONTEXT_SWITCH_CUE_PATTERN.search(plain)
+            or GOAL_NON_TARGET_REQUEST_VERB_PATTERN.search(plain)
+        )
+    )
+    return bool(
+        switches_to_non_target
+        and (
+            not GOAL_ARTIFACT_PATTERN.search(plain)
+            or GOAL_ABANDONMENT_PATTERN.search(plain)
+        )
+    )
+
+
+def induce_copyable_goal_preference(events: list[MemoryEvent]) -> InducedNaturalUserFact | None:
+    all_user_events: list[tuple[int, MemoryEvent, str]] = []
+    user_events: list[tuple[int, MemoryEvent, str]] = []
+    for index, event in enumerate(events):
+        if event.kind == "user":
+            raw = CANONICAL_SKILL_INVOCATION_PREFIX_PATTERN.sub("", event.text).strip()
+            normalized = clip(normalize_memory_text(raw))
+            if normalized:
+                all_user_events.append((index, event, normalized))
+        text = goal_correction_event_text(event)
+        if text:
+            user_events.append((index, event, text))
+    if not user_events:
+        return None
+
+    def has_active_goal_context(position: int) -> bool:
+        prior_goal_positions = [
+            index
+            for index, _, text in user_events
+            if index < position and GOAL_ARTIFACT_PATTERN.search(text)
+        ]
+        if not prior_goal_positions:
+            return False
+        last_goal = prior_goal_positions[-1]
+        return not any(
+            last_goal < index < position and is_goal_context_break(text)
+            for index, _, text in all_user_events
+        )
+
+    negative_positions = [
+        index
+        for index, _, text in user_events
+        if GOAL_TEXT_FENCE_REJECTION_PATTERN.search(text)
+        and GOAL_FORMAT_SIGNAL_PATTERN.search(text)
+        and (
+            GOAL_ARTIFACT_PATTERN.search(text)
+            or goal_format_has_durable_cue(text)
+            or has_active_goal_context(index)
+        )
+        and not GOAL_NON_TARGET_ARTIFACT_PATTERN.search(text)
+    ]
+    durable_directives = [
+        (index, event, text)
+        for index, event, text in user_events
+        if GOAL_ARTIFACT_PATTERN.search(text)
+        and GOAL_FORMAT_SIGNAL_PATTERN.search(text)
+        and GOAL_TEXT_FENCE_PATTERN.search(text)
+        and (GOAL_COPY_SIGNAL_PATTERN.search(text) or GOAL_ARTIFACT_FIRST_PATTERN.search(text))
+        and goal_format_has_durable_cue(text)
+        and not GOAL_TEXT_FENCE_REJECTION_PATTERN.search(text)
+    ]
+    if durable_directives:
+        index, event, _ = durable_directives[-1]
+        if negative_positions and negative_positions[-1] > index:
+            return None
+        return InducedNaturalUserFact(
+            text=COPYABLE_GOAL_PREFERENCE_TEXT,
+            support_events=(event,),
+            retrieval_terms=COPYABLE_GOAL_RETRIEVAL_TERMS,
+        )
+
+    qualified: tuple[int, tuple[MemoryEvent, ...]] | None = None
+    for end in range(len(user_events)):
+        window = user_events[max(0, end - GOAL_CORRECTION_USER_WINDOW + 1) : end + 1]
+        goal_context = [
+            row
+            for row in window
+            if GOAL_ARTIFACT_PATTERN.search(row[2]) and not is_goal_context_break(row[2])
+        ]
+        context_row: tuple[int, MemoryEvent, str] | None = None
+        corrections: list[tuple[int, MemoryEvent, str]] = []
+        for candidate_context in reversed(goal_context):
+            context_break_positions = [
+                row[0]
+                for row in all_user_events
+                if row[0] > candidate_context[0] and is_goal_context_break(row[2])
+            ]
+            context_end = min(context_break_positions) if context_break_positions else None
+            eligible = [
+                row
+                for row in window
+                if row[0] >= candidate_context[0]
+                and (context_end is None or row[0] < context_end)
+                and GOAL_FORMAT_SIGNAL_PATTERN.search(row[2])
+                and GOAL_CORRECTION_SIGNAL_PATTERN.search(row[2])
+                and not GOAL_TEXT_FENCE_REJECTION_PATTERN.search(row[2])
+                and not (
+                    GOAL_NON_TARGET_ARTIFACT_PATTERN.search(row[2])
+                    and not GOAL_ARTIFACT_PATTERN.search(row[2])
+                )
+            ]
+            linked: list[tuple[int, MemoryEvent, str]] = []
+            first_post_context_text = ""
+            for row in eligible:
+                mentions_goal = GOAL_ARTIFACT_PATTERN.search(row[2]) is not None
+                has_specific_format = GOAL_SPECIFIC_FORMAT_SIGNAL_PATTERN.search(row[2]) is not None
+                is_first_post_context = row[0] > candidate_context[0] and not linked
+                repeats_first = bool(
+                    first_post_context_text
+                    and source_text_key(row[2]) == first_post_context_text
+                )
+                if mentions_goal or has_specific_format or is_first_post_context or repeats_first:
+                    linked.append(row)
+                    if row[0] > candidate_context[0] and not first_post_context_text:
+                        first_post_context_text = source_text_key(row[2])
+            if len(linked) < 2:
+                continue
+            if not any(
+                GOAL_COPY_SIGNAL_PATTERN.search(row[2]) or GOAL_TEXT_FENCE_PATTERN.search(row[2])
+                for row in linked
+            ):
+                continue
+            context_row = candidate_context
+            corrections = linked
+            break
+        if context_row is None:
+            continue
+
+        supports: list[tuple[int, MemoryEvent, str]] = []
+        supports.append(context_row)
+        supports.extend(corrections[-2:])
+        artifact_first = [row for row in window if GOAL_ARTIFACT_FIRST_PATTERN.search(row[2])]
+        if artifact_first:
+            supports.append(artifact_first[-1])
+
+        support_by_position = {row[0]: row for row in supports}
+        ordered_supports = [support_by_position[key] for key in sorted(support_by_position)]
+        if len(ordered_supports) > GOAL_CORRECTION_SUPPORT_LIMIT:
+            ordered_supports = ordered_supports[-GOAL_CORRECTION_SUPPORT_LIMIT:]
+        qualified = (
+            corrections[-1][0],
+            tuple(row[1] for row in ordered_supports),
+        )
+
+    if qualified is None:
+        return None
+    latest_positive_position, support_events = qualified
+    if negative_positions and negative_positions[-1] > latest_positive_position:
+        return None
+    return InducedNaturalUserFact(
+        text=COPYABLE_GOAL_PREFERENCE_TEXT,
+        support_events=support_events,
+        retrieval_terms=COPYABLE_GOAL_RETRIEVAL_TERMS,
+    )
+
+
+def extract_natural_user_memory_facts(
+    events: list[MemoryEvent],
+    limit: int = NATURAL_USER_FACT_LIMIT,
+) -> list[str]:
     facts: list[str] = []
     for text in event_texts(events, {"user"}):
         fact = natural_user_memory_fact(text)
         if fact and fact not in facts:
             facts.append(fact)
-        if len(facts) >= limit:
+    if limit <= 0:
+        return []
+    return facts[-limit:]
+
+
+def select_summary_evidence(
+    natural_user_facts: list[str],
+    decisions: list[str],
+    retrieval_literals: list[str],
+    facts: list[str],
+    problems: list[str],
+    unresolved: list[str],
+    durable_user_lines: list[str],
+    final_state: str,
+    pinned_evidence: list[str] | None = None,
+) -> list[str]:
+    evidence: list[str] = []
+    final_evidence = durable_memory_text(final_state)
+    filler_limit = SUMMARY_EVIDENCE_LIMIT - int(bool(final_evidence))
+    for line in (pinned_evidence or [])[-filler_limit:]:
+        durable = durable_memory_text(line)
+        if durable:
+            evidence.append(durable)
+
+    filler_limit = SUMMARY_EVIDENCE_LIMIT - int(
+        bool(final_evidence and final_evidence not in evidence)
+    )
+    for line in natural_user_facts[-NATURAL_USER_FACT_LIMIT:]:
+        if len(evidence) >= filler_limit:
             break
-    return facts
+        durable = durable_memory_text(line)
+        if durable and durable not in evidence:
+            evidence.append(durable)
+
+    for group in (decisions, retrieval_literals, facts, problems, unresolved):
+        if len(evidence) >= filler_limit:
+            break
+        for line in group:
+            durable = durable_memory_text(line)
+            if durable and durable not in evidence:
+                evidence.append(durable)
+            if len(evidence) >= filler_limit:
+                break
+        if len(evidence) >= filler_limit:
+            break
+
+    if not evidence:
+        for line in durable_user_lines:
+            durable = durable_memory_text(line)
+            if durable and durable not in evidence:
+                evidence.append(durable)
+            if len(evidence) >= filler_limit:
+                break
+
+    if final_evidence and final_evidence not in evidence:
+        evidence.append(final_evidence)
+    return evidence[:SUMMARY_EVIDENCE_LIMIT]
 
 
 def extract_tags(project_name: str, texts: list[str]) -> list[str]:
@@ -2434,14 +3212,42 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         durable = durable_user_memory_text(line)
         if durable:
             durable_user_lines.append(durable)
-    assistant_lines = event_texts(events, {"assistant", "record"})
-    natural_user_facts = extract_natural_user_memory_facts(events)
-    decisions = select_event_texts(
-        events,
-        r"\b(decision|decide|decided|chosen|selected|root cause)\b|原因|根因|决定|选择",
-        kinds={"assistant", "record"},
-        limit=5,
-    )
+    assistant_lines = [
+        text
+        for text in event_texts(events, {"assistant", "record"})
+        if not is_assistant_goal_format_preference_claim(text)
+    ]
+    induced_user_facts = [
+        fact
+        for fact in [induce_copyable_goal_preference(events)]
+        if fact is not None
+    ]
+    induced_support_event_ids = {
+        id(event)
+        for fact in induced_user_facts
+        for event in fact.support_events
+    }
+    natural_user_facts = []
+    for fact in extract_natural_user_memory_facts(events):
+        source_event = source_event_for_text(events, fact)
+        if source_event is None or id(source_event) not in induced_support_event_ids:
+            natural_user_facts.append(fact)
+    natural_user_facts.extend(fact.text for fact in induced_user_facts)
+    natural_user_facts = natural_user_facts[-NATURAL_USER_FACT_LIMIT:]
+    induced_fact_keys = {
+        normalize_memory_text(fact.text).lower()
+        for fact in induced_user_facts
+    }
+    decisions = [
+        text
+        for text in select_event_texts(
+            events,
+            r"\b(decision|decide|decided|chosen|selected|root cause)\b|原因|根因|决定|选择",
+            kinds={"assistant", "record"},
+            limit=5,
+        )
+        if not is_assistant_goal_format_preference_claim(text)
+    ]
     problems = select_event_texts(
         events,
         r"\b(error|failed|failure|blocked|exception|traceback|problem|issue|bug|importerror)\b|失败|错误|阻塞",
@@ -2454,12 +3260,16 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         kinds={"assistant", "record"},
         limit=5,
     )
-    facts = select_event_texts(
-        events,
-        r"\b(root cause|verified|must|should|require|requires|constraint|convention|policy|rule|prefer|expected|finding|findings|changes_requested|approved|proxy|proxies|outbound proxy|global outbound proxy|local routing|socks5|http_proxy|https_proxy)\b|127\.0\.0\.1|原因|根因|验证|约定|偏好|必须|应该|阻塞|索引|高质量|只能做|做不到|还没有达到|摘要器|代理|全局出站代理|本地代理",
-        kinds={"assistant", "record"},
-        limit=12,
-    )
+    facts = [
+        text
+        for text in select_event_texts(
+            events,
+            r"\b(root cause|verified|must|should|require|requires|constraint|convention|policy|rule|prefer|expected|finding|findings|changes_requested|approved|proxy|proxies|outbound proxy|global outbound proxy|local routing|socks5|http_proxy|https_proxy)\b|127\.0\.0\.1|原因|根因|验证|约定|偏好|必须|应该|阻塞|索引|高质量|只能做|做不到|还没有达到|摘要器|代理|全局出站代理|本地代理",
+            kinds={"assistant", "record"},
+            limit=12,
+        )
+        if not is_assistant_goal_format_preference_claim(text)
+    ]
     for line in reversed(natural_user_facts):
         if line not in facts:
             facts.insert(0, line)
@@ -2469,35 +3279,35 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
             facts.append(line)
     if not facts:
         facts = [durable for text in assistant_lines if (durable := durable_memory_text(text))][:3]
-    evidence = []
-    for group in (decisions, retrieval_literals, facts, problems, unresolved):
-        for line in group:
-            durable = durable_memory_text(line)
-            if durable and durable not in evidence:
-                evidence.append(durable)
-            if len(evidence) >= 6:
-                break
-        if len(evidence) >= 6:
-            break
-    if not evidence:
-        for line in durable_user_lines:
-            durable = durable_memory_text(line)
-            if durable and durable not in evidence:
-                evidence.append(durable)
-            if len(evidence) >= 3:
-                break
-
-    user_intent = durable_user_lines[0] if durable_user_lines else ""
     final_state = ""
     for text in reversed(assistant_lines):
         durable = durable_memory_text(text)
-        if durable:
+        if durable and normalize_memory_text(durable).lower() not in induced_fact_keys:
             final_state = durable
             break
-    if final_state and final_state not in evidence:
-        if len(evidence) >= 6:
-            evidence = evidence[:5]
-        evidence.append(final_state)
+    natural_user_evidence = [
+        fact
+        for fact in natural_user_facts
+        if fact not in {induced.text for induced in induced_user_facts}
+    ]
+    induced_support_evidence = [
+        induced_goal_support_text(event)
+        for induced in induced_user_facts
+        for event in induced.support_events
+    ]
+    evidence = select_summary_evidence(
+        natural_user_evidence,
+        decisions,
+        retrieval_literals,
+        [fact for fact in facts if normalize_memory_text(fact).lower() not in induced_fact_keys],
+        problems,
+        unresolved,
+        durable_user_lines,
+        final_state,
+        induced_support_evidence,
+    )
+
+    user_intent = durable_user_lines[0] if durable_user_lines else ""
     summary_items = []
     summary_user_intent = durable_user_lines[0] if durable_user_lines else ""
     for line in [summary_user_intent, *decisions[:1], *facts[:1], final_state]:
@@ -2515,12 +3325,27 @@ def summarize_events(events: list[MemoryEvent], project_name: str) -> dict[str, 
         "summary": summary,
         "context": context[:5],
         "facts": facts,
-        "fact_sources": fact_source_entries(facts, events, natural_user_facts, retrieval_literals, evidence),
+        "fact_sources": fact_source_entries(
+            facts,
+            events,
+            natural_user_facts,
+            retrieval_literals,
+            evidence,
+            induced_user_facts,
+        ),
         "decisions": decisions,
         "problems": problems,
         "unresolved": unresolved,
         "evidence": evidence,
-        "evidence_sources": evidence_source_entries(evidence, events),
+        "evidence_sources": evidence_source_entries(
+            evidence,
+            events,
+            tuple(
+                event
+                for induced in induced_user_facts
+                for event in induced.support_events
+            ),
+        ),
         "tags": extract_tags(project_name, [*retrieval_literals, *facts, *decisions, *problems, *unresolved, final_state]),
         "final_state": final_state or summary,
     }
@@ -2718,29 +3543,59 @@ def source_anchor_id(source_record_sha256: str, row: dict[str, object]) -> str:
     return f"srca_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
 
 
-def memory_candidate_source_entries(summary_data: dict[str, object], events: list[MemoryEvent]) -> list[dict[str, str]]:
+def memory_candidate_source_entries(summary_data: dict[str, object], events: list[MemoryEvent]) -> list[dict[str, object]]:
     evidence = summary_data.get("evidence")
     if not isinstance(evidence, list):
         return []
     fact_sources = {
-        source_text_key(str(value.get("text") or "")): str(value.get("source") or "")
+        source_text_key(str(value.get("text") or "")): value
         for value in summary_data.get("fact_sources") or []
         if isinstance(value, dict)
     }
+    selected_natural_user_facts = [
+        str(value.get("text") or "")
+        for value in summary_data.get("fact_sources") or []
+        if isinstance(value, dict) and value.get("source") in {"natural_user", "natural_user_correction"}
+    ]
     entries: list[dict[str, str]] = []
     seen: set[str] = set()
-    for text, _ in iter_memory_candidate_texts(summary_data):
+    candidate_texts = [
+        (text, "Natural user fact selected from archived session.")
+        for text in selected_natural_user_facts
+    ]
+    candidate_texts.extend(iter_memory_candidate_texts(summary_data))
+    for text, _ in candidate_texts:
         key = source_text_key(text)
         if not key or key in seen:
             continue
-        quote_id = evidence_quote_id_for_text(evidence, text)
+        source_detail = fact_sources.get(key, {})
+        quote_ids = [
+            str(value)
+            for value in source_detail.get("evidence_quote_ids") or []
+            if isinstance(value, str) and value
+        ]
+        quote_id = str(source_detail.get("evidence_quote_id") or evidence_quote_id_for_text(evidence, text))
+        if not quote_ids and quote_id:
+            quote_ids = [quote_id]
         event = source_event_for_text(events, text)
-        if not quote_id or event is None:
+        if not quote_ids or (event is None and source_detail.get("source") != "natural_user_correction"):
             continue
-        entry = {"text": text, "evidence_quote_id": quote_id}
-        source = fact_sources.get(key, "")
+        entry: dict[str, object] = {
+            "text": text,
+            "evidence_quote_id": quote_ids[0],
+        }
+        if len(quote_ids) > 1:
+            entry["evidence_quote_ids"] = quote_ids
+        source = str(source_detail.get("source") or "")
         if source:
             entry["source"] = source
+        retrieval_terms = source_detail.get("retrieval_terms")
+        if isinstance(retrieval_terms, list):
+            entry["retrieval_terms"] = [
+                str(value)
+                for value in retrieval_terms
+                if isinstance(value, str) and value
+            ]
         entries.append(entry)
         seen.add(key)
     return entries
@@ -2778,6 +3633,15 @@ def materialize_source_anchors(summary_data: dict[str, object], source_record_sh
             quote_id = value.get("evidence_quote_id")
             if isinstance(quote_id, str) and quote_id in anchor_by_quote:
                 value["source_anchor_id"] = anchor_by_quote[quote_id]
+            quote_ids = value.get("evidence_quote_ids")
+            if isinstance(quote_ids, list):
+                source_anchor_ids = [
+                    anchor_by_quote[quote]
+                    for quote in quote_ids
+                    if isinstance(quote, str) and quote in anchor_by_quote
+                ]
+                if source_anchor_ids:
+                    value["source_anchor_ids"] = source_anchor_ids
     explicit_sources = summary_data.get("explicit_sources")
     if isinstance(explicit_sources, list):
         for value in explicit_sources:
@@ -2951,13 +3815,9 @@ def prepare_inventory_record(
     require_project_metadata: bool,
 ) -> PreparedArchiveRecord:
     source_text, source_mtime = read_validated_inventory_record(record)
-    redacted_text, redaction_counts = redact_text(source_text)
+    redacted_text, redaction_counts = redact_source_text(record.path, source_text)
     if record.path.suffix == ".jsonl":
-        try:
-            source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
-        except SourceInventoryError:
-            source_values = list(iter_source_json_values(record.path, source_text))
-            source_events = extract_source_events(record.path, redacted_text, source_text)
+        source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
     else:
         source_values = list(iter_source_json_values(record.path, source_text))
         source_events = extract_source_events(record.path, redacted_text, source_text)
@@ -3008,7 +3868,7 @@ def write_record(
     record: SourceRecord,
 ) -> Path | None:
     source_text = read_record_text(record.path)
-    redacted_text, redaction_counts = redact_text(source_text)
+    redacted_text, redaction_counts = redact_source_text(record.path, source_text)
     source_events = extract_source_events(record.path, redacted_text, source_text)
     prepared = prepare_record(
         memory_repo,
@@ -3288,7 +4148,7 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
         tags = tuple(str(tag) for tag in row.get("tags", []) if isinstance(tag, (str, int, float)))
         summary_path = str(row.get("summary_path", ""))
         evidence_path = str(row.get("evidence_path", ""))
-        fact_sources: dict[str, dict[str, str]] = {}
+        fact_sources: dict[str, dict[str, object]] = {}
         for item in row.get("reusable_fact_sources") or []:
             if not isinstance(item, dict):
                 continue
@@ -3299,8 +4159,11 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     "source": source,
                     "evidence_quote_id": str(item.get("evidence_quote_id") or ""),
                     "source_anchor_id": str(item.get("source_anchor_id") or ""),
+                    "evidence_quote_ids": item.get("evidence_quote_ids") or [],
+                    "source_anchor_ids": item.get("source_anchor_ids") or [],
+                    "retrieval_terms": item.get("retrieval_terms") or [],
                 }
-        candidate_sources: dict[str, dict[str, str]] = {}
+        candidate_sources: dict[str, dict[str, object]] = {}
         for item in row.get("memory_candidate_sources") or []:
             if not isinstance(item, dict):
                 continue
@@ -3311,6 +4174,9 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                 "source": str(item.get("source") or ""),
                 "evidence_quote_id": str(item.get("evidence_quote_id") or ""),
                 "source_anchor_id": str(item.get("source_anchor_id") or ""),
+                "evidence_quote_ids": item.get("evidence_quote_ids") or [],
+                "source_anchor_ids": item.get("source_anchor_ids") or [],
+                "retrieval_terms": item.get("retrieval_terms") or [],
             }
         if not summary_path or not evidence_path:
             continue
@@ -3319,11 +4185,32 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                 normalize_memory_text(text).lower(),
                 {},
             )
+            evidence_quote_ids = tuple(
+                str(value)
+                for value in source_detail.get("evidence_quote_ids") or []
+                if isinstance(value, str) and value
+            )
+            if not evidence_quote_ids and source_detail.get("evidence_quote_id"):
+                evidence_quote_ids = (str(source_detail["evidence_quote_id"]),)
+            source_anchor_ids = tuple(
+                str(value)
+                for value in source_detail.get("source_anchor_ids") or []
+                if isinstance(value, str) and value
+            )
+            if not source_anchor_ids and source_detail.get("source_anchor_id"):
+                source_anchor_ids = (str(source_detail["source_anchor_id"]),)
             if row.get("source_anchor_version") == SOURCE_ANCHOR_VERSION and (
-                not source_detail.get("evidence_quote_id") or not source_detail.get("source_anchor_id")
+                not evidence_quote_ids
+                or not source_anchor_ids
+                or len(evidence_quote_ids) != len(source_anchor_ids)
             ):
                 continue
             provenance = source_detail.get("source", "")
+            retrieval_terms = tuple(
+                str(value)
+                for value in source_detail.get("retrieval_terms") or []
+                if isinstance(value, str) and value
+            )
             text, supersedes_texts = parse_memory_refresh_text(text, is_noisy_text)
             text, deprecates_texts = parse_memory_deprecation_text(text, is_noisy_text)
             if deprecates_texts:
@@ -3343,12 +4230,14 @@ def memory_candidates_from_meta(rows: list[dict]) -> list[MemoryCandidate]:
                     source_record=str(row.get("source_record", "")),
                     source_map_path=str(row.get("source_map_path", "")),
                     source_updated_at=str(row.get("source_updated_at", "")),
-                    tags=tags,
-                    provenance=provenance,
+                    tags=tuple(sorted(set(tags) | set(retrieval_terms))),
+                    provenance=str(provenance),
                     supersedes_texts=supersedes_texts,
                     deprecates_texts=deprecates_texts,
                     evidence_quote_id=source_detail.get("evidence_quote_id", "") or "ev_001",
                     source_anchor_id=source_detail.get("source_anchor_id", ""),
+                    evidence_quote_ids=evidence_quote_ids,
+                    source_anchor_ids=source_anchor_ids,
                 )
             )
     return candidates
@@ -3371,12 +4260,38 @@ def evidence_ref_for_path(
 
 
 def evidence_ref_for_candidate(memory_repo: Path | None, candidate: MemoryCandidate) -> dict[str, str] | None:
-    return evidence_ref_for_path(memory_repo, candidate.evidence_path, candidate.evidence_quote_id)
+    refs = evidence_refs_for_candidate(memory_repo, candidate)
+    return refs[0] if refs else None
 
 
 def raw_ref_for_candidate(candidate: MemoryCandidate) -> dict[str, str] | None:
-    anchor = candidate.source_anchor_id or "source_record"
-    return raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, anchor)
+    refs = raw_refs_for_candidate(candidate)
+    return refs[0] if refs else None
+
+
+def evidence_refs_for_candidate(
+    memory_repo: Path | None,
+    candidate: MemoryCandidate,
+) -> list[dict[str, str]]:
+    quote_ids = candidate.evidence_quote_ids or (candidate.evidence_quote_id,)
+    refs = [
+        ref
+        for quote_id in quote_ids
+        if (ref := evidence_ref_for_path(memory_repo, candidate.evidence_path, quote_id)) is not None
+    ]
+    return refs
+
+
+def raw_refs_for_candidate(candidate: MemoryCandidate) -> list[dict[str, str]]:
+    anchors = candidate.source_anchor_ids or (
+        (candidate.source_anchor_id,) if candidate.source_anchor_id else ("source_record",)
+    )
+    refs = [
+        ref
+        for anchor in anchors
+        if (ref := raw_ref_for_source_fields(candidate.source_record, candidate.source_map_path, anchor)) is not None
+    ]
+    return refs
 
 
 def is_natural_memory_candidate(candidate: MemoryCandidate) -> bool:
@@ -3453,12 +4368,8 @@ def natural_induction_review_candidate_row(
         "support_count": 1,
         "source_updated_at": candidate.source_updated_at,
         "derived_from": [candidate.summary_path] if archive_relative_ref_exists(memory_repo, candidate.summary_path) else [],
-        "evidence_refs": [
-            ref
-            for ref in [evidence_ref_for_candidate(memory_repo, candidate)]
-            if ref is not None
-        ],
-        "raw_refs": [ref for ref in [raw_ref_for_candidate(candidate)] if ref is not None],
+        "evidence_refs": evidence_refs_for_candidate(memory_repo, candidate),
+        "raw_refs": raw_refs_for_candidate(candidate),
     }
     if related is not None:
         row["related_candidate_text_sha256"] = natural_candidate_text_sha256(related.text)
@@ -3623,11 +4534,9 @@ def build_memory_nodes_and_induction_review_candidates(
         evidence_refs_by_key: dict[tuple[str, str], dict[str, str]] = {}
         raw_refs_by_key: dict[tuple[str, str], dict[str, str]] = {}
         for candidate in candidates:
-            evidence_ref = evidence_ref_for_candidate(memory_repo, candidate)
-            if evidence_ref is not None:
+            for evidence_ref in evidence_refs_for_candidate(memory_repo, candidate):
                 evidence_refs_by_key[(evidence_ref["path"], evidence_ref["quote_id"])] = evidence_ref
-            raw_ref = raw_ref_for_candidate(candidate)
-            if raw_ref is not None:
+            for raw_ref in raw_refs_for_candidate(candidate):
                 raw_refs_by_key[(raw_ref["path"], raw_ref["anchor"])] = raw_ref
         evidence_refs = [evidence_refs_by_key[key] for key in sorted(evidence_refs_by_key)]
         raw_refs = [raw_refs_by_key[key] for key in sorted(raw_refs_by_key)]
@@ -4992,7 +5901,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Human-readable project name")
     parser.add_argument("--source-agent", default="agent", help="Source agent/runtime label")
     parser.add_argument("--pattern", action="append", help="Glob pattern to scan; may be repeated")
-    parser.add_argument("--max-records", type=int, default=50, help="Maximum records to archive in one run")
+    parser.add_argument(
+        "--max-records",
+        type=int,
+        default=-1,
+        help="Maximum records to archive in one run; negative means unlimited",
+    )
     parser.add_argument("--max-excerpt-bytes", type=int, default=12000, help="Deprecated compatibility option; raw excerpts are not copied by default")
     parser.add_argument("--allow-redacted-secrets", action="store_true", help="Archive records with detected secret patterns after redaction")
     parser.add_argument(
@@ -5024,6 +5938,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--finalize-archive",
         action="store_true",
         help="Rebuild derived archive surfaces without scanning source records",
+    )
+    parser.add_argument(
+        "--report-json",
+        action="store_true",
+        help="Emit one aggregate machine-readable target report",
     )
     parser.add_argument("--explicit-memory", action="append", default=[], help="Write a sticky high-level explicit memory")
     parser.add_argument(
@@ -5067,6 +5986,8 @@ def main(argv: list[str] | None = None) -> int:
     memory_repo = resolve_memory_repo(args.memory_repo)
     if args.finalize_archive:
         rebuild_indexes(memory_repo, reconcile_removed_refs=True)
+        if args.report_json:
+            emit_update_target_report(update_target_report("updated", "updated"))
         return 0
     if not args.source_dir:
         raise SystemExit("--source-dir is required unless --finalize-archive is used")
@@ -5143,6 +6064,15 @@ def main(argv: list[str] | None = None) -> int:
             memory_repo,
             reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
         )
+        if args.report_json:
+            emit_update_target_report(
+                update_target_report(
+                    "updated",
+                    "updated",
+                    records_selected_count=len(direct_nodes),
+                    records_processed_count=len(direct_nodes),
+                )
+            )
         return 0
 
     latest, archived_hashes, archived_source_hashes = archived_project_state(
@@ -5152,38 +6082,58 @@ def main(argv: list[str] | None = None) -> int:
         source_partition,
         include_generated_index=not args.defer_global_rebuild,
     )
+    try:
+        pending_source_paths = deferred_source_paths(memory_repo, archive_scope, source_partition)
+    except SourceInventoryError:
+        if args.report_json:
+            emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
+        else:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+        return 2
     discovery_args = (
         None if args.rewrite_existing else latest,
         project_path,
         set() if args.rewrite_existing else archived_hashes,
         {} if args.rewrite_existing else archived_source_hashes,
     )
-    if args.source_inventory_stdin:
-        try:
+    try:
+        if args.source_inventory_stdin:
             records = discover_records_from_inventory(
                 sys.stdin.read(),
                 source_dir,
                 *discovery_args,
                 require_project_metadata=args.require_project_metadata,
+                pending_source_paths=pending_source_paths,
             )
-        except SourceInventoryError:
+        else:
+            records = discover_records(
+                source_dir,
+                patterns,
+                *discovery_args,
+                require_project_metadata=args.require_project_metadata,
+                pending_source_paths=pending_source_paths,
+            )
+    except SourceInventoryError:
+        if args.report_json:
+            emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
+        else:
             print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
-            return 2
-    else:
-        records = discover_records(
-            source_dir,
-            patterns,
-            *discovery_args,
-            require_project_metadata=args.require_project_metadata,
-        )
+        return 2
     if args.max_records >= 0:
         records = records[: args.max_records]
 
+    selected_source_paths = {str(record.path.resolve()) for record in records}
+    unresolved_pending_paths = pending_source_paths - selected_source_paths
+    selected_record_count = len(records) + len(unresolved_pending_paths)
+    deferred_record_count = len(unresolved_pending_paths)
+    deferred_source_records = set(unresolved_pending_paths)
     prepared_records: list[PreparedArchiveRecord] | None = None
     if args.source_inventory_stdin and not args.dry_run:
-        try:
-            prepared_records = [
-                prepare_inventory_record(
+        prepared_records = []
+        stable_records: list[SourceRecord] = []
+        for record in records:
+            try:
+                prepared = prepare_inventory_record(
                     memory_repo,
                     project_path,
                     archive_scope,
@@ -5193,26 +6143,53 @@ def main(argv: list[str] | None = None) -> int:
                     record,
                     args.require_project_metadata,
                 )
-                for record in records
-            ]
-        except SourceInventoryError:
-            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
-            return 2
+            except SourceInventoryError as exc:
+                if str(exc) in DEFERABLE_SOURCE_INVENTORY_ERRORS:
+                    deferred_record_count += 1
+                    deferred_source_records.add(str(record.path.resolve()))
+                    continue
+                if args.report_json:
+                    emit_update_target_report(
+                        update_target_report(
+                            "blocked",
+                            "source_inventory_invalid",
+                            records_selected_count=selected_record_count,
+                        )
+                    )
+                else:
+                    print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+                return 2
+            stable_records.append(record)
+            prepared_records.append(prepared)
+        records = stable_records
 
-    print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
-    print(f"Project path: {safe_diagnostic_path(project_path)}")
-    if args.archive_scope is not None:
-        print("Archive scope: configured")
-    if args.source_partition is not None:
-        print("Source partition: configured")
-    print(f"Source dir: {safe_diagnostic_path(source_dir)}")
-    print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
-    print(f"Records selected: {len(records)}")
+    if not args.report_json:
+        print(f"Memory repo: {safe_diagnostic_path(memory_repo)}")
+        print(f"Project path: {safe_diagnostic_path(project_path)}")
+        if args.archive_scope is not None:
+            print("Archive scope: configured")
+        if args.source_partition is not None:
+            print("Source partition: configured")
+        print(f"Source dir: {safe_diagnostic_path(source_dir)}")
+        print(f"Latest archived timestamp: {isoformat(latest) if latest else '<none>'}")
+        print(f"Records selected: {len(records)}")
 
-    for record in records:
-        print(f"- {isoformat(record.updated_at)} {safe_diagnostic_path(record.path)}")
+        for record in records:
+            print(f"- {isoformat(record.updated_at)} {safe_diagnostic_path(record.path)}")
 
     if args.dry_run:
+        if args.report_json:
+            status = "deferred" if deferred_record_count else "updated"
+            reason = "source_records_deferred" if deferred_record_count else "updated"
+            emit_update_target_report(
+                update_target_report(
+                    status,
+                    reason,
+                    records_selected_count=selected_record_count,
+                    records_processed_count=len(records),
+                    records_deferred_count=deferred_record_count,
+                )
+            )
         return 0
 
     if prepared_records is not None:
@@ -5224,16 +6201,48 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sensitive_records = []
         for record in records:
-            _, counts = redact_text(read_record_text(record.path))
+            _, counts = redact_source_text(record.path, read_record_text(record.path))
             if counts:
                 sensitive_records.append((record, counts))
     if sensitive_records and not args.allow_redacted_secrets:
-        print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
-        for record, counts in sensitive_records:
-            labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
-            print(f"- {safe_diagnostic_path(record.path)}: {labels}", file=sys.stderr)
-        print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
+        if args.report_json:
+            emit_update_target_report(
+                update_target_report(
+                    "blocked",
+                    "secret_records_rejected",
+                    records_selected_count=selected_record_count,
+                    records_deferred_count=deferred_record_count,
+                )
+            )
+        else:
+            print("Refusing to archive records that match secret redaction patterns.", file=sys.stderr)
+            for record, counts in sensitive_records:
+                labels = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+                print(f"- {safe_diagnostic_path(record.path)}: {labels}", file=sys.stderr)
+            print("Review the source records or rerun with --allow-redacted-secrets to store redacted snippets.", file=sys.stderr)
         return 2
+
+    if deferred_source_records:
+        try:
+            update_deferred_source_paths(
+                memory_repo,
+                archive_scope,
+                source_partition,
+                add=deferred_source_records,
+            )
+        except SourceInventoryError:
+            if args.report_json:
+                emit_update_target_report(
+                    update_target_report(
+                        "blocked",
+                        "source_inventory_invalid",
+                        records_selected_count=selected_record_count,
+                        records_deferred_count=deferred_record_count,
+                    )
+                )
+            else:
+                print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
 
     removed_entries = 0
     skipped_records = 0
@@ -5260,15 +6269,59 @@ def main(argv: list[str] | None = None) -> int:
             written = apply_prepared_record(memory_repo, prepared_records[record_index])
         if written is None:
             skipped_records += 1
+    completed_pending_paths = pending_source_paths & {
+        str(record.path.resolve()) for record in records
+    }
+    if completed_pending_paths:
+        try:
+            update_deferred_source_paths(
+                memory_repo,
+                archive_scope,
+                source_partition,
+                remove=completed_pending_paths,
+            )
+        except SourceInventoryError:
+            if args.report_json:
+                emit_update_target_report(
+                    update_target_report(
+                        "blocked",
+                        "source_inventory_invalid",
+                        records_selected_count=selected_record_count,
+                        records_processed_count=len(records),
+                        records_deferred_count=deferred_record_count,
+                        records_skipped_count=skipped_records,
+                        entries_removed_count=removed_entries,
+                    )
+                )
+            else:
+                print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 2
     if not args.defer_global_rebuild:
         rebuild_indexes(
             memory_repo,
             reconcile_removed_refs=not args.defer_memory_ref_reconciliation,
         )
-    if args.rewrite_existing or removed_entries:
-        print(f"Existing entries removed: {removed_entries}")
-    print(f"Records skipped as low-signal: {skipped_records}")
-    print("Archive update complete.")
+    if args.report_json:
+        status = "deferred" if deferred_record_count else "updated"
+        reason = "source_records_deferred" if deferred_record_count else "updated"
+        emit_update_target_report(
+            update_target_report(
+                status,
+                reason,
+                records_selected_count=selected_record_count,
+                records_processed_count=len(records),
+                records_deferred_count=deferred_record_count,
+                records_skipped_count=skipped_records,
+                entries_removed_count=removed_entries,
+            )
+        )
+    else:
+        if args.rewrite_existing or removed_entries:
+            print(f"Existing entries removed: {removed_entries}")
+        if deferred_record_count:
+            print(f"Records deferred: {deferred_record_count}")
+        print(f"Records skipped as low-signal: {skipped_records}")
+        print("Archive update complete.")
     return 0
 
 

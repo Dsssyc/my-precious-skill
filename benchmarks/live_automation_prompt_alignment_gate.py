@@ -49,6 +49,7 @@ class PromptCase:
     expected_aligned: bool
     is_live: bool = False
     requires_preflight: bool = False
+    requires_transaction_adapter: bool = False
 
 
 def run_command(command: list[str], stage: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -127,6 +128,17 @@ def command_positions(lines: list[str], *needles: str, excluded: tuple[str, ...]
     return positions
 
 
+def python_action_positions(lines: list[str], script_name: str) -> list[int]:
+    positions: list[int] = []
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("$ "):
+            stripped = stripped[2:].lstrip()
+        if re.match(r"python(?:3)?\s+", stripped) and script_name in stripped:
+            positions.extend([index] * stripped.count(script_name))
+    return positions
+
+
 def first_after(positions: list[int], previous: int) -> int | None:
     return next((position for position in positions if position > previous), None)
 
@@ -184,19 +196,74 @@ def preflight_fail_closed_contract_present(prompt: str) -> bool:
         "drifted",
         "blocked",
     )
-    stop_language = "stop before updater" in lowered and "do not run the updater" in lowered
+    stop_language = (
+        "stop before updater" in lowered and "do not run the updater" in lowered
+    ) or (
+        "stop before transaction adapter" in lowered
+        and "do not run the transaction adapter" in lowered
+    )
     return stop_language and all(token in lowered for token in required_tokens)
 
 
 def terminal_status_contract_present(prompt: str) -> bool:
     lowered = prompt.lower()
-    required_tokens = (
+    legacy_tokens = (
         "finish with exactly one terminal status",
         "`published`",
         "`no_op_current`",
         "`blocked`",
         "worktree is clean",
         "head equals origin/main",
+    )
+    transaction_tokens = (
+        "finish with exactly one terminal status",
+        "`published`",
+        "`no_op_current`",
+        "`deferred`",
+        "`blocked`",
+        "source_batch_complete",
+        "canonical worktree is clean",
+        "canonical head equals origin/main",
+    )
+    return all(token in lowered for token in legacy_tokens) or all(
+        token in lowered for token in transaction_tokens
+    )
+
+
+def strict_transaction_report_contract_present(prompt: str) -> bool:
+    lowered = prompt.lower()
+    required_tokens = (
+        "exactly one json",
+        "report_kind",
+        "scheduled_memory_transaction",
+        "report_version 1",
+        "`published`",
+        "`no_op_current`",
+        "`deferred`",
+        "`blocked`",
+        "source_batch_complete",
+        "failure_stage",
+        "deferred",
+        "missing",
+        "malformed",
+        "unparsable",
+        "nonzero",
+    )
+    return all(token in lowered for token in required_tokens)
+
+
+def transaction_semantics_present(prompt: str) -> bool:
+    lowered = prompt.lower()
+    required_tokens = (
+        "exclusive transaction lock",
+        "persistent staging clone",
+        "rejects a dirty canonical",
+        "archive audit",
+        "publish-readiness",
+        "search health",
+        "sync dry-run",
+        "remote publication receipt",
+        "fast-forward",
     )
     return all(token in lowered for token in required_tokens)
 
@@ -218,6 +285,23 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
     update_positions = [
         *runner_update_positions,
         *command_positions(lines, "tools/update_memory_archive.py"),
+    ]
+    transaction_positions = python_action_positions(
+        lines,
+        "run_scheduled_memory_transaction.py",
+    )
+    direct_tool_positions = [
+        position
+        for script_name in (
+            "run_memory_updates.py",
+            "update_memory_archive.py",
+            "audit_memory_archive.py",
+            "audit_publish_readiness.py",
+            "repair_publish_surfaces.py",
+            "search_memory.py",
+            "sync_memory_archive.py",
+        )
+        for position in python_action_positions(lines, script_name)
     ]
     archive_positions = command_positions(lines, "tools/audit_memory_archive.py")
     readiness_positions = command_positions(lines, "tools/audit_publish_readiness.py")
@@ -243,6 +327,8 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
     refresh_count = actionable_tool_refresh_count(prompt)
 
     update = min(update_positions) if update_positions else None
+    transaction = min(transaction_positions) if transaction_positions else None
+    operation = transaction if transaction is not None else update
     preflight = min(preflight_positions) if preflight_positions else None
     archive_before = first_after(archive_positions, update) if update is not None else None
     readiness_before = first_after(readiness_positions, archive_before) if archive_before is not None else None
@@ -274,10 +360,10 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
     sync_dry_run_before_push_present = sync_dry is not None and sync_live is not None and sync_dry < sync_live
     sync_only_publish_path_present = sync_live is not None and raw_git_count == 0
     preflight_before_update_present = (
-        preflight is not None and update is not None and preflight < update
+        preflight is not None and operation is not None and preflight < operation
     )
     fail_closed_present = preflight_fail_closed_contract_present(prompt)
-    clean_worktree_flag_present = bool(runner_update_positions) and all(
+    legacy_clean_worktree_flag_present = bool(runner_update_positions) and all(
         "--require-clean-worktree" in lines[position]
         for position in runner_update_positions
     )
@@ -291,7 +377,7 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
             "worktree is clean",
         )
     )
-    publication_receipt_contract_present = (
+    legacy_publication_receipt_contract_present = (
         initial_head is not None
         and receipt_fetch is not None
         and receipt_head is not None
@@ -300,12 +386,50 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         and receipt_language_present
     )
     terminal_contract_present = terminal_status_contract_present(prompt)
+    strict_transaction_report = strict_transaction_report_contract_present(prompt)
+    transaction_semantics = transaction_semantics_present(prompt)
+    single_transaction_adapter = (
+        len(transaction_positions) == 1
+        and all(
+            token in lines[transaction_positions[0]]
+            for token in (
+                "--memory-repo",
+                "--source-dir",
+                "--state-dir",
+                "--push",
+                "--include-reviewed-memory-nodes",
+            )
+        )
+    )
+    transaction_direct_publish_chain_count = len(direct_tool_positions)
+    transaction_publication_receipt = (
+        transaction_semantics
+        and strict_transaction_report
+        and "canonical head equals origin/main" in prompt.lower()
+        and "canonical worktree is clean" in prompt.lower()
+    )
+    transaction_aligned = (
+        single_transaction_adapter
+        and transaction_direct_publish_chain_count == 0
+        and transaction_semantics
+        and strict_transaction_report
+        and transaction_publication_receipt
+        and terminal_contract_present
+    )
+    clean_worktree_flag_present = (
+        transaction_semantics if transaction is not None else legacy_clean_worktree_flag_present
+    )
+    publication_receipt_contract_present = (
+        transaction_publication_receipt
+        if transaction is not None
+        else legacy_publication_receipt_contract_present
+    )
     task_completion_not_publish_success_present = (
         "task completion is not publish success" in prompt.lower()
         and "task state alone" in prompt.lower()
     )
     preflight_aligned = preflight_before_update_present and fail_closed_present and refresh_count == 0
-    aligned = (
+    legacy_aligned = (
         update is not None
         and archive_before is not None
         and publish_readiness_gate_present
@@ -320,6 +444,21 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         and terminal_contract_present
         and task_completion_not_publish_success_present
     )
+    aligned = (
+        transaction_aligned
+        and generic_search_count == 0
+        and raw_git_count == 0
+        and private_count == 0
+        and task_completion_not_publish_success_present
+    ) if transaction is not None else legacy_aligned
+    if transaction is not None:
+        publish_readiness_gate_present = transaction_semantics
+        repair_step_present = transaction_semantics
+        post_repair_recheck_present = transaction_semantics
+        sync_dry_run_before_push_present = transaction_semantics
+        sync_only_publish_path_present = (
+            single_transaction_adapter and transaction_direct_publish_chain_count == 0
+        )
     return {
         "aligned": aligned,
         "update_present": update is not None,
@@ -341,6 +480,10 @@ def evaluate_prompt(prompt: str) -> dict[str, object]:
         "publication_receipt_contract_present": publication_receipt_contract_present,
         "terminal_status_contract_present": terminal_contract_present,
         "task_completion_not_publish_success_present": task_completion_not_publish_success_present,
+        "transaction_adapter_present": transaction is not None,
+        "single_transaction_adapter_invocation_present": single_transaction_adapter,
+        "strict_transaction_report_contract_present": strict_transaction_report,
+        "transaction_direct_publish_chain_count": transaction_direct_publish_chain_count,
     }
 
 
@@ -417,6 +560,57 @@ def synthetic_preflight_prompt(
     return "\n".join(prefix)
 
 
+def synthetic_transaction_prompt(
+    *,
+    duplicate_adapter: bool = False,
+    same_line_duplicate_adapter: bool = False,
+    include_report_contract: bool = True,
+) -> str:
+    adapter_command = (
+        "python /installed/update-my-precious/scripts/run_scheduled_memory_transaction.py "
+        "--memory-repo /tmp/agent-memory --source-dir /tmp/source "
+        "--state-dir /tmp/transaction-state --push --include-reviewed-memory-nodes"
+    )
+    lines = [
+        "Run the runtime parity preflight before transaction adapter execution.",
+        "python /installed/setup-my-precious/scripts/setup_memory_archive.py "
+        "--path /tmp/agent-memory --check-tools --report-json --skip-config",
+        "Require exit zero and valid JSON with report_kind runtime_tool_bundle_parity, "
+        "report_version 1, status=current, matching expected counts, equal hashes, and zero privacy leaks.",
+        "If exit is nonzero or the report is missing, stale, unsafe, malformed, unparsable, "
+        "failed, drifted, or blocked, stop before transaction adapter and do not run the transaction adapter.",
+        "Never run --refresh-tools from scheduled automation.",
+        "Run exactly one transaction adapter invocation:",
+        f"{adapter_command}; {adapter_command}" if same_line_duplicate_adapter else adapter_command,
+        "The adapter uses an exclusive transaction lock and persistent staging clone, rejects a dirty canonical, "
+        "and runs archive audit, publish-readiness, bounded repair, search health, sync dry-run, live sync, "
+        "remote publication receipt verification, and canonical fast-forward in that order.",
+    ]
+    if duplicate_adapter:
+        lines.append(adapter_command)
+    if include_report_contract:
+        lines.extend(
+            [
+                "Require exactly one JSON object with report_kind scheduled_memory_transaction, "
+                "report_version 1, and status `published`, `no_op_current`, `deferred`, or `blocked`.",
+                "A nonzero exit or missing, malformed, or unparsable adapter report is `blocked`.",
+                "Consume failure_stage and aggregate processed/deferred/child-failure counts only; "
+                "never render child output or source paths.",
+                "Task completion is not publish success; never infer success from task state alone.",
+                "Finish with exactly one terminal status:",
+                "- `published`: only when the adapter verified the remote publication receipt, "
+                "the canonical worktree is clean, and canonical HEAD equals origin/main; "
+                "source_batch_complete may be false when stable siblings were published.",
+                "- `no_op_current`: only when the adapter confirmed no changes, the canonical worktree is clean, "
+                "canonical HEAD equals origin/main, source_batch_complete is true, and deferred counts are zero.",
+                "- `deferred`: successful zero-exit with no publication when source_batch_complete is false "
+                "and aggregate deferred record/target counts are nonzero.",
+                "- `blocked`: for every other result.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def negative_missing_readiness_prompt() -> str:
     return "\n".join(
         [
@@ -452,6 +646,9 @@ def case_result(case: PromptCase) -> dict[str, object]:
     evaluation = evaluate_prompt(case.prompt)
     aligned = bool(evaluation["aligned"]) and (
         not case.requires_preflight or bool(evaluation["preflight_aligned"])
+    ) and (
+        not case.requires_transaction_adapter
+        or bool(evaluation["transaction_adapter_present"])
     )
     if aligned != case.expected_aligned:
         raise GateFailure(case.name, f"unexpected_alignment_{aligned}")
@@ -469,6 +666,7 @@ def case_result(case: PromptCase) -> dict[str, object]:
         "raw_git_publish_path_count": int(evaluation["raw_git_publish_path_count"]),
         "private_archive_content_committed_count": int(evaluation["private_archive_content_committed_count"]),
         "requires_preflight": case.requires_preflight,
+        "requires_transaction_adapter": case.requires_transaction_adapter,
         "preflight_before_update_present": bool(evaluation["preflight_before_update_present"]),
         "preflight_fail_closed_contract_present": bool(
             evaluation["preflight_fail_closed_contract_present"]
@@ -482,6 +680,16 @@ def case_result(case: PromptCase) -> dict[str, object]:
         "task_completion_not_publish_success_present": bool(
             evaluation["task_completion_not_publish_success_present"]
         ),
+        "transaction_adapter_present": bool(evaluation["transaction_adapter_present"]),
+        "single_transaction_adapter_invocation_present": bool(
+            evaluation["single_transaction_adapter_invocation_present"]
+        ),
+        "strict_transaction_report_contract_present": bool(
+            evaluation["strict_transaction_report_contract_present"]
+        ),
+        "transaction_direct_publish_chain_count": int(
+            evaluation["transaction_direct_publish_chain_count"]
+        ),
     }
 
 
@@ -494,6 +702,12 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
     synthetic_preflight = next(
         case for case in case_results if case["case"] == "synthetic_preflight_prompt"
     )
+    synthetic_transaction = next(
+        case for case in case_results if case["case"] == "synthetic_transaction_prompt"
+    )
+    transaction_positive_cases = [
+        case for case in positive_cases if case["requires_transaction_adapter"]
+    ]
     raw_git_count = sum(int(case["raw_git_publish_path_count"]) for case in positive_cases)
     private_count = sum(int(case["private_archive_content_committed_count"]) for case in positive_cases)
     metrics = {
@@ -507,6 +721,19 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
         "sync_dry_run_before_push_present": all(case["sync_dry_run_before_push_present"] for case in positive_cases),
         "sync_only_publish_path_present": all(case["sync_only_publish_path_present"] for case in positive_cases),
         "synthetic_preflight_alignment_pass": bool(synthetic_preflight["actual_aligned"]),
+        "transaction_adapter_alignment_pass": bool(synthetic_transaction["actual_aligned"]),
+        "single_transaction_adapter_invocation_present": all(
+            case["single_transaction_adapter_invocation_present"]
+            for case in transaction_positive_cases
+        ),
+        "strict_transaction_report_contract_present": all(
+            case["strict_transaction_report_contract_present"]
+            for case in transaction_positive_cases
+        ),
+        "transaction_direct_publish_chain_count": sum(
+            int(case["transaction_direct_publish_chain_count"])
+            for case in transaction_positive_cases
+        ),
         "preflight_before_update_present": all(
             case["preflight_before_update_present"] for case in preflight_cases
         ),
@@ -554,6 +781,24 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
             if case["case"] == "negative_missing_publication_receipt_prompt"
             and not case["actual_aligned"]
         ),
+        "duplicate_transaction_adapter_rejection_count": sum(
+            1
+            for case in negative_cases
+            if case["case"] == "negative_duplicate_transaction_adapter_prompt"
+            and not case["actual_aligned"]
+        ),
+        "same_line_duplicate_transaction_adapter_rejection_count": sum(
+            1
+            for case in negative_cases
+            if case["case"] == "negative_same_line_duplicate_transaction_adapter_prompt"
+            and not case["actual_aligned"]
+        ),
+        "missing_transaction_report_rejection_count": sum(
+            1
+            for case in negative_cases
+            if case["case"] == "negative_missing_transaction_report_prompt"
+            and not case["actual_aligned"]
+        ),
         "raw_git_publish_path_count": raw_git_count,
         "private_archive_content_committed_count": private_count,
         "generic_content_query_required_count": sum(
@@ -570,6 +815,10 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
         and metrics["sync_dry_run_before_push_present"]
         and metrics["sync_only_publish_path_present"]
         and metrics["synthetic_preflight_alignment_pass"]
+        and metrics["transaction_adapter_alignment_pass"]
+        and metrics["single_transaction_adapter_invocation_present"]
+        and metrics["strict_transaction_report_contract_present"]
+        and metrics["transaction_direct_publish_chain_count"] == 0
         and metrics["preflight_before_update_present"]
         and metrics["preflight_fail_closed_contract_present"]
         and metrics["clean_worktree_flag_present"]
@@ -582,6 +831,9 @@ def build_report(case_results: list[dict[str, object]], *, live_requested: bool)
         and metrics["raw_git_rejection_count"] == 1
         and metrics["missing_clean_worktree_rejection_count"] == 1
         and metrics["missing_publication_receipt_rejection_count"] == 1
+        and metrics["duplicate_transaction_adapter_rejection_count"] == 1
+        and metrics["same_line_duplicate_transaction_adapter_rejection_count"] == 1
+        and metrics["missing_transaction_report_rejection_count"] == 1
         and metrics["raw_git_publish_path_count"] == 0
         and metrics["private_archive_content_committed_count"] == 0
         and metrics["generic_content_query_required_count"] == 0
@@ -617,6 +869,13 @@ def run_gate(root: Path, *, automation_config: Path | None = None) -> dict[str, 
             True,
             requires_preflight=True,
         ),
+        PromptCase(
+            "synthetic_transaction_prompt",
+            synthetic_transaction_prompt(),
+            True,
+            requires_preflight=True,
+            requires_transaction_adapter=True,
+        ),
         PromptCase("negative_missing_readiness_prompt", negative_missing_readiness_prompt(), False),
         PromptCase("negative_raw_git_prompt", negative_raw_git_prompt(), False),
         PromptCase(
@@ -643,12 +902,34 @@ def run_gate(root: Path, *, automation_config: Path | None = None) -> dict[str, 
             False,
             requires_preflight=True,
         ),
+        PromptCase(
+            "negative_duplicate_transaction_adapter_prompt",
+            synthetic_transaction_prompt(duplicate_adapter=True),
+            False,
+            requires_preflight=True,
+            requires_transaction_adapter=True,
+        ),
+        PromptCase(
+            "negative_same_line_duplicate_transaction_adapter_prompt",
+            synthetic_transaction_prompt(same_line_duplicate_adapter=True),
+            False,
+            requires_preflight=True,
+            requires_transaction_adapter=True,
+        ),
+        PromptCase(
+            "negative_missing_transaction_report_prompt",
+            synthetic_transaction_prompt(include_report_contract=False),
+            False,
+            requires_preflight=True,
+            requires_transaction_adapter=True,
+        ),
     ]
     if automation_config is not None:
         cases.append(
             PromptCase(
                 "live_automation_config",
                 prompt_from_automation_config(automation_config),
+                True,
                 True,
                 True,
                 True,

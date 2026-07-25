@@ -32,6 +32,210 @@ AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT = Path("templates/agent-memory-repo/too
 
 
 class UpdateMemoryArchiveTests(unittest.TestCase):
+    def test_redact_source_text_preserves_jsonl_structure_for_cookie_header(self):
+        module = load_update_module()
+        source = (
+            json.dumps(
+                {
+                    "timestamp": "2026-07-23T01:00:00Z",
+                    "role": "user",
+                    "content": "Cookie: session=synthetic-cookie",
+                    "ok": True,
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+
+        row = json.loads(redacted)
+        self.assertEqual(row["content"], "Cookie: [REDACTED_COOKIE]")
+        self.assertTrue(row["ok"])
+        self.assertEqual(counts, {"cookie": 1})
+        self.assertNotIn("synthetic-cookie", redacted)
+
+    def test_redact_source_text_preserves_jsonl_lines_and_source_event_hashes(self):
+        module = load_update_module()
+        original_content = (
+            "Decision: structured source redaction must preserve event locators. "
+            "Cookie: session=synthetic-cookie\nKeep this durable detail."
+        )
+        rows = [
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": original_content,
+            },
+            {
+                "timestamp": "2026-07-23T01:00:01Z",
+                "role": "assistant",
+                "content": "The structured source contract is recorded.",
+            },
+        ]
+        source = json.dumps(rows[0], separators=(",", ":")) + "\n\n"
+        source += json.dumps(rows[1], separators=(",", ":")) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        events, values = module.analyze_selected_jsonl(source, redacted)
+
+        self.assertEqual(len(source.splitlines()), len(redacted.splitlines()))
+        self.assertEqual([json.loads(line) for line in redacted.splitlines() if line], [
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": (
+                    "Decision: structured source redaction must preserve event locators. "
+                    "Cookie: [REDACTED_COOKIE]\nKeep this durable detail."
+                ),
+            },
+            rows[1],
+        ])
+        self.assertEqual(values, rows)
+        user_event = next(event for event in events if event.kind == "user")
+        self.assertEqual((user_event.line_number, user_event.event_ordinal), (1, 1))
+        self.assertEqual(user_event.event_sha256, module.source_event_sha256(original_content))
+        self.assertEqual(counts, {"cookie": 1})
+
+    def test_redact_source_text_keeps_json_valid_for_cookie_text_variants(self):
+        module = load_update_module()
+        secrets = (
+            "session=synthetic-newline",
+            "session=synthetic-escapes",
+            "session=synthetic-narrative",
+        )
+        values = (
+            f"Cookie: {secrets[0]}\nNarrative remains.",
+            f'Cookie: {secrets[1]} with "quoted" and \\escaped values',
+            f"Cookie: {secrets[2]} followed by ordinary narrative",
+        )
+        source = "".join(
+            json.dumps({"content": value, "ok": True}, separators=(",", ":")) + "\n"
+            for value in values
+        )
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        rows = [json.loads(line) for line in redacted.splitlines()]
+
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(row["ok"] for row in rows))
+        self.assertEqual(rows[0]["content"], "Cookie: [REDACTED_COOKIE]\nNarrative remains.")
+        self.assertEqual(counts, {"cookie": 3})
+        for secret in secrets:
+            self.assertNotIn(secret, redacted)
+
+    def test_redact_source_text_keeps_escaped_unicode_separators_on_one_jsonl_line(self):
+        module = load_update_module()
+        content = (
+            "Cookie: session=synthetic-unicode-separators\n"
+            "Preserve escaped separators: \u0085 \u2028 \u2029."
+        )
+        source = json.dumps(
+            {
+                "timestamp": "2026-07-23T01:00:00Z",
+                "role": "user",
+                "content": content,
+                "ok": True,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        events, _ = module.analyze_selected_jsonl(source, redacted)
+
+        self.assertEqual(len(redacted.splitlines()), 1)
+        row = json.loads(redacted)
+        self.assertTrue(row["ok"])
+        self.assertEqual(
+            row["content"],
+            "Cookie: [REDACTED_COOKIE]\nPreserve escaped separators: \u0085 \u2028 \u2029.",
+        )
+        user_event = next(event for event in events if event.kind == "user")
+        self.assertEqual((user_event.line_number, user_event.event_ordinal), (1, 1))
+        self.assertEqual(counts, {"cookie": 1})
+        self.assertNotIn("synthetic-unicode-separators", redacted)
+
+    def test_redact_source_text_redacts_nested_structured_secret_values(self):
+        module = load_update_module()
+        github_token = "ghp_" + "A" * 24
+        openai_key = "sk-" + "b" * 24
+        source_value = {
+            "timestamp": "2026-07-23T01:00:00Z",
+            "payload": {
+                "headers": [
+                    "Cookie: session=synthetic-cookie",
+                    "Authorization: Bearer synthetic.bearer-token",
+                ],
+                "credentials": {
+                    "github": github_token,
+                    "openai": openai_key,
+                },
+            },
+            "ok": True,
+        }
+        source = json.dumps(source_value, separators=(",", ":")) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.jsonl"), source)
+        row = json.loads(redacted)
+
+        self.assertEqual(row["payload"]["headers"], [
+            "Cookie: [REDACTED_COOKIE]",
+            "Authorization: Bearer [REDACTED_BEARER_TOKEN]",
+        ])
+        self.assertEqual(row["payload"]["credentials"], {
+            "github": "[REDACTED_GITHUB_TOKEN]",
+            "openai": "[REDACTED_OPENAI_KEY]",
+        })
+        self.assertTrue(row["ok"])
+        self.assertEqual(counts, {
+            "bearer_token": 1,
+            "cookie": 1,
+            "github_token": 1,
+            "openai_key": 1,
+        })
+        for secret in ("synthetic-cookie", "synthetic.bearer-token", github_token, openai_key):
+            self.assertNotIn(secret, redacted)
+
+    def test_redact_source_text_preserves_json_object_structure(self):
+        module = load_update_module()
+        source = json.dumps(
+            {
+                "message": "Cookie: session=synthetic-cookie",
+                "nested": {"ok": True},
+            },
+            indent=2,
+        ) + "\n"
+
+        redacted, counts = module.redact_source_text(Path("record.json"), source)
+
+        self.assertEqual(json.loads(redacted), {
+            "message": "Cookie: [REDACTED_COOKIE]",
+            "nested": {"ok": True},
+        })
+        self.assertEqual(counts, {"cookie": 1})
+
+    def test_redact_source_text_keeps_nonstructured_cookie_line_behavior(self):
+        module = load_update_module()
+        source = "Cookie: session=synthetic-cookie\nDurable text remains.\n"
+
+        redacted, counts = module.redact_source_text(Path("record.log"), source)
+
+        self.assertEqual(redacted, "Cookie: [REDACTED_COOKIE]\nDurable text remains.\n")
+        self.assertEqual(counts, {"cookie": 1})
+
+    def test_redact_source_text_rejects_malformed_structured_sources(self):
+        module = load_update_module()
+
+        for path, source in (
+            (Path("record.jsonl"), '{"ok":true}\n{not-json}\n'),
+            (Path("record.json"), '{"ok":true'),
+        ):
+            with self.subTest(path=path):
+                with self.assertRaises(module.SourceInventoryError) as raised:
+                    module.redact_source_text(path, source)
+                self.assertEqual(str(raised.exception), "source record is malformed")
+
     def synthetic_memory_node(
         self,
         memory_id: str,
@@ -2707,6 +2911,802 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         self.assertEqual(anchor["event_ordinal"], 1)
         self.assertEqual(anchor["event_sha256"], source_hash)
         self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
+
+    def test_natural_user_preference_strips_canonical_skill_invocation_before_path_rejection(self):
+        module = load_update_module()
+        preference_text = (
+            "以后给我起草 goal 提示词时，我默认要求每个 subgoal 都必须可收敛，"
+            "并以可验证指标结束。"
+        )
+        source_text = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+            f"{preference_text}"
+        )
+
+        self.assertEqual(
+            module.natural_user_memory_fact(source_text),
+            f"用户偏好：{preference_text}",
+        )
+
+    def test_natural_user_preference_strips_multiple_canonical_skill_invocations(self):
+        module = load_update_module()
+        preference_text = "I prefer goal plans to end with deterministic verification."
+        source_text = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md)\n"
+            "[$using-superpowers]"
+            "(/Users/example/.agents/skills/using-superpowers/SKILL.md)\n"
+            f"{preference_text}"
+        )
+
+        self.assertEqual(
+            module.natural_user_memory_fact(source_text),
+            "The user prefers goal plans to end with deterministic verification.",
+        )
+
+    def test_natural_user_preference_rejects_noncanonical_or_non_durable_prefixed_text(self):
+        module = load_update_module()
+        canonical_prefix = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+        )
+        rejected = (
+            canonical_prefix,
+            "[notes](/Users/example/private/notes.md) "
+            "I prefer plans to include verification.",
+            "[notes](/Users/example/.codex/skills/notes/SKILL.md) "
+            "I prefer plans to include verification.",
+            "[$using-agent-skills](/Users/example/private/notes.md) "
+            "I prefer plans to include verification.",
+            "$100 I prefer plans to include verification.",
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md "
+            "I prefer plans to include verification.",
+            "I prefer plans to include verification "
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md).",
+            canonical_prefix + "这次任务我希望只输出三段。",
+            canonical_prefix + "如果以后写 goal，是不是每个 subgoal 都应该可收敛？",
+            canonical_prefix + "引用提示词：我的偏好是所有计划只有一个阶段。",
+            canonical_prefix + "好的，我会记住每个计划都必须可验证。",
+            canonical_prefix + "My preference is that Authorization: Bearer synthetic-token-value.",
+        )
+
+        self.assertEqual(
+            [module.natural_user_memory_fact(text) for text in rejected],
+            ["" for _ in rejected],
+        )
+
+    def test_prefixed_natural_user_preference_keeps_original_user_event_anchor(self):
+        module = load_update_module()
+        preference_text = "I prefer release evidence to include quantified outcomes."
+        source_text = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+            f"{preference_text}"
+        )
+        source_hash = module.source_event_sha256(source_text)
+        events = [module.MemoryEvent("user", source_text, 1, 1, source_hash)]
+
+        summary = module.summarize_events(events, "synthetic-prefixed-preference")
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        expected_fact = "The user prefers release evidence to include quantified outcomes."
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        anchor = next(row for row in anchors if row["quote_id"] == source["evidence_quote_id"])
+        self.assertEqual(source["source"], "natural_user")
+        self.assertEqual(anchor["event_sha256"], source_hash)
+        self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
+
+    def test_summarize_events_reserves_source_bound_preference_under_saturated_evidence(self):
+        module = load_update_module()
+        prefix = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+        )
+        preference = "I prefer saturated goal plans to end with deterministic evidence."
+        source_text = prefix + preference
+        final_state = "Final state: Synthetic source-bound allocation remains pending review."
+        texts = [
+            *[
+                f"Decision: Synthetic {name} allocation requires review."
+                for name in ("alpha", "beta", "gamma", "delta", "epsilon")
+            ],
+            *[
+                f"Synthetic retrieval endpoint is 127.0.0.1:{port}."
+                for port in range(4100, 4108)
+            ],
+            source_text,
+            final_state,
+        ]
+        events = [
+            module.MemoryEvent(
+                "user" if text == source_text else "assistant",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(texts, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-saturated-preference")
+        repeated = module.summarize_events(events, "synthetic-saturated-preference")
+        summary["memory_candidate_sources"] = module.memory_candidate_source_entries(
+            summary,
+            events,
+        )
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        expected_fact = "The user prefers saturated goal plans to end with deterministic evidence."
+        self.assertIn(expected_fact, summary["facts"])
+        self.assertIn(expected_fact, summary["evidence"])
+        self.assertIn(final_state, summary["evidence"])
+        self.assertLessEqual(len(summary["evidence"]), 6)
+        self.assertTrue(any(line.startswith("Decision:") for line in summary["evidence"]))
+        self.assertEqual(summary["evidence"], repeated["evidence"])
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        anchor = next(row for row in anchors if row["quote_id"] == source["evidence_quote_id"])
+        self.assertEqual(source["source"], "natural_user")
+        self.assertEqual(anchor["line_number"], texts.index(source_text) + 1)
+        self.assertEqual(anchor["event_sha256"], module.source_event_sha256(source_text))
+        self.assertEqual(source["source_anchor_id"], anchor["source_anchor_id"])
+        candidate_sources = [
+            row
+            for row in summary["memory_candidate_sources"]
+            if row["text"] == expected_fact
+        ]
+        self.assertEqual(len(candidate_sources), 1)
+        candidate_source = candidate_sources[0]
+        self.assertEqual(candidate_source["source"], "natural_user")
+        self.assertEqual(candidate_source["evidence_quote_id"], source["evidence_quote_id"])
+        self.assertEqual(candidate_source["source_anchor_id"], source["source_anchor_id"])
+
+    def test_summarize_events_bounds_five_selected_preferences_plus_final_state(self):
+        module = load_update_module()
+        prefix = (
+            "[$using-agent-skills]"
+            "(/Users/example/.codex/skills/using-agent-skills/SKILL.md) "
+        )
+        markers = ("alpha", "beta", "gamma", "delta", "epsilon")
+        source_texts = [
+            prefix + f"I prefer reserved goal {marker} plans to preserve source-bound evidence."
+            for marker in markers
+        ]
+        expected_facts = [
+            f"The user prefers reserved goal {marker} plans to preserve source-bound evidence."
+            for marker in markers
+        ]
+        final_state = "Final state: Synthetic five-preference allocation is complete."
+        texts = [
+            *[
+                f"Decision: Synthetic {name} capacity requires review."
+                for name in ("one", "two", "three", "four", "five")
+            ],
+            *[
+                f"Synthetic retrieval endpoint is 127.0.0.1:{port}."
+                for port in range(4200, 4208)
+            ],
+            *source_texts,
+            source_texts[0],
+            final_state,
+        ]
+        events = [
+            module.MemoryEvent(
+                "user" if text in source_texts else "assistant",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(texts, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-five-preferences")
+        summary["memory_candidate_sources"] = module.memory_candidate_source_entries(
+            summary,
+            events,
+        )
+        module.materialize_source_anchors(summary, "b" * 64)
+
+        self.assertEqual(summary["evidence"], [*expected_facts, final_state])
+        self.assertEqual(len(summary["evidence"]), 6)
+        self.assertEqual(len(set(summary["evidence"])), 6)
+        self.assertEqual(
+            [
+                row["text"]
+                for row in summary["fact_sources"]
+                if row.get("source") == "natural_user" and row.get("evidence_quote_id")
+            ],
+            expected_facts,
+        )
+        self.assertEqual(
+            [
+                row["text"]
+                for row in summary["fact_sources"]
+                if row.get("source") == "natural_user"
+                and row.get("evidence_quote_id")
+                and row.get("source_anchor_id")
+            ],
+            expected_facts,
+        )
+        self.assertEqual(
+            [
+                row["text"]
+                for row in summary["memory_candidate_sources"]
+                if row.get("source") == "natural_user"
+                and row.get("evidence_quote_id")
+                and row.get("source_anchor_id")
+            ],
+            expected_facts,
+        )
+
+    def test_natural_user_preference_anchor_wins_over_assistant_literal_collision(self):
+        module = load_update_module()
+        source_text = "I prefer bounded plans to end in verified evidence."
+        derived_fact = "The user prefers bounded plans to end in verified evidence."
+        source_hash = module.source_event_sha256(source_text)
+        events = [
+            module.MemoryEvent("assistant", derived_fact, 1, 1, "a" * 64),
+            module.MemoryEvent("user", source_text, 2, 1, source_hash),
+        ]
+
+        summary = module.summarize_events(events, "synthetic-preference-collision")
+        source = next(row for row in summary["fact_sources"] if row["text"] == derived_fact)
+        anchor = next(
+            row
+            for row in summary["evidence_sources"]
+            if row["quote_id"] == source["evidence_quote_id"]
+        )
+
+        self.assertEqual(source["source"], "natural_user")
+        self.assertEqual(anchor["line_number"], 2)
+        self.assertEqual(anchor["event_ordinal"], 1)
+        self.assertEqual(anchor["event_sha256"], source_hash)
+
+    def test_natural_user_preference_scans_full_stream_for_durable_chinese_constraint(self):
+        module = load_update_module()
+        earlier_preferences = [
+            module.MemoryEvent(
+                "user",
+                f"I prefer synthetic preference marker {index} to remain deterministic.",
+                index,
+                1,
+                module.source_event_sha256(
+                    f"I prefer synthetic preference marker {index} to remain deterministic."
+                ),
+            )
+            for index in range(1, 7)
+        ]
+        source_text = (
+            "以后给我起草 goal 提示词时，我默认要求每个 subgoal 都必须可收敛，"
+            "并以可验证指标结束。"
+        )
+        source_hash = module.source_event_sha256(source_text)
+        events = [
+            *earlier_preferences,
+            module.MemoryEvent("assistant", "Unrelated project history remains synthetic.", 7, 1, "a" * 64),
+            module.MemoryEvent("user", source_text, 8, 1, source_hash),
+        ]
+
+        summary = module.summarize_events(events, "synthetic-long-preference")
+
+        expected_fact = f"用户偏好：{source_text}"
+        self.assertIn(expected_fact, summary["facts"])
+        source = next(row for row in summary["fact_sources"] if row["text"] == expected_fact)
+        self.assertEqual(source["source"], "natural_user")
+        anchor = next(
+            row
+            for row in summary["evidence_sources"]
+            if row["quote_id"] == source["evidence_quote_id"]
+        )
+        self.assertEqual(anchor["line_number"], 8)
+        self.assertEqual(anchor["event_ordinal"], 1)
+        self.assertEqual(anchor["event_sha256"], source_hash)
+
+    def test_natural_user_preference_rejects_chinese_temporary_hypothetical_and_quoted_text(self):
+        module = load_update_module()
+
+        rejected = (
+            "这次任务我希望只输出三段。",
+            "如果以后给我写 goal 提示词，是不是应该每个 subgoal 都可收敛？",
+            "引用提示词：\u201c我希望以后所有 goal 都只有一个 subgoal。\u201d",
+            "我的偏好可能是每次只输出三段，但我还没决定。",
+            "我的偏好是今天只输出三段。",
+            "示例，我默认要求所有计划都只有一个阶段。",
+            "例如，我默认要求所有计划都只有一个阶段。",
+            "引用如下。我的偏好是所有计划只能有一个阶段。",
+            "这一个任务我默认要求只输出三段。",
+            "以后给我看看这个报错。",
+            "以后给我检查当前 HEAD 的状态。",
+            "我默认这个分支已经合并。",
+            "我默认认为测试已经通过。",
+        )
+
+        self.assertEqual(
+            [module.natural_user_memory_fact(text) for text in rejected],
+            ["" for _ in rejected],
+        )
+
+    def test_natural_user_preference_promotes_repeated_agent_directed_normative_constraints(self):
+        module = load_update_module()
+        source_texts = (
+            "你给出的长期计划必须有明确停止条件，不能无限增加子任务，"
+            "每个阶段都必须以可验证结果结束。",
+            "那你给一个长期计划，必须有明确停止条件，不能无限增加子任务，"
+            "每个阶段都必须以可验证结果结束。",
+        )
+
+        for source_text in source_texts:
+            with self.subTest(source_text=source_text):
+                self.assertEqual(
+                    module.natural_user_memory_fact(source_text),
+                    f"用户偏好：{source_text}",
+                )
+
+    def test_natural_user_preference_preserves_reference_format_rule(self):
+        module = load_update_module()
+        source_text = "引用如下格式的代码时，我默认要求保留行号。"
+
+        self.assertEqual(
+            module.natural_user_memory_fact(source_text),
+            f"用户偏好：{source_text}",
+        )
+
+    def test_v255_generic_preference_inducer_is_absent_from_production_runtime(self):
+        module = load_update_module()
+
+        self.assertFalse(hasattr(module, "induce_repeated_user_preference"))
+        source = Path(
+            "templates/agent-memory-repo/tools/update_memory_archive.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("def induce_repeated_user_preference", source)
+
+    def test_specialized_inducer_keeps_precedence_over_generic_correction_fact(self):
+        module = load_update_module()
+        rows = (
+            "给一个 Markdown 版本的 goal。",
+            "注意排版一定要正确，不然我无法复制。",
+            "你看看你给的是纯 Markdown 吗，这个格式已经乱了。",
+            "那你倒是把完整 goal 给我，不要继续解释。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-compatible-preference")
+
+        correction_sources = [
+            row
+            for row in summary["fact_sources"]
+            if row.get("source") == "natural_user_correction"
+        ]
+        self.assertEqual(
+            [row["text"] for row in correction_sources],
+            [module.COPYABLE_GOAL_PREFERENCE_TEXT],
+        )
+
+    def test_repeated_goal_format_corrections_induce_source_bound_copyable_preference(self):
+        module = load_update_module()
+        rows = (
+            ("user", "给一个 Markdown 版本的 goal。"),
+            ("assistant", "Here is a rendered goal with surrounding explanation."),
+            ("user", "注意排版一定要正确，不然我无法复制。"),
+            ("assistant", "I will explain the formatting before trying again."),
+            ("user", "你看看你给的是纯 Markdown 吗，这个格式已经乱了。"),
+            ("assistant", module.COPYABLE_GOAL_PREFERENCE_TEXT),
+            ("user", "那你倒是把完整 goal 给我，不要继续解释。"),
+        )
+        events = [
+            module.MemoryEvent(
+                kind,
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, (kind, text) in enumerate(rows, 1)
+        ]
+
+        induced = module.induce_copyable_goal_preference(events)
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+        self.assertGreaterEqual(len(induced.support_events), 2)
+        self.assertTrue(all(event.kind == "user" for event in induced.support_events))
+        self.assertIn(3, {event.line_number for event in induced.support_events})
+        self.assertIn(5, {event.line_number for event in induced.support_events})
+
+        summary = module.summarize_events(events, "synthetic-copyable-goal")
+        summary["memory_candidate_sources"] = module.memory_candidate_source_entries(summary, events)
+        anchors = module.materialize_source_anchors(summary, "a" * 64)
+
+        self.assertIn(module.COPYABLE_GOAL_PREFERENCE_TEXT, summary["facts"])
+        self.assertNotIn(module.COPYABLE_GOAL_PREFERENCE_TEXT, summary["evidence"])
+        source = next(
+            row
+            for row in summary["fact_sources"]
+            if row["text"] == module.COPYABLE_GOAL_PREFERENCE_TEXT
+        )
+        self.assertEqual(source["source"], "natural_user_correction")
+        self.assertGreaterEqual(len(source["evidence_quote_ids"]), 2)
+        self.assertEqual(len(source["evidence_quote_ids"]), len(source["source_anchor_ids"]))
+        anchored_quote_ids = {
+            row["quote_id"]
+            for row in anchors
+            if row["quote_id"] in source["evidence_quote_ids"]
+        }
+        self.assertEqual(anchored_quote_ids, set(source["evidence_quote_ids"]))
+        self.assertEqual(
+            {
+                row["line_number"]
+                for row in anchors
+                if row["quote_id"] in source["evidence_quote_ids"]
+            },
+            {event.line_number for event in induced.support_events},
+        )
+        candidate_source = next(
+            row
+            for row in summary["memory_candidate_sources"]
+            if row["text"] == module.COPYABLE_GOAL_PREFERENCE_TEXT
+        )
+        self.assertEqual(candidate_source["evidence_quote_ids"], source["evidence_quote_ids"])
+        self.assertEqual(candidate_source["source_anchor_ids"], source["source_anchor_ids"])
+
+    def test_single_durable_goal_format_instruction_induces_canonical_preference(self):
+        module = load_update_module()
+        source_text = (
+            "以后给我写 goal 时，默认把完整 goal 放在单独的 text 代码块里，"
+            "块外不要解释，方便一键复制。"
+        )
+        event = module.MemoryEvent(
+            "user",
+            source_text,
+            1,
+            1,
+            module.source_event_sha256(source_text),
+        )
+
+        induced = module.induce_copyable_goal_preference([event])
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+        self.assertEqual(induced.support_events, (event,))
+
+    def test_identical_goal_corrections_keep_distinct_event_provenance(self):
+        module = load_update_module()
+        rows = (
+            "给我一个 Markdown goal。",
+            "注意排版一定要正确，不然无法复制。",
+            "注意排版一定要正确，不然无法复制。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-identical-corrections")
+        anchors = module.materialize_source_anchors(summary, "b" * 64)
+        source = next(
+            row
+            for row in summary["fact_sources"]
+            if row["text"] == module.COPYABLE_GOAL_PREFERENCE_TEXT
+        )
+
+        quote_ids = source["evidence_quote_ids"]
+        self.assertEqual(len(quote_ids), len(set(quote_ids)))
+        anchored_lines = {
+            row["line_number"]
+            for row in anchors
+            if row["quote_id"] in quote_ids
+        }
+        self.assertTrue({2, 3}.issubset(anchored_lines))
+        self.assertEqual(len(source["source_anchor_ids"]), len(quote_ids))
+
+    def test_compact_chinese_goal_and_rhetorical_correction_match_real_producer_shape(self):
+        module = load_update_module()
+        rows = (
+            "给一个markdown版本的goal，注意排版一定要正确，不然我无法复制",
+            "你看看你给的是纯markdown吗。",
+            "不是，之前就能给出正确的md格式的goal，怎么现在又出错？",
+            "那你倒是把goal给我啊",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        induced = module.induce_copyable_goal_preference(events)
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+        self.assertGreaterEqual(len(induced.support_events), 2)
+        self.assertIn(events[0], induced.support_events)
+        self.assertIn(events[1], induced.support_events)
+
+    def test_goal_format_correction_induction_fails_closed_for_non_target_sequences(self):
+        module = load_update_module()
+
+        cases = {
+            "assistant_only": (
+                ("user", "给我一个 goal。"),
+                ("assistant", "注意排版一定要正确，不然无法复制。"),
+                ("assistant", "应该把完整 goal 放进 text 代码块。"),
+            ),
+            "ordinary_complaint": (
+                ("user", "给我一个 goal。"),
+                ("user", "这个页面排版很乱。"),
+                ("user", "表格内容无法复制。"),
+            ),
+            "quoted": (
+                ("user", "给我一个 goal。"),
+                ("user", "同事说：“注意排版一定要正确，不然无法复制。”"),
+                ("user", "同事还说：“应该把完整 goal 放进 text 代码块。”"),
+            ),
+            "hypothetical": (
+                ("user", "给我一个 goal。"),
+                ("user", "你看看如果这样排版是不是无法复制？"),
+                ("user", "你看看是不是应该放进 text 代码块？"),
+            ),
+            "temporary": (
+                ("user", "给我一个 goal。"),
+                ("user", "这次把完整 goal 放进 text 代码块。"),
+                ("user", "本轮块外不要解释，方便复制。"),
+            ),
+            "malformed": (
+                ("user", "给我一个 goal。"),
+                ("user", "```text 注意排版一定要正确，不然无法复制。"),
+                ("user", "```text 你看看你给的是纯 Markdown 吗。"),
+            ),
+            "markdown_blockquote": (
+                ("user", "给我一个 goal。"),
+                ("user", "> 注意排版一定要正确，不然无法复制。"),
+                ("user", "> 应该把完整 goal 放进 text 代码块。"),
+            ),
+            "inline_code_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", "`注意排版一定要正确，不然无法复制。`"),
+                ("user", "`应该把完整 goal 放进 text 代码块。`"),
+            ),
+            "unclosed_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", "“注意排版一定要正确，不然无法复制。"),
+                ("user", "「应该把完整 goal 放进 text 代码块。"),
+            ),
+            "unclosed_ascii_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", '"注意排版一定要正确，不然无法复制。'),
+                ("user", '"应该把完整 goal 放进 text 代码块。'),
+            ),
+            "conditional_question": (
+                ("user", "给我一个 goal。"),
+                ("user", "如果 goal 格式乱了，为什么还是无法复制？"),
+                ("user", "如果 goal 没放进 text 代码块，为什么会不能复制？"),
+            ),
+            "topic_switch": (
+                ("user", "给我一个 goal。"),
+                ("user", "现在请写一段 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "topic_switch_without_request_verb": (
+                ("user", "给我一个 goal。"),
+                ("user", "接下来改做一段 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "filtered_topic_switch": (
+                ("user", "给我一个 goal。"),
+                ("user", "现在请写一段 `Python 代码`。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "goal_abandonment_topic_switch": (
+                ("user", "给我一个 goal。"),
+                ("user", "先不做 goal 了，接下来写 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "goal_abandonment_topic_switch_spoken": (
+                ("user", "给我一个 goal。"),
+                ("user", "先不说 goal，接下来写 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "goal_abandonment_topic_switch_ignore": (
+                ("user", "给我一个 goal。"),
+                ("user", "别管 goal 了，现在写 Python 代码。"),
+                ("user", "你给的代码 Markdown 格式很乱。"),
+                ("user", "这个代码块无法复制。"),
+            ),
+            "fenced_quote": (
+                ("user", "给我一个 goal。"),
+                ("user", "```text\n注意排版一定要正确，不然无法复制。\n```"),
+                ("user", "```text\n应该把完整 goal 放进 text 代码块。\n```"),
+            ),
+            "unclosed_inline_code": (
+                ("user", "给我一个 goal。"),
+                ("user", "`注意排版一定要正确，不然无法复制。"),
+                ("user", "`应该把完整 goal 放进 text 代码块。"),
+            ),
+            "invalid_fence_close": (
+                ("user", "给我一个 goal。"),
+                ("user", "```text\n注意排版一定要正确，不然无法复制。\n```not-a-valid-close"),
+                ("user", "```text\n应该把完整 goal 放进 text 代码块。\n```not-a-valid-close"),
+            ),
+            "trailing_attribution": (
+                ("user", "给我一个 goal。"),
+                ("user", "“注意排版一定要正确，不然无法复制。”这是同事说的。"),
+                ("user", "“应该把完整 goal 放进 text 代码块。”这也是同事要求的。"),
+            ),
+            "trailing_attribution_without_speech_verb": (
+                ("user", "给我一个 goal。"),
+                ("user", "“注意排版一定要正确，不然无法复制。”这是同事的原话。"),
+                ("user", "“应该把完整 goal 放进 text 代码块。”引用自同事。"),
+            ),
+        }
+
+        for case_id, rows in cases.items():
+            with self.subTest(case_id=case_id):
+                events = [
+                    module.MemoryEvent(
+                        kind,
+                        text,
+                        index,
+                        1,
+                        module.source_event_sha256(text),
+                    )
+                    for index, (kind, text) in enumerate(rows, 1)
+                ]
+                self.assertIsNone(module.induce_copyable_goal_preference(events))
+                summary = module.summarize_events(events, f"synthetic-{case_id}")
+                self.assertNotIn(module.COPYABLE_GOAL_PREFERENCE_TEXT, summary["facts"])
+
+    def test_latest_explicit_goal_format_correction_is_current_source_of_truth(self):
+        module = load_update_module()
+        rows = (
+            "给一个 Markdown 版本的 goal。",
+            "注意排版一定要正确，不然我无法复制。",
+            "你给的纯 Markdown 格式又乱了。",
+            "不对，别用代码块了，直接渲染 Markdown。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        self.assertIsNone(module.induce_copyable_goal_preference(events))
+
+    def test_balanced_nested_fence_does_not_invalidate_durable_goal_preference(self):
+        module = load_update_module()
+        text = (
+            "以后给我写 goal 时，默认把完整 goal 放进 text 代码块，方便复制。\n\n"
+            "````text\n# Goal\n\n```bash\npython3 verify.py\n```\n````"
+        )
+        event = module.MemoryEvent(
+            "user",
+            text,
+            1,
+            1,
+            module.source_event_sha256(text),
+        )
+
+        induced = module.induce_copyable_goal_preference([event])
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+
+    def test_quoted_format_label_does_not_hide_durable_goal_preference(self):
+        module = load_update_module()
+        text = (
+            "以后给我写 goal 时，默认放进单独的“text”代码块，"
+            "块外不要解释，方便复制。"
+        )
+        event = module.MemoryEvent(
+            "user",
+            text,
+            1,
+            1,
+            module.source_event_sha256(text),
+        )
+
+        induced = module.induce_copyable_goal_preference([event])
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+
+    def test_goal_content_independence_is_not_a_topic_abandonment(self):
+        module = load_update_module()
+        rows = (
+            "不管 goal 里有没有 Python 代码，接下来都必须保证 Markdown 排版正确，方便复制。",
+            "注意排版一定要正确，不然无法复制。",
+            "你看看你给的是纯 Markdown 吗，这个格式已经乱了。",
+        )
+        events = [
+            module.MemoryEvent(
+                "user",
+                text,
+                index,
+                1,
+                module.source_event_sha256(text),
+            )
+            for index, text in enumerate(rows, 1)
+        ]
+
+        induced = module.induce_copyable_goal_preference(events)
+
+        self.assertIsNotNone(induced)
+        self.assertEqual(induced.text, module.COPYABLE_GOAL_PREFERENCE_TEXT)
+
+    def test_summarize_events_does_not_promote_chinese_assistant_acknowledgement(self):
+        module = load_update_module()
+        acknowledgements = (
+            "明白了，我会记住用户偏好，每个计划都必须可验证。",
+            "好的，我记住了用户偏好，后续每个计划都必须可验证。",
+            "明白，后续每个计划都必须可验证。",
+            "了解，我将遵循用户偏好，每个计划都必须可收敛。",
+            "OK，我会记住用户偏好，每个计划都必须可验证。",
+            "好的，已记住用户偏好，后续每个计划都必须可验证。",
+            "收到，后面我会按这个要求执行，每个计划都必须可验证。",
+        )
+        events = [module.MemoryEvent("user", "请回顾已有计划。", 1, 1, "a" * 64)]
+        events.extend(
+            module.MemoryEvent("assistant", text, index, 1, str(index) * 64)
+            for index, text in enumerate(acknowledgements, 2)
+        )
+
+        summary = module.summarize_events(events, "synthetic-acknowledgement")
+
+        for acknowledgement in acknowledgements:
+            with self.subTest(acknowledgement=acknowledgement):
+                self.assertNotIn(acknowledgement, summary["facts"])
+                self.assertFalse(
+                    any(
+                        row.get("source") == "natural_assistant"
+                        and row.get("text") == acknowledgement
+                        for row in summary["fact_sources"]
+                    )
+                )
+
+    def test_summarize_events_preserves_ack_prefixed_substantive_memory(self):
+        module = load_update_module()
+        architecture_decision = "OK，后续版本将使用新 API，这是已审查的架构决定。"
+        release_requirement = "好的，已记录决策：后续发布必须通过质量门禁。"
+        events = [
+            module.MemoryEvent("assistant", text, index, 1, str(index) * 64)
+            for index, text in enumerate((architecture_decision, release_requirement), 1)
+        ]
+
+        summary = module.summarize_events(events, "synthetic-substantive-decisions")
+
+        self.assertIn(architecture_decision, summary["decisions"])
+        self.assertIn(release_requirement, summary["facts"])
 
     def test_build_memory_nodes_skips_automatic_candidates_without_summary_or_evidence(self):
         module = load_update_module()
@@ -5748,7 +6748,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             from_inventory.assert_called_once()
             self.assertEqual(from_inventory.call_args.args[0], "{}")
 
-    def test_source_inventory_cli_fails_closed_when_a_dispatched_record_changes(self):
+    def test_source_inventory_cli_defers_changed_record_and_archives_stable_sibling(self):
         script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5760,8 +6760,8 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             (memory_repo / "sessions").mkdir()
             source_dir.mkdir()
             project_path.mkdir()
-            source = source_dir / "PRIVATE_SOURCE_SENTINEL.jsonl"
-            source.write_text(
+            changed = source_dir / "PRIVATE_SOURCE_SENTINEL.jsonl"
+            changed.write_text(
                 json.dumps(
                     {
                         "timestamp": "2026-07-13T11:00:00Z",
@@ -5773,23 +6773,53 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            raw = source.read_bytes()
-            stat = source.stat()
+            stable = source_dir / "stable.jsonl"
+            stable.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T12:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: stable sibling remains eligible for archival.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            prior_dir = memory_repo / "sessions/2026/07/13/prior-changed-record"
+            prior_dir.mkdir(parents=True)
+            prior_meta = {
+                "project_path": str(project_path.resolve()),
+                "archive_scope": str(project_path.resolve()),
+                "source_partition": str(project_path.resolve()),
+                "source_record": str(changed.resolve()),
+                "source_record_sha256": "a" * 64,
+                "source_updated_at": "2026-07-13T10:00:00Z",
+            }
+            (prior_dir / "meta.json").write_text(
+                json.dumps(prior_meta, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            def row_for(path: Path) -> dict[str, object]:
+                raw = path.read_bytes()
+                stat = path.stat()
+                return {
+                    "relative_path": path.name,
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "source_updated_at": json.loads(raw)["timestamp"],
+                }
+
             payload = json.dumps(
                 {
                     "report_kind": "memory_source_inventory",
-                    "report_version": 1,
-                    "records": [
-                        {
-                            "relative_path": source.name,
-                            "sha256": hashlib.sha256(raw).hexdigest(),
-                            "size": stat.st_size,
-                            "mtime_ns": stat.st_mtime_ns,
-                        }
-                    ],
+                    "report_version": 2,
+                    "records": [row_for(changed), row_for(stable)],
                 }
             )
-            source.write_text(source.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
+            changed.write_text(changed.read_text(encoding="utf-8") + "{}\n", encoding="utf-8")
 
             result = subprocess.run(
                 [
@@ -5804,6 +6834,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                     "--require-project-metadata",
                     "--source-inventory-stdin",
                     "--defer-global-rebuild",
+                    "--report-json",
                 ],
                 input=payload,
                 text=True,
@@ -5811,11 +6842,383 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("update_status=blocked reason=source_inventory_invalid", result.stderr)
-            self.assertNotIn(source.name, result.stdout + result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["report_kind"], "memory_update_target_report")
+            self.assertEqual(report["status"], "deferred")
+            self.assertEqual(report["reason"], "source_records_deferred")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["records_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["records_processed_count"], 1)
+            self.assertTrue((prior_dir / "meta.json").is_file())
+            meta_rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertEqual(sum(row.get("source_record") == str(changed.resolve()) for row in meta_rows), 1)
+            self.assertEqual(sum(row.get("source_record") == str(stable.resolve()) for row in meta_rows), 1)
+            self.assertNotIn(changed.name, result.stdout + result.stderr)
             self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_never_archived_older_deferred_record_retries_after_stable_high_water_advances(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+
+            deferred = source_dir / "deferred-older.jsonl"
+            deferred.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: archive the older deferred source after it stabilizes.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stable = source_dir / "stable-newer.jsonl"
+            stable.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T12:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: let the stable sibling advance archive high-water.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            def inventory_payload() -> str:
+                rows = []
+                for path in (deferred, stable):
+                    raw = path.read_bytes()
+                    file_stat = path.stat()
+                    rows.append(
+                        {
+                            "relative_path": path.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": file_stat.st_size,
+                            "mtime_ns": file_stat.st_mtime_ns,
+                            "source_updated_at": json.loads(raw.splitlines()[0])["timestamp"],
+                        }
+                    )
+                return json.dumps(
+                    {
+                        "report_kind": "memory_source_inventory",
+                        "report_version": 2,
+                        "records": rows,
+                    }
+                )
+
+            first_inventory = inventory_payload()
+            deferred.write_text(
+                deferred.read_text(encoding="utf-8")
+                + json.dumps(
+                    {
+                        "timestamp": "2026-07-13T10:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "assistant",
+                        "content": "The older source changed after inventory.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            command = [
+                sys.executable,
+                str(script),
+                "--memory-repo",
+                str(memory_repo),
+                "--source-dir",
+                str(source_dir),
+                "--project-path",
+                str(project_path),
+                "--require-project-metadata",
+                "--source-inventory-stdin",
+                "--defer-global-rebuild",
+                "--report-json",
+            ]
+            first = subprocess.run(
+                command,
+                input=first_inventory,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(first.returncode, 0, first.stderr)
+            first_report = json.loads(first.stdout)
+            self.assertEqual(first_report["status"], "deferred")
+            self.assertEqual(first_report["metrics"]["records_deferred_count"], 1)
+            first_rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertEqual([Path(row["source_record"]).name for row in first_rows], [stable.name])
+
+            retry = subprocess.run(
+                command,
+                input=inventory_payload(),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            retry_report = json.loads(retry.stdout)
+            self.assertEqual(retry_report["status"], "updated")
+            self.assertTrue(retry_report["source_batch_complete"])
+            self.assertEqual(retry_report["metrics"]["records_selected_count"], 1)
+            retry_rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertEqual(
+                {Path(row["source_record"]).name for row in retry_rows},
+                {deferred.name, stable.name},
+            )
+            deferred_state = memory_repo / "index/deferred_sources.jsonl"
+            self.assertFalse(deferred_state.exists() and deferred_state.read_text(encoding="utf-8").strip())
+
+    def test_source_inventory_cli_rejects_malformed_jsonl_before_archive_mutation(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            source = source_dir / "malformed.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T13:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: malformed sources must fail closed.",
+                    }
+                )
+                + "\n{not-json}\n",
+                encoding="utf-8",
+            )
+            raw = source.read_bytes()
+            file_stat = source.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 2,
+                    "records": [
+                        {
+                            "relative_path": source.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": file_stat.st_size,
+                            "mtime_ns": file_stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-13T13:00:00Z",
+                        }
+                    ],
+                }
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--source-inventory-stdin",
+                    "--defer-global-rebuild",
+                    "--report-json",
+                ],
+                input=payload,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "source_inventory_invalid")
             self.assertEqual(list((memory_repo / "sessions").glob("**/meta.json")), [])
+
+    def test_source_inventory_cli_materializes_structured_cookie_record(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            secret = "session=synthetic-cookie"
+            source = source_dir / "structured-cookie.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-23T01:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": (
+                            "Decision: selected structured sources must remain parseable. "
+                            f"Cookie: {secret}\nKeep escaped separators: \u0085 \u2028 \u2029."
+                        ),
+                        "ok": True,
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raw = source.read_bytes()
+            file_stat = source.stat()
+            payload = json.dumps(
+                {
+                    "report_kind": "memory_source_inventory",
+                    "report_version": 2,
+                    "records": [
+                        {
+                            "relative_path": source.name,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "size": file_stat.st_size,
+                            "mtime_ns": file_stat.st_mtime_ns,
+                            "source_updated_at": "2026-07-23T01:00:00Z",
+                        }
+                    ],
+                }
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--source-inventory-stdin",
+                    "--defer-global-rebuild",
+                    "--allow-redacted-secrets",
+                    "--report-json",
+                ],
+                input=payload,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "updated")
+            self.assertEqual(report["reason"], "updated")
+            self.assertEqual(report["metrics"]["records_selected_count"], 1)
+            self.assertEqual(report["metrics"]["records_processed_count"], 1)
+            entry_dir = next((memory_repo / "sessions").glob("**/meta.json")).parent
+            meta = json.loads((entry_dir / "meta.json").read_text(encoding="utf-8"))
+            source_map = json.loads((entry_dir / "source-map.json").read_text(encoding="utf-8"))
+            self.assertEqual(meta["source_record_sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(source_map["source_record_sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertTrue(source_map["evidence_source_anchors"])
+            combined = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in entry_dir.iterdir()
+                if path.is_file()
+            )
+            self.assertNotIn(secret, combined)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_default_record_limit_does_not_starve_durable_record_after_fifty_low_signal_records(self):
+        script = Path("templates/agent-memory-repo/tools/update_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            source_dir = root / "records"
+            project_path = root / "project"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            source_dir.mkdir()
+            project_path.mkdir()
+            for index in range(50):
+                (source_dir / f"low-signal-{index:02d}.jsonl").write_text(
+                    json.dumps(
+                        {
+                            "timestamp": f"2026-07-13T10:{index:02d}:00Z",
+                            "cwd": str(project_path),
+                            "role": "assistant",
+                            "content": "I will inspect the next command output.",
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            durable = source_dir / "durable-51.jsonl"
+            durable.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-13T11:00:00Z",
+                        "cwd": str(project_path),
+                        "role": "user",
+                        "content": "Decision: the default scheduled batch must not starve durable records.",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--memory-repo",
+                    str(memory_repo),
+                    "--source-dir",
+                    str(source_dir),
+                    "--project-path",
+                    str(project_path),
+                    "--require-project-metadata",
+                    "--defer-global-rebuild",
+                    "--report-json",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["metrics"]["records_selected_count"], 51)
+            rows = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (memory_repo / "sessions").glob("**/meta.json")
+            ]
+            self.assertIn(durable.name, {Path(row["source_record"]).name for row in rows})
 
     def test_update_memory_archive_archive_scope_decouples_high_water_from_project_path(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()

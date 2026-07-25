@@ -10,6 +10,7 @@ UPDATE_SKILL = Path("skills/update-my-precious/SKILL.md")
 USING_SKILL = Path("skills/using-my-precious/SKILL.md")
 SETUP_SKILL = Path("skills/setup-my-precious/SKILL.md")
 TEMPLATE_AGENTS = Path("templates/agent-memory-repo/AGENTS.md")
+SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py")
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -1000,6 +1001,375 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v248_reboot_safe_transactional_replay_contract(self):
+        section = self.evaluation_section(
+            "## V2.48 Reboot-Safe Scheduled Update Transactional Replay Closure"
+        )
+        for phrase in (
+            "benchmarks/scheduled_reboot_replay_gate.py",
+            "live_automation_prompt_alignment_gate.py",
+            "run_scheduled_memory_transaction.py",
+            "transaction_adapter_alignment_pass",
+            "single_transaction_adapter_invocation_present",
+            "strict_transaction_report_contract_present",
+            "duplicate_transaction_adapter_rejection_count",
+            "same_line_duplicate_transaction_adapter_rejection_count",
+            "missing_transaction_report_rejection_count",
+            "Initial private operational recovery result: `published`",
+            "pre-final-review adapter",
+            "first private attempt",
+            "5400-second final-candidate attempt",
+            "`staging_reset_failed`",
+            "checkout-first",
+            "Final-candidate private acceptance result: `published`",
+            "9081.302 seconds",
+            "recovery_action=stale_staging_replayed",
+            "recovery_count=1",
+            "remote_publish_count=1",
+            "canonical_mutation_count=1",
+            "repair_attempt_count=1",
+            "canonical and staging worktrees were clean",
+            "transaction state was cleared",
+            "19/19",
+            "existing automation remained `status: ACTIVE`",
+            "live_automation_alignment_pass=true",
+            "transaction_case_count",
+            "clean_publish_accuracy",
+            "no_op_decision_accuracy",
+            "reboot_replay_success_rate",
+            "canonical_clean_after_interruption_rate",
+            "stale_staging_recovery_rate",
+            "post_push_receipt_reconciliation_rate",
+            "concurrent_transaction_rejection_rate",
+            "dirty_canonical_rejection_rate",
+            "malformed_state_rejection_rate",
+            "unsafe_state_path_rejection_rate",
+            "remote_race_rejection_rate",
+            "repository_scoped_lock_rejection_rate",
+            "git_common_dir_lock_rejection_rate",
+            "nested_writer_lock_rejection_rate",
+            "canonical_fast_forward_recovery_rate",
+            "unreceipted_remote_rejection_rate",
+            "receipted_remote_advance_replay_rate",
+            "receipted_remote_tracked_overlap_count",
+            "receipted_remote_untracked_overlap_count",
+            "partial_remote_publish_count",
+            "duplicate_publish_commit_count",
+            "canonical_unverified_mutation_count",
+            "deployed_v238_tool_mutation_count",
+            "raw_source_copy_count",
+            "privacy_leak_count",
+            "not exact process continuation",
+            "not cloud scheduler uptime",
+            "not power-loss durability of the source disk",
+            "not distributed locking",
+            "not a GitHub availability SLA",
+            "not memory quality",
+            "not ranking quality",
+            "not LLM quality",
+            "not vector search",
+            "not ontology discovery",
+            "not V2.39/V2.40 deployment approval",
+            "V2.38 remains deployed",
+            "V2.48R2 is a repair and acceptance label",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        update_skill = UPDATE_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "scheduled or broad multi-project refreshes",
+            "run_scheduled_memory_transaction.py",
+            "--state-dir",
+            "persistent staging clone",
+            "canonical-repository-scoped lock",
+            "surviving nested updater",
+            "validated adapter-owned staging",
+            "hard-reset and cleaned before",
+            "receipted remote advance",
+            "unrelated dirty paths remain untouched",
+            "Same-path user edits",
+            "Remote inspection does not advance canonical",
+            "published",
+            "no_op_current",
+            "blocked",
+            "exactly one JSON",
+            "on-demand single-project",
+        ):
+            self.assert_contains(update_skill, phrase)
+
+    def test_docs_record_v249_real_use_recall_utility_contract(self):
+        section = self.evaluation_section("## V2.49 Real-Use Recall Utility Closure")
+        for phrase in (
+            "benchmarks/real_use_recall_utility_gate.py",
+            "exact or short controls were supported in `2/2` cases",
+            "natural or multi-intent forms were supported in `0/2` cases",
+            "query.decomposition_recommended",
+            "complete event stream",
+            "source user-event anchor",
+            "at most two context-package queries",
+            "current HEAD",
+            "synthetic_case_count",
+            "durable_chinese_preference_extraction_recall",
+            "natural_goal_preference_supported_recall",
+            "project_history_supported_recall",
+            "live_state_memory_answer_count",
+            "wrong_project_supported_hit_count",
+            "unsupported_claim_count",
+            "privacy_leak_count",
+            "not general semantic-memory quality",
+            "not ranking quality",
+            "not vector search",
+            "not private archive correctness",
+            "not public leaderboard parity",
+            "not LLM answer quality",
+            "Private shadow result: `deployment_no_go`",
+            "private_preference_materialization_count",
+            "private_preference_source_binding_rate",
+            "private_goal_preference_supported",
+            "private_project_history_supported",
+            "private_transaction_invocation_count=0",
+            "source-normalization ordering boundary",
+            "skill-invocation prefix",
+            "candidate matched only `16/19`",
+            "prior `19/19` runtime parity",
+            "automation remained ACTIVE",
+            "was not installed",
+            "V2.39/V2.40",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        for phrase in (
+            "complete event stream",
+            "original language",
+            "assistant-acknowledgement",
+            "not translation",
+            "query.decomposition_recommended",
+            "per-hit `query_support`",
+            "current HEAD",
+        ):
+            self.assert_contains(self.skill_contracts + "\n" + self.design, phrase)
+
+    def test_docs_record_v250_canonical_skill_invocation_contract(self):
+        section = self.evaluation_section(
+            "## V2.50 Canonical Skill-Invocation Prefix Normalization"
+        )
+        for phrase in (
+            "canonical leading skill invocation",
+            "label begins with `$`",
+            "target ends in `SKILL.md`",
+            "Ordinary Markdown links",
+            "original user-event source anchor",
+            "memory_recall_context_package",
+            "canonical_skill_prefixed_preference_recall",
+            "multi_skill_prefix_recall",
+            "prefixed_preference_source_binding_rate",
+            "invocation_only_rejection_rate",
+            "arbitrary_markdown_path_rejection_rate",
+            "malformed_prefix_rejection_rate",
+            "prefixed_non_durable_rejection_rate",
+            "standalone_preference_regression_rate",
+            "invocation_artifact_leak_count",
+            "privacy_leak_count",
+            "aggregate reports match",
+            "Private regression result: `deployment_no_go`",
+            "one aggregate-only regression",
+            "not an unknown holdout",
+            "private_newly_qualified_target_count",
+            "private_newly_qualified_non_target_count",
+            "evidence_slots_consumed_before_fact_phase",
+            "target_source_event_binding_count",
+            "target_memory_candidate_count",
+            "schema-key collision only",
+            "No installation was attempted",
+            "automation remained `ACTIVE`",
+            "retuned or rerun",
+            "not ranking quality",
+            "not vector search",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design_section = self.design.split(
+            "### V2.50 Canonical Skill-Invocation Prefix Normalization", 1
+        )[1]
+        for phrase in (
+            "natural_user_memory_fact",
+            "strict normalizer",
+            "raw-prompt",
+            "source anchor",
+            "real_use_recall_utility_gate.py",
+            "deployment_no_go",
+            "evidence budget",
+            "not installed",
+        ):
+            self.assert_contains(design_section, phrase)
+
+    def test_docs_record_v251_source_bound_goal_preference_contract(self):
+        section = self.evaluation_section(
+            "## V2.51 Source-Bound Goal Preference Materialization And Real-Use Recall Closure"
+        )
+        for phrase in (
+            "bounded evidence reservation",
+            "evidence count remains at most 6",
+            "selected_natural_user_fact_evidence_binding_rate",
+            "selected_natural_user_fact_source_anchor_rate",
+            "selected_natural_user_fact_candidate_materialization_rate",
+            "selected_natural_user_fact_active_memory_rate",
+            "goal_preference_context_package_support_rate",
+            "remaining_evidence_priority_regression_rate",
+            "evidence_budget_overflow_count",
+            "non_target_memory_promotion_count",
+            "unsupported_claim_count",
+            "privacy_leak_count",
+            "known producer-shape regression",
+            "not an unseen holdout",
+            "Private regression result: `deployment_go`",
+            "target_supported_package_answer_count",
+            "wrong_project_supported_hit_count",
+            "live_repository_state_memory_answer_count",
+            "19/19",
+            "allow-list record count",
+            "consumer_intent_supported_recall",
+            "HEAD == origin/main",
+            "automation definition and schedule were unchanged",
+            "not ranking quality",
+            "not vector search",
+            "not general semantic memory",
+            "not public leaderboard parity",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design_section = self.design.split(
+            "### V2.51 Source-Bound Goal Preference Materialization", 1
+        )[1]
+        for phrase in (
+            "NATURAL_USER_FACT_LIMIT",
+            "SUMMARY_EVIDENCE_LIMIT",
+            "select_summary_evidence",
+            "final-state slot",
+            "memory_candidate_sources",
+            "materialize_source_anchors",
+            "source-anchor completeness",
+            "memory_recall_context_package",
+            "deployment_go",
+        ):
+            self.assert_contains(design_section, phrase)
+
+    def test_docs_record_v256_subject_anchored_hybrid_recall_contract(self):
+        section = self.evaluation_section(
+            "## V2.56 Subject-Anchored Hybrid Preference Recall Closure"
+        )
+        for phrase in (
+            "normalized_subject_candidate_v1",
+            "source_bound_subject_preference_support_v1",
+            "exact `matched_tokens`",
+            "candidate retrieval is not answerability",
+            "pre-materialized source-bound read-path fixtures",
+            "V2.55 calibration fingerprint",
+            "V2.55 holdout fingerprint",
+            "V2.54 write-path behavior",
+            "normalized_surface_variant_recall_at_5",
+            "open_ended_subject_preference_supported_recall",
+            "supported_decision_precision",
+            "candidate_only_answer_count",
+            "candidate_only_safety_eligible_rate",
+            "bare_subject_rejection_rate",
+            "deployment-holdout",
+            "public deployment holdout",
+            "final decision: `no_go`",
+            "private deployment holdout was not executed",
+            "not installed or deployed",
+            "single_text_fence_no_outer_text",
+            "not embedding quality",
+            "not vector search",
+            "not LLM answer quality",
+            "not ontology discovery",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        skill = USING_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "Artifact delivery format",
+            "Artifact content structure",
+            "only the stable subject plus preference intent",
+            "`candidate_match` explains normalized candidate retrieval only",
+            "`source_bound_subject_preference_support_v1`",
+            "Exact token coverage never bypasses",
+            "single `text` code fence",
+        ):
+            self.assert_contains(skill, phrase)
+
+        runtime = SEARCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn("scoped_global_preference_applicability", runtime)
+
+    def test_docs_record_v252_live_source_batch_contract(self):
+        section = self.evaluation_section("## V2.52 Stable Live-Source Batch Closure")
+        for phrase in (
+            "scheduled_live_source_deferral_gate.py",
+            "private_live_source_inventory_ab_gate.py",
+            "metadata-only manifest",
+            "live_source_defer_accuracy",
+            "stable_sibling_publish_accuracy",
+            "deferred_retry_recall",
+            "changed_source_partial_mutation_count",
+            "changed_source_freshness_advance_count",
+            "unknown_failure_block_accuracy",
+            "aggregate_failure_reason_coverage",
+            "inventory_worker_isolation_accuracy",
+            "manifest_metadata_only_accuracy",
+            "private_enabled_target_completion_rate",
+            "private_output_parity_rate",
+            "parent_post_inventory_rss_reduction_rate",
+            "all 74 enabled targets",
+            "privacy_leak_count",
+            "source_batch_complete",
+            "child_failure_unclassified",
+            "parent-RSS",
+            "Controlled live deployment closure",
+            "Exactly one controlled transaction",
+            "`update_project_processed_count`",
+            "`source_record_deferred_count`",
+            "`source_target_deferred_count`",
+            "`update_child_failure_count`",
+            "adapter-owned stale staging state",
+            "not an archive-current claim",
+            "19/19",
+            "not LLM answer quality",
+            "not vector search",
+            "not ontology discovery",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+        design_section = self.design.split("### V2.52 Stable Live-Source Batch Closure", 1)[1]
+        for phrase in (
+            "short-lived worker",
+            "mode-`0600` manifest",
+            "changed or became unavailable",
+            "freshness state remain untouched",
+            "child_failure_unclassified",
+            "`deferred` terminal status",
+            "no_op_current",
+        ):
+            self.assert_contains(design_section, phrase)
+
+        update_skill = UPDATE_SKILL.read_text(encoding="utf-8")
+        for phrase in (
+            "published",
+            "no_op_current",
+            "deferred",
+            "source_batch_complete",
+            "aggregate deferred-target/record counts",
+        ):
+            self.assert_contains(update_skill, phrase)
+
     def test_skill_docs_record_explicit_capture_adapter_contract(self):
         for phrase in (
             "capture_explicit_memory.py",
@@ -1010,6 +1380,73 @@ class DocumentationContractTests(unittest.TestCase):
             "short fact",
         ):
             self.assert_contains(self.skill_contracts, phrase)
+
+    def test_docs_record_v253_copyable_goal_preference_recall_closure(self):
+        section = self.evaluation_section(
+            "## V2.53 Copyable Goal Preference Recall Closure"
+        )
+        for phrase in (
+            "copyable_goal_preference_recall_gate.py",
+            "session-local",
+            "latest explicit correction",
+            "natural_user_memory_fact()",
+            "at least two user-event",
+            "memory_recall_context_package",
+            "controlled baseline",
+            "goal-correction inducer disabled",
+            "exact target memory ID",
+            "actual user role",
+            "unrelated supported hits",
+            "correction_sequence_qualification_rate",
+            "correction_induced_fact_materialization_rate",
+            "correction_source_anchor_binding_rate",
+            "goal_format_query_supported_recall",
+            "supported_summary_fact_resolution_rate",
+            "global_scope_accuracy",
+            "current_turn_instruction_precedence_accuracy",
+            "copyable_text_block_decision_accuracy",
+            "nested_fence_collision_avoidance_accuracy",
+            "assistant_evidence_promotion_count",
+            "non_target_memory_promotion_count",
+            "free_form_answerability_use_count",
+            "privacy_leak_count",
+            "aggregate-only",
+            "not ranking quality",
+            "not vector search",
+            "not ontology discovery",
+            "not public leaderboard parity",
+            "not LLM answer quality",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_docs_record_v255_general_preference_no_go(self):
+        section = self.evaluation_section(
+            "## V2.55 General Durable Preference Recall Holdout Closure"
+        )
+        for phrase in (
+            "general_durable_preference_recall_gate.py",
+            "calibration fingerprint",
+            "holdout fingerprint",
+            "repeated-correction induction",
+            "bounded CJK",
+            "memory_recall_context_package",
+            "legacy_goal_alias_ablation_supported_recall",
+            "private_false_support_count",
+            "`no_go`",
+            "V2.54",
+            "19/19 current",
+            "not universal semantic memory",
+            "not general LongMemEval quality",
+            "not LLM answer quality",
+            "not vector-search quality",
+            "not ontology discovery",
+            "not unrestricted raw-transcript recall",
+            "not distributed scheduler uptime",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (

@@ -31,6 +31,13 @@ class LiveAutomationPromptAlignmentGateTests(unittest.TestCase):
         self.assertTrue(metrics["sync_dry_run_before_push_present"])
         self.assertTrue(metrics["sync_only_publish_path_present"])
         self.assertTrue(metrics["synthetic_preflight_alignment_pass"])
+        self.assertTrue(metrics["transaction_adapter_alignment_pass"])
+        self.assertTrue(metrics["single_transaction_adapter_invocation_present"])
+        self.assertTrue(metrics["strict_transaction_report_contract_present"])
+        self.assertEqual(metrics["transaction_direct_publish_chain_count"], 0)
+        self.assertEqual(metrics["duplicate_transaction_adapter_rejection_count"], 1)
+        self.assertEqual(metrics["same_line_duplicate_transaction_adapter_rejection_count"], 1)
+        self.assertEqual(metrics["missing_transaction_report_rejection_count"], 1)
         self.assertTrue(metrics["preflight_before_update_present"])
         self.assertTrue(metrics["preflight_fail_closed_contract_present"])
         self.assertTrue(metrics["clean_worktree_flag_present"])
@@ -48,6 +55,7 @@ class LiveAutomationPromptAlignmentGateTests(unittest.TestCase):
         self.assertEqual(metrics["privacy_leak_count"], 0)
         self.assertNotIn("PRIVATE_AUTOMATION_PROMPT_SENTINEL", result.stdout)
         self.assertNotIn("tools/run_memory_updates.py --memory-repo", result.stdout)
+        self.assertNotIn("run_scheduled_memory_transaction.py --memory-repo", result.stdout)
 
 
 if __name__ == "__main__":

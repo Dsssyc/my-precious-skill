@@ -7,15 +7,70 @@ description: Use when the user invokes $update-my-precious or asks to immediatel
 
 Use this skill for an on-demand memory update. It writes new summarized archive entries.
 Use `setup-my-precious` first if no archive repository exists. Use `using-my-precious` later to search.
-For scheduled or broad multi-project refreshes, prefer the deployment
-repository's `tools/run_memory_updates.py`; this skill is the single-project
-on-demand path.
+For scheduled or broad multi-project refreshes, use this skill's
+`scripts/run_scheduled_memory_transaction.py` adapter. Keep direct
+`update_memory_archive.py` use as the on-demand single-project path.
 
 ## Core Boundary
 
 Update the private deployment repository, not this skill development repository.
 Do not archive raw transcripts by default.
 Do not upload credentials, cookies, private keys, or unredacted source records.
+
+## Scheduled Transaction Rule
+
+For a Git-backed scheduled refresh, run one adapter invocation with an explicit
+state directory outside both the archive and source-record trees:
+
+```bash
+python "$UPDATE_MY_PRECIOUS_SKILL/scripts/run_scheduled_memory_transaction.py" \
+  --memory-repo "$MEMORY_REPO" \
+  --source-dir "$SOURCE_RECORD_DIR" \
+  --state-dir "$SCHEDULED_MEMORY_STATE_DIR" \
+  --push \
+  --include-reviewed-memory-nodes
+```
+
+The adapter owns a mode-`0700` state directory and persistent staging clone. A
+canonical-repository-scoped lock serializes writers even when callers supply
+different state directories, and the adapter checks the deployed V2.38 updater
+lock before resetting staging so a surviving nested updater cannot race replay.
+It invokes the deployment repository's own update, audit, repair,
+search-health, and sync tools, and updates canonical only after verifying a
+matching remote receipt. An interrupted unpublished run is discarded and
+replayed from current `origin/main`. After exact owner and remote validation and
+a successful fetch, validated adapter-owned staging is hard-reset and cleaned before
+`main` is checked out, so a receipted remote advance can replace overlapping
+abandoned tracked and untracked updater outputs. This destructive replay never
+applies to unowned, symlinked, or remote-mismatched staging. An interruption
+after push is reconciled without creating another publication commit. A
+receipt-backed interrupted canonical update may repair only paths changed by
+that verified commit, and only when each worktree and index entry exactly
+matches the base or candidate blob and mode. Same-path user edits and unrelated dirty paths remain untouched
+and fail closed. Remote inspection does not advance canonical tracking refs;
+the verified candidate object and
+`origin/main` update are installed only after the remote receipt matches
+staging.
+
+Treat exactly one JSON object with `report_kind: scheduled_memory_transaction`
+and `report_version: 1` as the terminal result. `published`, `no_op_current`,
+and `deferred` are successful zero-exit scheduled outcomes. `published` may
+carry `source_batch_complete: false` when stable siblings were safely
+published while changed or temporarily unavailable source records were left
+for retry. `deferred` means no archive commit was needed or published and at
+least one such source record remains pending. `no_op_current` is valid only
+when `source_batch_complete: true` and no records are deferred. `blocked` is a
+failed-closed outcome and must not be inferred as success from automation task
+completion. The report exposes aggregate deferred-target/record counts only;
+`failure_stage` plus processed/child-failure counts identify a blocked update
+without forwarding arbitrary diagnostics. It never renders source paths,
+source content, or child output.
+An interrupted no-publication run whose persisted `complete` candidate equals
+its base is reconciled to its original `no_op_current` or `deferred` result;
+it is not a failed remote receipt. Pending-source retry state is private
+selection metadata only and never proves archived freshness or currentness.
+Do not replace this adapter with a prose-driven chain of direct updater, audit,
+or Git commands in scheduled automation.
 
 ## Required Inputs
 
@@ -70,6 +125,14 @@ records. When the user or governing prompt explicitly says to remember,
 force-save, or distill a short fact, use the deployment repository's
 `tools/capture_explicit_memory.py` explicit capture path instead of waiting for
 ordinary summarization.
+
+Ordinary induction scans the complete event stream for high-confidence,
+durable user preferences in supported English and Chinese forms. It preserves
+the user's original language and binds the derived fact to the originating
+user event. Temporary or current-task constraints, tentative or hypothetical
+statements, questions, quoted examples, process text, and assistant
+acknowledgements must not be promoted. This is bounded extraction, not
+translation or open-ended semantic inference.
 
 The explicit capture adapter consumes agent-neutral JSONL. Each row should
 contain a short fact in `text` plus optional `layer`, `scope`, and `source`
