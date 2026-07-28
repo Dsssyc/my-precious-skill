@@ -10,8 +10,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
+import socket
+import stat
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -69,6 +72,62 @@ SOURCE_PREVIEW_REDACTION_PATTERNS = (
 SOURCE_MAP_ANCHOR_ALIASES = {
     "explicit_memory": "source_record",
 }
+SEMANTIC_SUPPORT_POLICY = "bounded_local_semantic_support_v1"
+SEMANTIC_SUPPORT_THRESHOLD = 0.85
+SEMANTIC_SUPPORT_MAX_CANDIDATES = 5
+SEMANTIC_SUPPORT_TIMEOUT_SECONDS = 1.75
+SEMANTIC_SUPPORT_MODEL_FINGERPRINT = (
+    "89c7223e22f226e5142b3ebc9360f0127b436dc88ba8684922b55dbdabcd6437"
+)
+SEMANTIC_SUPPORT_PROVIDER_ENV = "MY_PRECIOUS_SEMANTIC_PROVIDER_SOCKET"
+SEMANTIC_SUPPORT_ALLOWED_PROVENANCE = {
+    "automatic",
+    "explicit",
+    "explicit_request",
+}
+SEMANTIC_SUPPORT_CURRENT_TURN_PATTERNS = (
+    re.compile(
+        r"\b(?:this time|for (?:this|the current) (?:task|request)|"
+        r"only today|today only|right now|from now on)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:这次|本次|当前(?:任务|请求)|仅限今天|只在今天|从现在起)"),
+)
+SEMANTIC_SUPPORT_NEGATION_PATTERNS = (
+    re.compile(r"\b(?:do not|don't|never|must not|should not)\b", re.IGNORECASE),
+    re.compile(r"(?:不要|别再|不得|不应|禁止)"),
+)
+SEMANTIC_SUPPORT_HYPOTHETICAL_PATTERNS = (
+    re.compile(r"\b(?:if|suppose|hypothetical(?:ly)?|imagine)\b", re.IGNORECASE),
+    re.compile(r"(?:如果|假设|设想|假如)"),
+)
+SEMANTIC_SUPPORT_QUOTED_PATTERNS = (
+    re.compile(
+        r"\b(?:quoted?|sample prompt|example prompt|template)\b.*"
+        r"\b(?:says?|claims?|states?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:引用|示例提示|模板).*(?:声称|写着|表示|要求)"),
+)
+SEMANTIC_SUPPORT_INQUIRY_PATTERNS = (
+    re.compile(
+        r"[?？]|\b(?:how|what|which|does|do|is|are|normally|"
+        r"usual(?:ly)?|preferred?|preference|want)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:怎样|怎么|如何|哪种|什么|偏好|通常|惯常)"),
+)
+SEMANTIC_SUPPORT_MULTI_FACET_PATTERNS = (
+    re.compile(
+        r"\b(?:and|plus|as well as)\b.{0,100}"
+        r"\b(?:history|branch|status|head|tests?|progress|roadmap|decision)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:并且|以及|还要|同时).{0,100}"
+        r"(?:历史|分支|状态|进度|路线图|决策|测试)"
+    ),
+)
 
 
 @dataclass
@@ -87,6 +146,13 @@ class Hit:
     evidence_refs: tuple[str, ...] = ()
     raw_refs: tuple[str, ...] = ()
     matched_tokens: tuple[str, ...] = ()
+    memory_provenance: str = ""
+
+
+@dataclass(frozen=True)
+class SemanticSupportProviderConfig:
+    socket_path: Path
+    timeout_seconds: float = SEMANTIC_SUPPORT_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -281,6 +347,49 @@ def configured_memory_repos() -> list[str]:
         if isinstance(value, str) and value.strip():
             repos.append(value)
     return repos
+
+
+def configured_semantic_provider_sockets() -> list[str]:
+    sockets: list[str] = []
+    env_value = os.environ.get(SEMANTIC_SUPPORT_PROVIDER_ENV)
+    if env_value:
+        sockets.append(env_value)
+
+    config_paths: list[str] = []
+    for name in CONFIG_CANDIDATES:
+        value = os.environ.get(name)
+        if value:
+            config_paths.append(value)
+    config_paths.append(str(DEFAULT_CONFIG_PATH))
+    for candidate in config_paths:
+        path = Path(candidate).expanduser()
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        provider = payload.get("semantic_support_provider")
+        if not isinstance(provider, dict) or provider.get("enabled") is False:
+            continue
+        socket_value = provider.get("socket")
+        if isinstance(socket_value, str) and socket_value.strip():
+            sockets.append(socket_value)
+    return sockets
+
+
+def resolve_semantic_provider(
+    socket_arg: str | None,
+) -> SemanticSupportProviderConfig | None:
+    candidates = [socket_arg] if socket_arg else configured_semantic_provider_sockets()
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return SemanticSupportProviderConfig(
+                socket_path=Path(candidate).expanduser(),
+            )
+    return None
 
 
 def resolve_repo(repo_arg: str | None) -> Path:
@@ -1664,6 +1773,7 @@ def collect_memory_hits(
                 evidence_refs=support_refs.evidence_refs,
                 raw_refs=support_refs.raw_refs,
                 matched_tokens=tuple(matched),
+                memory_provenance=source_kind,
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
@@ -2050,6 +2160,279 @@ def context_query_support(query_tokens: list[str], matched_tokens: list[str]) ->
     }
 
 
+def semantic_query_governance_reason(query: str, query_tokens: list[str]) -> str:
+    if safe_display_text(query) == UNSAFE_DISPLAY_FIELD:
+        return "unsafe_query"
+    if any(pattern.search(query) for pattern in SEMANTIC_SUPPORT_CURRENT_TURN_PATTERNS):
+        return "current_turn_precedence"
+    if any(pattern.search(query) for pattern in SEMANTIC_SUPPORT_NEGATION_PATTERNS):
+        return "polarity_conflict"
+    if any(pattern.search(query) for pattern in SEMANTIC_SUPPORT_HYPOTHETICAL_PATTERNS):
+        return "hypothetical_context"
+    if any(pattern.search(query) for pattern in SEMANTIC_SUPPORT_QUOTED_PATTERNS):
+        return "quoted_context"
+    facet_count = sum(1 for pattern in QUERY_FACET_PATTERNS if pattern.search(query))
+    if facet_count >= 2 or any(
+        pattern.search(query) for pattern in SEMANTIC_SUPPORT_MULTI_FACET_PATTERNS
+    ):
+        return "multi_facet_query"
+    meaningful_tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
+    if len(meaningful_tokens) < 2:
+        return "insufficient_facet_detail"
+    if not any(pattern.search(query) for pattern in SEMANTIC_SUPPORT_INQUIRY_PATTERNS):
+        return "not_preference_inquiry"
+    return ""
+
+
+def semantic_hit_governance_reason(
+    hit: Hit,
+    *,
+    scope: str,
+    preferred_scope: str,
+    project_path: str | None,
+) -> str:
+    if hit.source != "memory" or not hit.memory_id:
+        return "not_active_memory"
+    if hit.memory_provenance not in SEMANTIC_SUPPORT_ALLOWED_PROVENANCE:
+        return "unsupported_provenance"
+    if not hit.text or hit.text == UNSAFE_DISPLAY_FIELD:
+        return "unsafe_or_missing_memory_text"
+    summary_paths = [path for path in hit.drill_paths if is_summary_drill_path(path)]
+    evidence_paths = [path for path in hit.drill_paths if is_evidence_drill_path(path)]
+    if not summary_paths or not evidence_paths:
+        return "missing_summary_evidence_binding"
+    if hit.layer == "global":
+        if scope not in ("all", "global") or hit.scope not in ("", "global"):
+            return "wrong_scope"
+    elif hit.layer == "domain":
+        if scope != "domain" and preferred_scope != "domain":
+            return "wrong_scope"
+    elif hit.layer == "project":
+        if not project_path or "project-context" not in hit.why:
+            return "wrong_scope"
+    else:
+        return "wrong_scope"
+    return ""
+
+
+def semantic_provider_scores(
+    provider: SemanticSupportProviderConfig,
+    query: str,
+    candidates: list[tuple[str, str]],
+) -> tuple[dict[str, float], str]:
+    if (
+        not candidates
+        or len(candidates) > SEMANTIC_SUPPORT_MAX_CANDIDATES
+        or provider.timeout_seconds <= 0
+        or provider.timeout_seconds > SEMANTIC_SUPPORT_TIMEOUT_SECONDS
+    ):
+        return {}, "invalid_provider_request"
+    try:
+        socket_stat = provider.socket_path.lstat()
+    except OSError:
+        return {}, "provider_unavailable"
+    if (
+        not stat.S_ISSOCK(socket_stat.st_mode)
+        or socket_stat.st_uid != os.getuid()
+        or socket_stat.st_mode & 0o077
+    ):
+        return {}, "provider_socket_not_private"
+
+    request = {
+        "report_kind": "semantic_support_request",
+        "report_version": 1,
+        "model_fingerprint": SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+        "query": safe_display_text(query),
+        "candidates": [
+            {
+                "candidate_id": candidate_id,
+                "text": safe_display_text(text),
+            }
+            for candidate_id, text in candidates
+        ],
+    }
+    if request["query"] == UNSAFE_DISPLAY_FIELD or any(
+        candidate["text"] in ("", UNSAFE_DISPLAY_FIELD)
+        for candidate in request["candidates"]
+    ):
+        return {}, "unsafe_provider_payload"
+
+    payload = json.dumps(
+        request,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    response_bytes = bytearray()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(provider.timeout_seconds)
+            client.connect(str(provider.socket_path))
+            client.sendall(payload)
+            while not response_bytes.endswith(b"\n"):
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response_bytes.extend(chunk)
+                if len(response_bytes) > 65536:
+                    return {}, "provider_response_too_large"
+    except TimeoutError:
+        return {}, "provider_timeout"
+    except OSError:
+        return {}, "provider_unavailable"
+
+    try:
+        response = json.loads(response_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}, "provider_malformed"
+    if (
+        not isinstance(response, dict)
+        or response.get("report_kind") != "semantic_support_response"
+        or response.get("report_version") != 1
+    ):
+        return {}, "provider_malformed"
+    if response.get("model_fingerprint") != SEMANTIC_SUPPORT_MODEL_FINGERPRINT:
+        return {}, "provider_fingerprint_mismatch"
+    raw_scores = response.get("scores")
+    if not isinstance(raw_scores, list):
+        return {}, "provider_malformed"
+
+    expected_ids = {candidate_id for candidate_id, _text in candidates}
+    scores: dict[str, float] = {}
+    for item in raw_scores:
+        if not isinstance(item, dict):
+            return {}, "provider_malformed"
+        candidate_id = item.get("candidate_id")
+        score = item.get("score")
+        if (
+            not isinstance(candidate_id, str)
+            or candidate_id not in expected_ids
+            or candidate_id in scores
+            or isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not math.isfinite(float(score))
+            or not -1.0 <= float(score) <= 1.0
+        ):
+            return {}, "provider_malformed"
+        scores[candidate_id] = float(score)
+    if set(scores) != expected_ids:
+        return {}, "provider_malformed"
+    return scores, ""
+
+
+def apply_semantic_support(
+    *,
+    query: str,
+    query_tokens: list[str],
+    scope: str,
+    preferred_scope: str,
+    project_path: str | None,
+    hits: list[Hit],
+    context_hits: list[dict[str, object]],
+    provider: SemanticSupportProviderConfig,
+) -> dict[str, object]:
+    query_reason = semantic_query_governance_reason(query, query_tokens)
+    candidates: list[tuple[str, str]] = []
+    candidate_contexts: dict[str, dict[str, object]] = {}
+    for rank, (hit, context) in enumerate(
+        zip(hits, context_hits, strict=True),
+        1,
+    ):
+        query_support = context.get("query_support")
+        if not isinstance(query_support, dict):
+            continue
+        if query_support.get("status") == "supported":
+            if query_reason:
+                query_support["semantic_support"] = {
+                    "status": "governance_rejected",
+                    "reason": query_reason,
+                    "policy": SEMANTIC_SUPPORT_POLICY,
+                }
+                context["answerability"] = {
+                    "status": "unsupported",
+                    "reason": "semantic_mode_focused_intent_required",
+                }
+            continue
+        if query_support.get("status") != "weak":
+            continue
+        if rank > SEMANTIC_SUPPORT_MAX_CANDIDATES:
+            query_support["semantic_support"] = {
+                "status": "governance_rejected",
+                "reason": "outside_top_five",
+                "policy": SEMANTIC_SUPPORT_POLICY,
+            }
+            continue
+        hit_reason = semantic_hit_governance_reason(
+            hit,
+            scope=scope,
+            preferred_scope=preferred_scope,
+            project_path=project_path,
+        )
+        reason = query_reason or hit_reason
+        if reason:
+            query_support["semantic_support"] = {
+                "status": "governance_rejected",
+                "reason": reason,
+                "policy": SEMANTIC_SUPPORT_POLICY,
+            }
+            continue
+        candidate_id = f"candidate_{rank}"
+        candidates.append((candidate_id, hit.text))
+        candidate_contexts[candidate_id] = context
+
+    scores, failure = semantic_provider_scores(provider, query, candidates) if candidates else ({}, "")
+    for candidate_id, _text in candidates:
+        context = candidate_contexts[candidate_id]
+        query_support = context["query_support"]
+        if failure:
+            query_support["semantic_support"] = {
+                "status": "provider_failure",
+                "reason": failure,
+                "policy": SEMANTIC_SUPPORT_POLICY,
+            }
+            continue
+        score = scores[candidate_id]
+        semantic_metadata: dict[str, object] = {
+            "status": (
+                "supported"
+                if score >= SEMANTIC_SUPPORT_THRESHOLD
+                else "below_threshold"
+            ),
+            "policy": SEMANTIC_SUPPORT_POLICY,
+            "score": round(score, 6),
+            "threshold": SEMANTIC_SUPPORT_THRESHOLD,
+            "model_fingerprint": SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+        }
+        query_support["semantic_support"] = semantic_metadata
+        if score >= SEMANTIC_SUPPORT_THRESHOLD:
+            query_support["lexical_status"] = query_support["status"]
+            query_support["status"] = "supported"
+            query_support["policy"] = SEMANTIC_SUPPORT_POLICY
+            context["answerability"] = {
+                "status": "supported",
+                "reason": (
+                    "active_current_memory_with_summary_evidence_and_"
+                    "bounded_local_semantic_support"
+                ),
+            }
+
+    return {
+        "status": (
+            "provider_failure"
+            if failure
+            else "evaluated"
+            if candidates
+            else "no_eligible_candidates"
+        ),
+        "policy": SEMANTIC_SUPPORT_POLICY,
+        "provider_transport": "local_unix_socket",
+        "model_fingerprint": SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+        "threshold": SEMANTIC_SUPPORT_THRESHOLD,
+        "candidate_evaluation_count": len(candidates),
+        "max_candidate_count": SEMANTIC_SUPPORT_MAX_CANDIDATES,
+    }
+
+
 def context_hit(
     repo: Path,
     hit: Hit,
@@ -2152,13 +2535,29 @@ def build_context_package(
     project_path: str | None,
     hits: list[Hit],
     inactive_match_count: int,
+    semantic_provider: SemanticSupportProviderConfig | None = None,
 ) -> dict[str, object]:
+    package_hits = context_package_hits(hits, limit)
     context_hits = [
         context_hit(repo, hit, rank, depth, query_tokens)
-        for rank, hit in enumerate(context_package_hits(hits, limit), 1)
+        for rank, hit in enumerate(package_hits, 1)
     ]
+    semantic_metadata = (
+        apply_semantic_support(
+            query=query,
+            query_tokens=query_tokens,
+            scope=scope,
+            preferred_scope=preferred_scope,
+            project_path=project_path,
+            hits=package_hits,
+            context_hits=context_hits,
+            provider=semantic_provider,
+        )
+        if semantic_provider is not None
+        else None
+    )
     decomposition_recommended = query_decomposition_recommended(query, query_tokens)
-    return {
+    package: dict[str, object] = {
         "report_kind": "memory_recall_context_package",
         "report_version": 1,
         "claim_boundary": (
@@ -2183,6 +2582,9 @@ def build_context_package(
         "hits": context_hits,
         "privacy": context_privacy_block(),
     }
+    if semantic_metadata is not None:
+        package["semantic_support"] = semantic_metadata
+    return package
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2244,6 +2646,13 @@ def main(argv: list[str] | None = None) -> int:
         "--project-path",
         help="Optional current project path used to boost matching archive records",
     )
+    parser.add_argument(
+        "--semantic-provider-socket",
+        help=(
+            "Optional private Unix socket for the pinned bounded semantic-support "
+            "verifier; also read from MY_PRECIOUS_SEMANTIC_PROVIDER_SOCKET or config"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.limit <= 0:
@@ -2285,6 +2694,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.context_json:
         inactive_count = inactive_memory_match_count(repo, query_tokens, context_terms, args.scope)
+        semantic_provider = resolve_semantic_provider(args.semantic_provider_socket)
         print(
             json.dumps(
                 build_context_package(
@@ -2299,6 +2709,7 @@ def main(argv: list[str] | None = None) -> int:
                     project_path=args.project_path,
                     hits=hits,
                     inactive_match_count=inactive_count,
+                    semantic_provider=semantic_provider,
                 ),
                 sort_keys=True,
             )

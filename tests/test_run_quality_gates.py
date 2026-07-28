@@ -122,6 +122,20 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertTrue(
             any("benchmarks/search_memory_release_truth_gate.py" in command for command in commands)
         )
+        self.assertTrue(
+            any(
+                "benchmarks/real_use_semantic_support_gate.py --cohort calibration --baseline-only"
+                in command
+                for command in commands
+            )
+        )
+        self.assertTrue(
+            any(
+                "benchmarks/real_use_semantic_support_gate.py --cohort holdout --baseline-only"
+                in command
+                for command in commands
+            )
+        )
         self.assertTrue(any("benchmarks/runtime_tool_bundle_parity_gate.py" in command for command in commands))
         self.assertTrue(
             any("benchmarks/three_layer_distribution_preflight_gate.py" in command for command in commands)
@@ -198,6 +212,14 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("benchmarks/private_lifecycle_governance_shadow_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/search_tool_drift_repair_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/search_memory_release_truth_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "benchmarks/real_use_semantic_support_gate.py",
+            module.PY_COMPILE_TARGETS,
+        )
+        self.assertIn(
+            "benchmarks/private_real_use_semantic_support_gate.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("benchmarks/runtime_tool_bundle_parity_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/three_layer_distribution_preflight_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/public_induction_recall_gate.py", module.PY_COMPILE_TARGETS)
@@ -219,6 +241,14 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("templates/agent-memory-repo/tools/audit_publish_readiness.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/repair_publish_surfaces.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/resolve_memory_source.py", module.PY_COMPILE_TARGETS)
+        self.assertIn(
+            "templates/agent-memory-repo/tools/semantic_support_provider.py",
+            module.PY_COMPILE_TARGETS,
+        )
+        self.assertIn(
+            "skills/using-my-precious/scripts/semantic_support_provider.py",
+            module.PY_COMPILE_TARGETS,
+        )
         self.assertIn("templates/agent-memory-repo/tools/upgrade_source_anchors.py", module.PY_COMPILE_TARGETS)
         self.assertIn("skills/using-my-precious/scripts/resolve_memory_source.py", module.PY_COMPILE_TARGETS)
 

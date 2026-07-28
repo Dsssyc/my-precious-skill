@@ -43,6 +43,9 @@ When changing shared tools:
   `skills/update-my-precious/scripts/memory_consolidation.py`.
 - Copy `templates/agent-memory-repo/tools/search_memory.py` to
   `skills/using-my-precious/scripts/search_memory.py`.
+- Copy `templates/agent-memory-repo/tools/semantic_support_provider.py` and
+  `semantic_support_provider_requirements.txt` to
+  `skills/using-my-precious/scripts/`.
 - Copy `templates/agent-memory-repo/tools/resolve_memory_source.py` to
   `skills/using-my-precious/scripts/resolve_memory_source.py`.
 - Copy all template changes into
@@ -55,6 +58,8 @@ diff -qr templates/agent-memory-repo skills/setup-my-precious/assets/agent-memor
 cmp -s templates/agent-memory-repo/tools/update_memory_archive.py skills/update-my-precious/scripts/update_memory_archive.py
 cmp -s templates/agent-memory-repo/tools/memory_consolidation.py skills/update-my-precious/scripts/memory_consolidation.py
 cmp -s templates/agent-memory-repo/tools/search_memory.py skills/using-my-precious/scripts/search_memory.py
+cmp -s templates/agent-memory-repo/tools/semantic_support_provider.py skills/using-my-precious/scripts/semantic_support_provider.py
+cmp -s templates/agent-memory-repo/tools/semantic_support_provider_requirements.txt skills/using-my-precious/scripts/semantic_support_provider_requirements.txt
 cmp -s templates/agent-memory-repo/tools/resolve_memory_source.py skills/using-my-precious/scripts/resolve_memory_source.py
 ```
 
@@ -126,6 +131,8 @@ python3 benchmarks/long_horizon_memory_stress_gate.py
 python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
 python3 benchmarks/search_tool_drift_repair_gate.py
 python3 benchmarks/search_memory_release_truth_gate.py
+python3 benchmarks/real_use_semantic_support_gate.py --cohort calibration --baseline-only
+python3 benchmarks/real_use_semantic_support_gate.py --cohort holdout --baseline-only
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
@@ -146,6 +153,29 @@ the dedicated calibration and holdout commands when reviewing that candidate:
 python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
 python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
 ```
+
+Run the V2.58 pinned local semantic candidate only with a repository-external
+provider environment, model directory, work directory, and aggregate report:
+
+```bash
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort calibration \
+  --provider-python /external/provider-venv/bin/python \
+  --model-dir /external/models/multilingual-e5-small \
+  --work-dir /tmp/my-precious-v258-calibration \
+  --report-file /tmp/my-precious-v258-calibration-report.json
+
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort holdout \
+  --provider-python /external/provider-venv/bin/python \
+  --model-dir /external/models/multilingual-e5-small \
+  --work-dir /tmp/my-precious-v258-holdout \
+  --report-file /tmp/my-precious-v258-holdout-report.json
+```
+
+The private V2.58 holdout is one-shot and must use a manifest, once ledger,
+work directory, and aggregate report outside this repository. Run it only
+after the frozen public holdout reports `go`.
 
 Run the external LongMemEval source-to-induction measurement only with a
 downloaded dataset and generated archives outside this repository:
@@ -239,6 +269,8 @@ python3 -m py_compile \
   benchmarks/private_lifecycle_governance_shadow_gate.py \
   benchmarks/search_tool_drift_repair_gate.py \
   benchmarks/search_memory_release_truth_gate.py \
+  benchmarks/real_use_semantic_support_gate.py \
+  benchmarks/private_real_use_semantic_support_gate.py \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
   benchmarks/public_induction_recall_gate.py \
@@ -262,6 +294,7 @@ python3 -m py_compile \
   skills/update-my-precious/scripts/memory_consolidation.py \
   skills/update-my-precious/scripts/run_scheduled_memory_transaction.py \
   skills/using-my-precious/scripts/search_memory.py \
+  skills/using-my-precious/scripts/semantic_support_provider.py \
   skills/using-my-precious/scripts/resolve_memory_source.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
@@ -274,6 +307,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
+  templates/agent-memory-repo/tools/semantic_support_provider.py \
   templates/agent-memory-repo/tools/resolve_memory_source.py \
   templates/agent-memory-repo/tools/upgrade_source_anchors.py \
   templates/agent-memory-repo/tools/generate_answer_records.py \
