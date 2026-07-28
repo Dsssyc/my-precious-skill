@@ -32,6 +32,22 @@ AUTHOR_INDUCTION_REVIEW_DECISIONS_SCRIPT = Path("templates/agent-memory-repo/too
 
 
 class UpdateMemoryArchiveTests(unittest.TestCase):
+    def test_extract_tags_filters_compound_review_status_tokens(self):
+        module = load_update_module()
+
+        tags = module.extract_tags(
+            "synthetic-project",
+            [
+                "CHANGES_REQUESTED durable reconnect diagnosis",
+                "DONE_WITH_CONCERNS bounded recovery contract",
+            ],
+        )
+
+        self.assertNotIn("changes_requested", tags)
+        self.assertNotIn("done_with_concerns", tags)
+        self.assertIn("reconnect", tags)
+        self.assertIn("recovery", tags)
+
     def test_redact_source_text_preserves_jsonl_structure_for_cookie_header(self):
         module = load_update_module()
         source = (
@@ -10361,6 +10377,7 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             prompt_row = next(row for row in rows if row["source_record"].endswith("prompt-only.jsonl"))
 
             self.assertIn("Concurrent reconnect losers return spurious 502", review_row["title"])
+            self.assertNotIn("changes_requested", review_row["tags"])
             self.assertNotIn("/Users/", review_row["title"])
             self.assertNotIn("worktree", review_row["title"].lower())
             self.assertIn("Review Phase 4", prompt_row["title"])

@@ -595,6 +595,8 @@ NOISY_TAGS = {
     "commands",
     "command",
     "status",
+    "changes_requested",
+    "done_with_concerns",
     "implementation",
     "has",
     "meaningful",
