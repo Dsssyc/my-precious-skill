@@ -125,6 +125,7 @@ python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/long_horizon_memory_stress_gate.py
 python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
 python3 benchmarks/search_tool_drift_repair_gate.py
+python3 benchmarks/search_memory_release_truth_gate.py
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
@@ -237,6 +238,7 @@ python3 -m py_compile \
   benchmarks/long_horizon_memory_stress_gate.py \
   benchmarks/private_lifecycle_governance_shadow_gate.py \
   benchmarks/search_tool_drift_repair_gate.py \
+  benchmarks/search_memory_release_truth_gate.py \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
   benchmarks/public_induction_recall_gate.py \

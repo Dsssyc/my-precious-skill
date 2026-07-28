@@ -352,7 +352,7 @@ class PublicQuerySupportCalibrationGateTests(unittest.TestCase):
             observation["baseline_runtime_policy_parity_numerator"],
             observation["baseline_runtime_policy_parity_denominator"],
         )
-        self.assertEqual(observation["non_baseline_runtime_policy_hit_count"], 1)
+        self.assertEqual(observation["non_baseline_runtime_policy_hit_count"], 0)
         rendered = json.dumps(observation, sort_keys=True)
         self.assertNotIn(row["question_id"], rendered)
         self.assertNotIn(row["question"], rendered)

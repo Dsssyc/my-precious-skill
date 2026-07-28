@@ -52,6 +52,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
     "benchmarks/search_tool_drift_repair_gate.py",
+    "benchmarks/search_memory_release_truth_gate.py",
     "benchmarks/runtime_tool_bundle_parity_gate.py",
     "benchmarks/three_layer_distribution_preflight_gate.py",
     "benchmarks/public_induction_recall_gate.py",
@@ -228,6 +229,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "search_tool_drift_repair",
             ("python3", "benchmarks/search_tool_drift_repair_gate.py"),
+        ),
+        CheckSpec(
+            "search_memory_release_truth",
+            ("python3", "benchmarks/search_memory_release_truth_gate.py"),
         ),
         CheckSpec(
             "runtime_tool_bundle_parity",

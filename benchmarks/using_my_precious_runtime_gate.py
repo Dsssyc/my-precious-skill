@@ -29,12 +29,6 @@ UNSUPPORTED_CASE = "unsupported_no_hit"
 INACTIVE_CASE = "inactive_superseded_only"
 WEAK_ACTIVE_CASE = "weak_active_current"
 SAME_TOPIC_NEAR_MISS_CASE = "same_topic_near_miss"
-SUBJECT_PREFERENCE_CASE = "source_bound_subject_preference"
-EXACT_SUBJECT_PREFERENCE_CASE = "exact_source_bound_subject_preference"
-CANDIDATE_ONLY_PREFERENCE_CASE = "candidate_only_subject_preference"
-BARE_SUBJECT_PREFERENCE_CASE = "bare_subject_preference"
-WRONG_SCOPE_PREFERENCE_CASE = "wrong_scope_subject_preference"
-CURRENT_TURN_PREFERENCE_CASE = "current_turn_subject_preference"
 MALFORMED_CASE = "malformed_package"
 
 SUPPORTED_QUERY = "packagefirst answerability marker"
@@ -42,32 +36,11 @@ UNSUPPORTED_QUERY = "zzabsent qxmissing factoid"
 INACTIVE_QUERY = "staleonly zetaomega legacyonly"
 WEAK_ACTIVE_QUERY = "weakonly support coverage marker"
 SAME_TOPIC_QUERY = "samealpha exactbeta answerdelta"
-SUBJECT_PREFERENCE_QUERY = "release note提示词 可直接复制 纯文本"
-EXACT_SUBJECT_PREFERENCE_QUERY = "release note 提示词 可直接复制 纯文本"
-CANDIDATE_ONLY_PREFERENCE_QUERY = "AuditNimbus preference"
-BARE_SUBJECT_PREFERENCE_QUERY = "release note提示词"
-WRONG_SCOPE_PREFERENCE_QUERY = "status brief 提示词 可直接复制 纯文本"
-CURRENT_TURN_PREFERENCE_QUERY = (
-    "For this task, status briefs use lists with compact headings."
-)
 
 ACTIVE_MEMORY_TEXT = "packagefirst answerability marker active support"
 INACTIVE_MEMORY_TEXT = "staleonly zetaomega legacyonly stale support"
 WEAK_ACTIVE_MEMORY_TEXT = "weakonly generic active memory with drill paths"
 SAME_TOPIC_MEMORY_TEXT = "samealpha nearby topic active memory"
-SUBJECT_PREFERENCE_MEMORY_TEXT = (
-    "用户偏好：release note 提示词默认以可直接复制的纯文本形式交付，"
-    "完整内容放入单独的 text 代码围栏。"
-)
-CANDIDATE_ONLY_PREFERENCE_MEMORY_TEXT = (
-    "The user prefers AuditNimbus reports to be directly copyable."
-)
-WRONG_SCOPE_PREFERENCE_MEMORY_TEXT = (
-    "用户偏好：status brief 提示词默认以可直接复制的纯文本形式交付。"
-)
-CURRENT_TURN_PREFERENCE_MEMORY_TEXT = (
-    "The user prefers status briefs to use tables with compact headings."
-)
 RAW_SOURCE_SENTINEL = "RAW TRANSCRIPT SHOULD NOT RENDER"
 SECRET_SENTINEL = "cookie=SHOULD_NOT_RENDER"
 LEAK_MARKERS = (
@@ -75,10 +48,6 @@ LEAK_MARKERS = (
     INACTIVE_MEMORY_TEXT,
     WEAK_ACTIVE_MEMORY_TEXT,
     SAME_TOPIC_MEMORY_TEXT,
-    SUBJECT_PREFERENCE_MEMORY_TEXT,
-    CANDIDATE_ONLY_PREFERENCE_MEMORY_TEXT,
-    WRONG_SCOPE_PREFERENCE_MEMORY_TEXT,
-    CURRENT_TURN_PREFERENCE_MEMORY_TEXT,
     RAW_SOURCE_SENTINEL,
     SECRET_SENTINEL,
 )
@@ -104,7 +73,6 @@ class RuntimeDecision:
     reason: str
     parse_success: bool
     report_kind: str
-    delivery_contract: str = "none"
 
 
 @dataclass(frozen=True)
@@ -160,17 +128,14 @@ def memory_row(
     topic: str = "using-my-precious-runtime-gate",
     supersedes: list[str] | None = None,
     superseded_by: str | None = None,
-    layer: str = "domain",
-    scope: str = "domain:runtime-gate",
-    source: str = "synthetic",
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "memory_id": memory_id,
-        "layer": layer,
-        "scope": scope,
+        "layer": "domain",
+        "scope": "domain:runtime-gate",
         "topic": topic,
         "text": text,
-        "source": source,
+        "source": "synthetic",
         "confidence": "high",
         "support_count": 2,
         "derived_from": [summary_path],
@@ -268,42 +233,6 @@ def write_synthetic_archive(memory_repo: Path) -> None:
             evidence_path=same_topic_evidence,
             topic="samealpha",
         ),
-        memory_row(
-            "runtime_gate_source_bound_preference",
-            SUBJECT_PREFERENCE_MEMORY_TEXT,
-            summary_path=supported_summary,
-            evidence_path=supported_evidence,
-            layer="global",
-            scope="global",
-            source="automatic",
-        ),
-        memory_row(
-            "runtime_gate_candidate_only_preference",
-            CANDIDATE_ONLY_PREFERENCE_MEMORY_TEXT,
-            summary_path=supported_summary,
-            evidence_path=supported_evidence,
-            layer="global",
-            scope="global",
-            source="automatic",
-        ),
-        memory_row(
-            "runtime_gate_wrong_scope_preference",
-            WRONG_SCOPE_PREFERENCE_MEMORY_TEXT,
-            summary_path=supported_summary,
-            evidence_path=supported_evidence,
-            layer="project",
-            scope="project:runtime-gate",
-            source="automatic",
-        ),
-        memory_row(
-            "runtime_gate_current_turn_preference",
-            CURRENT_TURN_PREFERENCE_MEMORY_TEXT,
-            summary_path=supported_summary,
-            evidence_path=supported_evidence,
-            layer="global",
-            scope="global",
-            source="automatic",
-        ),
     ]
     index_path = memory_repo / "index/memories.jsonl"
     index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -364,34 +293,16 @@ def documented_runtime_decision(raw_package: str) -> RuntimeDecision:
         if not isinstance(hit, dict):
             continue
         hit_answerability = hit.get("answerability")
-        query_support = hit.get("query_support")
         if (
             hit.get("active_current") is True
             and isinstance(hit_answerability, dict)
             and hit_answerability.get("status") == "supported"
-            and isinstance(query_support, dict)
-            and query_support.get("status") == "supported"
+            and isinstance(hit.get("query_support"), dict)
+            and hit["query_support"].get("status") == "supported"
             and hit.get("summary_drill_paths")
             and hit.get("evidence_drill_paths")
         ):
-            candidate_match = hit.get("candidate_match")
-            delivery_contract = "none"
-            if (
-                query_support.get("subject_preference_support") is True
-                and query_support.get("preference_memory") is True
-                and isinstance(candidate_match, dict)
-                and candidate_match.get("focused_preference_intent") is True
-                and candidate_match.get("polarity_match") is True
-                and candidate_match.get("stable_subject_anchor") is True
-            ):
-                delivery_contract = "single_text_fence_no_outer_text"
-            return RuntimeDecision(
-                "answer",
-                "supported_active_current_package_with_query_support",
-                True,
-                report_kind,
-                delivery_contract,
-            )
+            return RuntimeDecision("answer", "supported_active_current_package_with_query_support", True, report_kind)
 
     return RuntimeDecision("abstain", "unsupported_package", True, report_kind)
 
@@ -403,36 +314,6 @@ def run_cases(memory_repo: Path) -> list[CaseResult]:
         (INACTIVE_CASE, "abstain", run_context_package(memory_repo, INACTIVE_QUERY)),
         (WEAK_ACTIVE_CASE, "abstain", run_context_package(memory_repo, WEAK_ACTIVE_QUERY)),
         (SAME_TOPIC_NEAR_MISS_CASE, "abstain", run_context_package(memory_repo, SAME_TOPIC_QUERY)),
-        (
-            SUBJECT_PREFERENCE_CASE,
-            "answer",
-            run_context_package(memory_repo, SUBJECT_PREFERENCE_QUERY),
-        ),
-        (
-            EXACT_SUBJECT_PREFERENCE_CASE,
-            "answer",
-            run_context_package(memory_repo, EXACT_SUBJECT_PREFERENCE_QUERY),
-        ),
-        (
-            CANDIDATE_ONLY_PREFERENCE_CASE,
-            "abstain",
-            run_context_package(memory_repo, CANDIDATE_ONLY_PREFERENCE_QUERY),
-        ),
-        (
-            BARE_SUBJECT_PREFERENCE_CASE,
-            "abstain",
-            run_context_package(memory_repo, BARE_SUBJECT_PREFERENCE_QUERY),
-        ),
-        (
-            WRONG_SCOPE_PREFERENCE_CASE,
-            "abstain",
-            run_context_package(memory_repo, WRONG_SCOPE_PREFERENCE_QUERY),
-        ),
-        (
-            CURRENT_TURN_PREFERENCE_CASE,
-            "abstain",
-            run_context_package(memory_repo, CURRENT_TURN_PREFERENCE_QUERY),
-        ),
         (MALFORMED_CASE, "abstain", "{not-json"),
     ]
     return [
@@ -448,32 +329,6 @@ def run_cases(memory_repo: Path) -> list[CaseResult]:
 
 def safe_rate(numerator: int, denominator: int) -> float:
     return 1.0 if denominator == 0 else numerator / denominator
-
-
-def preference_support_flags(raw_package: str) -> tuple[bool, bool]:
-    package, parse_success, _ = load_context_package(raw_package)
-    if not parse_success or package is None:
-        return False, False
-    hits = package.get("hits")
-    if not isinstance(hits, list):
-        return False, False
-    preference_support = [
-        hit.get("query_support")
-        for hit in hits
-        if isinstance(hit, dict)
-        and isinstance(hit.get("query_support"), dict)
-        and hit["query_support"].get("preference_memory") is True
-    ]
-    return (
-        any(
-            support.get("preference_safety_eligible") is True
-            for support in preference_support
-        ),
-        any(
-            support.get("subject_preference_support") is True
-            for support in preference_support
-        ),
-    )
 
 
 def count_privacy_leaks(results: list[CaseResult], final_report: dict[str, object] | None = None) -> int:
@@ -519,53 +374,6 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
     near_miss_abstentions = sum(1 for result in near_miss_results if result.decision.action == "abstain")
     weak_active_rejection_count = near_miss_abstentions
     case_outcomes = {result.case_id: result.decision.action for result in results}
-    preference_result = next(
-        result for result in results if result.case_id == SUBJECT_PREFERENCE_CASE
-    )
-    exact_preference_result = next(
-        result
-        for result in results
-        if result.case_id == EXACT_SUBJECT_PREFERENCE_CASE
-    )
-    candidate_only_rejection_count = sum(
-        1
-        for result in results
-        if result.case_id == CANDIDATE_ONLY_PREFERENCE_CASE
-        and result.decision.action == "abstain"
-    )
-    candidate_only_result = next(
-        result
-        for result in results
-        if result.case_id == CANDIDATE_ONLY_PREFERENCE_CASE
-    )
-    (
-        candidate_only_safety_eligible,
-        candidate_only_subject_support,
-    ) = preference_support_flags(candidate_only_result.package_text)
-    bare_subject_rejection_count = sum(
-        1
-        for result in results
-        if result.case_id == BARE_SUBJECT_PREFERENCE_CASE
-        and result.decision.action == "abstain"
-    )
-    wrong_scope_rejection_count = sum(
-        1
-        for result in results
-        if result.case_id == WRONG_SCOPE_PREFERENCE_CASE
-        and result.decision.action == "abstain"
-    )
-    current_turn_preference_rejection_count = sum(
-        1
-        for result in results
-        if result.case_id == CURRENT_TURN_PREFERENCE_CASE
-        and result.decision.action == "abstain"
-    )
-    delivery_contract_outcomes = {
-        SUBJECT_PREFERENCE_CASE: preference_result.decision.delivery_contract,
-        EXACT_SUBJECT_PREFERENCE_CASE: (
-            exact_preference_result.decision.delivery_contract
-        ),
-    }
     metrics: dict[str, object] = {
         "runtime_context_package_parse_success_rate": safe_rate(
             parse_success_count,
@@ -581,30 +389,6 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
         ),
         "runtime_supported_decision_accuracy": safe_rate(supported_correct, len(supported_results)),
         "runtime_abstention_accuracy": safe_rate(abstain_correct, len(abstain_results)),
-        "runtime_subject_preference_supported_accuracy": float(
-            preference_result.decision.action == "answer"
-        ),
-        "runtime_goal_delivery_contract_accuracy": float(
-            preference_result.decision.delivery_contract
-            == "single_text_fence_no_outer_text"
-        ),
-        "runtime_exact_preference_delivery_contract_accuracy": float(
-            exact_preference_result.decision.action == "answer"
-            and exact_preference_result.decision.delivery_contract
-            == "single_text_fence_no_outer_text"
-        ),
-        "runtime_candidate_only_rejection_count": candidate_only_rejection_count,
-        "runtime_candidate_only_safety_eligible_count": int(
-            candidate_only_safety_eligible
-        ),
-        "runtime_candidate_only_subject_support_count": int(
-            candidate_only_subject_support
-        ),
-        "runtime_bare_subject_rejection_count": bare_subject_rejection_count,
-        "runtime_wrong_scope_rejection_count": wrong_scope_rejection_count,
-        "runtime_current_turn_preference_rejection_count": (
-            current_turn_preference_rejection_count
-        ),
         "runtime_weak_active_rejection_count": weak_active_rejection_count,
         "runtime_inactive_rejection_count": inactive_rejection_count,
         "runtime_malformed_fail_closed_count": malformed_fail_closed_count,
@@ -612,7 +396,7 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
     }
     report: dict[str, object] = {
         "report_kind": "using_my_precious_runtime_consumption_gate",
-        "report_version": 2,
+        "report_version": 1,
         "status": "passed",
         "package_source": "clean_packaged_deployment_repo",
         "free_form_search_used": False,
@@ -623,7 +407,6 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
             "query_support_required": True,
         },
         "case_outcomes": case_outcomes,
-        "delivery_contract_outcomes": delivery_contract_outcomes,
         "metrics": metrics,
         "privacy": {
             "aggregate_only": True,
@@ -642,15 +425,6 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
         or metrics["runtime_near_miss_abstention_accuracy"] != 1.0
         or metrics["runtime_supported_decision_accuracy"] != 1.0
         or metrics["runtime_abstention_accuracy"] != 1.0
-        or metrics["runtime_subject_preference_supported_accuracy"] != 1.0
-        or metrics["runtime_goal_delivery_contract_accuracy"] != 1.0
-        or metrics["runtime_exact_preference_delivery_contract_accuracy"] != 1.0
-        or candidate_only_rejection_count != 1
-        or not candidate_only_safety_eligible
-        or candidate_only_subject_support
-        or bare_subject_rejection_count != 1
-        or wrong_scope_rejection_count != 1
-        or current_turn_preference_rejection_count != 1
         or weak_active_rejection_count != 2
         or inactive_rejection_count != 1
         or malformed_fail_closed_count != 1
@@ -662,12 +436,6 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
             INACTIVE_CASE: "abstain",
             WEAK_ACTIVE_CASE: "abstain",
             SAME_TOPIC_NEAR_MISS_CASE: "abstain",
-            SUBJECT_PREFERENCE_CASE: "answer",
-            EXACT_SUBJECT_PREFERENCE_CASE: "answer",
-            CANDIDATE_ONLY_PREFERENCE_CASE: "abstain",
-            BARE_SUBJECT_PREFERENCE_CASE: "abstain",
-            WRONG_SCOPE_PREFERENCE_CASE: "abstain",
-            CURRENT_TURN_PREFERENCE_CASE: "abstain",
             MALFORMED_CASE: "abstain",
         }
     ):

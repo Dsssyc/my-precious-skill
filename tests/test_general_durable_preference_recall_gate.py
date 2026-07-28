@@ -31,6 +31,26 @@ class GeneralDurablePreferenceRecallGateTests(unittest.TestCase):
         cls.gate = load_gate()
         cls.cases = cls.gate.load_cases(CASE_FILE)
 
+    def test_v256_candidate_runtime_is_loaded_from_its_historical_commit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = self.gate.setup_archive(Path(tmpdir), "candidate")
+
+            self.gate.install_candidate_runtime(repo)
+
+            candidate = repo / "tools/search_memory.py"
+            release = Path(
+                "templates/agent-memory-repo/tools/search_memory.py"
+            ).resolve()
+            self.assertEqual(
+                self.gate.CANDIDATE_COMMIT,
+                "1f153c535505685ead0d1566539eeede03ada0ee",
+            )
+            self.assertNotEqual(candidate.read_bytes(), release.read_bytes())
+            self.assertEqual(
+                self.gate.file_sha256(candidate),
+                "29e20ef5f63570d37d09eb878916d66de57ff44e9f8e794bd5f1ec33e25eefed",
+            )
+
     def test_frozen_cohorts_are_disjoint_and_cover_required_shapes(self):
         gate = self.gate
         calibration = gate.cohort_cases(self.cases, "calibration")

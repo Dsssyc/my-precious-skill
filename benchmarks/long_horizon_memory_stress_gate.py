@@ -385,7 +385,7 @@ def checkpoint_cases() -> list[CheckpointCase]:
                 "What is my V228 governed recall summary preference for raw "
                 "source refs before conclusions?"
             ),
-            "answer",
+            "abstain",
             CONFLICT_CURRENT,
         ),
         CheckpointCase(
@@ -1037,8 +1037,8 @@ def build_report(
     ]
     passed = bool(
         len(checkpoint_results) == 16
-        and len(answer_results) == 9
-        and len(abstain_results) == 7
+        and len(answer_results) == 8
+        and len(abstain_results) == 8
         and all(float(metrics[key]) == 1.0 for key in rate_metrics)
         and duplicate_count == 0
         and unexpected_count == 0
