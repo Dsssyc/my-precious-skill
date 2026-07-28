@@ -230,11 +230,29 @@ def validate_public_holdout(report: object) -> None:
         or report.get("cohort") != "holdout"
         or report.get("status") != "go"
         or report.get("decision") != "public_holdout_go"
+        or report.get("candidate_commit") != public_gate.CANDIDATE_COMMIT
         or report.get("case_file_fingerprint") != public_gate.CASE_FILE_SHA256
         or not isinstance(report.get("provider_identity"), dict)
         or report["provider_identity"].get("model_fingerprint") != MODEL_FINGERPRINT
+        or not isinstance(report.get("policy"), dict)
+        or report["policy"].get("name") != SEMANTIC_POLICY
+        or report["policy"].get("threshold") != public_gate.SEMANTIC_THRESHOLD
+        or report["policy"].get("candidate_limit") != 5
     ):
         raise PrivateGateFailure("public_holdout_not_admitted")
+
+
+def validate_candidate_runtime(path: Path) -> None:
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise PrivateGateFailure("candidate_runtime_missing") from exc
+    if (
+        hashlib.sha256(content).hexdigest()
+        != public_gate.CANDIDATE_SEARCH_SHA256
+        or SEMANTIC_POLICY.encode("utf-8") not in content
+    ):
+        raise PrivateGateFailure("candidate_runtime_missing")
 
 
 def run_private_search(
@@ -442,12 +460,14 @@ def main(argv: list[str] | None = None) -> int:
     ledger: Path | None = None
     manifest_sha256 = ""
     try:
-        manifest_path = ensure_external(
-            Path(args.private_manifest),
-            must_exist=True,
-        )
         holdout_path = ensure_external(
             Path(args.public_holdout_report),
+            must_exist=True,
+        )
+        validate_public_holdout(json.loads(holdout_path.read_text(encoding="utf-8")))
+        validate_candidate_runtime(SEARCH_SCRIPT)
+        manifest_path = ensure_external(
+            Path(args.private_manifest),
             must_exist=True,
         )
         ledger = ensure_external(Path(args.once_ledger))
@@ -458,7 +478,6 @@ def main(argv: list[str] | None = None) -> int:
         if (
             not provider_python.is_file()
             or not model_dir.is_dir()
-            or not SEARCH_SCRIPT.is_file()
         ):
             raise PrivateGateFailure("candidate_runtime_missing")
         manifest_bytes = manifest_path.read_bytes()
@@ -467,7 +486,6 @@ def main(argv: list[str] | None = None) -> int:
         archive_repo = ensure_external(manifest.archive_repo, must_exist=True)
         if not (archive_repo / "index").is_dir() or not (archive_repo / "sessions").is_dir():
             raise PrivateGateFailure("private_archive_invalid")
-        validate_public_holdout(json.loads(holdout_path.read_text(encoding="utf-8")))
         reserve_once(ledger, manifest_sha256)
         work_dir.mkdir(parents=True, exist_ok=True)
         root = Path(tempfile.mkdtemp(prefix="v258-private-", dir=work_dir))

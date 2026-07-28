@@ -43,9 +43,6 @@ When changing shared tools:
   `skills/update-my-precious/scripts/memory_consolidation.py`.
 - Copy `templates/agent-memory-repo/tools/search_memory.py` to
   `skills/using-my-precious/scripts/search_memory.py`.
-- Copy `templates/agent-memory-repo/tools/semantic_support_provider.py` and
-  `semantic_support_provider_requirements.txt` to
-  `skills/using-my-precious/scripts/`.
 - Copy `templates/agent-memory-repo/tools/resolve_memory_source.py` to
   `skills/using-my-precious/scripts/resolve_memory_source.py`.
 - Copy all template changes into
@@ -58,8 +55,6 @@ diff -qr templates/agent-memory-repo skills/setup-my-precious/assets/agent-memor
 cmp -s templates/agent-memory-repo/tools/update_memory_archive.py skills/update-my-precious/scripts/update_memory_archive.py
 cmp -s templates/agent-memory-repo/tools/memory_consolidation.py skills/update-my-precious/scripts/memory_consolidation.py
 cmp -s templates/agent-memory-repo/tools/search_memory.py skills/using-my-precious/scripts/search_memory.py
-cmp -s templates/agent-memory-repo/tools/semantic_support_provider.py skills/using-my-precious/scripts/semantic_support_provider.py
-cmp -s templates/agent-memory-repo/tools/semantic_support_provider_requirements.txt skills/using-my-precious/scripts/semantic_support_provider_requirements.txt
 cmp -s templates/agent-memory-repo/tools/resolve_memory_source.py skills/using-my-precious/scripts/resolve_memory_source.py
 ```
 
@@ -154,8 +149,10 @@ python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibratio
 python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
 ```
 
-Run the V2.58 pinned local semantic candidate only with a repository-external
-provider environment, model directory, work directory, and aggregate report:
+V2.58 is a frozen public-holdout `no_go`. Its evaluation runner loads the
+candidate only from the pinned historical commit and requires a
+repository-external provider environment, model directory, work directory,
+and aggregate report:
 
 ```bash
 python3 benchmarks/real_use_semantic_support_gate.py \
@@ -173,9 +170,8 @@ python3 benchmarks/real_use_semantic_support_gate.py \
   --report-file /tmp/my-precious-v258-holdout-report.json
 ```
 
-The private V2.58 holdout is one-shot and must use a manifest, once ledger,
-work directory, and aggregate report outside this repository. Run it only
-after the frozen public holdout reports `go`.
+Do not run the private V2.58 holdout: the frozen public holdout did not report
+`go`.
 
 Run the external LongMemEval source-to-induction measurement only with a
 downloaded dataset and generated archives outside this repository:
@@ -294,7 +290,6 @@ python3 -m py_compile \
   skills/update-my-precious/scripts/memory_consolidation.py \
   skills/update-my-precious/scripts/run_scheduled_memory_transaction.py \
   skills/using-my-precious/scripts/search_memory.py \
-  skills/using-my-precious/scripts/semantic_support_provider.py \
   skills/using-my-precious/scripts/resolve_memory_source.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
@@ -307,7 +302,6 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
-  templates/agent-memory-repo/tools/semantic_support_provider.py \
   templates/agent-memory-repo/tools/resolve_memory_source.py \
   templates/agent-memory-repo/tools/upgrade_source_anchors.py \
   templates/agent-memory-repo/tools/generate_answer_records.py \

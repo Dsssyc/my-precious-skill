@@ -241,14 +241,6 @@ class RunQualityGatesTests(unittest.TestCase):
         self.assertIn("templates/agent-memory-repo/tools/audit_publish_readiness.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/repair_publish_surfaces.py", module.PY_COMPILE_TARGETS)
         self.assertIn("templates/agent-memory-repo/tools/resolve_memory_source.py", module.PY_COMPILE_TARGETS)
-        self.assertIn(
-            "templates/agent-memory-repo/tools/semantic_support_provider.py",
-            module.PY_COMPILE_TARGETS,
-        )
-        self.assertIn(
-            "skills/using-my-precious/scripts/semantic_support_provider.py",
-            module.PY_COMPILE_TARGETS,
-        )
         self.assertIn("templates/agent-memory-repo/tools/upgrade_source_anchors.py", module.PY_COMPILE_TARGETS)
         self.assertIn("skills/using-my-precious/scripts/resolve_memory_source.py", module.PY_COMPILE_TARGETS)
 

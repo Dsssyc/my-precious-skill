@@ -3925,6 +3925,155 @@ V2.57 proves the bounded JSONL physical-line contract and recovery path. It is
 not overall semantic recall closure, ranking quality, vector search, ontology
 discovery, public leaderboard parity, or LLM answer quality.
 
+## V2.58 Real-Use Semantic Support Admission And Release-Truth Convergence
+
+Date: 2026-07-28
+
+Decision: `no_go`.
+
+V2.58 evaluated one bounded local semantic verifier for the specific failure
+where an active/current memory is already in the context-package top five with
+summary and evidence paths, but strict lexical `query_support` remains weak.
+It did not evaluate semantic retrieval for a no-hit query.
+
+Release truth was repaired before the candidate was evaluated. The template,
+setup asset, and bundled `using-my-precious` search tools were restored to the
+approved V2.53/V2.54/V2.57 read path with SHA-256
+`e73b7b6600db8a147d667f91f08eef0562b5029e487950a7fa228c4903f8d248`.
+The release-truth gate rejects both historical no-go runtimes:
+
+| historical candidate | rejected search SHA-256 |
+| --- | --- |
+| V2.55 | `3e0715d25cf0d59703774c5e9d41a19155e92ce85fa8f11549516449d3c15875` |
+| V2.56 | `29e20ef5f63570d37d09eb878916d66de57ff44e9f8e794bd5f1ec33e25eefed` |
+
+The gate also fails closed with aggregate JSON for missing, unreadable, or
+non-UTF-8 release surfaces. It does not render local paths or tracebacks.
+
+The frozen public-data-free case file is
+`benchmarks/cases/real_use_semantic_support_synthetic.jsonl`, with SHA-256
+`7893a6646c36982be2213f43bac75c8c045e72612d5f4177deb27b26e56172d0`.
+Calibration and holdout are disjoint:
+
+| cohort | slice fingerprint | positive | negative | intended weak-hit cases |
+| --- | --- | ---: | ---: | ---: |
+| calibration | `40477d84e0ac82b26048161a46c784a06821f803d2e557203cf061e7da436edf` | 9 | 9 | 6 |
+| holdout | `b44ee705010bfc9de96407a16e7eba2328d435b93fe986e0c9173528a8e88959` | 9 | 13 | 6 |
+
+Both baseline cohorts reproduced the same positive first-loss distribution:
+
+| first-loss stage | count per cohort |
+| --- | ---: |
+| `memory_not_materialized` | 1 |
+| `not_retrieved_at_5` | 1 |
+| `retrieved_but_query_support_weak` | 6 |
+| `supported` | 1 |
+
+`baseline_support_gap_reproduction_rate` and
+`baseline_first_loss_classification_accuracy` were both 1.0. V2.58 was scoped
+only to `retrieved_but_query_support_weak`; the other first-loss stages remain
+future work.
+
+The single candidate was frozen in commit
+`bfc5842bea845dddceb1721a4d47b9155aa21e70`. Its identity was:
+
+| field | frozen value |
+| --- | --- |
+| model | `intfloat/multilingual-e5-small` |
+| model revision | `614241f622f53c4eeff9890bdc4f31cfecc418b3` |
+| model artifact-manifest SHA-256 | `8a945b5d9dde256c5bb6f0274845ac4d7a42e9a02b1e0ac76da66972d32299bb` |
+| model/runtime fingerprint | `89c7223e22f226e5142b3ebc9360f0127b436dc88ba8684922b55dbdabcd6437` |
+| sentence-transformers | 5.6.0 |
+| torch | 2.13.0 |
+| transformers | 5.14.1 |
+| prefix policy | `query:` / `passage:` |
+| threshold | 0.85 |
+| maximum candidates | 5 |
+| provider deadline | 1.75 seconds |
+| query-time network | disabled |
+
+The candidate only inspected eligible weak active/current hits already present
+in the first five lexical results. A private mode-0600 Unix socket carried one
+bounded query and up to five bounded candidate texts to the local provider.
+Provider absence, timeout, fingerprint mismatch, malformed output, unknown or
+duplicate IDs, and non-finite scores failed closed to the lexical result. A
+semantic score alone could not authorize an answer: active/current lifecycle,
+automatic or explicit provenance, matching layer/scope/project context, both
+summary and evidence paths, focused single-facet intent, polarity/currentness,
+and current-turn precedence were also required.
+
+Calibration passed and froze the threshold:
+
+| calibration metric | result |
+| --- | ---: |
+| `semantic_support_public_calibration_recall` | 1.0 |
+| `supported_decision_precision` | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 |
+| `wrong_scope_rejection_rate` | 1.0 |
+| `inactive_rejection_rate` | 1.0 |
+| `provider_failure_fail_closed_rate` | 1.0 |
+| `summary_evidence_resolution_rate` | 1.0 |
+| `legacy_v253_goal_preference_regression_rate` | 1.0 |
+| `semantic_positive_min` | 0.851811 |
+| `semantic_negative_max_evaluated` | 0.831818 |
+| `public_warm_query_p95_seconds` | 0.121655 |
+| `false_support_count` | 0 |
+| `case_specific_runtime_literal_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The frozen public holdout then failed the required recall threshold:
+
+| holdout metric | required | result |
+| --- | ---: | ---: |
+| `semantic_support_public_holdout_recall` | 1.0 | 0.8333333333333334 |
+| `summary_evidence_resolution_rate` | 1.0 | 0.8333333333333334 |
+| `supported_decision_precision` | 1.0 | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `wrong_scope_rejection_rate` | 1.0 | 1.0 |
+| `inactive_rejection_rate` | 1.0 | 1.0 |
+| `current_turn_precedence_accuracy` | 1.0 | 1.0 |
+| `provider_failure_fail_closed_rate` | 1.0 | 1.0 |
+| `legacy_v253_goal_preference_regression_rate` | 1.0 | 1.0 |
+| `public_warm_query_p95_seconds` | <= 2.0 | 0.105967 |
+| `false_support_count` | 0 | 0 |
+| `free_form_answerability_use_count` | 0 | 0 |
+| `case_specific_runtime_literal_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The aggregate holdout report was written outside this repository. No threshold,
+model, rule, or holdout case was changed after observing the result. Because
+public holdout failed, the one-shot private holdout was not run, no private
+archive was queried by the candidate admission, and no candidate was installed
+or deployed. `private_real_use_goal_preference_supported_recall` and
+`private_warm_query_p95_seconds` therefore have no V2.58 result and must not be
+reported as passing.
+
+The private gate validates the aggregate public-holdout admission and the exact
+deployed candidate search-runtime hash before it reads a private manifest or
+archive. In the V2.58 no-go release state, the approved lexical runtime therefore
+closes the private path before private inputs are accessed.
+
+The no-go candidate runtime was removed from every installable surface. The
+evaluation runner now loads the exact candidate scripts only from the frozen
+historical commit and verifies their SHA-256 values before replay. Production
+continues to use the approved lexical runtime, and the real-use Goal-preference
+weak-hit experience remains unresolved.
+
+Baseline taxonomy verification remains part of the canonical release gate:
+
+```bash
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort calibration --baseline-only
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort holdout --baseline-only
+```
+
+V2.58 proves a frozen public calibration/holdout admission decision and clean
+release-truth rollback. It does not prove real Goal-preference recall closure,
+private recall, no-hit semantic retrieval, vector search, a persistent
+embedding store, ranking quality, automatic induction quality, ontology
+discovery, LLM answer quality, or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

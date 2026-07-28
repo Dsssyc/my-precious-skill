@@ -79,7 +79,6 @@ PY_COMPILE_TARGETS = (
     "skills/update-my-precious/scripts/memory_consolidation.py",
     "skills/update-my-precious/scripts/run_scheduled_memory_transaction.py",
     "skills/using-my-precious/scripts/search_memory.py",
-    "skills/using-my-precious/scripts/semantic_support_provider.py",
     "skills/using-my-precious/scripts/resolve_memory_source.py",
     "templates/agent-memory-repo/tools/run_memory_updates.py",
     "templates/agent-memory-repo/tools/audit_memory_archive.py",
@@ -92,7 +91,6 @@ PY_COMPILE_TARGETS = (
     "templates/agent-memory-repo/tools/update_memory_archive.py",
     "templates/agent-memory-repo/tools/memory_consolidation.py",
     "templates/agent-memory-repo/tools/search_memory.py",
-    "templates/agent-memory-repo/tools/semantic_support_provider.py",
     "templates/agent-memory-repo/tools/resolve_memory_source.py",
     "templates/agent-memory-repo/tools/upgrade_source_anchors.py",
     "templates/agent-memory-repo/tools/generate_answer_records.py",
@@ -345,24 +343,6 @@ def build_release_checks() -> list[CheckSpec]:
                 "-s",
                 "templates/agent-memory-repo/tools/search_memory.py",
                 "skills/using-my-precious/scripts/search_memory.py",
-            ),
-        ),
-        CheckSpec(
-            "template_sync_semantic_provider",
-            (
-                "cmp",
-                "-s",
-                "templates/agent-memory-repo/tools/semantic_support_provider.py",
-                "skills/using-my-precious/scripts/semantic_support_provider.py",
-            ),
-        ),
-        CheckSpec(
-            "template_sync_semantic_provider_requirements",
-            (
-                "cmp",
-                "-s",
-                "templates/agent-memory-repo/tools/semantic_support_provider_requirements.txt",
-                "skills/using-my-precious/scripts/semantic_support_provider_requirements.txt",
             ),
         ),
         CheckSpec(

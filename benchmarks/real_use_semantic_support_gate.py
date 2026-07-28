@@ -36,6 +36,17 @@ SEMANTIC_THRESHOLD = 0.85
 SEMANTIC_PROVIDER_SCRIPT = (
     "tools/semantic_support_provider.py"
 )
+CANDIDATE_COMMIT = "bfc5842bea845dddceb1721a4d47b9155aa21e70"
+CANDIDATE_SEARCH_PATH = "templates/agent-memory-repo/tools/search_memory.py"
+CANDIDATE_PROVIDER_PATH = (
+    "templates/agent-memory-repo/tools/semantic_support_provider.py"
+)
+CANDIDATE_SEARCH_SHA256 = (
+    "186e02ab36146113580d4a234c1e7a7050110ce319ace137c7cc69e5120c25d6"
+)
+CANDIDATE_PROVIDER_SHA256 = (
+    "241ca4ac329d7ca551e07c4ee51d666db3e0ba4d8198d5701c51c7d43e2620e7"
+)
 COPYABLE_GOAL_GATE = REPO_ROOT / "benchmarks/copyable_goal_preference_recall_gate.py"
 FIRST_LOSS_STAGES = (
     "memory_not_materialized",
@@ -110,6 +121,12 @@ class CandidateObservation:
     elapsed_seconds: float
 
 
+@dataclass(frozen=True)
+class CandidateRuntime:
+    search_script: bytes
+    provider_script: bytes
+
+
 def safe_rate(numerator: int, denominator: int) -> float:
     return numerator / denominator if denominator else 0.0
 
@@ -176,12 +193,40 @@ def require(
     return result
 
 
+def historical_candidate_runtime() -> CandidateRuntime:
+    scripts: dict[str, bytes] = {}
+    for name, relative, expected_sha256 in (
+        ("search_script", CANDIDATE_SEARCH_PATH, CANDIDATE_SEARCH_SHA256),
+        ("provider_script", CANDIDATE_PROVIDER_PATH, CANDIDATE_PROVIDER_SHA256),
+    ):
+        result = subprocess.run(
+            ["git", "show", f"{CANDIDATE_COMMIT}:{relative}"],
+            cwd=REPO_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode:
+            raise GateFailure("candidate_history", "candidate_artifact_missing")
+        if hashlib.sha256(result.stdout).hexdigest() != expected_sha256:
+            raise GateFailure("candidate_history", "candidate_artifact_hash_mismatch")
+        scripts[name] = result.stdout
+    return CandidateRuntime(
+        search_script=scripts["search_script"],
+        provider_script=scripts["provider_script"],
+    )
+
+
 def target_memory_id(case: SemanticCase) -> str:
     digest = hashlib.sha256(case.case_id.encode("utf-8")).hexdigest()[:16]
     return f"semantic_support_{digest}"
 
 
-def setup_case_archive(root: Path, case: SemanticCase) -> tuple[Path, str]:
+def setup_case_archive(
+    root: Path,
+    case: SemanticCase,
+    *,
+    candidate_runtime: CandidateRuntime | None = None,
+) -> tuple[Path, str]:
     memory_repo = root / case.case_id
     require(
         [
@@ -193,6 +238,10 @@ def setup_case_archive(root: Path, case: SemanticCase) -> tuple[Path, str]:
         ],
         "setup_archive",
     )
+    if candidate_runtime is not None:
+        search_script = memory_repo / "tools/search_memory.py"
+        search_script.write_bytes(candidate_runtime.search_script)
+        search_script.chmod(0o755)
     memory_id = target_memory_id(case)
     if not case.materialized:
         return memory_repo, memory_id
@@ -361,7 +410,9 @@ def packaged_provider(
     root: Path,
     provider_python: Path,
     model_dir: Path,
+    candidate_runtime: CandidateRuntime | None = None,
 ) -> Iterator[Path]:
+    runtime = candidate_runtime or historical_candidate_runtime()
     provider_repo = root / "provider-host"
     require(
         [
@@ -374,8 +425,8 @@ def packaged_provider(
         "provider_setup",
     )
     provider_script = provider_repo / SEMANTIC_PROVIDER_SCRIPT
-    if not provider_script.is_file():
-        raise GateFailure("provider_setup", "packaged_provider_missing")
+    provider_script.write_bytes(runtime.provider_script)
+    provider_script.chmod(0o755)
     socket_path = root / "semantic-provider.sock"
     process = subprocess.Popen(
         [
@@ -560,8 +611,13 @@ def observe_candidate(
     root: Path,
     case: SemanticCase,
     semantic_socket: Path,
+    candidate_runtime: CandidateRuntime,
 ) -> CandidateObservation:
-    memory_repo, memory_id = setup_case_archive(root, case)
+    memory_repo, memory_id = setup_case_archive(
+        root,
+        case,
+        candidate_runtime=candidate_runtime,
+    )
     if case.shape == "malformed_provider":
         malformed_socket = root.parent / "malformed.sock"
         with one_shot_provider(malformed_socket, "malformed"):
@@ -735,6 +791,7 @@ def percentile_95(values: list[float]) -> float:
 def provider_failure_probes(
     root: Path,
     case: SemanticCase,
+    candidate_runtime: CandidateRuntime,
 ) -> list[bool]:
     results: list[bool] = []
     for index, mode in enumerate(
@@ -743,7 +800,11 @@ def provider_failure_probes(
     ):
         mode_root = root / "provider-failure-probes" / mode
         mode_root.mkdir(parents=True, exist_ok=True)
-        memory_repo, memory_id = setup_case_archive(mode_root, case)
+        memory_repo, memory_id = setup_case_archive(
+            mode_root,
+            case,
+            candidate_runtime=candidate_runtime,
+        )
         socket_path = root / f"f{index}.sock"
         if mode == "missing":
             raw_package, _elapsed = context_package(
@@ -794,10 +855,13 @@ def cohort_slice_fingerprint(cases: list[SemanticCase]) -> str:
     ).hexdigest()
 
 
-def case_specific_runtime_literal_count(cases: list[SemanticCase]) -> int:
-    runtime = (
-        REPO_ROOT / "templates/agent-memory-repo/tools/search_memory.py"
-    ).read_text(encoding="utf-8")
+def case_specific_runtime_literal_count(
+    cases: list[SemanticCase],
+    candidate_runtime: CandidateRuntime,
+) -> int:
+    runtime = b"\n".join(
+        (candidate_runtime.search_script, candidate_runtime.provider_script)
+    ).decode("utf-8")
     case_ids = {case.case_id for case in cases}
     synthetic_subjects: set[str] = set()
     for case in cases:
@@ -825,9 +889,20 @@ def run_candidate(
     cases = [case for case in load_cases() if case.cohort == cohort]
     if not cases:
         raise GateFailure("cases", "cohort_empty")
-    with packaged_provider(root, provider_python, model_dir) as semantic_socket:
+    candidate_runtime = historical_candidate_runtime()
+    with packaged_provider(
+        root,
+        provider_python,
+        model_dir,
+        candidate_runtime,
+    ) as semantic_socket:
         observations = [
-            observe_candidate(root / "cases", case, semantic_socket)
+            observe_candidate(
+                root / "cases",
+                case,
+                semantic_socket,
+                candidate_runtime,
+            )
             for case in cases
         ]
         support_gap_case = next(
@@ -835,7 +910,11 @@ def run_candidate(
             for case in cases
             if case.expected_first_loss == "retrieved_but_query_support_weak"
         )
-        failure_probe_results = provider_failure_probes(root, support_gap_case)
+        failure_probe_results = provider_failure_probes(
+            root,
+            support_gap_case,
+            candidate_runtime,
+        )
 
     support_gaps = [
         observation
@@ -938,7 +1017,8 @@ def run_candidate(
         ),
         "free_form_answerability_use_count": 0,
         "case_specific_runtime_literal_count": case_specific_runtime_literal_count(
-            cases
+            cases,
+            candidate_runtime,
         ),
         "privacy_leak_count": 0,
     }
@@ -952,6 +1032,7 @@ def run_candidate(
             "threshold_frozen" if cohort == "calibration" else "public_holdout_go"
         ),
         "mode": "semantic_candidate",
+        "candidate_commit": CANDIDATE_COMMIT,
         "cohort": cohort,
         "case_file_fingerprint": CASE_FILE_SHA256,
         "cohort_fingerprint": cohort_slice_fingerprint(cases),

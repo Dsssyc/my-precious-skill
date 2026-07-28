@@ -8,6 +8,8 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from benchmarks import real_use_semantic_support_gate as semantic_gate
+
 
 GATE_SCRIPT = Path("benchmarks/real_use_semantic_support_gate.py").resolve()
 CASE_FILE = Path(
@@ -27,6 +29,45 @@ def load_cases():
 
 
 class RealUseSemanticSupportGateTests(unittest.TestCase):
+    def test_no_go_candidate_is_historical_and_absent_from_release_runtime(self):
+        runtime = semantic_gate.historical_candidate_runtime()
+        current = Path(
+            "templates/agent-memory-repo/tools/search_memory.py"
+        ).read_bytes()
+
+        self.assertEqual(
+            hashlib.sha256(runtime.search_script).hexdigest(),
+            semantic_gate.CANDIDATE_SEARCH_SHA256,
+        )
+        self.assertEqual(
+            hashlib.sha256(runtime.provider_script).hexdigest(),
+            semantic_gate.CANDIDATE_PROVIDER_SHA256,
+        )
+        self.assertIn(
+            semantic_gate.SEMANTIC_POLICY.encode("utf-8"),
+            runtime.search_script,
+        )
+        self.assertNotIn(
+            semantic_gate.SEMANTIC_POLICY.encode("utf-8"),
+            current,
+        )
+        self.assertNotIn(
+            semantic_gate.SEMANTIC_MODEL_FINGERPRINT.encode("utf-8"),
+            current,
+        )
+
+    def test_case_literal_audit_checks_the_historical_candidate_runtime(self):
+        case = semantic_gate.load_cases()[0]
+        runtime = semantic_gate.CandidateRuntime(
+            search_script=b"# generic candidate\n",
+            provider_script=f"# {case.case_id}\n".encode("utf-8"),
+        )
+
+        self.assertEqual(
+            semantic_gate.case_specific_runtime_literal_count([case], runtime),
+            1,
+        )
+
     def test_frozen_cohorts_are_disjoint_public_and_cover_required_shapes(self):
         cases = load_cases()
         calibration = [case for case in cases if case["cohort"] == "calibration"]

@@ -1,29 +1,42 @@
-import importlib.util
 import json
 import math
+import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
 
-PROVIDER_SCRIPT = Path(
-    "templates/agent-memory-repo/tools/semantic_support_provider.py"
-).resolve()
-REQUIREMENTS_FILE = Path(
+V258_CANDIDATE_COMMIT = "bfc5842bea845dddceb1721a4d47b9155aa21e70"
+PROVIDER_PATH = "templates/agent-memory-repo/tools/semantic_support_provider.py"
+REQUIREMENTS_PATH = (
     "templates/agent-memory-repo/tools/semantic_support_provider_requirements.txt"
-).resolve()
+)
+
+
+def historical_file(relative: str) -> bytes:
+    return subprocess.run(
+        ["git", "show", f"{V258_CANDIDATE_COMMIT}:{relative}"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout
 
 
 def load_provider_module():
-    spec = importlib.util.spec_from_file_location(
-        "semantic_support_provider_under_test",
-        PROVIDER_SCRIPT,
+    name = "semantic_support_provider_under_test"
+    module = types.ModuleType(name)
+    module.__file__ = PROVIDER_PATH
+    sys.modules[name] = module
+    exec(
+        compile(
+            historical_file(PROVIDER_PATH),
+            PROVIDER_PATH,
+            "exec",
+        ),
+        module.__dict__,
     )
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
     return module
 
 
@@ -68,7 +81,7 @@ class SemanticSupportProviderTests(unittest.TestCase):
             "89c7223e22f226e5142b3ebc9360f0127b436dc88ba8684922b55dbdabcd6437",
         )
         self.assertEqual(
-            REQUIREMENTS_FILE.read_text(encoding="utf-8").splitlines(),
+            historical_file(REQUIREMENTS_PATH).decode("utf-8").splitlines(),
             [
                 "huggingface-hub==1.25.1",
                 "numpy==2.5.1",

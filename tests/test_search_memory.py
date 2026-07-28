@@ -6,11 +6,13 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
 
 
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+V258_CANDIDATE_COMMIT = "bfc5842bea845dddceb1721a4d47b9155aa21e70"
 
 
 def load_search_memory_module():
@@ -19,6 +21,31 @@ def load_search_memory_module():
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+def load_v258_candidate_search_memory_module():
+    result = subprocess.run(
+        [
+            "git",
+            "show",
+            (
+                f"{V258_CANDIDATE_COMMIT}:"
+                "templates/agent-memory-repo/tools/search_memory.py"
+            ),
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    name = "v258_candidate_search_memory_under_test"
+    module = types.ModuleType(name)
+    module.__file__ = str(SEARCH_SCRIPT)
+    sys.modules[name] = module
+    exec(
+        compile(result.stdout, module.__file__, "exec"),
+        module.__dict__,
+    )
     return module
 
 
@@ -138,7 +165,7 @@ class SearchMemoryTests(unittest.TestCase):
         )
 
     def test_context_package_can_authorize_one_bounded_local_semantic_hit(self):
-        search_memory = load_search_memory_module()
+        search_memory = load_v258_candidate_search_memory_module()
         query = "How should CedarGoal arrive so I can paste it without cleanup?"
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "semantic.sock"
@@ -203,7 +230,7 @@ class SearchMemoryTests(unittest.TestCase):
         )
 
     def test_semantic_support_rejects_current_turn_override_before_provider_call(self):
-        search_memory = load_search_memory_module()
+        search_memory = load_v258_candidate_search_memory_module()
         query = (
             "Use a table this time; what was the CedarGoal delivery preference?"
         )
@@ -242,7 +269,7 @@ class SearchMemoryTests(unittest.TestCase):
         )
 
     def test_semantic_mode_rejects_bare_subject_without_changing_lexical_status(self):
-        search_memory = load_search_memory_module()
+        search_memory = load_v258_candidate_search_memory_module()
         hit = self.semantic_support_hit(search_memory)
         hit.matched_tokens = ("cedargoal",)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -284,7 +311,7 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertEqual(package["answerability"]["status"], "unsupported")
 
     def test_semantic_provider_malformed_fingerprint_and_timeout_fail_closed(self):
-        search_memory = load_search_memory_module()
+        search_memory = load_v258_candidate_search_memory_module()
         query = "How should CedarGoal arrive so I can paste it without cleanup?"
         scenarios = (
             ("malformed", lambda _request: b"{not-json\n", 0.2),
@@ -359,7 +386,7 @@ class SearchMemoryTests(unittest.TestCase):
             )
 
     def test_missing_semantic_provider_fails_closed(self):
-        search_memory = load_search_memory_module()
+        search_memory = load_v258_candidate_search_memory_module()
         query = "How should CedarGoal arrive so I can paste it without cleanup?"
         with tempfile.TemporaryDirectory() as tmpdir:
             package = search_memory.build_context_package(
@@ -391,7 +418,7 @@ class SearchMemoryTests(unittest.TestCase):
         )
 
     def test_semantic_candidate_evaluation_is_limited_to_top_five(self):
-        search_memory = load_search_memory_module()
+        search_memory = load_v258_candidate_search_memory_module()
         query = "How should CedarGoal arrive so I can paste it without cleanup?"
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "semantic.sock"
