@@ -1,13 +1,18 @@
 import importlib.util
 import json
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import types
 import unittest
 from pathlib import Path
 
 
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+V258_CANDIDATE_COMMIT = "bfc5842bea845dddceb1721a4d47b9155aa21e70"
 
 
 def load_search_memory_module():
@@ -16,6 +21,31 @@ def load_search_memory_module():
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+def load_v258_candidate_search_memory_module():
+    result = subprocess.run(
+        [
+            "git",
+            "show",
+            (
+                f"{V258_CANDIDATE_COMMIT}:"
+                "templates/agent-memory-repo/tools/search_memory.py"
+            ),
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    name = "v258_candidate_search_memory_under_test"
+    module = types.ModuleType(name)
+    module.__file__ = str(SEARCH_SCRIPT)
+    sys.modules[name] = module
+    exec(
+        compile(result.stdout, module.__file__, "exec"),
+        module.__dict__,
+    )
     return module
 
 
@@ -63,80 +93,386 @@ def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
     )
 
 
-def write_source_bound_preference_archive(
-    repo: Path,
-    *,
-    source: str = "automatic",
-    layer: str = "global",
-    scope: str = "global",
-    text: str = (
-        "用户偏好：goal 提示词默认以可直接复制的纯文本形式交付，"
-        "完整内容放入单独的 text 代码围栏。"
-    ),
-) -> None:
-    session_dir = repo / "sessions/2026/07/08/preference"
-    session_dir.mkdir(parents=True)
-    (repo / "index").mkdir()
-    (session_dir / "summary.md").write_text(
-        "# Session: Synthetic Preference\n",
-        encoding="utf-8",
-    )
-    (session_dir / "evidence.md").write_text(
-        "ev_001: Synthetic preference evidence.\n",
-        encoding="utf-8",
-    )
-    (repo / "index/memories.jsonl").write_text(
-        json.dumps(
-            {
-                "memory_id": "mem_source_bound_preference",
-                "layer": layer,
-                "scope": scope,
-                "topic": "artifact-delivery-preference",
-                "text": text,
-                "source": source,
-                "confidence": "high",
-                "support_count": 2,
-                "derived_from": [
-                    "sessions/2026/07/08/preference/summary.md"
-                ],
-                "evidence_refs": [
-                    {
-                        "path": "sessions/2026/07/08/preference/evidence.md",
-                        "quote_id": "ev_001",
-                    }
-                ],
-                "raw_refs": [],
-            },
-            ensure_ascii=False,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+def start_fake_semantic_provider(
+    socket_path: Path,
+    response_factory,
+) -> tuple[threading.Thread, list[dict], list[BaseException]]:
+    requests: list[dict] = []
+    errors: list[BaseException] = []
+    ready = threading.Event()
 
+    def serve() -> None:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                socket_path.chmod(0o600)
+                server.listen(1)
+                ready.set()
+                connection, _ = server.accept()
+                with connection:
+                    payload = bytearray()
+                    while not payload.endswith(b"\n"):
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        payload.extend(chunk)
+                    request = json.loads(payload)
+                    requests.append(request)
+                    response = response_factory(request)
+                    if isinstance(response, bytes):
+                        rendered = response
+                    else:
+                        rendered = json.dumps(response, sort_keys=True).encode("utf-8") + b"\n"
+                    try:
+                        connection.sendall(rendered)
+                    except BrokenPipeError:
+                        pass
+        except BaseException as exc:
+            errors.append(exc)
+            ready.set()
 
-def run_context_package(repo: Path, query: str, *, scope: str = "global") -> dict:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SEARCH_SCRIPT),
-            query,
-            "--repo",
-            str(repo),
-            "--scope",
-            scope,
-            "--depth",
-            "evidence",
-            "--context-json",
-        ],
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    return json.loads(result.stdout)
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    if not ready.wait(2):
+        raise AssertionError("fake semantic provider did not start")
+    if errors:
+        raise errors[0]
+    return thread, requests, errors
 
 
 class SearchMemoryTests(unittest.TestCase):
+    def semantic_support_hit(self, search_memory, *, suffix: str = ""):
+        return search_memory.Hit(
+            path=Path(f"index/memories.jsonl/semantic-support{suffix}"),
+            score=100,
+            source="memory",
+            why=["source:automatic"],
+            memory_id=f"semantic-support{suffix}",
+            layer="global",
+            scope="global",
+            topic="goal delivery preference",
+            text=(
+                "The user prefers CedarGoal deliverables as a single directly "
+                "reusable plain-text block."
+            ),
+            drill_paths=(
+                "sessions/synthetic/semantic-support/summary.md",
+                "sessions/synthetic/semantic-support/evidence.md",
+            ),
+            evidence_refs=("sessions/synthetic/semantic-support/evidence.md#ev_001",),
+            matched_tokens=("cedargoal",),
+            memory_provenance="automatic",
+        )
+
+    def test_context_package_can_authorize_one_bounded_local_semantic_hit(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "semantic.sock"
+
+            def response(request):
+                return {
+                    "report_kind": "semantic_support_response",
+                    "report_version": 1,
+                    "model_fingerprint": search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+                    "scores": [
+                        {
+                            "candidate_id": candidate["candidate_id"],
+                            "score": 0.91,
+                        }
+                        for candidate in request["candidates"]
+                    ],
+                }
+
+            thread, requests, errors = start_fake_semantic_provider(
+                socket_path,
+                response,
+            )
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[self.semantic_support_hit(search_memory)],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=socket_path,
+                ),
+            )
+            thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(requests[0]["candidates"]), 1)
+        self.assertEqual(
+            requests[0]["model_fingerprint"],
+            search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+        )
+        self.assertEqual(package["answerability"]["status"], "supported")
+        self.assertEqual(package["hits"][0]["query_support"]["status"], "supported")
+        self.assertEqual(
+            package["hits"][0]["query_support"]["policy"],
+            "bounded_local_semantic_support_v1",
+        )
+        self.assertEqual(
+            package["hits"][0]["query_support"]["lexical_status"],
+            "weak",
+        )
+        self.assertEqual(
+            package["semantic_support"]["candidate_evaluation_count"],
+            1,
+        )
+
+    def test_semantic_support_rejects_current_turn_override_before_provider_call(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = (
+            "Use a table this time; what was the CedarGoal delivery preference?"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[self.semantic_support_hit(search_memory)],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=Path(tmpdir) / "missing.sock",
+                ),
+            )
+
+        support = package["hits"][0]["query_support"]
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+        self.assertEqual(support["status"], "weak")
+        self.assertEqual(
+            support["semantic_support"]["status"],
+            "governance_rejected",
+        )
+        self.assertEqual(
+            support["semantic_support"]["reason"],
+            "current_turn_precedence",
+        )
+        self.assertEqual(
+            package["semantic_support"]["candidate_evaluation_count"],
+            0,
+        )
+
+    def test_semantic_mode_rejects_bare_subject_without_changing_lexical_status(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        hit = self.semantic_support_hit(search_memory)
+        hit.matched_tokens = ("cedargoal",)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query="CedarGoal",
+                query_tokens=["cedargoal"],
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[hit],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=Path(tmpdir) / "missing.sock",
+                ),
+            )
+
+        support = package["hits"][0]["query_support"]
+        self.assertEqual(support["status"], "supported")
+        self.assertEqual(
+            support["policy"],
+            "strict_meaningful_or_important_query_token_coverage",
+        )
+        self.assertEqual(
+            support["semantic_support"]["status"],
+            "governance_rejected",
+        )
+        self.assertEqual(
+            support["semantic_support"]["reason"],
+            "insufficient_facet_detail",
+        )
+        self.assertEqual(
+            package["hits"][0]["answerability"]["status"],
+            "unsupported",
+        )
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+
+    def test_semantic_provider_malformed_fingerprint_and_timeout_fail_closed(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        scenarios = (
+            ("malformed", lambda _request: b"{not-json\n", 0.2),
+            (
+                "fingerprint",
+                lambda request: {
+                    "report_kind": "semantic_support_response",
+                    "report_version": 1,
+                    "model_fingerprint": "wrong",
+                    "scores": [
+                        {
+                            "candidate_id": candidate["candidate_id"],
+                            "score": 0.99,
+                        }
+                        for candidate in request["candidates"]
+                    ],
+                },
+                0.2,
+            ),
+            (
+                "timeout",
+                lambda request: (
+                    time.sleep(0.2)
+                    or {
+                        "report_kind": "semantic_support_response",
+                        "report_version": 1,
+                        "model_fingerprint": search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+                        "scores": [
+                            {
+                                "candidate_id": candidate["candidate_id"],
+                                "score": 0.99,
+                            }
+                            for candidate in request["candidates"]
+                        ],
+                    }
+                ),
+                0.05,
+            ),
+        )
+        for name, response_factory, timeout_seconds in scenarios:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
+                socket_path = Path(tmpdir) / "semantic.sock"
+                thread, _requests, errors = start_fake_semantic_provider(
+                    socket_path,
+                    response_factory,
+                )
+                package = search_memory.build_context_package(
+                    repo=Path("."),
+                    query=query,
+                    query_tokens=search_memory.unique_query_tokens(query),
+                    depth="evidence",
+                    limit=5,
+                    scope="all",
+                    preferred_scope="",
+                    legacy_sessions=False,
+                    project_path=None,
+                    hits=[self.semantic_support_hit(search_memory)],
+                    inactive_match_count=0,
+                    semantic_provider=search_memory.SemanticSupportProviderConfig(
+                        socket_path=socket_path,
+                        timeout_seconds=timeout_seconds,
+                    ),
+                )
+                thread.join(1)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(package["answerability"]["status"], "unsupported")
+            self.assertEqual(package["hits"][0]["query_support"]["status"], "weak")
+            self.assertEqual(
+                package["hits"][0]["query_support"]["semantic_support"]["status"],
+                "provider_failure",
+            )
+
+    def test_missing_semantic_provider_fails_closed(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[self.semantic_support_hit(search_memory)],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=Path(tmpdir) / "missing.sock",
+                ),
+            )
+
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+        self.assertEqual(package["hits"][0]["query_support"]["status"], "weak")
+        self.assertEqual(
+            package["hits"][0]["query_support"]["semantic_support"]["status"],
+            "provider_failure",
+        )
+        self.assertEqual(
+            package["hits"][0]["query_support"]["semantic_support"]["reason"],
+            "provider_unavailable",
+        )
+
+    def test_semantic_candidate_evaluation_is_limited_to_top_five(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "semantic.sock"
+
+            def response(request):
+                return {
+                    "report_kind": "semantic_support_response",
+                    "report_version": 1,
+                    "model_fingerprint": search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+                    "scores": [
+                        {
+                            "candidate_id": candidate["candidate_id"],
+                            "score": 0.91,
+                        }
+                        for candidate in request["candidates"]
+                    ],
+                }
+
+            thread, requests, errors = start_fake_semantic_provider(
+                socket_path,
+                response,
+            )
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=8,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[
+                    self.semantic_support_hit(search_memory, suffix=f"-{index}")
+                    for index in range(7)
+                ],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=socket_path,
+                ),
+            )
+            thread.join(2)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(requests[0]["candidates"]), 5)
+        self.assertEqual(
+            package["semantic_support"]["candidate_evaluation_count"],
+            5,
+        )
+        self.assertEqual(
+            [hit["query_support"]["status"] for hit in package["hits"]],
+            ["supported"] * 5 + ["weak"] * 2,
+        )
+
     def test_source_map_reachability_accepts_versioned_source_anchor(self):
         search_memory = load_search_memory_module()
 
@@ -289,354 +625,6 @@ class SearchMemoryTests(unittest.TestCase):
 
                 self.assertFalse(package["query"]["decomposition_recommended"])
                 self.assertEqual(package["query"]["decomposition_reason"], "focused_query")
-
-    def test_normalized_candidate_matching_does_not_claim_exact_tokens(self):
-        search_memory = load_search_memory_module()
-        query = "审查建议里风险等级和修复办法按什么顺序"
-        query_tokens = search_memory.unique_query_tokens(query)
-        memory_text = "用户偏好：我默认偏好在代码审查意见中先写风险等级，再写修复建议。"
-
-        score, matched = search_memory.score_text(
-            query_tokens,
-            memory_text,
-            weight=10,
-        )
-
-        self.assertEqual(score, 0)
-        self.assertEqual(matched, [])
-        candidate = search_memory.normalized_subject_candidate_match(
-            query,
-            memory_text,
-        )
-        self.assertTrue(candidate.is_candidate)
-        self.assertGreater(candidate.subject_anchor_match_count, 0)
-        self.assertGreater(candidate.normalized_unit_coverage, 0.0)
-        generic_score, generic_matched = search_memory.score_text(
-            search_memory.unique_query_tokens("我的长期偏好是什么"),
-            "用户偏好：图例始终放在右侧。",
-            weight=10,
-        )
-        self.assertEqual(generic_score, 0)
-        self.assertEqual(generic_matched, [])
-
-    def test_source_bound_preference_supports_normalized_and_open_queries(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "agent-memory"
-            repo.mkdir()
-            write_source_bound_preference_archive(repo)
-
-            for query in (
-                "goal提示词 可直接复制 纯文本",
-                "goal 提示词 直接可复制的偏好",
-                "起草下一份 goal 时该采用什么交付格式",
-                "我以前要求 goal 怎么给才方便直接粘贴",
-                "How should you format a goal so I can copy it directly?",
-                "What goal delivery style do I prefer?",
-            ):
-                with self.subTest(query=query):
-                    payload = run_context_package(repo, query)
-                    self.assertEqual(payload["answerability"]["status"], "supported")
-                    hit = payload["hits"][0]
-                    self.assertEqual(
-                        hit["query_support"]["policy"],
-                        "source_bound_subject_preference_support_v1",
-                    )
-                    self.assertEqual(hit["answerability"]["status"], "supported")
-                    self.assertNotIn(
-                        "goal提示词",
-                        hit["query_support"]["matched_tokens"],
-                    )
-                    candidate = hit["candidate_match"]
-                    self.assertEqual(
-                        candidate["policy"],
-                        "normalized_subject_candidate_v1",
-                    )
-                    self.assertGreater(candidate["subject_anchor_coverage"], 0.0)
-                    self.assertTrue(candidate["polarity_match"])
-                    self.assertGreater(candidate["ranking_contribution"], 0)
-
-    def test_subject_preference_support_rejects_neighboring_intents(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "agent-memory"
-            repo.mkdir()
-            write_source_bound_preference_archive(repo)
-
-            for query in (
-                "Example prompt: I prefer every goal to use a YAML fence.",
-                "网页内容应该直接可复制",
-                "网页 goal 卡片应该直接可复制",
-                "当前项目 goal 状态是什么",
-                "Markdown 文档应该使用 text 代码围栏",
-                "我不再要求 goal 使用纯文本代码围栏",
-                "How should you format a webpage goal card as a text code fence?",
-                "Do not use my goal text fence preference.",
-                "This task uses YAML instead of my goal text fence preference.",
-                "不要使用 goal 的 text 代码围栏偏好",
-            ):
-                with self.subTest(query=query):
-                    payload = run_context_package(repo, query)
-                    self.assertEqual(payload["answerability"]["status"], "unsupported")
-                    self.assertFalse(
-                        any(
-                            hit["query_support"]["status"] == "supported"
-                            for hit in payload["hits"]
-                        )
-                    )
-
-    def test_subject_preference_support_rejects_bare_subject_with_eligible_provenance(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "agent-memory"
-            repo.mkdir()
-            write_source_bound_preference_archive(repo)
-
-            payload = run_context_package(repo, "goal提示词")
-
-        self.assertEqual(payload["answerability"]["status"], "unsupported")
-        self.assertFalse(
-            any(
-                hit["query_support"]["status"] == "supported"
-                for hit in payload["hits"]
-            )
-        )
-
-    def test_exact_preference_support_cannot_bypass_current_turn_or_scope(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            global_repo = Path(tmpdir) / "global"
-            global_repo.mkdir()
-            write_source_bound_preference_archive(
-                global_repo,
-                text=(
-                    "The user prefers reports to use tables with compact headings."
-                ),
-            )
-            current_turn = run_context_package(
-                global_repo,
-                "For this task, reports use lists with compact headings.",
-            )
-
-            project_repo = Path(tmpdir) / "project"
-            project_repo.mkdir()
-            write_source_bound_preference_archive(
-                project_repo,
-                layer="project",
-                scope="project:synthetic",
-            )
-            wrong_scope = run_context_package(
-                project_repo,
-                "goal 提示词 可直接复制 纯文本",
-                scope="all",
-            )
-
-        for payload in (current_turn, wrong_scope):
-            with self.subTest(payload=payload["answerability"]):
-                self.assertEqual(payload["answerability"]["status"], "unsupported")
-                self.assertFalse(
-                    any(
-                        hit["query_support"]["status"] == "supported"
-                        for hit in payload["hits"]
-                    )
-                )
-
-    def test_source_bound_preference_support_accepts_first_person_explicit_memory(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "agent-memory"
-            repo.mkdir()
-            write_source_bound_preference_archive(
-                repo,
-                source="explicit",
-                text=(
-                    "I prefer release note prompts to be delivered in one directly "
-                    "copyable text code fence."
-                ),
-            )
-
-            payload = run_context_package(
-                repo,
-                "What release note prompt delivery format do I prefer?",
-            )
-
-        self.assertEqual(payload["answerability"]["status"], "supported")
-        hit = payload["hits"][0]
-        self.assertEqual(hit["query_support"]["status"], "supported")
-        self.assertTrue(hit["query_support"]["subject_preference_support"])
-
-    def test_subject_preference_support_requires_source_bound_provenance(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "agent-memory"
-            repo.mkdir()
-            write_source_bound_preference_archive(repo, source="synthetic")
-
-            payload = run_context_package(
-                repo,
-                "goal提示词 可直接复制 纯文本",
-            )
-
-        self.assertEqual(payload["answerability"]["status"], "unsupported")
-        self.assertEqual(payload["hits"][0]["query_support"]["status"], "weak")
-
-    def test_candidate_only_preference_passes_safety_but_cannot_authorize(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir) / "agent-memory"
-            repo.mkdir()
-            write_source_bound_preference_archive(
-                repo,
-                text=(
-                    "The user prefers ReviewNimbus reports to be directly "
-                    "copyable."
-                ),
-            )
-
-            payload = run_context_package(
-                repo,
-                "ReviewNimbus preference",
-            )
-
-        self.assertEqual(payload["answerability"]["status"], "unsupported")
-        hit = payload["hits"][0]
-        support = hit["query_support"]
-        self.assertTrue(support["preference_safety_eligible"])
-        self.assertFalse(support["subject_preference_support"])
-        self.assertEqual(support["status"], "weak")
-
-    def test_generic_chinese_query_framing_does_not_block_domain_token(self):
-        search_memory = load_search_memory_module()
-
-        self.assertEqual(
-            search_memory.unique_query_tokens("我的 goal 偏好是什么"),
-            ["goal"],
-        )
-
-    def test_subject_preference_support_is_separate_from_default_coverage(self):
-        search_memory = load_search_memory_module()
-        query_tokens = ["goal", "下一步目标内容"]
-        matched_tokens = ["goal"]
-
-        ordinary = search_memory.context_query_support(
-            query_tokens,
-            matched_tokens,
-        )
-        applicable = search_memory.context_query_support(
-            query_tokens,
-            matched_tokens,
-            subject_preference_supported=True,
-            preference_memory=True,
-            preference_safety_eligible=True,
-        )
-        exact_preference = search_memory.context_query_support(
-            ["reports", "tables"],
-            ["reports", "tables"],
-            subject_preference_supported=True,
-            preference_memory=True,
-            preference_safety_eligible=True,
-        )
-
-        self.assertEqual(ordinary["status"], "weak")
-        self.assertEqual(applicable["status"], "supported")
-        self.assertEqual(
-            ordinary["policy"],
-            "strict_meaningful_or_important_query_token_coverage",
-        )
-        self.assertEqual(
-            applicable["policy"],
-            "source_bound_subject_preference_support_v1",
-        )
-        self.assertEqual(
-            exact_preference["policy"],
-            "source_bound_subject_preference_support_v1",
-        )
-        self.assertFalse(ordinary["subject_preference_support"])
-        self.assertTrue(applicable["subject_preference_support"])
-
-    def test_source_bound_preference_support_rejects_multi_facet_query(self):
-        search_memory = load_search_memory_module()
-        query = (
-            "Combine my global preference, project history, and current repository state"
-        )
-        hit = search_memory.Hit(
-            path=Path("index/memories.jsonl/mem_preference"),
-            score=100,
-            source="memory",
-            title="The user prefers plans to include verification.",
-            memory_id="mem_preference",
-            layer="global",
-            scope="global",
-            matched_tokens=("preference",),
-            provenance_source="automatic",
-            preference_memory=True,
-            candidate_match=search_memory.CandidateMatch(
-                is_candidate=True,
-                subject_anchor_coverage=1.0,
-                normalized_unit_coverage=1.0,
-                subject_anchor_match_count=2,
-                query_subject_anchor_count=2,
-                independent_support_unit_count=1,
-                stable_subject_anchor=True,
-                focused_preference_intent=True,
-                open_ended_subject_preference=True,
-                polarity_match=True,
-                ranking_contribution=64,
-            ),
-            why=[],
-        )
-
-        self.assertFalse(
-            search_memory.source_bound_subject_preference_supported(
-                query,
-                hit,
-                summary_drill_paths=["sessions/synthetic/summary.md"],
-                evidence_drill_paths=["sessions/synthetic/evidence.md"],
-            )
-        )
-
-    def test_normalized_candidate_preserves_hit_before_package_support(self):
-        search_memory = load_search_memory_module()
-        query = "下一份 goal 应按什么形式给我"
-        query_tokens = search_memory.unique_query_tokens(query)
-        record = synthetic_memory_row(
-            "mem_goal_preference",
-            "用户偏好：请直接把完整 goal 给我，别再解释。",
-            layer="global",
-            scope="global",
-        )
-        record["source"] = "automatic"
-
-        score, matched, _ = search_memory.score_index_record(
-            query_tokens,
-            record,
-            [],
-            query=query,
-        )
-
-        self.assertGreater(score, 0)
-        self.assertIn("goal", matched)
-
-    def test_candidate_ranking_and_metadata_use_the_same_memory_text(self):
-        search_memory = load_search_memory_module()
-        query = "What release note delivery format do I prefer?"
-        query_tokens = search_memory.unique_query_tokens(query)
-        record = synthetic_memory_row(
-            "mem_metadata_consistency",
-            "The user prefers unrelated status summaries.",
-            layer="global",
-            scope="global",
-        )
-        record["source"] = "automatic"
-        record["topic"] = "release-note-delivery-format-preference"
-
-        score, _, reasons = search_memory.score_index_record(
-            query_tokens,
-            record,
-            [],
-            query=query,
-        )
-        candidate = search_memory.normalized_subject_candidate_match(
-            query,
-            str(record["text"]),
-        )
-
-        self.assertGreater(score, 0)
-        self.assertFalse(candidate.is_candidate)
-        self.assertNotIn("normalized-subject-candidate", reasons)
 
     def test_context_package_decomposition_signal_is_answerability_orthogonal(self):
         search_memory = load_search_memory_module()

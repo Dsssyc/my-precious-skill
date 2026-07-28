@@ -52,6 +52,9 @@ PY_COMPILE_TARGETS = (
     "benchmarks/lifecycle_governance_gate.py",
     "benchmarks/private_lifecycle_governance_shadow_gate.py",
     "benchmarks/search_tool_drift_repair_gate.py",
+    "benchmarks/search_memory_release_truth_gate.py",
+    "benchmarks/real_use_semantic_support_gate.py",
+    "benchmarks/private_real_use_semantic_support_gate.py",
     "benchmarks/runtime_tool_bundle_parity_gate.py",
     "benchmarks/three_layer_distribution_preflight_gate.py",
     "benchmarks/public_induction_recall_gate.py",
@@ -228,6 +231,30 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "search_tool_drift_repair",
             ("python3", "benchmarks/search_tool_drift_repair_gate.py"),
+        ),
+        CheckSpec(
+            "search_memory_release_truth",
+            ("python3", "benchmarks/search_memory_release_truth_gate.py"),
+        ),
+        CheckSpec(
+            "real_use_semantic_support_calibration_baseline",
+            (
+                "python3",
+                "benchmarks/real_use_semantic_support_gate.py",
+                "--cohort",
+                "calibration",
+                "--baseline-only",
+            ),
+        ),
+        CheckSpec(
+            "real_use_semantic_support_holdout_baseline",
+            (
+                "python3",
+                "benchmarks/real_use_semantic_support_gate.py",
+                "--cohort",
+                "holdout",
+                "--baseline-only",
+            ),
         ),
         CheckSpec(
             "runtime_tool_bundle_parity",

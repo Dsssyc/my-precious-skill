@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CASE_FILE = REPO_ROOT / "benchmarks/cases/general_durable_preference_recall_synthetic.jsonl"
 SETUP_SCRIPT = REPO_ROOT / "skills/setup-my-precious/scripts/setup_memory_archive.py"
 BASELINE_COMMIT = "b076f5585ee3bfe0a8b2db07718ec9b32a3e03dd"
+CANDIDATE_COMMIT = "1f153c535505685ead0d1566539eeede03ada0ee"
 CONTEXT_REPORT_KIND = "memory_recall_context_package"
 REPORT_KIND = "general_durable_preference_recall_gate"
 V255_CALIBRATION_FINGERPRINT = (
@@ -614,18 +615,33 @@ def seed_read_path_archive(
     )
 
 
-def git_show(relative_path: str) -> str:
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def git_show(relative_path: str, *, commit: str = BASELINE_COMMIT) -> str:
     return run_command(
-        ["git", "show", f"{BASELINE_COMMIT}:{relative_path}"],
-        "baseline_git_show",
+        ["git", "show", f"{commit}:{relative_path}"],
+        "historical_git_show",
         cwd=REPO_ROOT,
     )
 
 
-def install_baseline_runtime(memory_repo: Path) -> None:
+def install_runtime(memory_repo: Path, *, commit: str) -> None:
     for relative_path in RUNTIME_RELATIVE_PATHS:
         target = memory_repo / "tools" / Path(relative_path).name
-        target.write_text(git_show(relative_path), encoding="utf-8")
+        target.write_text(
+            git_show(relative_path, commit=commit),
+            encoding="utf-8",
+        )
+
+
+def install_baseline_runtime(memory_repo: Path) -> None:
+    install_runtime(memory_repo, commit=BASELINE_COMMIT)
+
+
+def install_candidate_runtime(memory_repo: Path) -> None:
+    install_runtime(memory_repo, commit=CANDIDATE_COMMIT)
 
 
 def update_archive(
@@ -941,6 +957,7 @@ def added_runtime_diff() -> str:
             "diff",
             "--unified=0",
             BASELINE_COMMIT,
+            CANDIDATE_COMMIT,
             "--",
             *RUNTIME_RELATIVE_PATHS,
         ],
@@ -1011,6 +1028,8 @@ def legacy_ablation_rate(
     )
     if baseline:
         install_baseline_runtime(memory_repo)
+    else:
+        install_candidate_runtime(memory_repo)
     seed_read_path_archive(memory_repo, legacy_cases)
     rows = read_jsonl(memory_repo / "index/memories.jsonl")
     legacy_facts = {case.expected_fact for case in legacy_cases}
@@ -1177,6 +1196,7 @@ def performance_metrics(root: Path) -> dict[str, float]:
     baseline_repo = setup_archive(root, "performance-baseline")
     candidate_repo = setup_archive(root, "performance-candidate")
     install_baseline_runtime(baseline_repo)
+    install_candidate_runtime(candidate_repo)
     seed_performance_archive(baseline_repo)
     seed_performance_archive(candidate_repo)
     query = "synthetic report 0317 deterministic marker group 11"
@@ -1426,6 +1446,7 @@ def run_public(cohort: str, root: Path) -> dict[str, object]:
     baseline_repo = setup_archive(root, "baseline")
     candidate_repo = setup_archive(root, "candidate")
     install_baseline_runtime(baseline_repo)
+    install_candidate_runtime(candidate_repo)
     seed_read_path_archive(baseline_repo, cases)
     seed_read_path_archive(candidate_repo, cases)
     baseline_projects = {case.case_id: set() for case in cases}
@@ -1507,6 +1528,7 @@ def run_public(cohort: str, root: Path) -> dict[str, object]:
         },
         "candidate": {
             "candidate_count": 1,
+            "commit": CANDIDATE_COMMIT[:7],
             "first_loss_distribution": first_loss_distribution(candidate_observations),
             "metrics": candidate_metrics,
         },
@@ -1596,9 +1618,12 @@ def private_tool(root: Path, baseline: bool) -> Path:
             encoding="utf-8",
         )
     else:
-        shutil.copy2(
-            REPO_ROOT / "templates/agent-memory-repo/tools/search_memory.py",
-            target,
+        target.write_text(
+            git_show(
+                "templates/agent-memory-repo/tools/search_memory.py",
+                commit=CANDIDATE_COMMIT,
+            ),
+            encoding="utf-8",
         )
     return target
 
@@ -1765,6 +1790,7 @@ def run_private(
         },
         "candidate": {
             "candidate_count": len(candidate_rows),
+            "commit": CANDIDATE_COMMIT[:7],
             "metrics": metrics,
         },
         "answerability_source": CONTEXT_REPORT_KIND,

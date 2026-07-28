@@ -1295,19 +1295,15 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
         skill = USING_SKILL.read_text(encoding="utf-8")
-        for phrase in (
-            "Artifact delivery format",
-            "Artifact content structure",
-            "only the stable subject plus preference intent",
-            "`candidate_match` explains normalized candidate retrieval only",
-            "`source_bound_subject_preference_support_v1`",
-            "Exact token coverage never bypasses",
-            "single `text` code fence",
-        ):
-            self.assert_contains(skill, phrase)
-
         runtime = SEARCH_SCRIPT.read_text(encoding="utf-8")
-        self.assertNotIn("scoped_global_preference_applicability", runtime)
+        for rejected_policy in (
+            "normalized_subject_candidate_v1",
+            "source_bound_subject_preference_support_v1",
+            "scoped_global_preference_applicability",
+        ):
+            self.assertNotIn(rejected_policy, skill)
+            self.assertNotIn(rejected_policy, runtime)
+        self.assert_contains(skill, "single `text` code fence")
 
     def test_docs_record_v252_live_source_batch_contract(self):
         section = self.evaluation_section("## V2.52 Stable Live-Source Batch Closure")

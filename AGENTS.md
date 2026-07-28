@@ -125,6 +125,9 @@ python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/long_horizon_memory_stress_gate.py
 python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
 python3 benchmarks/search_tool_drift_repair_gate.py
+python3 benchmarks/search_memory_release_truth_gate.py
+python3 benchmarks/real_use_semantic_support_gate.py --cohort calibration --baseline-only
+python3 benchmarks/real_use_semantic_support_gate.py --cohort holdout --baseline-only
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
@@ -145,6 +148,30 @@ the dedicated calibration and holdout commands when reviewing that candidate:
 python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
 python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
 ```
+
+V2.58 is a frozen public-holdout `no_go`. Its evaluation runner loads the
+candidate only from the pinned historical commit and requires a
+repository-external provider environment, model directory, work directory,
+and aggregate report:
+
+```bash
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort calibration \
+  --provider-python /external/provider-venv/bin/python \
+  --model-dir /external/models/multilingual-e5-small \
+  --work-dir /tmp/my-precious-v258-calibration \
+  --report-file /tmp/my-precious-v258-calibration-report.json
+
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort holdout \
+  --provider-python /external/provider-venv/bin/python \
+  --model-dir /external/models/multilingual-e5-small \
+  --work-dir /tmp/my-precious-v258-holdout \
+  --report-file /tmp/my-precious-v258-holdout-report.json
+```
+
+Do not run the private V2.58 holdout: the frozen public holdout did not report
+`go`.
 
 Run the external LongMemEval source-to-induction measurement only with a
 downloaded dataset and generated archives outside this repository:
@@ -237,6 +264,9 @@ python3 -m py_compile \
   benchmarks/long_horizon_memory_stress_gate.py \
   benchmarks/private_lifecycle_governance_shadow_gate.py \
   benchmarks/search_tool_drift_repair_gate.py \
+  benchmarks/search_memory_release_truth_gate.py \
+  benchmarks/real_use_semantic_support_gate.py \
+  benchmarks/private_real_use_semantic_support_gate.py \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
   benchmarks/public_induction_recall_gate.py \
