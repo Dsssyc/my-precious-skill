@@ -4078,9 +4078,7 @@ discovery, LLM answer quality, or public leaderboard parity.
 
 Date: 2026-07-28
 
-Decision: release convergence candidate accepted by the synthetic gate; final
-operational acceptance requires the live aggregate audit after branch
-integration and deployment.
+Decision: `go`.
 
 The V2.59 preflight observed `origin/main` as an ancestor of
 `origin/dev-feature`, with a left/right commit count of `0/20`. The three
@@ -4106,6 +4104,23 @@ These content identities remain valid across documentation-only integration
 commits. The authoritative final source commit is emitted by the live
 aggregate report and verified by equal remote refs; it is not self-embedded in
 the commit whose identity it would change.
+
+The final live audit at operational source commit
+`0c465d9d322d149747dd91322fcde72c542872de` returned status: `current`.
+The source, approved, and integration commit identities were equal. All
+`source_installed_skills_match`, `source_deployed_tools_match`, and
+`automation_contract_aligned` checks were true. Skill-tree, missing-tool,
+stale-tool, unsafe-target, automation-contract, and automation-self-update
+mismatch counts were zero, with `audit_mutation_count: 0` and
+`privacy_leak_count: 0`.
+
+The final mainline skills already matched the installed skills, so deployment
+required no file replacement. Private runtime parity remained `19/19 current`,
+so no tool refresh or private repository commit was needed. The live
+automation was inspected through its automation API and required no mutation.
+PR #18 preserved the complete integration history, its merge commit was
+fast-forwarded back to `dev-feature`, and the temporary implementation branch
+and worktree were removed only after proving they had zero unique commits.
 
 The synthetic gate runs the full case set twice and requires identical
 aggregate reports. Its accepted metrics are:
@@ -4137,8 +4152,7 @@ install, refresh, retry, or use direct Git publication. Release freshness is
 checked at the release/deployment boundary; scheduled runtime parity remains a
 consistency and safety gate.
 
-Final operational acceptance requires all of the following in one live audit
-receipt:
+The final operational audit receipt proved all of the following:
 
 - `origin/main` and `origin/dev-feature` resolve to the same source commit;
 - all three installed skills match the approved source bundle;
