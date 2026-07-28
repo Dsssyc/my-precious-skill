@@ -40,6 +40,23 @@ If none exists, say that no local agent memory archive was found.
 
 After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
+Before searching, divide the requested claims into bounded facets:
+
+- Global user preferences are historical facets. Query them in the user's
+  original language, retaining stable technical identifiers, and do not pass
+  project context.
+- Project history is a historical facet. Query it in the user's original
+  language, retaining stable technical identifiers, and pass project context.
+- Live repository state is not a memory facet. Inspect the repository for the
+  current HEAD, current tests, and current reviewed-code state; never answer
+  those claims from memory.
+
+Use at most two context-package queries for each historical facet. An
+unsupported broad package with `query.decomposition_recommended: true` is a
+bounded split signal, not answer support: split it into the applicable facets
+above and retry only within that limit. Do not add unlimited paraphrases or
+cross-language translations.
+
 1. Before answering a historical fact, run the machine-readable context package
    first:
 
@@ -51,21 +68,22 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    `answerability.status`, and per-hit `query_support.status`. Do not use free-form search output as the answerability source.
    Use free-form search output only for exploration or drilldown after the package decision.
 
-2. When the current task is tied to a local project, pass project context:
+2. For a project-history facet tied to a local project, pass project context:
 
    ```bash
    python "$MEMORY_REPO/tools/search_memory.py" "<query>" --project-path "$PWD" --depth evidence --context-json
    ```
 
    This boosts matching `project_path`, `cwd`, `repository`, or project
-   records without hiding cross-project hits.
+   records without hiding cross-project hits. Do not use `--project-path` for
+   a global-preference facet.
 
 3. Apply the context-package decision recipe:
 
    | package state | agent action |
    | --- | --- |
    | supported package -> answer | Answer only from supported active/current memory hits with `query_support.status: supported` plus `summary_drill_paths` and `evidence_drill_paths`. |
-   | unsupported package -> abstain | Say the archive does not provide supported memory for the requested fact. Do not infer from related context. |
+   | unsupported package -> abstain | Abstain for that facet. If and only if a broad package recommends decomposition, apply the bounded facet split above; do not infer from related context. |
    | inactive/superseded-only package -> abstain | Treat `answerability.reason: no_active_current_support` as stale support only; prefer current replacements when they are separately supported. |
    | malformed or missing package -> abstain | The agent must fail closed to abstain rather than falling back to free-form output for answerability. |
 
@@ -80,6 +98,11 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
    raw refs, source paths, raw source content, credentials, scheduler state, or
    local private paths. Keep answers bounded to summarized evidence and
    archive-relative summary/evidence drill paths.
+
+   Decide each historical facet independently: answer a supported facet and
+   abstain on an unsupported facet without promoting one facet's evidence into
+   another. `query.decomposition_recommended` never changes package or per-hit
+   answerability. Free-form output never determines answerability.
 
 4. If package-supported evidence needs human-readable exploration, use
    free-form search after the decision:
@@ -165,6 +188,16 @@ After choosing a repository path, refer to it as `MEMORY_REPO` in commands.
 
 10. If search returns no relevant result, say that explicitly instead of
    inferring historical facts.
+
+11. Apply supported delivery preferences only after the package decision.
+    For a supported copyable goal artifact preference, return the complete
+    artifact first inside a single `text` code fence, with no explanatory preamble or epilogue outside the fence.
+    Choose an outer fence longer than every backtick run inside the goal so
+    nested code examples remain part of one copyable artifact.
+    current-turn format instructions take precedence over historical
+    preferences: archive abstention does not erase a current-turn instruction.
+    If history is unsupported and the current turn
+    gives no format instruction, do not invent a historical preference.
 
 ## Privacy Rules
 

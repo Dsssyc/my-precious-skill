@@ -17,6 +17,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,14 @@ CONCURRENT_UPDATE_EXIT = getattr(os, "EX_TEMPFAIL", 75)
 CHILD_TERMINATION_TIMEOUT_SECONDS = 5.0
 SOURCE_INVENTORY_REPORT_KIND = "memory_source_inventory"
 SOURCE_INVENTORY_REPORT_VERSION = 2
+SOURCE_INVENTORY_MANIFEST_KIND = "memory_source_inventory_manifest"
+SOURCE_INVENTORY_MANIFEST_VERSION = 1
+UPDATE_TARGET_REPORT_KIND = "memory_update_target_report"
+UPDATE_TARGET_REPORT_VERSION = 1
+UPDATE_BATCH_REPORT_KIND = "memory_update_batch_report"
+UPDATE_BATCH_REPORT_VERSION = 1
+MAX_CHILD_REPORT_BYTES = 64 * 1024
+MAX_INVENTORY_MANIFEST_BYTES = 256 * 1024 * 1024
 TIMESTAMP_KEYS = {"timestamp", "created_at", "updated_at", "started_at", "ended_at", "date"}
 
 
@@ -70,6 +79,47 @@ class SourceInventoryRecord:
 
 class SourceInventoryError(ValueError):
     pass
+
+
+def empty_batch_metrics() -> dict[str, int]:
+    return {
+        "inventory_worker_count": 0,
+        "projects_updated_count": 0,
+        "source_streams_updated_count": 0,
+        "archive_finalization_count": 0,
+        "records_deferred_count": 0,
+        "targets_deferred_count": 0,
+        "child_failure_count": 0,
+    }
+
+
+def update_batch_report(
+    status: str,
+    reason: str,
+    metrics: dict[str, int] | None = None,
+    *,
+    failure_stage: str = "none",
+) -> dict[str, object]:
+    values = dict(metrics or empty_batch_metrics())
+    return {
+        "report_kind": UPDATE_BATCH_REPORT_KIND,
+        "report_version": UPDATE_BATCH_REPORT_VERSION,
+        "status": status,
+        "reason": reason,
+        "failure_stage": failure_stage,
+        "source_batch_complete": status == "updated" and values["records_deferred_count"] == 0,
+        "metrics": values,
+        "privacy": {
+            "aggregate_only": True,
+            "paths_rendered": False,
+            "source_content_rendered": False,
+            "child_output_rendered": False,
+        },
+    }
+
+
+def emit_update_batch_report(payload: dict[str, object]) -> None:
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
 class RunnerInterrupted(Exception):
@@ -203,12 +253,13 @@ class ChildProcessController:
             finally:
                 if child.poll() is not None:
                     self.current = None
-            return subprocess.CompletedProcess(
-                command,
-                returncode,
-                "",
-                "",
-            )
+            stdout_file.flush()
+            stdout_size = stdout_file.seek(0, os.SEEK_END)
+            stdout = ""
+            if stdout_size <= MAX_CHILD_REPORT_BYTES:
+                stdout_file.seek(0)
+                stdout = stdout_file.read()
+            return subprocess.CompletedProcess(command, returncode, stdout, "")
 
     def signal_current(self) -> None:
         child = self.current
@@ -365,6 +416,23 @@ def should_skip(path: Path) -> bool:
     return any(part in SKIP_DIRS for part in path.parts)
 
 
+def jsonl_physical_lines(text: str) -> list[str]:
+    """Split JSONL records only at LF or CRLF physical boundaries."""
+    if not text:
+        return []
+    trailing_lf = text.endswith("\n")
+    lines = text.split("\n")
+    if trailing_lf:
+        lines.pop()
+    last_index = len(lines) - 1
+    return [
+        line[:-1]
+        if line.endswith("\r") and (index < last_index or trailing_lf)
+        else line
+        for index, line in enumerate(lines)
+    ]
+
+
 def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterable[Path]:
     for pattern in patterns:
         for path in source_dir.rglob(pattern):
@@ -374,21 +442,21 @@ def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterabl
 
 def iter_json_values(path: Path, text: str) -> Iterable[object]:
     if path.suffix == ".jsonl":
-        for raw_line in text.splitlines():
+        for raw_line in jsonl_physical_lines(text):
             raw_line = raw_line.strip()
             if not raw_line:
                 continue
             try:
                 yield json.loads(raw_line)
-            except json.JSONDecodeError:
-                continue
+            except json.JSONDecodeError as exc:
+                raise SourceInventoryError("source_inventory_malformed") from exc
         return
 
     if path.suffix == ".json":
         try:
             yield json.loads(text)
-        except json.JSONDecodeError:
-            return
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source_inventory_malformed") from exc
         return
 
     try:
@@ -397,14 +465,14 @@ def iter_json_values(path: Path, text: str) -> Iterable[object]:
     except json.JSONDecodeError:
         pass
 
-    for raw_line in text.splitlines():
+    for raw_line in jsonl_physical_lines(text):
         raw_line = raw_line.strip()
         if not raw_line:
             continue
         try:
             yield json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise SourceInventoryError("source_inventory_malformed") from exc
 
 
 def walk_json_values(value: object) -> Iterable[tuple[str, object]]:
@@ -514,24 +582,38 @@ def build_source_inventory(
         ):
             raise SourceInventoryError("source_inventory_changed")
         text = raw.decode("utf-8", errors="replace")
-        values = list(iter_json_values(resolved, text))
-        if any(source_value_is_automation(value) for value in values):
-            continue
         project_paths: set[Path] = set()
-        for value in values:
+        latest_source_timestamp: datetime | None = None
+        automation_source = False
+        for value in iter_json_values(resolved, text):
+            if source_value_is_automation(value):
+                automation_source = True
+                break
+            for timestamp in direct_source_timestamps(value):
+                if latest_source_timestamp is None or timestamp > latest_source_timestamp:
+                    latest_source_timestamp = timestamp
             for key, child in walk_json_values(value):
                 if key not in PROJECT_PATH_KEYS or not isinstance(child, str) or not child.strip():
                     continue
                 candidate = Path(child).expanduser()
                 if candidate.is_absolute():
                     project_paths.add(candidate.resolve())
+        if automation_source:
+            continue
+        filename_timestamp = timestamp_from_source_filename(resolved)
+        if filename_timestamp and (
+            latest_source_timestamp is None or filename_timestamp > latest_source_timestamp
+        ):
+            latest_source_timestamp = filename_timestamp
+        if latest_source_timestamp is None:
+            latest_source_timestamp = datetime.fromtimestamp(final_stat.st_mtime, tz=UTC)
         inventory.append(
             SourceInventoryRecord(
                 relative_path=relative_path,
                 sha256=hashlib.sha256(raw).hexdigest(),
                 size=final_stat.st_size,
                 mtime_ns=final_stat.st_mtime_ns,
-                source_updated_at=source_updated_at_from_values(resolved, values, final_stat.st_mtime),
+                source_updated_at=latest_source_timestamp.isoformat().replace("+00:00", "Z"),
                 project_paths=tuple(sorted(project_paths, key=lambda item: item.as_posix())),
             )
         )
@@ -577,6 +659,148 @@ def source_inventory_payload(inventory: Iterable[SourceInventoryRecord]) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def source_inventory_manifest_payload(inventory: Iterable[SourceInventoryRecord]) -> dict[str, object]:
+    return {
+        "report_kind": SOURCE_INVENTORY_MANIFEST_KIND,
+        "report_version": SOURCE_INVENTORY_MANIFEST_VERSION,
+        "records": [
+            {
+                "relative_path": record.relative_path,
+                "sha256": record.sha256,
+                "size": record.size,
+                "mtime_ns": record.mtime_ns,
+                "source_updated_at": record.source_updated_at,
+                "project_paths": [str(path) for path in record.project_paths],
+            }
+            for record in inventory
+        ],
+    }
+
+
+def write_source_inventory_manifest(path: Path, inventory: Iterable[SourceInventoryRecord]) -> None:
+    parent = path.parent.resolve(strict=True)
+    if path.parent.is_symlink() or path.exists() or path.is_symlink():
+        raise SourceInventoryError("source_inventory_manifest_unsafe")
+    parent_stat = parent.stat()
+    if stat.S_IMODE(parent_stat.st_mode) & 0o077 or (
+        hasattr(os, "getuid") and parent_stat.st_uid != os.getuid()
+    ):
+        raise SourceInventoryError("source_inventory_manifest_unsafe")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".inventory-", dir=parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(
+                source_inventory_manifest_payload(inventory),
+                handle,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        file_stat = path.stat()
+        if (
+            stat.S_IMODE(file_stat.st_mode) & 0o077
+            or (hasattr(os, "getuid") and file_stat.st_uid != os.getuid())
+            or file_stat.st_size > MAX_INVENTORY_MANIFEST_BYTES
+        ):
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except SourceInventoryError:
+        raise
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SourceInventoryError("source_inventory_manifest_invalid") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("report_kind") != SOURCE_INVENTORY_MANIFEST_KIND
+        or payload.get("report_version") != SOURCE_INVENTORY_MANIFEST_VERSION
+        or not isinstance(payload.get("records"), list)
+    ):
+        raise SourceInventoryError("source_inventory_manifest_invalid")
+    inventory: list[SourceInventoryRecord] = []
+    seen: set[str] = set()
+    for row in payload["records"]:
+        if not isinstance(row, dict) or set(row) != {
+            "relative_path",
+            "sha256",
+            "size",
+            "mtime_ns",
+            "source_updated_at",
+            "project_paths",
+        }:
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        relative_path = row["relative_path"]
+        digest = row["sha256"]
+        size = row["size"]
+        mtime_ns = row["mtime_ns"]
+        source_updated_at = row["source_updated_at"]
+        project_paths = row["project_paths"]
+        if (
+            not isinstance(relative_path, str)
+            or not relative_path
+            or Path(relative_path).is_absolute()
+            or any(part in {"", ".", ".."} for part in Path(relative_path).parts)
+            or relative_path in seen
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or not isinstance(size, int)
+            or size < 0
+            or not isinstance(mtime_ns, int)
+            or mtime_ns < 0
+            or not isinstance(source_updated_at, str)
+            or parse_source_timestamp(source_updated_at) is None
+            or not isinstance(project_paths, list)
+            or any(not isinstance(value, str) or not Path(value).is_absolute() for value in project_paths)
+        ):
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        seen.add(relative_path)
+        inventory.append(
+            SourceInventoryRecord(
+                relative_path=relative_path,
+                sha256=digest,
+                size=size,
+                mtime_ns=mtime_ns,
+                source_updated_at=source_updated_at,
+                project_paths=tuple(Path(value).resolve() for value in project_paths),
+            )
+        )
+    return sorted(inventory, key=lambda record: record.relative_path)
+
+
+def build_source_inventory_isolated(
+    controller: ChildProcessController,
+    memory_repo: Path,
+    source_dir: Path,
+    patterns: tuple[str, ...],
+    manifest_path: Path,
+) -> list[SourceInventoryRecord]:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--source-dir",
+        str(source_dir),
+        "--inventory-worker-manifest",
+        str(manifest_path),
+    ]
+    for pattern in patterns:
+        command.extend(["--pattern", pattern])
+    result = controller.run(command, memory_repo)
+    if result.returncode != 0:
+        raise SourceInventoryError("source_inventory_worker_failed")
+    return load_source_inventory_manifest(manifest_path)
 
 
 def discover_projects(source_dir: Path, patterns: tuple[str, ...]) -> list[Path]:
@@ -699,10 +923,17 @@ def merge_discovered_projects(
     return merged, added
 
 
-def write_registry(memory_repo: Path, projects: dict[str, dict[str, object]], dry_run: bool) -> None:
+def write_registry(
+    memory_repo: Path,
+    projects: dict[str, dict[str, object]],
+    dry_run: bool,
+    *,
+    quiet: bool = False,
+) -> None:
     path = registry_path(memory_repo)
     if dry_run:
-        print("dry-run: project registry write planned")
+        if not quiet:
+            print("dry-run: project registry write planned")
         return
     ensure_safe_project_registry_path(memory_repo, path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -754,6 +985,87 @@ def require_clean_worktree(memory_repo: Path) -> bool:
     return True
 
 
+def parse_update_target_report(result: subprocess.CompletedProcess[str]) -> dict[str, object] | None:
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+    try:
+        payload = json.loads(lines[0])
+    except json.JSONDecodeError:
+        return None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {
+            "report_kind",
+            "report_version",
+            "status",
+            "reason",
+            "source_batch_complete",
+            "metrics",
+            "privacy",
+        }
+        or payload.get("report_kind") != UPDATE_TARGET_REPORT_KIND
+        or payload.get("report_version") != UPDATE_TARGET_REPORT_VERSION
+        or payload.get("status") not in {"updated", "deferred", "blocked"}
+        or payload.get("reason")
+        not in {"updated", "source_records_deferred", "source_inventory_invalid", "secret_records_rejected"}
+        or not isinstance(payload.get("source_batch_complete"), bool)
+    ):
+        return None
+    metrics = payload.get("metrics")
+    expected_metric_keys = {
+        "records_selected_count",
+        "records_processed_count",
+        "records_deferred_count",
+        "records_skipped_count",
+        "entries_removed_count",
+    }
+    if (
+        not isinstance(metrics, dict)
+        or set(metrics) != expected_metric_keys
+        or any(not isinstance(metrics[key], int) or metrics[key] < 0 for key in expected_metric_keys)
+    ):
+        return None
+    privacy = payload.get("privacy")
+    if privacy != {
+        "aggregate_only": True,
+        "paths_rendered": False,
+        "source_content_rendered": False,
+    }:
+        return None
+    if payload["source_batch_complete"] != (
+        payload["status"] == "updated" and metrics["records_deferred_count"] == 0
+    ):
+        return None
+    valid_reasons = {
+        "updated": {"updated"},
+        "deferred": {"source_records_deferred"},
+        "blocked": {"source_inventory_invalid", "secret_records_rejected"},
+    }
+    if payload["reason"] not in valid_reasons[payload["status"]]:
+        return None
+    if metrics["records_skipped_count"] > metrics["records_processed_count"]:
+        return None
+    if payload["status"] == "deferred" and metrics["records_deferred_count"] == 0:
+        return None
+    if payload["status"] == "updated" and metrics["records_deferred_count"] != 0:
+        return None
+    if payload["status"] != "blocked" and (
+        metrics["records_processed_count"] + metrics["records_deferred_count"]
+        != metrics["records_selected_count"]
+    ):
+        return None
+    return payload
+
+
+def merge_target_report(metrics: dict[str, int], payload: dict[str, object]) -> None:
+    target_metrics = payload["metrics"]
+    assert isinstance(target_metrics, dict)
+    deferred = int(target_metrics["records_deferred_count"])
+    metrics["records_deferred_count"] += deferred
+    metrics["targets_deferred_count"] += int(deferred > 0)
+
+
 def run_project_update(
     controller: ChildProcessController,
     memory_repo: Path,
@@ -765,7 +1077,8 @@ def run_project_update(
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
-) -> int:
+    report_json: bool,
+) -> subprocess.CompletedProcess[str]:
     project_path = str(project["project_path"])
     source_dir = Path(str(project.get("source_dir") or default_source_dir)).expanduser().resolve()
     command = [
@@ -800,16 +1113,19 @@ def run_project_update(
         command.append("--rewrite-existing")
     if dry_run:
         command.append("--dry-run")
+    if report_json:
+        command.append("--report-json")
 
-    print("Updating project.")
+    if not report_json:
+        print("Updating project.")
     result = controller.run(
         command,
         memory_repo,
         input_text=source_inventory_payload(inventory),
     )
-    if result.returncode:
+    if result.returncode and not report_json:
         print("update_status=failed reason=project_update_failed", file=sys.stderr)
-    return result.returncode
+    return result
 
 
 def run_source_stream_update(
@@ -823,7 +1139,8 @@ def run_source_stream_update(
     patterns: tuple[str, ...],
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
-) -> int:
+    report_json: bool,
+) -> subprocess.CompletedProcess[str]:
     stream_id = str(stream["stream_id"])
     source_dir = Path(str(stream.get("source_dir") or default_source_dir)).expanduser().resolve()
     project_path = Path(str(stream.get("project_path") or source_dir)).expanduser().resolve()
@@ -862,22 +1179,27 @@ def run_source_stream_update(
         command.append("--rewrite-existing")
     if dry_run:
         command.append("--dry-run")
+    if report_json:
+        command.append("--report-json")
 
-    print("Updating source stream.")
+    if not report_json:
+        print("Updating source stream.")
     result = controller.run(
         command,
         memory_repo,
         input_text=source_inventory_payload(inventory),
     )
-    if result.returncode:
+    if result.returncode and not report_json:
         print("update_status=failed reason=source_stream_update_failed", file=sys.stderr)
-    return result.returncode
+    return result
 
 
 def run_archive_finalization(
     controller: ChildProcessController,
     memory_repo: Path,
-) -> int:
+    *,
+    report_json: bool,
+) -> subprocess.CompletedProcess[str]:
     command = [
         sys.executable,
         str(memory_repo / "tools" / "update_memory_archive.py"),
@@ -885,11 +1207,14 @@ def run_archive_finalization(
         str(memory_repo),
         "--finalize-archive",
     ]
-    print("Finalizing archive.")
+    if report_json:
+        command.append("--report-json")
+    else:
+        print("Finalizing archive.")
     result = controller.run(command, memory_repo)
-    if result.returncode:
+    if result.returncode and not report_json:
         print("update_status=failed reason=archive_finalization_failed", file=sys.stderr)
-    return result.returncode
+    return result
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -913,6 +1238,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Block before mutation unless a Git-backed memory repository is clean",
     )
+    parser.add_argument(
+        "--report-json",
+        action="store_true",
+        help="Emit one aggregate machine-readable batch report",
+    )
+    parser.add_argument(
+        "--inventory-worker-manifest",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--dry-run", action="store_true", help="Discover and run project updates without writing records")
     return parser.parse_args(argv)
 
@@ -923,130 +1257,227 @@ def run_updates(
     source_dir: Path,
     patterns: tuple[str, ...],
     controller: ChildProcessController,
-) -> int:
+) -> tuple[int, dict[str, object]]:
+    metrics = empty_batch_metrics()
     if args.require_clean_worktree and not require_clean_worktree(memory_repo):
-        return 1
+        return 1, update_batch_report(
+            "blocked",
+            "clean_worktree_unavailable",
+            metrics,
+            failure_stage="preflight",
+        )
 
     registered = load_registry(memory_repo)
     source_streams = load_source_stream_registry(memory_repo)
     inventories: dict[Path, list[SourceInventoryRecord]] = {}
+    with tempfile.TemporaryDirectory(prefix="my-precious-inventory-") as manifest_dir_text:
+        manifest_dir = Path(manifest_dir_text)
+        manifest_dir.chmod(0o700)
 
-    def inventory_for(candidate: Path) -> list[SourceInventoryRecord]:
-        source_root = candidate.expanduser().resolve()
-        if source_root not in inventories:
-            inventories[source_root] = build_source_inventory(source_root, patterns)
-        return inventories[source_root]
+        def inventory_for(candidate: Path) -> list[SourceInventoryRecord]:
+            source_root = candidate.expanduser().resolve()
+            if source_root not in inventories:
+                manifest_path = manifest_dir / f"inventory-{len(inventories):04d}.json"
+                metrics["inventory_worker_count"] += 1
+                inventories[source_root] = build_source_inventory_isolated(
+                    controller,
+                    memory_repo,
+                    source_root,
+                    patterns,
+                    manifest_path,
+                )
+            return inventories[source_root]
 
-    discovered = discover_projects_from_inventory(inventory_for(source_dir))
-    projects, added = merge_discovered_projects(registered, discovered, source_dir)
-    write_registry(memory_repo, projects, args.dry_run)
+        discovered = discover_projects_from_inventory(inventory_for(source_dir))
+        projects, added = merge_discovered_projects(registered, discovered, source_dir)
+        write_registry(memory_repo, projects, args.dry_run, quiet=args.report_json)
 
-    runnable = enabled_projects(projects)
-    runnable_streams = enabled_source_streams(source_streams)
-    for project in runnable:
-        inventory_for(Path(str(project.get("source_dir") or source_dir)))
-    for stream in runnable_streams:
-        inventory_for(Path(str(stream.get("source_dir") or source_dir)))
-    print("Memory repo: configured")
-    print("Source dir: configured")
-    print(f"Discovered projects: {len(discovered)}")
-    print(f"Registered new projects: {added}")
-    print(f"Enabled projects: {len(runnable)}")
-    print(f"Enabled source streams: {len(runnable_streams)}")
-    print(f"Source inventories built: {len(inventories)}")
-    print("Source root rescans: 0")
+        runnable = enabled_projects(projects)
+        runnable_streams = enabled_source_streams(source_streams)
+        for project in runnable:
+            inventory_for(Path(str(project.get("source_dir") or source_dir)))
+        for stream in runnable_streams:
+            inventory_for(Path(str(stream.get("source_dir") or source_dir)))
+        if not args.report_json:
+            print("Memory repo: configured")
+            print("Source dir: configured")
+            print(f"Discovered projects: {len(discovered)}")
+            print(f"Registered new projects: {added}")
+            print(f"Enabled projects: {len(runnable)}")
+            print(f"Enabled source streams: {len(runnable_streams)}")
+            print(f"Source inventories built: {len(inventories)}")
+            print("Source root rescans: 0")
 
-    if not runnable and not runnable_streams:
-        print("Projects updated: 0")
-        print("Archive finalizations: 0")
-        if not discovered and not registered:
-            print("No registered projects and no project paths discovered from source records.")
-        return 0
+        if not runnable and not runnable_streams:
+            if not args.report_json:
+                print("Projects updated: 0")
+                print("Archive finalizations: 0")
+                if not discovered and not registered:
+                    print("No registered projects and no project paths discovered from source records.")
+            return 0, update_batch_report("updated", "updated", metrics)
 
-    updated = 0
-    for project in runnable:
-        project_source_dir = Path(str(project.get("source_dir") or source_dir)).expanduser().resolve()
-        project_inventory = inventory_records_for_target(
-            inventory_for(project_source_dir),
-            Path(str(project["project_path"])),
-            require_project_metadata=True,
-        )
-        returncode = run_project_update(
-            controller,
-            memory_repo,
-            project,
-            project_inventory,
-            source_dir,
-            args.dry_run,
-            args.max_records,
-            patterns,
-            args.allow_redacted_secrets,
-            args.rewrite_existing,
-        )
-        if returncode:
-            print(f"Projects updated: {updated}")
-            print("Source streams updated: 0")
-            print("Archive finalizations: 0")
-            print("Projects failed: 1", file=sys.stderr)
-            return 1
-        updated += 1
+        def accept_child_result(result: subprocess.CompletedProcess[str]) -> tuple[bool, str]:
+            if not args.report_json:
+                return result.returncode == 0, "child_failure_unclassified"
+            payload = parse_update_target_report(result)
+            if (
+                payload is None
+                or (result.returncode == 0 and payload["status"] == "blocked")
+                or (result.returncode != 0 and payload["status"] != "blocked")
+            ):
+                return False, "child_failure_unclassified"
+            if result.returncode != 0:
+                return False, str(payload["reason"])
+            merge_target_report(metrics, payload)
+            return True, "updated"
 
-    streams_updated = 0
-    for stream in runnable_streams:
-        stream_source_dir = Path(str(stream.get("source_dir") or source_dir)).expanduser().resolve()
-        stream_project_path = Path(str(stream.get("project_path") or stream_source_dir)).expanduser().resolve()
-        stream_inventory = inventory_records_for_target(
-            inventory_for(stream_source_dir),
-            stream_project_path,
-            require_project_metadata=stream.get("require_project_metadata") is True,
-        )
-        returncode = run_source_stream_update(
-            controller,
-            memory_repo,
-            stream,
-            stream_inventory,
-            source_dir,
-            args.dry_run,
-            args.max_records,
-            patterns,
-            args.allow_redacted_secrets,
-            args.rewrite_existing,
-        )
-        if returncode:
+        updated = 0
+        for project in runnable:
+            project_source_dir = Path(str(project.get("source_dir") or source_dir)).expanduser().resolve()
+            project_inventory = inventory_records_for_target(
+                inventory_for(project_source_dir),
+                Path(str(project["project_path"])),
+                require_project_metadata=True,
+            )
+            result = run_project_update(
+                controller,
+                memory_repo,
+                project,
+                project_inventory,
+                source_dir,
+                args.dry_run,
+                args.max_records,
+                patterns,
+                args.allow_redacted_secrets,
+                args.rewrite_existing,
+                args.report_json,
+            )
+            accepted, failure_reason = accept_child_result(result)
+            if not accepted:
+                metrics["child_failure_count"] += 1
+                if not args.report_json:
+                    print(f"Projects updated: {updated}")
+                    print("Source streams updated: 0")
+                    print("Archive finalizations: 0")
+                    print("Projects failed: 1", file=sys.stderr)
+                return 1, update_batch_report(
+                    "blocked",
+                    failure_reason,
+                    metrics,
+                    failure_stage="project_update",
+                )
+            updated += 1
+            metrics["projects_updated_count"] = updated
+
+        streams_updated = 0
+        for stream in runnable_streams:
+            stream_source_dir = Path(str(stream.get("source_dir") or source_dir)).expanduser().resolve()
+            stream_project_path = Path(str(stream.get("project_path") or stream_source_dir)).expanduser().resolve()
+            stream_inventory = inventory_records_for_target(
+                inventory_for(stream_source_dir),
+                stream_project_path,
+                require_project_metadata=stream.get("require_project_metadata") is True,
+            )
+            result = run_source_stream_update(
+                controller,
+                memory_repo,
+                stream,
+                stream_inventory,
+                source_dir,
+                args.dry_run,
+                args.max_records,
+                patterns,
+                args.allow_redacted_secrets,
+                args.rewrite_existing,
+                args.report_json,
+            )
+            accepted, failure_reason = accept_child_result(result)
+            if not accepted:
+                metrics["child_failure_count"] += 1
+                if not args.report_json:
+                    print(f"Projects updated: {updated}")
+                    print(f"Source streams updated: {streams_updated}")
+                    print("Archive finalizations: 0")
+                    print("Source streams failed: 1", file=sys.stderr)
+                return 1, update_batch_report(
+                    "blocked",
+                    failure_reason,
+                    metrics,
+                    failure_stage="source_stream_update",
+                )
+            streams_updated += 1
+            metrics["source_streams_updated_count"] = streams_updated
+
+        finalizations = 0
+        if not args.dry_run:
+            result = run_archive_finalization(
+                controller,
+                memory_repo,
+                report_json=args.report_json,
+            )
+            accepted, failure_reason = accept_child_result(result)
+            if not accepted:
+                metrics["child_failure_count"] += 1
+                if not args.report_json:
+                    print(f"Projects updated: {updated}")
+                    print(f"Source streams updated: {streams_updated}")
+                    print("Archive finalizations: 0")
+                return 1, update_batch_report(
+                    "blocked",
+                    failure_reason,
+                    metrics,
+                    failure_stage="archive_finalization",
+                )
+            finalizations = 1
+            metrics["archive_finalization_count"] = 1
+        if not args.report_json:
             print(f"Projects updated: {updated}")
             print(f"Source streams updated: {streams_updated}")
-            print("Archive finalizations: 0")
-            print("Source streams failed: 1", file=sys.stderr)
-            return 1
-        streams_updated += 1
-
-    finalizations = 0
-    if not args.dry_run:
-        if run_archive_finalization(controller, memory_repo):
-            print(f"Projects updated: {updated}")
-            print(f"Source streams updated: {streams_updated}")
-            print("Archive finalizations: 0")
-            return 1
-        finalizations = 1
-    print(f"Projects updated: {updated}")
-    print(f"Source streams updated: {streams_updated}")
-    print(f"Archive finalizations: {finalizations}")
-    return 0
+            print(f"Archive finalizations: {finalizations}")
+        status = "deferred" if metrics["records_deferred_count"] else "updated"
+        reason = "source_records_deferred" if status == "deferred" else "updated"
+        return 0, update_batch_report(status, reason, metrics)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    memory_repo = resolve_memory_repo(args.memory_repo)
     source_dir = Path(args.source_dir).expanduser().resolve()
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
+    if args.inventory_worker_manifest:
+        try:
+            inventory = build_source_inventory(source_dir, patterns)
+            write_source_inventory_manifest(
+                Path(args.inventory_worker_manifest).expanduser(),
+                inventory,
+            )
+        except SourceInventoryError:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+            return 1
+        except Exception:
+            print("update_status=failed reason=inventory_worker_internal_error", file=sys.stderr)
+            return 1
+        return 0
+
+    memory_repo = resolve_memory_repo(args.memory_repo)
     update_lock = UpdateRunLock(memory_repo)
+    payload = update_batch_report("blocked", "runner_internal_error", failure_stage="runner")
     try:
         acquired = update_lock.acquire()
     except OSError:
-        print("update_status=blocked reason=lock_unavailable", file=sys.stderr)
+        if args.report_json:
+            emit_update_batch_report(
+                update_batch_report("blocked", "lock_unavailable", failure_stage="lock_acquire")
+            )
+        else:
+            print("update_status=blocked reason=lock_unavailable", file=sys.stderr)
         return CONCURRENT_UPDATE_EXIT
     if not acquired:
-        print("update_status=blocked reason=concurrent_update", file=sys.stderr)
+        if args.report_json:
+            emit_update_batch_report(
+                update_batch_report("blocked", "concurrent_update", failure_stage="lock_acquire")
+            )
+        else:
+            print("update_status=blocked reason=concurrent_update", file=sys.stderr)
         return CONCURRENT_UPDATE_EXIT
 
     controller = ChildProcessController(update_lock)
@@ -1066,15 +1497,25 @@ def main(argv: list[str] | None = None) -> int:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, handle_signal)
-        exit_code = run_updates(args, memory_repo, source_dir, patterns, controller)
+        exit_code, payload = run_updates(args, memory_repo, source_dir, patterns, controller)
     except RunnerInterrupted as exc:
-        print("update_status=blocked reason=interrupted", file=sys.stderr)
+        payload = update_batch_report("blocked", "interrupted", failure_stage="runner")
+        if not args.report_json:
+            print("update_status=blocked reason=interrupted", file=sys.stderr)
         exit_code = 128 + exc.signum
     except SourceInventoryError:
-        print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+        payload = update_batch_report(
+            "blocked",
+            "source_inventory_invalid",
+            failure_stage="source_inventory",
+        )
+        if not args.report_json:
+            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
         exit_code = 1
     except Exception:
-        print("update_status=failed reason=runner_internal_error", file=sys.stderr)
+        payload = update_batch_report("blocked", "runner_internal_error", failure_stage="runner")
+        if not args.report_json:
+            print("update_status=failed reason=runner_internal_error", file=sys.stderr)
         exit_code = 1
     finally:
         child_stopped = controller.terminate_current()
@@ -1082,12 +1523,26 @@ def main(argv: list[str] | None = None) -> int:
             signal.signal(signum, handler)
         if child_stopped:
             if not update_lock.release():
-                print("update_status=blocked reason=lock_release_failed", file=sys.stderr)
+                payload = update_batch_report(
+                    "blocked",
+                    "lock_release_failed",
+                    failure_stage="lock_release",
+                )
+                if not args.report_json:
+                    print("update_status=blocked reason=lock_release_failed", file=sys.stderr)
                 exit_code = 1
         else:
             update_lock.close_parent_handle()
-            print("update_status=blocked reason=child_cleanup_failed", file=sys.stderr)
+            payload = update_batch_report(
+                "blocked",
+                "child_cleanup_failed",
+                failure_stage="child_cleanup",
+            )
+            if not args.report_json:
+                print("update_status=blocked reason=child_cleanup_failed", file=sys.stderr)
             exit_code = 1
+    if args.report_json:
+        emit_update_batch_report(payload)
     return exit_code
 
 

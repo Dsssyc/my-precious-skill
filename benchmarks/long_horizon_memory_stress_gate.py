@@ -378,7 +378,16 @@ def checkpoint_cases() -> list[CheckpointCase]:
         CheckpointCase("e5-cross-project", 5, CROSS_PROJECT_TEXT, "answer", CROSS_PROJECT_TEXT),
         CheckpointCase("e3-noise", 3, NOISE_QUERY, "abstain"),
         CheckpointCase("e4-update-current", 4, UPDATE_CURRENT_TWO, "answer", UPDATE_CURRENT_TWO),
-        CheckpointCase("e4-resolved-conflict", 4, CONFLICT_CURRENT, "answer", CONFLICT_CURRENT),
+        CheckpointCase(
+            "e4-resolved-conflict",
+            4,
+            (
+                "What is my V228 governed recall summary preference for raw "
+                "source refs before conclusions?"
+            ),
+            "abstain",
+            CONFLICT_CURRENT,
+        ),
         CheckpointCase(
             "e4-resolved-conflict-old",
             4,
@@ -1028,8 +1037,8 @@ def build_report(
     ]
     passed = bool(
         len(checkpoint_results) == 16
-        and len(answer_results) == 9
-        and len(abstain_results) == 7
+        and len(answer_results) == 8
+        and len(abstain_results) == 8
         and all(float(metrics[key]) == 1.0 for key in rate_metrics)
         and duplicate_count == 0
         and unexpected_count == 0

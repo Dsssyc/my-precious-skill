@@ -179,8 +179,9 @@ and JSONL indexes.
   launchd or cron scheduler configuration and agent-native automation prompts
   without installing or enabling them.
 - `templates/agent-memory-repo/tools/run_memory_updates.py`: global runner that
-  inventories each unique source root once, bootstraps an empty project registry
-  from that snapshot, invokes an isolated updater for each enabled target, and
+  inventories each unique source root once in a short-lived metadata-only
+  worker, bootstraps an empty project registry from that snapshot, invokes an
+  isolated updater for each enabled target, and
   rebuilds derived archive surfaces once after every ingestion succeeds. It can
   also run explicit source streams keyed by stable archive scope plus source
   partition without first materializing a project row.
@@ -219,6 +220,15 @@ domain/global source stream whose primary identity is `archive_scope` plus
 `source_partition` rather than a project registry row. This avoids a bootstrap
 deadlock where an empty deployment repository has no project registry and
 reduces the requirement that every source stream first become a project.
+
+The internal inventory manifest includes integrity metadata, target dispatch
+metadata, and a normalized source timestamp, but no source content. Its worker
+exits before target children start, so the runner parent does not retain parsed
+source bodies. If a selected record changes or becomes unavailable after the
+snapshot, the target defers that record before mutation and continues with
+stable siblings. Unsafe, malformed, privacy-rejected, target-mismatched, or
+unknown cases remain fail-closed. Scheduled adapters consume the single
+aggregate JSON report rather than child prose.
 
 The internal inventory includes a normalized source timestamp so scheduled
 children can apply high-water and record limits before reading selected source
@@ -265,7 +275,11 @@ flag remains optional for local-only manual runner use. Agent-native publication
 does not infer success from task completion. It records the starting commit,
 publishes only through `tools/sync_memory_archive.py`, fetches `origin/main`, and
 checks a clean worktree plus local/remote commit equality. Its terminal result is
-exactly one of `published`, `no_op_current`, or `blocked`.
+exactly one of `published`, `no_op_current`, `deferred`, or `blocked`.
+`no_op_current` requires a complete source batch. `deferred` is a successful
+zero-exit result with no publication and one or more pending live-source
+records. `published` may retain `source_batch_complete: false` when stable
+sibling work was published and deferred records remain for retry.
 
 This is a single-host execution-ownership contract. It is not whole-run rollback,
 not a cross-host distributed lock, not a GitHub availability SLA, and not a
@@ -696,6 +710,130 @@ induction trace and does not replace summary paths or `evidence_refs`. Unit
 coverage additionally gates duplicate/conflicting induction review decision
 rejection and aggregate-only preflight output. They require
 `natural_false_promotion_rate` to remain 0 and `privacy_leak_count` to remain 0.
+
+### V2.49 Bounded Real-Use Preference And Facet Slice
+
+`benchmarks/real_use_recall_utility_gate.py` exercises a noisy long session
+through the clean packaged updater and consumes only packaged context JSON from
+the copied search tool. The write-side candidate scans the complete event
+stream for high-confidence durable English and Chinese user preferences,
+preserves original wording and the source user-event anchor, and rejects
+temporary, tentative, hypothetical, question, quoted-example, process, and
+assistant-acknowledgement text. It does not translate or infer arbitrary user
+meaning.
+
+The read-side candidate adds `query.decomposition_recommended` and
+`query.decomposition_reason` as query-shape metadata only. The fields do not
+change ranking, per-hit `query_support`, active/current status, lifecycle,
+scope, drill-path, privacy, or package answerability. The runtime recipe splits
+global preferences, project history, and live repository state, uses no more
+than two package queries for each historical facet, and routes current HEAD,
+tests, and reviewed-code state to repository inspection.
+
+The V2.49 private shadow ended in `deployment_no_go`. A durable real user
+message prefixed by a skill invocation was rejected as raw prompt text because
+the invocation's local path was checked before the existing skill-prefix
+normalizer ran. The frozen candidate was not retuned, installed, or used for a
+private transaction. This source-normalization ordering boundary remains a
+future goal; the public synthetic gate does not prove private source-adapter
+coverage.
+
+### V2.50 Canonical Skill-Invocation Prefix Normalization
+
+`natural_user_memory_fact()` now applies a dedicated strict normalizer before
+raw-prompt, local-path, noise, sensitive-content, and durability checks. A
+canonical leading skill invocation has a label beginning with `$` and, for the
+Markdown form, a target ending in `SKILL.md`. Contiguous invocations may be
+removed; ordinary Markdown links, malformed invocations, local paths in the
+message body, and invocation-only events remain fail-closed. The older broad
+title-oriented helper is unchanged, so title and explicit-memory call sites do
+not inherit this source-adapter behavior.
+
+The derived memory text excludes the invocation artifact while source matching
+still resolves the fact to the original user-event source anchor. The V2.50
+cohort extends `benchmarks/real_use_recall_utility_gate.py` rather than adding a
+second packaged harness: the copied updater materializes the synthetic fact,
+the copied search tool emits a context package, and the existing package-only
+decision recipe determines support. Ranking, query support, answerability,
+scheduler behavior, and semantic retrieval are unchanged.
+
+The one frozen private regression ended in `deployment_no_go`. Prefix
+normalization qualified exactly the intended target and no non-target facts,
+but the long-session evidence budget was full before the facts phase. The
+target therefore had no evidence quote or source anchor and could not become an
+automatic memory candidate. That downstream evidence-allocation boundary is
+not changed in V2.50; the candidate was not installed and no canonical update
+transaction ran.
+
+### V2.51 Source-Bound Goal Preference Materialization
+
+V2.51 closes the bounded allocation failure left by V2.50. It does not widen
+the evidence budget: `NATURAL_USER_FACT_LIMIT` remains 5 and
+`SUMMARY_EVIDENCE_LIMIT` remains 6. The pure `select_summary_evidence()` helper
+first reserves one evidence entry for every already-selected natural-user
+fact, then preserves one final-state slot when a final state exists. Any
+remaining slots retain the prior deterministic priority across decisions,
+retrieval literals, other facts, problems, and unresolved work. Deduplication
+is stable, and the result never exceeds six entries.
+
+Selection is still policy-gated before reservation. A malformed prefix,
+invocation-only message, ordinary Markdown path, temporary decision,
+hypothetical, question, quoted example, process update, acknowledgement, or
+sensitive text is rejected by the existing rules and receives no reserved
+slot. A selected durable fact keeps its original user-event identity through
+`evidence`, `fact_sources`, and `memory_candidate_sources` before
+`materialize_source_anchors()` binds the quote to that event. The existing
+source-anchor completeness check in `memory_candidates_from_meta()` is
+unchanged and remains fail-closed.
+
+The packaged gate runs the copied updater and copied search tool. Answerability
+comes only from a `memory_recall_context_package` containing a supported
+active/current hit with summary and evidence drill paths; free-form search
+output is not evidence. Public synthetic runs and one aggregate-only known
+producer-shape regression reached `deployment_go`, after which the frozen
+candidate was installed through source, installed-skill, and deployment-runtime
+parity and the bounded source record was regenerated and published. Live
+repository state remains a repository-inspection concern rather than a memory
+answer.
+
+### V2.52 Stable Live-Source Batch Closure
+
+V2.52 changes scheduled execution ownership, not memory semantics. Source-root
+inventory construction moves into a short-lived worker. The worker writes one
+private mode-`0600` manifest containing only relative names, hashes, sizes,
+mtime values, normalized source timestamps, and target-dispatch paths, then
+exits before project/source-stream children begin. The runner parent retains
+compact metadata but no parsed source content.
+
+Each inventory-fed updater prepares every selected record before any archive
+mutation. A record whose file changed or became unavailable after inventory is
+excluded from that target's mutation set and counted as deferred. Its prior
+archive entry, source hash, and freshness state remain untouched; stable
+siblings continue, and a later stable run can ingest the deferred record.
+Scoped pending-path state preserves retry eligibility when a never-archived
+deferred record is older than a stable sibling that advances timestamp
+high-water. This state carries no source bytes or source hash, is not
+currentness evidence, and is deleted only after that record is applied.
+Scheduled targets are unlimited by default so a fixed first-50 slice cannot
+hide later durable records; an explicit `--max-records` remains available for
+bounded manual runs.
+Other inventory errors remain target-fatal. Runner and transaction adapters
+accept only bounded versioned JSON reports; missing, malformed, or unknown
+child results, invalid status/reason pairs, and inconsistent selected/process/
+deferred counts become `child_failure_unclassified` and stay blocked without
+rendering captured output. JSON and JSONL source records must parse completely.
+
+The transaction contract adds a successful `deferred` terminal status and a
+`source_batch_complete` bit. `published` may be incomplete at the source-batch
+level, `deferred` means no commit was published and pending records remain,
+and `no_op_current` is reserved for a complete batch with no pending records.
+These fields and deferred counts survive adapter-owned reboot replay state.
+The persisted `complete` phase is also idempotent when no commit was published:
+if candidate, base, staging, and remote all still identify the same clean
+commit, recovery returns the stored `no_op_current` or `deferred` semantics
+instead of inventing a remote-receipt failure.
+This does not change induction, summarization, lifecycle, search ranking,
+query support, vector search, ontology discovery, or answer generation.
 
 ## End-To-End Induction-To-Recall Benchmark
 

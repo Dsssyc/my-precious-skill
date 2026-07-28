@@ -180,6 +180,60 @@ class RunMemoryUpdatesTests(unittest.TestCase):
             self.assertNotIn(str(root), str(raised.exception))
             self.assertNotIn(outside.name, str(raised.exception))
 
+    def test_source_inventory_fails_closed_on_malformed_jsonl(self):
+        module = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_dir = Path(tmpdir) / "records"
+            source_dir.mkdir()
+            (source_dir / "malformed.jsonl").write_text(
+                json.dumps({"timestamp": "2026-07-13T01:00:00Z", "content": "valid prefix"})
+                + "\n{not-json}\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(module.SourceInventoryError) as raised:
+                module.build_source_inventory(source_dir, ("*.jsonl",))
+
+            self.assertEqual(str(raised.exception), "source_inventory_malformed")
+
+    def test_source_inventory_treats_literal_unicode_separators_as_json_string_content(self):
+        module = load_runner_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_dir = root / "records"
+            project_path = root / "project"
+            source_dir.mkdir()
+            project_path.mkdir()
+            rows = [
+                {
+                    "timestamp": "2026-07-13T01:00:00Z",
+                    "cwd": str(project_path),
+                    "role": "user",
+                    "content": "Literal separators stay inside JSON: A\u0085B\u2028C\u2029D.",
+                },
+                {
+                    "timestamp": "2026-07-13T01:00:01Z",
+                    "cwd": str(project_path),
+                    "role": "assistant",
+                    "content": "Second physical record.",
+                },
+            ]
+            source = "\r\n".join(
+                json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                for row in rows
+            ) + "\r\n"
+            source_path = source_dir / "unicode-separators.jsonl"
+            source_path.write_text(source, encoding="utf-8")
+
+            parsed = list(module.iter_json_values(source_path, source))
+            inventory = module.build_source_inventory(source_dir, ("*.jsonl",))
+
+            self.assertEqual(parsed, rows)
+            self.assertEqual(len(inventory), 1)
+            self.assertEqual(inventory[0].source_updated_at, "2026-07-13T01:00:01Z")
+
     def test_runner_classifies_unsafe_source_inventory_before_child_launch(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1172,6 +1226,120 @@ if is_finalize and os.environ.get('MY_PRECIOUS_TEST_FAIL_FINALIZER') == '1':
             "--source-dir",
             str(source_dir),
         ]
+
+    @staticmethod
+    def install_structured_fake_updater(memory_repo: Path) -> None:
+        (memory_repo / "tools/update_memory_archive.py").write_text(
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+mode = os.environ.get('MY_PRECIOUS_TEST_STRUCTURED_MODE', 'updated')
+if mode == 'unknown-failure':
+    print('PRIVATE_CHILD_FAILURE_DETAIL', file=sys.stderr)
+    raise SystemExit(9)
+deferred = 1 if mode == 'deferred' and '--finalize-archive' not in args else 0
+payload = {
+    'report_kind': 'memory_update_target_report',
+    'report_version': 1,
+    'status': 'deferred' if deferred else 'updated',
+    'reason': 'source_records_deferred' if deferred else 'updated',
+    'source_batch_complete': not deferred,
+    'metrics': {
+        'records_selected_count': deferred,
+        'records_processed_count': 0,
+        'records_deferred_count': deferred,
+        'records_skipped_count': 0,
+        'entries_removed_count': 0,
+    },
+    'privacy': {
+        'aggregate_only': True,
+        'paths_rendered': False,
+        'source_content_rendered': False,
+    },
+}
+if mode == 'invalid-pair':
+    payload['reason'] = 'secret_records_rejected'
+if '--report-json' in args:
+    print(json.dumps(payload, sort_keys=True, separators=(',', ':')))
+""",
+            encoding="utf-8",
+        )
+
+    def test_report_json_aggregates_deferred_target_without_blocking(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo, source_dir = self.make_fake_repo(root)
+            self.install_structured_fake_updater(memory_repo)
+
+            result = subprocess.run(
+                [*self.runner_command(memory_repo, source_dir), "--report-json"],
+                cwd=memory_repo,
+                env={**os.environ, "MY_PRECIOUS_TEST_STRUCTURED_MODE": "deferred"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["report_kind"], "memory_update_batch_report")
+            self.assertEqual(report["status"], "deferred")
+            self.assertEqual(report["reason"], "source_records_deferred")
+            self.assertEqual(report["failure_stage"], "none")
+            self.assertFalse(report["source_batch_complete"])
+            self.assertEqual(report["metrics"]["records_deferred_count"], 1)
+            self.assertEqual(report["metrics"]["inventory_worker_count"], 1)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_report_json_classifies_unknown_child_failure_without_rendering_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo, source_dir = self.make_fake_repo(root)
+            self.install_structured_fake_updater(memory_repo)
+
+            result = subprocess.run(
+                [*self.runner_command(memory_repo, source_dir), "--report-json"],
+                cwd=memory_repo,
+                env={**os.environ, "MY_PRECIOUS_TEST_STRUCTURED_MODE": "unknown-failure"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "child_failure_unclassified")
+            self.assertEqual(report["failure_stage"], "project_update")
+            self.assertEqual(report["metrics"]["child_failure_count"], 1)
+            self.assertNotIn("PRIVATE_CHILD_FAILURE_DETAIL", result.stdout + result.stderr)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_report_json_rejects_semantically_impossible_child_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo, source_dir = self.make_fake_repo(root)
+            self.install_structured_fake_updater(memory_repo)
+
+            result = subprocess.run(
+                [*self.runner_command(memory_repo, source_dir), "--report-json"],
+                cwd=memory_repo,
+                env={**os.environ, "MY_PRECIOUS_TEST_STRUCTURED_MODE": "invalid-pair"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "child_failure_unclassified")
+            self.assertEqual(report["failure_stage"], "project_update")
+            self.assertEqual(report["metrics"]["child_failure_count"], 1)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
 
     def test_required_clean_worktree_blocks_all_dirty_kinds_before_mutation(self):
         for dirty_kind in ("tracked", "deleted", "untracked"):

@@ -20,6 +20,7 @@ POLICY_NAMES = (
     "weighted_partial_060_v1",
     "weighted_partial_050_specific_v1",
 )
+BASELINE_RUNTIME_POLICY = "strict_meaningful_or_important_query_token_coverage"
 OFFICIAL_DATASET_SHA256 = "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
 OFFICIAL_DATASET_SOURCE = "LongMemEval cleaned S"
 HOLDOUT_SEED = "my-precious-v236"
@@ -264,6 +265,7 @@ def observe_packaged_case(row: dict[str, Any], case_ordinal: int, case_root: Pat
         "supported_gold_package": 0,
         "baseline_runtime_policy_parity_numerator": 0,
         "baseline_runtime_policy_parity_denominator": 0,
+        "non_baseline_runtime_policy_hit_count": 0,
         "runtime_policy_parity": {
             policy: {"numerator": 0, "denominator": 0} for policy in POLICY_NAMES
         },
@@ -355,6 +357,9 @@ def observe_packaged_case(row: dict[str, Any], case_ordinal: int, case_root: Pat
     for hit in hits:
         support = hit.get("query_support")
         if not isinstance(support, dict):
+            continue
+        if str(support.get("policy") or BASELINE_RUNTIME_POLICY) != BASELINE_RUNTIME_POLICY:
+            observation["non_baseline_runtime_policy_hit_count"] += 1
             continue
         observation["baseline_runtime_policy_parity_denominator"] += 1
         runtime_supported = support.get("status") == "supported"
@@ -573,6 +578,10 @@ def build_cohort_report(
         ),
         "direct_synthetic_archive_injection_count": sum(
             int(row.get("direct_synthetic_archive_injection_count") or 0)
+            for row in observations
+        ),
+        "non_baseline_runtime_policy_hit_count": sum(
+            int(row.get("non_baseline_runtime_policy_hit_count") or 0)
             for row in observations
         ),
         "cohort_overlap_count": int(selection.get("cohort_overlap_count") or 0),
@@ -874,6 +883,8 @@ def _strict_runtime_parity(packages: list[dict[str, Any]]) -> float:
                 continue
             support = hit.get("query_support")
             if not isinstance(support, dict):
+                continue
+            if str(support.get("policy") or BASELINE_RUNTIME_POLICY) != BASELINE_RUNTIME_POLICY:
                 continue
             cases += 1
             expected = policy_supports(support, search_module.token_importance, "strict_v1")

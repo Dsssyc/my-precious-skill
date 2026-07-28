@@ -85,8 +85,8 @@ class LongHorizonMemoryStressGateTests(unittest.TestCase):
             self.assertLess(metrics["runtime_seconds"], 180.0)
 
             self.assertEqual(report["checkpoint_case_count"], 16)
-            self.assertEqual(report["answer_checkpoint_count"], 9)
-            self.assertEqual(report["abstention_checkpoint_count"], 7)
+            self.assertEqual(report["answer_checkpoint_count"], 8)
+            self.assertEqual(report["abstention_checkpoint_count"], 8)
             self.assertTrue(report["privacy"]["aggregate_only"])
             self.assertFalse(report["privacy"]["queries_rendered"])
             self.assertFalse(report["privacy"]["memory_text_rendered"])

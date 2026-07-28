@@ -2452,6 +2452,1708 @@ skills, alter the private archive, change the automation prompt, rerun a private
 72-target timing shadow, or claim that a source pull request has already been
 merged.
 
+## V2.44 Public Induction First-Loss Attribution And Bounded Repair
+
+Date: 2026-07-13
+
+V2.44 adds `benchmarks/public_induction_first_loss_gate.py` to attribute every
+selected positive LongMemEval case to exactly one earliest deterministic loss.
+The updater, consolidator, archive, and search path receive only normal
+role/content source records and metadata. Questions, answers, `has_answer`
+positions, answer-session labels, and expected support events remain
+scorer-only. Scorer event positions are resolved to generated evidence anchors
+after ingestion; they are never written into source records or used as direct
+memory input. Free-form search output is not an answerability source.
+
+The ordered, mutually exclusive taxonomy is:
+
+| category | first failed contract |
+| --- | --- |
+| `source_rejected` | the normal source refusal boundary rejected the record |
+| `update_failed` | packaged setup or updater execution did not complete |
+| `archive_audit_failed` | the generated archive failed its normal audit |
+| `session_support_omitted` | no expected scorer support event survived as an evidence anchor |
+| `memory_induction_omitted_or_overcompressed` | preserved support had no active automatic memory |
+| `memory_present_not_top5` | active support memory did not enter the context top five |
+| `top1_not_query_supported` | a top-five support candidate did not produce supported query evidence |
+| `supported` | active support survived into a supported context package |
+
+Every taxonomy category emits an aggregate count and rate, including
+`memory_present_not_top5_rate` and `top1_not_query_supported_rate`.
+
+The offline public-data-free contract is canonical:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py --offline-fixture
+```
+
+The external runs used the same official LongMemEval cleaned S artifact as
+V2.36 and V2.37. The downloaded input and every generated archive/report stayed
+outside this repository.
+
+| frozen input | SHA-256 or selection fingerprint |
+| --- | --- |
+| dataset | `d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442` |
+| calibration selection | `c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19` |
+| frozen holdout selection | `4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7` |
+| cohort overlap | 0 |
+
+The baseline calibration command was:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort calibration \
+  --work-dir /tmp/my-precious-v244-calibration \
+  --report-file /tmp/my-precious-v244-calibration-report.json
+```
+
+Calibration found one eligible induction defect. `session_support_omitted`
+accounted for 15 cases, all 15 pre-retrieval induction losses, exceeding both
+the minimum five cases and 0.40 share. Only one candidate was permitted:
+`durable_first_person_projection_v1`, a general first-person declaration
+projection with evidence-slot priority. It contained no answer-label input,
+question phrase list, ranking change, top-k change, query-support relaxation,
+lifecycle change, or secret-policy change.
+
+| calibration metric | baseline | frozen candidate |
+| --- | ---: | ---: |
+| `positive_first_loss_attribution_coverage_rate` | 1.0 | 1.0 |
+| `session_support_event_preservation_rate` | 19/56 (0.3392857143) | 19/56 (0.3392857143) |
+| `source_rejected` | 2 | 2 |
+| `update_failed` | 0 | 0 |
+| `archive_audit_failed` | 6 | 5 |
+| `session_support_omitted` | 15 | 15 |
+| `memory_induction_omitted_or_overcompressed` | 0 | 0 |
+| `memory_present_not_top5` | 6 | 5 |
+| `top1_not_query_supported` | 1 | 3 |
+| `supported` | 0 | 0 |
+| `pre_retrieval_induction_loss_count` | 15 | 15 |
+| updater success | 38/40 | 38/40 |
+| archive audit success | 32/40 | 33/40 |
+| `abstention_accuracy` | 1.0 | 1.0 |
+| `false_promotion_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The candidate was frozen despite zero calibration gain so that the single
+allowed strategy could receive one final, non-tunable holdout decision. The
+baseline holdout used the baseline runtime bundle; the candidate run consumed
+only its aggregate baseline report and the frozen strategy slug:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --calibration-report /tmp/my-precious-v244-calibration-report.json \
+  --work-dir /tmp/my-precious-v244-holdout-baseline \
+  --report-file /tmp/my-precious-v244-holdout-baseline-report.json
+
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --calibration-report /tmp/my-precious-v244-calibration-report.json \
+  --baseline-report /tmp/my-precious-v244-holdout-baseline-report.json \
+  --candidate-strategy durable_first_person_projection_v1 \
+  --runtime-root /tmp/my-precious-v244-candidate-runtime \
+  --work-dir /tmp/my-precious-v244-holdout-candidate \
+  --report-file /tmp/my-precious-v244-holdout-candidate-report.json
+```
+
+The baseline reproduced the V2.36/V2.37 split through
+`baseline_retrievable_positive_count = 13` and
+`previously_unexplained_positive_count = 17`. The latter partition has its own
+`previously_unexplained_first_loss_attribution_coverage_rate = 1.0` and
+`previously_unexplained_first_loss_partition_invariant_violation_count = 0`.
+The previously unexplained 17 positives are now accounted for as follows:
+
+| first loss among the previous 17 | count | rate |
+| --- | ---: | ---: |
+| `source_rejected` | 0 | 0.0 |
+| `update_failed` | 0 | 0.0 |
+| `archive_audit_failed` | 3 | 0.1764705882 |
+| `session_support_omitted` | 10 | 0.5882352941 |
+| `memory_induction_omitted_or_overcompressed` | 0 | 0.0 |
+| `memory_present_not_top5` | 4 | 0.2352941176 |
+| `top1_not_query_supported` | 0 | 0.0 |
+| `supported` | 0 | 0.0 |
+
+The full 30-positive baseline first-loss partition was 0 source rejection, 0
+update failure, 4 audit failures, 15 session-support omissions, 0 memory-node
+omissions, 9 top-five retrieval losses, 2 query-support losses, and 0 supported
+cases. Its support-event preservation was 19/46 (0.4130434783).
+
+The frozen candidate did not change either owning induction metric:
+
+| final comparison | result | required |
+| --- | ---: | ---: |
+| baseline targeted loss | 15 | - |
+| candidate targeted loss | 15 | - |
+| `recovered_holdout_positive_count` | 0 | at least 2 |
+| `targeted_holdout_loss_reduction_rate` | 0.0 | at least 0.25 |
+| `recovered_pre_retrieval_positive_count` | 0 | at least 2 |
+| `pre_retrieval_induction_loss_reduction_rate` | 0.0 | at least 0.25 |
+| candidate updater success | 40/40 | no regression |
+| candidate archive audit success | 34/40 | no regression |
+| `abstention_accuracy` | 10/10 (1.0) | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `false_promotion_count` | 0 | 0 |
+| `gold_label_ingestion_count` | 0 | 0 |
+| `direct_memory_injection_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The required V2.37 synthetic boundary rerun also kept the strict policy's three
+hard-negative rejections at 3/3. Candidate `safety_passed` was 1, but
+`gain_passed` was 0. The candidate merely moved two later losses from
+`memory_present_not_top5` to `top1_not_query_supported`; it did not recover an
+induction loss or a supported case.
+
+| aggregate artifact | SHA-256 |
+| --- | --- |
+| baseline calibration report | `8950a2bdd0d1a469173039a0634ce9e8fec6e86cf7a8440defd184f4c777c45d` |
+| candidate calibration report | `3b9b806803719061e99d19997cdad886b9cf7b386c6b2b0a4d83906bd561ce4d` |
+| baseline holdout report | `849c775ee07bb73476243c0352ea8b4adb288783a162270ff5a4ae2235664adc` |
+| candidate holdout report | `92d82da6e5ab005deb945b8ab14324fc5657befd3ae8021d5b232650a51abb23` |
+| baseline runtime bundle | `d6c2b27f44432590a96bc21ec76dd11ee2906e68bbc2eebf30b4cfa2517dd1c0` |
+| candidate runtime bundle | `4f8fb5aaa33bdba6d9865615d8708c54a72255c123fab94c8ff56a6320260d7b` |
+| baseline configuration | `882bbd00305319992d591139e70576a1dec2a1e36f9a7bd16bb9bccd001a505b` |
+| candidate configuration | `fdec2cd60b2e25474e12dde1ca2b8542c6f7dbcb20cdbc24fa33f8154de7fd48` |
+| candidate strategy | `654054d60b0e6b3bf11c0ece8759c39176cd7f8af9985758c1871b08039c0f5a` |
+
+Terminal public decision: `induction_no_go`, reason
+`insufficient_holdout_gain`. The failed candidate production change and its
+candidate-only tests were removed. No second hypothesis was attempted. Because
+there was no public go, the conditional private aggregate shadow was skipped.
+V2.44 does not install or deploy skills, modify the private archive, alter the
+scheduler, or promote the V2.39/V2.40 runtime.
+
+V2.44 proves deterministic source-to-session-to-memory first-loss attribution,
+scorer isolation, a complete explanation of the previous 17/30 holdout gap,
+and a bounded safe no-go for the only candidate. It is not LLM answer quality.
+It is not ranking quality. It is not vector search. It is not ontology discovery.
+It is not public leaderboard parity. It does not prove that a different future
+induction design will fail.
+
+## V2.45 Session Support Preservation Attribution And One-Shot Repair
+
+Date: 2026-07-13
+
+V2.45 adds `benchmarks/session_support_preservation_gate.py`. It keeps the
+V2.44 source-to-session-to-memory stages intact, then uses a benchmark-owned
+scorer sidecar to explain each expected support event. The packaged updater
+receives only ordinary role/content events and normal metadata. Questions,
+answers, `has_answer`, answer-session identifiers, and expected support
+positions remain scorer-only and are applied after ingestion. Reports contain
+only aggregate counts and synthetic fixture results.
+
+The ordered event taxonomy is mutually exclusive:
+
+| category | first failed event contract |
+| --- | --- |
+| `source_event_missing_after_extraction` | the expected source event is absent after normal extraction |
+| `durability_filter_rejected` | the event exists but has no durable candidate |
+| `no_summary_channel_candidate` | a durable candidate enters no summary channel |
+| `evidence_budget_evicted` | a summary candidate does not survive the fixed six-item evidence budget |
+| `evidence_bound_to_wrong_ordinal` | evidence text is bound to a different source event position |
+| `evidence_source_entry_missing` | selected evidence has no source entry |
+| `source_anchor_materialization_failed` | the source entry does not materialize as a matching anchor |
+| `preserved` | evidence and its source anchor match the expected event locator |
+
+The public-data-free gate is part of the canonical quality runner:
+
+```bash
+python3 benchmarks/session_support_preservation_gate.py --offline-fixture
+```
+
+Its fixture executes real packaged positive, duplicate-text wrong-ordinal, and
+abstention cases, plus synthetic cases for the remaining taxonomy branches. It
+requires `support_event_attribution_coverage_rate == 1.0`,
+`support_event_partition_invariant_violation_count == 0`, hard-negative
+rejection and abstention accuracy of 1.0, and zero label ingestion, direct
+memory injection, or privacy leakage.
+
+The external calibration used the pinned LongMemEval cleaned S artifact. All
+input, generated archives, and aggregate reports remained outside this
+repository.
+
+| frozen input | SHA-256 or selection fingerprint |
+| --- | --- |
+| dataset | `d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442` |
+| calibration selection | `c8ac66423f41b968ca60c9af18ae3f2c949f534a8f875d8997ec83cd8fbb5e19` |
+| frozen holdout selection | `4d94450bf30e279ad120b16dfd0fed38dbe18f98e73403f73db254311fdab7a7` |
+| cohort overlap | 0 |
+
+V2.44 was reproduced before V2.45 attribution began: calibration retained its
+15 `session_support_omitted` cases and 19/56 compatibility preservation count;
+the full V2.44 holdout retained 15 omissions and 19/46. Its runtime bundle was
+`d6c2b27f44432590a96bc21ec76dd11ee2906e68bbc2eebf30b4cfa2517dd1c0`.
+
+V2.45 also records a scorer correction rather than silently rewriting that
+history. The generated public source format stores one turn per JSONL line, so
+a LongMemEval turn position maps to `(line_number = turn_ordinal,
+event_ordinal = 1)`. V2.44 compared the turn position only with
+`event_ordinal`, which produced false matches. V2.45 preserves the V2.44 count
+as a compatibility metric while using the complete locator for event
+attribution. On calibration this yielded
+`v244_locator_support_status_disagreement_count = 14`, 4/56 canonically
+preserved support events, and 19 canonical `session_support_omitted` cases. The
+difference is a scorer correction, not a production runtime regression.
+
+The complete-locator calibration event partition was:
+
+| event category | count |
+| --- | ---: |
+| `source_event_missing_after_extraction` | 0 |
+| `durability_filter_rejected` | 0 |
+| `no_summary_channel_candidate` | 25 |
+| `evidence_budget_evicted` | 25 |
+| `evidence_bound_to_wrong_ordinal` | 2 |
+| `evidence_source_entry_missing` | 0 |
+| `source_anchor_materialization_failed` | 0 |
+| `preserved` | 4 |
+
+Among the 19 omitted cases, `no_summary_channel_candidate` occurred in 14
+cases, or 0.7368421053. `evidence_budget_evicted` occurred in 9 and
+`evidence_bound_to_wrong_ordinal` in 2; case incidence can overlap because a
+case may contain multiple expected support events. The fixed ordering selected
+the dominant allowed surface without inspecting holdout.
+
+Exactly one label-free candidate was tested:
+`latest_noninitial_user_declaration_v1`. It selected at most the latest
+noninitial user event that passed normal durability/noise checks, was no longer
+than 240 characters, contained no question mark, and could bind back to its
+own event. It added one summary candidate with priority inside the existing
+six-item evidence budget. It did not add answer labels, question phrase lists,
+ranking changes, top-k changes, query-support relaxation, or a second repair
+rule. A focused synthetic test was RED before the change and GREEN afterward.
+
+The one-shot calibration comparison was:
+
+| metric | V2.45 baseline | candidate |
+| --- | ---: | ---: |
+| `support_event_attribution_coverage_rate` | 1.0 | 1.0 |
+| `support_event_partition_invariant_violation_count` | 0 | 0 |
+| preserved support events | 4/56 | 10/56 |
+| `source_rejected` | 2 | 2 |
+| `update_failed` | 0 | 0 |
+| `archive_audit_failed` | 6 | 28 |
+| `session_support_omitted` | 19 | 0 |
+| `memory_induction_omitted_or_overcompressed` | 0 | 0 |
+| `memory_present_not_top5` | 0 | 0 |
+| `top1_not_query_supported` | 3 | 0 |
+| `supported` | 0 | 0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `abstention_accuracy` | 1.0 | 1.0 |
+| `gold_label_ingestion_count` | 0 | 0 |
+| `answer_ingestion_count` | 0 | 0 |
+| `direct_memory_injection_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The comparison calculated nominal recovery of 19 session omissions, 19
+pre-retrieval losses, and 6 support events, so `gain_passed` was 1. Those are
+not accepted recoveries: 22 additional positives moved to the earlier
+`archive_audit_failed` stage. Consequently `safety_passed` was 0 and the
+candidate was not frozen. The candidate production change and candidate-only tests were removed.
+The baseline updater remains the shipped implementation.
+The candidate holdout was not run, and no second candidate was attempted. A
+baseline-only holdout command was mistakenly started before calibration freeze,
+then interrupted before completion; its output was not inspected, its temporary
+artifacts were deleted, and it produced no report or decision.
+
+After the no-go, scorer-only harness hardening made the configuration
+fingerprint cover every dominance, gain, allowed-surface, stage-shift, and
+safety rule; it also made zero-omission reports use a null target and made
+V2.44 contract mismatch return `baseline_not_reproducible`. These changes did
+not change the taxonomy, thresholds, candidate metrics, or terminal decision.
+The table distinguishes historical evaluated-report fingerprints from the
+final hardened policy fingerprints.
+
+| aggregate artifact or frozen component | SHA-256 |
+| --- | --- |
+| V2.44 reproduced calibration report | `7b50ef70c6fda03f53b17ade1efd8616ade291e80a95a2868c62f4eb89ba57f7` |
+| V2.44 reproduced holdout report | `849c775ee07bb73476243c0352ea8b4adb288783a162270ff5a4ae2235664adc` |
+| V2.45 baseline calibration report | `ddc3b0e591c271a2e105b8a386aacabc8b969818b25290f123a36ea3f625bcf1` |
+| V2.45 candidate calibration report | `5ca991f3b7ca070ab88c4ce19045a87f45a315215b88432e2efe466077f678f9` |
+| evaluated V2.45 baseline configuration | `3dd6307117d7ac0e555e24fb8a231e962051237cabf11db151795595d28e6789` |
+| evaluated candidate configuration | `816b2d7a55bba0fc293607c79b118576b65d8815cdfcea22992936a5807e1117` |
+| evaluated candidate runtime bundle | `82c1a8f19c514cf981953d0ddbfc7eba153c7ae069299e625cbc1e71284211f6` |
+| candidate strategy | `746ad2c7eaea3426d1a0b3649fb41483d31a2bd5c9c2eb4326e7e8eabb7332ed` |
+| final hardened baseline policy | `a3fddc8dc79692a0ecb0421741e8d9c8c763420567ab5fb8034c94b485b2e470` |
+| final hardened candidate decision policy | `21cbccd2389390333ea33306e2730de4ffd9fffe054be507649e0dd204b8d96f` |
+
+Terminal public decision: `session_support_no_go: safety_regression`.
+
+V2.45 proves deterministic event-level session-support attribution, complete
+locator handling, scorer isolation, and a bounded one-candidate calibration
+no-go. It is not LLM answer quality, not ranking quality, not vector search,
+not ontology discovery, and not public leaderboard parity. It does not prove private deployment readiness
+and does not prove scheduler reliability. It does not install or deploy skills,
+alter a private archive, or change an automation prompt.
+
+## V2.48 Reboot-Safe Scheduled Update Transactional Replay Closure
+
+Date: 2026-07-16
+
+V2.48 adds the skill-side
+`skills/update-my-precious/scripts/run_scheduled_memory_transaction.py`
+adapter and `benchmarks/scheduled_reboot_replay_gate.py`. Scheduled generation
+runs in an adapter-owned persistent staging clone rather than the canonical
+archive checkout. Aggregate phase state and staging live in an explicit
+mode-`0700` state directory outside both the archive and source trees. The
+exclusive lock is keyed by the canonical repository's Git common directory, so
+changing `--state-dir` cannot create a second writer. Before resetting staging,
+the adapter also probes the deployed V2.38 updater lock, which remains held by a
+surviving nested updater child even if the adapter and runner disappear. The
+staging clone invokes the deployment repository's existing runtime tools; the
+canonical checkout changes only after a matching remote publication receipt.
+
+The public gate uses sixteen synthetic cases and synthetic source records.
+It performs real `SIGKILL` interruption during update, after the staging commit
+but before push, and after push but before canonical fast-forward. The next
+invocation must either regenerate unpublished work from current `origin/main`
+or reconcile the already-pushed commit without publishing a duplicate. It also
+checks clean publish, no-op, repository-scoped concurrent writers using both
+the same and different state directories, a linked worktree sharing the same
+Git common directory, a surviving nested updater child, dirty canonical,
+malformed state, symlinked staging, remote-race behavior, and an unreceipted
+remote advance. Remote inspection uses a non-mutating receipt query, so a
+rejected unreceipted advance leaves both canonical `HEAD` and `origin/main`
+unchanged. The sixteenth case combines an interrupted `updating` transaction
+without a candidate, dirty adapter-owned tracked and untracked staging paths,
+and a separately receipted remote advance that overlaps both path classes. Once
+ownership, remote identity, writer exclusion, and fetch all pass, staging is
+hard-reset and cleaned before `main` checkout. Replay then returns
+`no_op_current` from the latest receipt with no duplicate publication. The
+canonical-fast-forward case waits until the real two-stage protocol has applied
+the candidate checkout while retaining the base ref, then sends `SIGKILL`;
+replay accepts only worktree and index entries whose blob and mode exactly match
+the base or verified candidate. Same-path user edits fail closed and remain
+untouched. Two consecutive gate runs produced identical metrics:
+
+| Metric | Result |
+| --- | ---: |
+| `transaction_case_count` | 16 |
+| `clean_publish_accuracy` | 1.0 |
+| `no_op_decision_accuracy` | 1.0 |
+| `reboot_replay_success_rate` | 1.0 |
+| `canonical_clean_after_interruption_rate` | 1.0 |
+| `stale_staging_recovery_rate` | 1.0 |
+| `post_push_receipt_reconciliation_rate` | 1.0 |
+| `concurrent_transaction_rejection_rate` | 1.0 |
+| `dirty_canonical_rejection_rate` | 1.0 |
+| `malformed_state_rejection_rate` | 1.0 |
+| `unsafe_state_path_rejection_rate` | 1.0 |
+| `remote_race_rejection_rate` | 1.0 |
+| `repository_scoped_lock_rejection_rate` | 1.0 |
+| `git_common_dir_lock_rejection_rate` | 1.0 |
+| `nested_writer_lock_rejection_rate` | 1.0 |
+| `canonical_fast_forward_recovery_rate` | 1.0 |
+| `unreceipted_remote_rejection_rate` | 1.0 |
+| `receipted_remote_advance_replay_rate` | 1.0 |
+| `receipted_remote_tracked_overlap_count` | 1 |
+| `receipted_remote_untracked_overlap_count` | 1 |
+| `partial_remote_publish_count` | 0 |
+| `duplicate_publish_commit_count` | 0 |
+| `canonical_unverified_mutation_count` | 0 |
+| `deployed_v238_tool_mutation_count` | 0 |
+| `raw_source_copy_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+`benchmarks/live_automation_prompt_alignment_gate.py` now keeps the legacy
+agent-native prompt regression while separately validating the V2.48
+parity-preflight plus single-adapter contract. Its synthetic transaction cases
+report `transaction_adapter_alignment_pass=true`,
+`single_transaction_adapter_invocation_present=true`,
+`strict_transaction_report_contract_present=true`,
+`duplicate_transaction_adapter_rejection_count=1`,
+`same_line_duplicate_transaction_adapter_rejection_count=1`, and
+`missing_transaction_report_rejection_count=1`. This prevents a live automation
+from passing merely because it retains the superseded prose-driven direct
+updater/audit/sync chain.
+
+Initial private operational recovery result: `published`. This run used the
+pre-final-review adapter and therefore proves the quarantine and deployment
+workflow, not acceptance of the final source candidate. Before the run, the
+interrupted generated-only working state was quarantined in one local, unpushed
+stash and the canonical checkout was restored to its previously published
+commit. The first private attempt then completed with one terminal transaction report:
+`remote_publish_count=1`, `canonical_mutation_count=1`,
+`repair_attempt_count=1`, `recovery_count=0`, and `privacy_leak_count=0`.
+After a fresh remote fetch, canonical and staging worktrees were clean and each
+matched `origin/main`; transaction state was cleared. Archive audit,
+publish-readiness, search health, and reviewed sync dry-run all passed.
+
+Final-candidate acceptance then proceeded through three bounded, fail-closed
+steps. The 5400-second final-candidate attempt timed out while the durable phase
+was still `updating`; it had no candidate commit, left canonical and remote at
+the same clean receipt, terminated the process group, restored the prior
+adapter and automation definition, and created no source commit. A later
+10800-second reopening returned after 3.709 seconds with
+`staging_reset_failed`: the checkout-first staging sequence encountered 51
+dirty tracked paths and 45 untracked paths after a separately verified remote
+publication changed 106 paths, including 36 tracked and 35 untracked overlaps.
+It produced no candidate, publication, canonical mutation, or privacy leak and
+again rolled deployment back. A fail-first synthetic case reproduced that exact
+boundary before the implementation was changed.
+
+V2.48R2 changes only the validated adapter-owned staging normalization order:
+hard reset and clean now precede `main` checkout after all safety checks and a
+successful fetch. The repaired sixteen-case gate reports the three new metrics
+above while every prior required rate remains `1.0` and every safety/privacy
+count remains zero. Existing unreceipted remote advance, remote race, unsafe
+staging, dirty canonical, nested-writer, interruption, and post-push cases retain
+their previous fail-closed behavior.
+
+Final-candidate private acceptance result: `published`. Exactly one repaired
+candidate invocation completed in 9081.302 seconds and emitted one valid
+transaction JSON object with `recovery_action=stale_staging_replayed`,
+`recovery_count=1`, `remote_publish_count=1`,
+`canonical_mutation_count=1`, `repair_attempt_count=1`, and
+`privacy_leak_count=0`. Transaction state was cleared; canonical and staging
+worktrees were clean and matched the freshly queried remote receipt. Archive
+audit, publish-readiness, search health, reviewed sync dry-run, 19/19 runtime
+parity, and the pinned V2.38 runner and scheduler hashes all passed afterward.
+V2.48R2 is a repair and acceptance label, not a new memory feature or runtime
+tool-bundle version.
+
+Installed-to-deployment runtime parity remained `19/19`, with equal V2.38 bundle
+fingerprints and unchanged pinned runner/scheduler hashes. The existing automation remained `status: ACTIVE`
+with its name, schedule, model, reasoning effort, local environment, and
+workspace preserved. Only its prompt changed: it now runs parity preflight plus
+exactly one transaction adapter command. The saved definition passed the live gate with
+`live_automation_alignment_pass=true`, one adapter invocation, strict JSON
+validation, zero direct publish-chain commands, and zero privacy leaks.
+
+This is local, single-host reboot-safe transactional replay, not exact process continuation.
+An interruption during canonical checkout may leave a transient, receipt-backed
+tracked-state mismatch; the next invocation validates its exact base/candidate
+entries and repairs it instead of being permanently blocked by dirty startup.
+It is not cloud scheduler uptime and not power-loss durability of the source disk.
+It is not distributed locking and not a GitHub availability SLA.
+It is not memory quality, not ranking quality, and not LLM quality.
+It is not vector search, not ontology discovery, and not V2.39/V2.40 deployment approval.
+The adapter is an isolated skill-side addition; V2.38 remains deployed and its
+existing 19-tool runtime bundle is not changed by this public gate.
+
+## V2.49 Real-Use Recall Utility Closure
+
+Date: 2026-07-17
+
+The aggregate-only pre-change real-use probe showed the practical failure that
+motivated this slice: exact or short controls were supported in `2/2` cases,
+while natural or multi-intent forms were supported in `0/2` cases. The archive
+already contained 54 goal-related memory-index rows and four decision rows
+containing the convergence term, but the durable goal-writing preference had
+not entered automatic induction or review. The frozen fail-first reproduced
+both the missing durable Chinese preference and missing broad-query
+decomposition signal without rendering query text, memory text, IDs, refs, or
+private paths.
+
+The write-path candidate adds high-precision English and Chinese durable-user
+preference extraction over the complete event stream. It preserves the user's
+original language and source user-event anchor. Temporary/current-task,
+tentative, hypothetical, question, quoted-example, process, and assistant
+acknowledgement text remains rejected. The read-path candidate adds only
+`query.decomposition_recommended` and `query.decomposition_reason`; it does not
+weaken package or per-hit support, active/current, lifecycle, scope, drilldown,
+or privacy checks. `using-my-precious` now bounds global-preference and
+project-history facets to at most two context-package queries each and routes
+current HEAD, tests, and reviewed-code state to repository inspection.
+
+`python3 benchmarks/real_use_recall_utility_gate.py` creates clean packaged
+archives, invokes the copied updater for three synthetic source records, and
+consumes only `memory_recall_context_package` output from the copied search
+tool. Two internal runs produce identical aggregate reports:
+
+| Metric | Result |
+| --- | ---: |
+| `synthetic_case_count` | 12 |
+| `durable_chinese_preference_extraction_recall` | 1.0 |
+| `durable_english_preference_regression_rate` | 1.0 |
+| `long_session_middle_preference_recall` | 1.0 |
+| `noise_insertion_stability_rate` | 1.0 |
+| `temporary_constraint_rejection_rate` | 1.0 |
+| `hypothetical_statement_rejection_rate` | 1.0 |
+| `quoted_prompt_rejection_rate` | 1.0 |
+| `assistant_acknowledgement_promotion_count` | 0 |
+| `global_preference_scope_accuracy` | 1.0 |
+| `bounded_facet_plan_accuracy` | 1.0 |
+| `natural_goal_preference_supported_recall` | 1.0 |
+| `project_history_supported_recall` | 1.0 |
+| `live_state_memory_answer_count` | 0 |
+| `wrong_project_supported_hit_count` | 0 |
+| `broad_query_false_answer_count` | 0 |
+| `max_query_variants_per_facet` | 2 |
+| `unsupported_claim_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The deterministic decision harness separately rejects malformed packages,
+inactive-only support, weak support, missing drill paths, wrong-project scope,
+and excess query variants. Free-form output never supplies answerability.
+
+This public result proves only the bounded synthetic real-use slice.
+It is not general semantic-memory quality, ranking quality, vector search, private
+archive correctness, live repository truth, public leaderboard parity, or LLM
+answer quality. More explicitly, it is not ranking quality, not vector search,
+not private archive correctness, not public leaderboard parity, and not LLM answer quality.
+
+### Private shadow result: `deployment_no_go`
+
+After the public release gate and production review passed, the three-skill
+runtime candidate was frozen at
+`dad6e085d1cfe6c56f396659c49d6e33e4b87bf745cd6c7238481498cccf1d32`.
+One aggregate-only shadow copied a fixed, complete-event prefix from the real
+source stream and the canonical archive into temporary storage. The candidate
+setup path produced `19/19` runtime parity in that copy before the copied
+updater and package-first search path ran.
+
+| Private shadow metric | Result |
+| --- | ---: |
+| `private_preference_materialization_count` | 0 |
+| `private_preference_source_binding_rate` | 0.0 |
+| `private_goal_preference_supported` | 0 |
+| `private_project_history_supported` | 1 |
+| `private_live_state_memory_answer_count` | 0 |
+| `private_wrong_project_supported_hit_count` | 0 |
+| `max_query_variants_per_facet` | 2 |
+| `unsupported_claim_count` | 0 |
+| `canonical_archive_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The aggregate-only read-side diagnosis found 37 target-bearing user-event
+representations, but the frozen extractor qualified zero user preferences.
+Exactly one target was rejected by the raw-prompt/local-path boundary, and
+that same target qualified when the already existing skill-invocation prefix
+normalizer was applied first. This is a source-normalization ordering boundary,
+not a last-five selection failure and not a package answerability relaxation
+request. No private text, query, path, ID, or raw ref was retained in the
+reports.
+
+The one-shot holdout rule forbade retuning the candidate after this result.
+Consequently `install_attempt_count=0` and
+`private_transaction_invocation_count=0`; the automation remained ACTIVE and
+the canonical archive remained clean and current. Installed skills and the
+private deployment retained their prior `19/19` runtime parity, while the
+frozen candidate matched only `16/19`, proving that it was not installed.
+Rollback was unnecessary because no private runtime or archive mutation
+occurred. V2.39/V2.40 therefore remain source-integrated but not deployment
+approved.
+
+V2.49 proves the public synthetic preference/facet slice and records a real
+source-adapter `deployment_no_go`. It does not prove private preference recall,
+general semantic-memory quality, ranking quality, vector search, public
+leaderboard parity, or LLM answer quality. A future bounded goal may test
+prefix normalization before raw-prompt rejection with a new frozen candidate;
+that change is not part of V2.49.
+
+## V2.50 Canonical Skill-Invocation Prefix Normalization
+
+Date: 2026-07-18
+
+V2.50 closes the public source-adapter boundary identified by the V2.49
+private no-go. Before the change, a durable user preference prefixed by a
+canonical skill invocation was rejected because the invocation's local path
+reached raw-prompt filtering first. The focused fail-first reproduced that
+empty result. The implementation now removes only a canonical leading skill invocation
+whose label begins with `$` and whose Markdown target ends in `SKILL.md`, then
+runs the existing process, raw-prompt, path, noise, sensitive,
+temporary, hypothetical, question, quoted-example, and acknowledgement gates.
+Ordinary Markdown links, malformed prefixes, body-local paths, and
+invocation-only events remain rejected.
+
+The normalized fact excludes the invocation artifact, while the fact source
+continues to bind to the original user-event source anchor. The existing
+`benchmarks/real_use_recall_utility_gate.py` now carries the additional cohort;
+it creates a clean packaged deployment, executes the copied updater, and uses
+only `memory_recall_context_package` output from the copied search tool for
+answerability. Free-form search output remains excluded.
+
+Two internal packaged runs produced identical aggregate reports. The
+aggregate reports match and all 23 synthetic cases passed:
+
+| Metric | Result |
+| --- | ---: |
+| `canonical_skill_prefixed_preference_recall` | 1.0 |
+| `multi_skill_prefix_recall` | 1.0 |
+| `prefixed_preference_source_binding_rate` | 1.0 |
+| `invocation_only_rejection_rate` | 1.0 |
+| `arbitrary_markdown_path_rejection_rate` | 1.0 |
+| `malformed_prefix_rejection_rate` | 1.0 |
+| `prefixed_non_durable_rejection_rate` | 1.0 |
+| `standalone_preference_regression_rate` | 1.0 |
+| `invocation_artifact_leak_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+### Private regression result: `deployment_no_go`
+
+The candidate was frozen once after the public gates at bundle SHA-256
+`338eb45311bdd2047841d32385cee8ce7593544e64329fe17962b8fbd1e3c2c8`.
+The one aggregate-only regression reused the previously diagnosed immutable
+source prefix; it was a regression check, not an unknown holdout. Candidate
+hash verification passed, setup/runtime parity was 19/19, and the shadow did
+not mutate the canonical archive.
+
+The source-adapter change behaved as intended: `private_newly_qualified_target_count`
+was 1 and `private_newly_qualified_non_target_count` was 0. The end-to-end
+criteria nevertheless failed: target preference materialization was 0, source
+binding was 0.0, and goal-preference support was 0. Project-history support
+remained 1, live-state memory answers remained 0, and wrong-project supported
+hits remained 0.
+
+A read-only pure-function diagnosis of that same consumed regression isolated
+the loss after successful normalization and summary selection:
+
+| Diagnostic metric | Result |
+| --- | ---: |
+| `target_qualified_preference_count` | 1 |
+| `summary_target_preference_count` | 1 |
+| `summary_evidence_limit` | 6 |
+| `evidence_slots_consumed_before_fact_phase` | 6 |
+| `target_evidence_count` | 0 |
+| `target_source_event_binding_count` | 1 |
+| `target_fact_source_quote_count` | 0 |
+| `target_memory_candidate_source_count` | 0 |
+| `target_memory_candidate_anchor_count` | 0 |
+| `target_memory_candidate_count` | 0 |
+
+The evidence budget was exhausted by earlier groups before the facts phase.
+Although the selected natural-user preference still resolved to its original
+user event, it received no evidence quote; the source-anchor completeness gate
+then correctly refused to create a memory candidate. A static counterfactual
+confirmed that the retained candidate would have been classified as `global`,
+so this run did not expose a second scope-classification failure.
+
+The original wrapper's conservative privacy scan also returned 1 because a
+generic preference marker collided with a fixed aggregate schema key. The
+follow-up diagnosis classified this as a schema-key collision only: neither
+report rendered queries, memory text, source content, source paths, raw refs,
+or memory IDs. The wrapper result remains fail-closed and was not reinterpreted
+as a pass.
+
+No installation was attempted, no private or canonical update transaction was
+invoked, and the automation remained `ACTIVE`. The frozen candidate was not
+retuned or rerun. A future bounded goal may address evidence/source-anchor
+allocation for selected natural-user facts; that change is outside V2.50.
+
+V2.50 proves only canonical invocation normalization in this bounded source
+shape. It is not ranking quality, not vector search, not general semantic
+memory, not public leaderboard parity, and not LLM answer quality.
+
+## V2.51 Source-Bound Goal Preference Materialization And Real-Use Recall Closure
+
+Date: 2026-07-20
+
+V2.50 qualified the intended durable Goal-writing preference but ended in
+`deployment_no_go` because all six evidence slots were consumed before the
+facts phase. V2.51 applies bounded evidence reservation to facts that have
+already passed the natural-user durability policy. Up to five selected facts
+are reserved first, one final-state slot is retained when applicable, and any
+remaining slots use the existing deterministic priority order. The evidence count remains at most 6;
+the fix does not raise the limit, weaken candidate
+source-anchor completeness, relax query support, or bypass package-first
+answerability.
+
+`benchmarks/real_use_recall_utility_gate.py` now includes a saturated synthetic
+source record with five decisions, eight retrieval literals, a canonical skill
+invocation, one durable Goal preference, and a final state. It executes the
+updater and search tool copied into a clean packaged archive and uses only
+`memory_recall_context_package` output. Two runs produced identical reports,
+all 24 synthetic cases passed, and free-form search was never used.
+
+| Public metric | Result |
+| --- | ---: |
+| `selected_natural_user_fact_evidence_binding_rate` | 1.0 |
+| `selected_natural_user_fact_source_anchor_rate` | 1.0 |
+| `selected_natural_user_fact_candidate_materialization_rate` | 1.0 |
+| `selected_natural_user_fact_active_memory_rate` | 1.0 |
+| `goal_preference_context_package_support_rate` | 1.0 |
+| `remaining_evidence_priority_regression_rate` | 1.0 |
+| `evidence_budget_overflow_count` | 0 |
+| `non_target_memory_promotion_count` | 0 |
+| `invocation_artifact_leak_count` | 0 |
+| `unsupported_claim_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+### Private regression result: `deployment_go`
+
+One frozen candidate was evaluated against a known producer-shape regression;
+this was not an unseen holdout. A complete-event prefix ending at the durable
+preference turn was copied into temporary storage, processed by the packaged
+runtime, and discarded. The report retained only aggregate counts. The
+canonical archive was unchanged during this shadow run.
+
+| Private regression metric | Result |
+| --- | ---: |
+| `target_qualification_count` | 1 |
+| `target_summary_selection_count` | 1 |
+| `target_evidence_binding_count` | 1 |
+| `target_source_anchor_binding_count` | 1 |
+| `target_candidate_materialization_count` | 1 |
+| `target_active_current_memory_count` | 1 |
+| `target_supported_package_answer_count` | 1 |
+| `context_package_parse_success_rate` | 1.0 |
+| `query_variant_count` | 2 |
+| `evidence_budget_overflow_count` | 0 |
+| `wrong_project_supported_hit_count` | 0 |
+| `live_repository_state_memory_answer_count` | 0 |
+| `free_form_search_use_count` | 0 |
+| `canonical_archive_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The same candidate was then installed through the reviewed three-layer path.
+Source and installed skill bundles matched, and installed-to-deployment runtime
+parity was `19/19` in two consecutive checks. The targeted backfill predeclared
+an allow-list record count of 1; dry-run selected 1, apply selected and rewrote
+1, and the low-signal skip count was 0. Archive audit, publish readiness, search
+health, content-noise review, and reviewed sync dry-run all passed before
+publication.
+
+After regeneration, the deployment package-first consumer check reported
+`consumer_intent_supported_recall=1.0`, one active/current target memory, valid
+summary and evidence drill paths, no supported wrong-project answer, and no
+memory answer for live repository state. The matching sync helper created and
+pushed the archive commit. The private repository finished clean with
+`HEAD == origin/main`; the automation definition and schedule were unchanged.
+No private source text, identifier, path, query, hash, memory ID, or raw ref is
+stored in this document or in the aggregate reports.
+
+V2.51 proves bounded source-bound materialization and retrieval for this real
+Goal-preference failure class. It is not ranking quality, not vector search,
+not general semantic memory, not public leaderboard parity, and not LLM answer quality.
+It also does not claim automatic ontology discovery or universal
+recall for every durable preference shape.
+
+## V2.52 Stable Live-Source Batch Closure
+
+Date: 2026-07-23
+
+V2.52 addresses the scheduled failure class in which a large live rollout can
+change or disappear after source inventory but before one target child reads
+it. Inventory now runs in a short-lived worker and crosses into the runner only
+through a private metadata-only manifest. Record preparation distinguishes
+only `changed` and `unavailable` as retryable live-source conditions; both are
+removed from the mutation set before source-specific removal, write, or
+freshness advancement. Stable siblings continue. Unsafe paths, malformed
+contracts, target/timestamp mismatch, privacy rejection, and unknown child
+output remain blocked.
+
+Final-review closure adds a scoped `index/deferred_sources.jsonl` retry ledger.
+It records only the exact pending source path under its archive scope and
+source partition, never source content or a source hash. It therefore cannot
+advance freshness or prove currentness, but it does reselect a never-archived
+record whose timestamp is older than a stable sibling's newly advanced
+high-water. The ledger entry is removed only after successful application.
+The scheduled default no longer truncates each target at 50 records, JSONL
+parsing rejects any malformed non-empty line, and target reports now enforce
+status/reason pairing plus selected/processed/deferred count conservation.
+
+The public synthetic closure command is:
+
+```bash
+python3 benchmarks/scheduled_live_source_deferral_gate.py
+```
+
+| Synthetic metric | Result |
+| --- | ---: |
+| `live_source_defer_accuracy` | 1.0 |
+| `stable_sibling_publish_accuracy` | 1.0 |
+| `deferred_retry_recall` | 1.0 |
+| `changed_source_partial_mutation_count` | 0 |
+| `changed_source_freshness_advance_count` | 0 |
+| `unknown_failure_block_accuracy` | 1.0 |
+| `aggregate_failure_reason_coverage` | 1.0 |
+| `inventory_worker_isolation_accuracy` | 1.0 |
+| `manifest_metadata_only_accuracy` | 1.0 |
+| `privacy_leak_count` | 0 |
+
+The synthetic retry cohort now includes a never-archived deferred record at
+`08:00`, below its stable sibling at `11:00`. It is recalled on the next stable
+run after high-water advances. For previously archived changed/unavailable
+records, the partial-mutation check hashes every file in each source-owned
+archive entry rather than checking only `meta.json`. Reason coverage directly
+requires `source_records_deferred`, retry `updated`, and
+`child_failure_unclassified` reports.
+
+The scheduled transaction consumes exactly one `memory_update_batch_report`.
+`published` may report `source_batch_complete: false`; `deferred` is a
+successful zero-exit result when no publication is needed and pending records
+remain; `no_op_current` is valid only for a complete batch; and unknown or
+malformed child output becomes `blocked/child_failure_unclassified`. Deferred
+record and target counts are aggregate-only and persist in reboot-replay state.
+Blocked reports retain an allow-listed `failure_stage` and parsed aggregate
+processed/child-failure counts; arbitrary child stdout and stderr remain
+suppressed.
+If the process is interrupted after persisting a clean no-publication
+`complete` state, replay verifies base, candidate, staging, and remote equality
+and returns the original `no_op_current` or `deferred` terminal result. This
+path does not claim a remote receipt and does not rerun the transaction.
+
+Private immutable A/B evidence is generated outside this repository with:
+
+```bash
+python3 benchmarks/private_live_source_inventory_ab_gate.py \
+  --private-memory-repo /path/to/private/agent-memory \
+  --private-source-dir /path/to/immutable/source-cohort \
+  --report-file /tmp/my-precious-v252-private-ab.json
+```
+
+The final frozen private rerun used four source records totaling 272,940,639 bytes.
+Both the V2.51 baseline and V2.52 candidate completed all 74 enabled targets,
+and the candidate retained exact archive-output parity. The two sequential
+updates shared one test-only frozen wall clock so the volatile `archived_at`
+audit instant could not create false inequality; no archive field or file was
+excluded or normalized before the byte-for-byte snapshot comparison:
+
+| Private immutable A/B metric | Result |
+| --- | ---: |
+| `baseline_enabled_target_count` | 74 |
+| `baseline_completed_target_count` | 74 |
+| `candidate_enabled_target_count` | 74 |
+| `candidate_completed_target_count` | 74 |
+| `private_enabled_target_completion_rate` | 1.0 |
+| `private_full_completion_rate` | 1.0 |
+| `private_output_parity_rate` | 1.0 |
+| `private_source_immutability_rate` | 1.0 |
+| `baseline_parent_post_inventory_rss_kib` | 750128 |
+| `candidate_parent_post_inventory_rss_kib` | 29568 |
+| `parent_post_inventory_rss_reduction_rate` | 0.9605827272145554 |
+| `privacy_leak_count` | 0 |
+
+The result exceeds the required `0.50` post-inventory parent-RSS reduction
+without a full source-directory copy. The aggregate report remains outside the
+repository and never stores source content, paths, identifiers, or archive
+text.
+
+### Controlled live deployment closure
+
+After the public release gate and private immutable A/B passed, the automation
+was paused through the Codex automation API, the reviewed three-layer runtime
+was deployed, and installed-to-deployment parity reached `19/19`. The automation
+was restored active with the four-status transaction contract and passed the
+live prompt-alignment gate. Exactly one controlled transaction then replayed
+the adapter-owned stale staging state and returned:
+
+| Controlled transaction metric | Result |
+| --- | ---: |
+| `status` | `published` |
+| `failure_stage` | `none` |
+| `source_batch_complete` | `false` |
+| `update_inventory_worker_count` | 1 |
+| `update_project_processed_count` | 74 |
+| `source_record_deferred_count` | 3 |
+| `source_target_deferred_count` | 3 |
+| `update_child_failure_count` | 0 |
+| `recovery_count` | 1 |
+| `remote_publish_count` | 1 |
+| `canonical_mutation_count` | 1 |
+| `repair_attempt_count` | 1 |
+| `privacy_leak_count` | 0 |
+
+This is the real incident closure: three changing sources no longer blocked
+the 74 stable project targets or the receipted publication. It is deliberately
+not an archive-current claim. The three deferred records remain eligible for
+the next stable scheduled run; the deterministic public gate proves their
+retry closure without violating the one-controlled-invocation limit here.
+After publication, canonical and staging worktrees were clean, transaction
+state was cleared, canonical `HEAD` matched the remote receipt, runtime parity
+remained `19/19`, archive audit and search health passed, publish readiness had
+zero blockers, and reviewed sync dry-run reported no remaining publishable
+changes.
+
+V2.52 proves bounded scheduled live-source progress, retry closure, output
+parity, aggregate diagnostics, and parent-memory isolation. It is not LLM answer quality,
+not induction quality, not ranking quality, not vector search,
+not ontology discovery, not public leaderboard parity, not distributed
+scheduling, and not a whole-run rollback transaction.
+
+## V2.53 Copyable Goal Preference Recall Closure
+
+Date: 2026-07-22
+
+V2.53 closes one real-use induction gap: repeated user corrections about a
+Markdown goal's formatting and copyability previously remained separate event
+fragments, so no durable preference was materialized for package-first recall.
+The new rule is deterministic, session-local, and limited to goal artifacts.
+It requires explicit goal context followed by at least two user-event format
+corrections, or one explicit instruction with durable language such as a
+future or default rule. A later contrary instruction wins as the latest explicit correction.
+Malformed, quoted, hypothetical, temporary, assistant-only, and non-goal
+complaints fail closed. The existing `natural_user_memory_fact()` behavior for
+single explicit preferences remains intact.
+
+The induced summary fact is normalized, but it is not rendered as a verbatim
+user quote. Instead, its candidate carries the actual bounded user-event
+evidence quote IDs and corresponding source anchors. The resulting memory is
+global, active/current, and has summary and evidence drill paths. Controlled
+retrieval aliases are attached only to this candidate so the four frozen goal
+format intents can reach complete lexical query support without a ranking
+rewrite.
+
+The public closure command is:
+
+```bash
+python3 benchmarks/copyable_goal_preference_recall_gate.py
+```
+
+`benchmarks/copyable_goal_preference_recall_gate.py` initializes two clean
+packaged archives and runs the same synthetic source through both. The
+controlled baseline executes the copied updater with only the goal-correction inducer disabled;
+it still archives the source and classifies the observed
+failure as `memory_not_materialized`. The candidate then requests
+`memory_recall_context_package` with evidence depth and accepts support only
+when the package hit has the exact target memory ID and its own summary drill
+path resolves the normalized fact. Free-form search output and unrelated supported hits
+are never answerability sources.
+
+The source-binding check independently resolves every cited source-map anchor
+back to its JSONL event. Each accepted anchor must pair with the cited evidence
+quote, carry a distinct event locator, and resolve to an actual user role;
+metadata labels alone cannot establish user provenance. The public baseline
+archived two synthetic sessions, materialized zero target memories, and
+returned zero target-supported queries. The candidate bound four evidence
+quotes to four distinct user events.
+
+| Public metric | Result |
+| --- | ---: |
+| `correction_sequence_qualification_rate` | 1.0 |
+| `correction_induced_fact_materialization_rate` | 1.0 |
+| `correction_source_anchor_binding_rate` | 1.0 |
+| `goal_format_query_supported_recall` | 1.0 |
+| `supported_summary_fact_resolution_rate` | 1.0 |
+| `global_scope_accuracy` | 1.0 |
+| `current_turn_instruction_precedence_accuracy` | 1.0 |
+| `copyable_text_block_decision_accuracy` | 1.0 |
+| `nested_fence_collision_avoidance_accuracy` | 1.0 |
+| `assistant_evidence_promotion_count` | 0 |
+| `non_target_memory_promotion_count` | 0 |
+| `free_form_answerability_use_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The runtime recipe uses a supported history preference to place the complete
+goal in one `text` fence with no prose outside it. A current-turn format
+instruction takes precedence even when history is unsupported, inactive, or
+malformed. With no supported history and no current instruction, it does not
+invent a preference. When the goal contains an inner backtick fence, the
+outer fence is deterministically longer.
+
+An optional frozen private A/B accepts the real source record and the prior
+installed updater only through external command arguments:
+
+```bash
+python3 benchmarks/copyable_goal_preference_recall_gate.py \
+  --private-source-record /path/to/external/source.jsonl \
+  --private-baseline-updater /path/to/prior/update_memory_archive.py \
+  --private-project-path /path/to/matching/project
+```
+
+That mode reports aggregate-only materialization and target-bound
+supported-query counts.
+It does not render source text, source paths, session identifiers, query text,
+memory text, or raw refs. The frozen private run passed: the prior updater had
+`baseline_no_hit_rate=1.0` and materialized zero target memories, while the
+candidate materialized one target memory and reached
+`candidate_supported_recall=1.0` across all four query variants.
+
+The reviewed three-layer deployment then matched source and installed skill
+bundles. The installed setup skill detected exactly one stale deployment tool,
+refreshed that source-owned file, and produced two consecutive `19/19`
+`current` parity reports. The targeted backfill dry-run selected one allow-listed
+source record; apply selected and rewrote one record, removed its one prior
+archive entry, and skipped zero records as low signal. Archive audit, publish
+readiness, search health, induction/consolidation review, content-noise review,
+and reviewed sync dry-run all passed. Every publish-readiness noise category
+remained zero.
+
+Runtime code deployment and generated-memory publication remained separate.
+The runtime deployment admitted only the one source-owned tool that matched the
+installed setup asset. `sync_memory_archive.py --include-reviewed-memory-nodes`
+was the only stage, commit, and push path for generated archive data. After
+publication, both the deployment search tool and the installed read skill
+returned supported active/current packages for all four query variants. All
+four resolved to one global current memory; summary-drill, evidence-drill, and
+summary-fact resolution rates were `1.0`, and free-form answerability use and
+privacy leaks remained zero. The private repository finished clean with
+`HEAD == origin/main`; the automation definition and schedule were unchanged.
+No private source text, identifier, path, query, hash, memory ID, or raw ref is
+stored in this document or in the aggregate reports.
+
+V2.53 proves this bounded correction-to-delivery path. It is not ranking quality,
+not vector search, not general complaint understanding, not ontology discovery,
+not public leaderboard parity, and not LLM answer quality.
+
+## V2.54 Structure-Preserving Redaction And Scheduled Recovery Closure
+
+Date: 2026-07-23
+
+V2.54 closes one observed scheduled-update blocker. The prior updater applied
+the non-structured `Cookie:` pattern directly to serialized JSONL, so the
+pattern could consume the closing quote and object delimiter. Raw records were
+valid, but selected-record preparation then rejected the damaged redacted text
+as `source_inventory_invalid`.
+
+The updater now distinguishes source formats. JSON is parsed as one value and
+JSONL is parsed one physical record at a time; existing secret patterns are
+applied recursively only to decoded string values. Each JSONL input record
+produces one output record, blank-line positions remain stable, and the
+redacted output is parsed again by the tests and gate. Structured output uses
+ASCII-safe JSON encoding so escaped `U+0085`, `U+2028`, and `U+2029` values do
+not become physical line separators during re-encoding. Non-structured text
+continues to use the existing text redaction behavior. Source hashes,
+timestamps, inventory validation, and source anchors still derive from the
+original source bytes.
+
+All structured callers use the path-aware boundary, including selected-record
+preparation, direct archive writes, secret preflight, backfill, source-anchor
+upgrade, and the two attribution benchmarks. The template, setup asset, and
+update-skill copies remain byte-for-byte synchronized.
+
+The bounded public-data-free gate is:
+
+```bash
+python3 benchmarks/structured_redaction_integrity_gate.py
+```
+
+It covers JSON and multi-record JSONL, nested string values, Cookie plus
+Bearer/GitHub/OpenAI secrets, blank-line and ordinal preservation, actual
+`--source-inventory-stdin` materialization, malformed input, automation-source
+rejection, and target-metadata rejection.
+
+| Synthetic metric | Result |
+| --- | ---: |
+| `structured_source_parse_success_rate` | 1.0 |
+| `structured_redaction_parse_success_rate` | 1.0 |
+| `cookie_redaction_success_rate` | 1.0 |
+| `jsonl_boundary_preservation_rate` | 1.0 |
+| `selected_record_materialization_success_rate` | 1.0 |
+| `malformed_source_fail_closed_rate` | 1.0 |
+| `inventory_rejection_boundary_pass_rate` | 1.0 |
+| `source_inventory_invalid_count` for valid cases | 0 |
+| `expected_source_inventory_rejection_count` | 3 |
+| `privacy_leak_count` | 0 |
+
+One frozen aggregate-only private redaction A/B used the same 53-record target
+cohort exactly once per implementation. Raw parsing had zero failures. The
+pre-fix updater produced five redacted parse failures; the candidate produced
+zero.
+
+The A/B harness's isolated materialization substep was invalid because that
+temporary harness truncated microseconds from an mtime-derived
+`source_updated_at`, producing a separate `source inventory timestamp
+mismatch`. It was not rerun and is not counted as a passing materialization
+probe. The required single live scheduled transaction subsequently supplied
+the actual target-update evidence using the production runner's
+precision-preserving inventory payload.
+
+| Aggregate private closure metric | Result |
+| --- | ---: |
+| `private_source_record_count` | 53 |
+| `private_raw_parse_failure_count` | 0 |
+| `private_baseline_redaction_parse_failure_count` | 5 |
+| `private_candidate_redaction_parse_failure_count` | 0 |
+| `private_selected_target_update_success_count` | 1 |
+| `private_source_inventory_invalid_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The source skills were installed through a rollback-backed copy. The installed
+setup skill then detected and refreshed exactly three stale source-owned
+deployment tools. Post-refresh runtime parity was `19/19 current`:
+`missing_tool_count=0`, `stale_tool_count=0`, `unsafe_target_count=0`,
+`changed_tool_count=0`, equal source/target bundle fingerprints, and
+`privacy_leak_count=0`.
+
+Exactly one real scheduled transaction was invoked after clean canonical,
+remote-head, parity, and single-writer preflights. Its terminal aggregate
+report was:
+
+| Scheduled metric | Result |
+| --- | ---: |
+| `status` | `published` |
+| `reason` | `published` |
+| `failure_stage` | `none` |
+| `update_project_processed_count` | 74 |
+| `update_source_stream_processed_count` | 0 |
+| `update_child_failure_count` | 0 |
+| `update_inventory_worker_count` | 1 |
+| `source_record_deferred_count` | 2 |
+| `source_target_deferred_count` | 2 |
+| `canonical_mutation_count` | 1 |
+| `remote_publish_count` | 1 |
+| `recovery_count` | 1 |
+| `repair_attempt_count` | 1 |
+| `privacy_leak_count` | 0 |
+
+The two live-source deferrals make `source_batch_complete=false`; they do not
+change the published terminal status. The prior selected target was processed
+within all 74 successful project updates, no child failed, and the original
+`project_update/source_inventory_invalid` blocker did not recur. After the
+terminal report, the canonical repository was clean, its local and remote
+heads matched, runtime parity remained current, and no updater or adapter
+process survived.
+
+An independent post-transaction review then found the escaped Unicode line
+separator edge case described above. Fail-first helper, CLI, and gate cases
+reproduced it before the ASCII-safe encoding change. The focused gates and full
+release gate were rerun after the change, and the final runtime bundle was
+deployed with current parity. The scheduled transaction was deliberately not
+run a second time. Consequently, the live transaction proves recovery for the
+observed private Cookie cohort; the escaped-separator hardening has synthetic,
+packaged, and deployed-parity evidence, not a second live publication claim.
+
+V2.54 proves structure-preserving redaction for the supported JSON, JSONL, and
+non-structured source boundaries; selected-record materialization; and
+scheduled recovery from this exact blocker. It does not prove complete secret
+detection, a general DLP system, arbitrary structured formats, ranking or
+memory-recall improvement, goal-preference improvement, vector search,
+ontology discovery, LLM answer quality, public leaderboard parity, or that all
+future automation failures are solved.
+
+## V2.55 General Durable Preference Recall Holdout Closure
+
+Date: 2026-07-23
+
+V2.55 evaluates one bounded candidate for recalling durable user preferences
+without adding benchmark query strings, per-domain canonical facts, or another
+goal-query alias list. The public-data-free gate is:
+
+```bash
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
+```
+
+The frozen calibration fingerprint is
+`9cc208235c44c99a1ad9e13c04662d1907a23a268e249b15ee919b9b2286862b`.
+The frozen holdout fingerprint is
+`2e0c4b9ab2515c368843d651217487595ab683f4068df7dc57c12ba742b16147`.
+Each cohort has nine positive and nine negative cases; their case IDs and
+source records are disjoint.
+
+The baseline first-loss distributions were:
+
+| Cohort | First-loss distribution |
+| --- | --- |
+| calibration | `durable_preference_qualified=2`, `retrieved_at_5=3`, `query_support_accepted=3`, `none=1` |
+| holdout | `durable_preference_qualified=2`, `retrieved_at_5=3`, `query_support_accepted=4` |
+
+The single candidate combines only stages identified by that attribution:
+
+- generic repeated-correction induction over user events with source-bound
+  evidence and source anchors;
+- bounded CJK substantive-unit matching rather than an unbounded token or
+  embedding index;
+- global preference applicability restricted to active/current, source-backed
+  preference memories and rejected for multi-facet queries;
+- continued precedence for the existing V2.53 goal-specific inducer so legacy
+  behavior remains compatible.
+
+Answerability remains package-first. Every decision consumes
+`memory_recall_context_package`; free-form search output is not an
+answerability source. The candidate adds no persistent vector or embedding
+store. Applicability support is explicitly labeled
+`scoped_global_preference_applicability`; it is not mislabeled as the existing
+strict query-support policy. The V2.37 packaged parity check therefore remains
+strict for strict-policy hits while separately counting non-baseline-policy
+hits.
+
+Calibration passed all frozen thresholds. The public holdout was run twice and
+reproduced the same quality result. All nine ordinary candidate positives had
+no first loss, but the independent generic path failed when the legacy
+goal-specific inducer and aliases were ablated.
+
+| Public candidate metric | Calibration | Holdout |
+| --- | ---: | ---: |
+| `generic_preference_qualification_recall` | 1.0 | 1.0 |
+| `generic_preference_materialization_recall` | 1.0 | 1.0 |
+| `generic_preference_source_anchor_binding_rate` | 1.0 | 1.0 |
+| `generic_preference_scope_accuracy` | 1.0 | 1.0 |
+| `unseen_paraphrase_recall_at_5` | 1.0 | 1.0 |
+| `unseen_paraphrase_supported_recall` | 1.0 | 1.0 |
+| `supported_decision_precision` | 1.0 | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `inactive_preference_rejection_rate` | 1.0 | 1.0 |
+| `current_turn_precedence_accuracy` | 1.0 | 1.0 |
+| `legacy_goal_preference_regression_rate` | 1.0 | 1.0 |
+| `legacy_goal_alias_ablation_supported_recall` | 1.0 | **0.0** |
+| `free_form_answerability_use_count` | 0 | 0 |
+| `new_case_specific_runtime_literal_count` | 0 | 0 |
+| `holdout_query_literal_overlap_count` | 0 | 0 |
+| `preference_specific_candidate_branch_count` | 0 | 0 |
+| `deterministic_result_ordering_rate` | 1.0 | 1.0 |
+| `performance_runtime_ratio` | 1.059 | 1.014 |
+| `performance_peak_memory_ratio` | 1.008 | 0.996-1.017 |
+| `privacy_leak_count` | 0 | 0 |
+
+The private shadow used one frozen external manifest with six positive and six
+negative cases against one immutable archive snapshot. The report is
+aggregate-only and excludes queries, memory text, source paths, IDs, raw refs,
+and context packages.
+
+| Private candidate metric | Result |
+| --- | ---: |
+| `private_context_package_parse_success_rate` | 1.0 |
+| `private_unseen_preference_supported_recall` | 1.0 |
+| `private_supported_decision_precision` | **0.8571428571428571** |
+| `private_false_support_count` | **1** |
+| `private_wrong_scope_supported_count` | 0 |
+| `private_inactive_answer_count` | 0 |
+| `private_free_form_answerability_use_count` | 0 |
+| `canonical_archive_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+Decision: `no_go`. The public
+`legacy_goal_alias_ablation_supported_recall` threshold required at least
+`0.75` and observed `0.0`; the private precision threshold required `1.0` and
+one of six negative cases was falsely supported. These are quality failures,
+not permission to add case-specific cues or a second candidate.
+
+The candidate exists only on the V2.55 evaluation branch. It was not installed
+or deployed. The three installed skills remain byte-for-byte equal to V2.54,
+and their private deployment bundle remains `19/19 current` with a clean
+repository and matching local/remote heads. The canonical release gate does
+not execute this known-failing holdout; it compiles the evaluation gate and
+continues to protect the active V2.54 release contract. Its final run passed
+all 48 checks, including all 853 unit tests, both v1 readiness scorecards,
+script compilation, and template synchronization.
+
+This result is evidence for one synthetic durable-preference slice and one
+aggregate private shadow only. It is not general LongMemEval quality.
+It is not universal semantic memory. It is not LLM answer quality.
+It is not vector-search quality. It is not ontology discovery.
+It is not unrestricted raw-transcript recall.
+It is not distributed scheduler uptime. It is not public leaderboard parity.
+
+## V2.56 Subject-Anchored Hybrid Preference Recall Closure
+
+Date: 2026-07-24
+
+V2.56 evaluates a bounded read-path candidate over already materialized,
+active/current, source-bound preference memories. It replaces V2.55's broad
+preference override with two explicitly separated stages:
+
+- `normalized_subject_candidate_v1` applies Unicode NFKC, casefolding,
+  Latin/CJK boundary normalization, coarse subject-segment coverage, and
+  bounded CJK bigram/trigram overlap for candidate retrieval and ranking;
+- `source_bound_subject_preference_support_v1` is the only preference-memory
+  authorization policy. It requires focused preference intent,
+  automatic/explicit provenance, global layer and scope, summary/evidence
+  drill paths, stable subject anchors, polarity, currentness, and either an
+  independent attribute-support unit or an open-ended subject lookup.
+
+The exact lexical path remains available for retrieval, and exact `matched_tokens`
+now contains exact matches only. Exact coverage does not
+bypass the preference support policy. Normalized overlap is emitted separately
+as aggregate-safe `candidate_match` metadata; candidate retrieval is not answerability:
+candidate score, normalized coverage, subject coverage, and
+exact lexical coverage alone cannot produce a supported preference package.
+
+The gate now uses pre-materialized source-bound read-path fixtures rather than
+calling the V2.55 no-go updater candidate. The final production updater copies
+retain V2.54 write-path behavior. The V2.55 calibration fingerprint remains
+`9cc208235c44c99a1ad9e13c04662d1907a23a268e249b15ee919b9b2286862b`;
+the V2.55 holdout fingerprint remains
+`2e0c4b9ab2515c368843d651217487595ab683f4068df7dc57c12ba742b16147`.
+Both remain historical `no_go` evidence and are included in the V2.56 report.
+
+The V2.56 calibration fingerprint is
+`d44005ef4f618e6344d3465112cab412d4e70291afe348e56b2b73d0c58725d5`.
+The regression holdout fingerprint is
+`cda9f4d448934636151d27e94fb1f8d3cc316532f7bf7759a01194cad1f20cb3`.
+Each contains 13 positive and 16 negative synthetic cases. They returned
+`calibration_passed` and `regression_passed`; neither status authorizes
+deployment.
+
+The public deployment holdout uses the separate `deployment-holdout` cohort,
+which was frozen before execution with fingerprint
+`63b837382d0b698daafdbb4f183358a5a62567b73a130f82278b65d305acecaf`.
+It contains 8 positive and 13 negative cases. Its first and only execution
+returned `status: failed` and `decision: no_go`.
+
+| Public candidate metric | Calibration | Regression | Deployment holdout |
+| --- | ---: | ---: | ---: |
+| `normalized_surface_variant_recall_at_5` | 1.0 | 1.0 | 0.5 |
+| `normalized_surface_variant_supported_recall` | 1.0 | 1.0 | 0.5 |
+| `open_ended_subject_preference_supported_recall` | 1.0 | 1.0 | 1.0 |
+| `unseen_paraphrase_recall_at_5` | 1.0 | 1.0 | 0.875 |
+| `unseen_paraphrase_supported_recall` | 0.9166666666666666 | 0.8333333333333334 | 0.75 |
+| `supported_decision_precision` | 1.0 | 1.0 | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `negation_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `inactive_preference_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `wrong_scope_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `current_turn_precedence_accuracy` | 1.0 | 1.0 | 1.0 |
+| `legacy_goal_preference_regression_rate` | 1.0 | 1.0 | 0.0 |
+| `legacy_goal_alias_ablation_supported_recall` | 0.75 | 0.75 | 0.0 |
+| `candidate_only_answer_count` | 0 | 0 | 0 |
+| `candidate_only_safety_eligible_rate` | 1.0 | 1.0 | 0.0 |
+| `candidate_only_subject_support_count` | 0 | 0 | 0 |
+| `bare_subject_rejection_rate` | 1.0 | 1.0 | 1.0 |
+| `free_form_answerability_use_count` | 0 | 0 | 0 |
+| `new_case_specific_runtime_literal_count` | 0 | 0 | 0 |
+| `deterministic_result_ordering_rate` | 1.0 | 1.0 | 1.0 |
+| `performance_runtime_ratio` | 1.333 | 1.314 | 1.319 |
+| `performance_peak_memory_ratio` | 1.054 | 1.040 | 1.027 |
+| `privacy_leak_count` | 0 | 0 | 0 |
+
+The deployment first-loss distribution contains one
+`retrieved_at_5` loss and one `query_support_accepted` loss among the eight
+positive cases. The two zero-valued legacy metrics also expose a gate
+construction defect: the deployment cohort does not contain the legacy
+ablation shape even though the shared threshold set requires those metrics.
+The candidate-only fixture likewise did not demonstrate the required
+safety-eligible near-miss in this cohort. These construction issues do not
+convert the result to a pass. The untouched normalized recall failure alone is
+sufficient for `no_go`, and the frozen cohort was not changed or rerun.
+
+The frozen private deployment manifest has fingerprint
+`f3f0cf92a3afb54c07add2e1f89c411378036e3721ffb7f4afcfc55505313753`
+and contains 11 positive and 15 negative cases. The private deployment holdout was not executed
+because the public deployment hard gate had already failed.
+No private query, memory text, memory ID, source path, raw ref, or context
+package was rendered.
+
+The clean packaged runtime gate covers normalized and exact source-bound
+preferences, a safety-eligible candidate-only hit, bare subject, wrong scope,
+current-turn override, inactive state, weak/no-hit support, and malformed
+packages. Supported preference cases map deterministically to
+`single_text_fence_no_outer_text`; all negative cases abstain.
+Runtime supported-decision, abstention, preference-delivery, and context-package
+parse accuracy are 1.0. Candidate-only safety-eligible count is 1, its subject
+support count is 0, bare-subject rejection count is 1, and
+`privacy_leak_count=0`. Free-form output is not used.
+
+The final decision: `no_go`. The V2.56 candidate was not installed or deployed.
+The existing private runtime remains `19/19 current`; its repository is clean
+and its local and remote main heads match. V2.54 remains the production
+write-path truth. `remaining_semantic_only_failure_count` is not claimed
+because the observed residue includes lexical retrieval and gate-construction
+failures, not only semantic paraphrases.
+
+The evaluation branch itself remains regression-clean: 863 unit tests passed,
+all three skill folders validated, the packaged V1 readiness scorecard passed
+6/6 required dimensions, template/runtime copies matched, and the canonical
+release-contract runner passed 48/48 checks. Those results protect the existing
+release baseline; they do not override the failed V2.56 deployment holdout.
+
+V2.56 is not embedding quality, not vector search, not LLM answer quality,
+not ontology discovery, and not public leaderboard parity. It is also not a
+ranking overhaul, automatic induction quality, or unrestricted semantic recall.
+
+## V2.57 JSONL Physical-Line Recovery And Dev-Feature Convergence
+
+Date: 2026-07-25
+
+V2.57 closes a distinct record-boundary defect found after V2.54. Valid JSONL
+may contain literal U+0085, U+2028, or U+2029 characters inside a JSON string.
+Python `str.splitlines()` treats those characters as line boundaries, so the
+inventory runner and updater could split a valid physical record in the middle
+of a string and fail it as `source_inventory_invalid`.
+
+The JSONL contract is now explicit: only LF and CRLF delimit physical records.
+Literal U+0085, U+2028, and U+2029 remain JSON string content. The focused
+change covers inventory parsing, updater parsing, structured redaction,
+selected-record analysis, value detection, and source-event locators. Ordinary
+text and command-output uses of `str.splitlines()` are unchanged. Missing,
+truncated, and otherwise malformed JSONL still fails closed.
+
+V2.57 is based on the V2.54 production truth. V2.56 remains `no_go`; its
+read-path candidate is retained as evaluation history and is neither installed
+nor treated as production authorization.
+
+The bounded public-data-free gate is:
+
+```bash
+python3 benchmarks/jsonl_record_boundary_recovery_gate.py
+```
+
+It covers LF, CRLF, multi-record input, blank records, all three literal
+Unicode separators, an isolated inventory worker, selected-record
+materialization, truly malformed JSONL, and stale `phase=updating` transaction
+replay.
+
+| Synthetic metric | Result |
+| --- | ---: |
+| `unicode_separator_inventory_acceptance_rate` | 1.0 |
+| `unicode_separator_materialization_rate` | 1.0 |
+| `physical_record_count_accuracy` | 1.0 |
+| `crlf_compatibility_rate` | 1.0 |
+| `malformed_jsonl_fail_closed_rate` | 1.0 |
+| `stale_replay_recovery_rate` | 1.0 |
+| `valid_case_source_inventory_invalid_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The three production-safe skills were installed through a rollback-backed
+copy, after which all three source and installed skill trees matched. The new
+installed setup skill reported exactly two stale deployment tools in both its
+read-only check and repair dry-run. The transactional refresh changed only the
+runner and updater, and the reviewed tool-only deployment was committed and
+published. Installed-to-private deployment parity then returned `19/19
+current`: missing, stale, unsafe, and extra tool counts were zero, source and
+target bundle fingerprints matched, and `privacy_leak_count=0`.
+
+After clean canonical, remote-head, parity, and single-writer preflights,
+exactly one controlled transaction was invoked. Its terminal aggregate was:
+
+| Controlled transaction metric | Result |
+| --- | ---: |
+| `status` | `published` |
+| `reason` | `published` |
+| `failure_stage` | `none` |
+| `recovery_action` | `stale_staging_replayed` |
+| `update_inventory_worker_count` | 1 |
+| `update_project_processed_count` | 76 |
+| `update_source_stream_processed_count` | 0 |
+| `update_child_failure_count` | 0 |
+| `source_record_deferred_count` | 3 |
+| `source_target_deferred_count` | 2 |
+| `canonical_mutation_count` | 1 |
+| `remote_publish_count` | 1 |
+| `recovery_count` | 1 |
+| `repair_attempt_count` | 1 |
+| `source_batch_complete` | false |
+| `privacy_leak_count` | 0 |
+
+The transaction crossed source inventory and published stable source siblings;
+the three deferred records across two targets explain
+`source_batch_complete=false` and remain eligible for a later scheduled run.
+No retry or fallback was used. Postflight found no surviving writer, the
+canonical worktree was clean, canonical HEAD matched the freshly fetched
+remote receipt, persistent transaction state had been cleared by the adapter,
+and runtime parity remained `19/19 current`.
+
+V2.57 proves the bounded JSONL physical-line contract and recovery path. It is
+not overall semantic recall closure, ranking quality, vector search, ontology
+discovery, public leaderboard parity, or LLM answer quality.
+
+## V2.58 Real-Use Semantic Support Admission And Release-Truth Convergence
+
+Date: 2026-07-28
+
+Decision: `no_go`.
+
+V2.58 evaluated one bounded local semantic verifier for the specific failure
+where an active/current memory is already in the context-package top five with
+summary and evidence paths, but strict lexical `query_support` remains weak.
+It did not evaluate semantic retrieval for a no-hit query.
+
+Release truth was repaired before the candidate was evaluated. The template,
+setup asset, and bundled `using-my-precious` search tools were restored to the
+approved V2.53/V2.54/V2.57 read path with SHA-256
+`e73b7b6600db8a147d667f91f08eef0562b5029e487950a7fa228c4903f8d248`.
+The release-truth gate rejects both historical no-go runtimes:
+
+| historical candidate | rejected search SHA-256 |
+| --- | --- |
+| V2.55 | `3e0715d25cf0d59703774c5e9d41a19155e92ce85fa8f11549516449d3c15875` |
+| V2.56 | `29e20ef5f63570d37d09eb878916d66de57ff44e9f8e794bd5f1ec33e25eefed` |
+
+The gate also fails closed with aggregate JSON for missing, unreadable, or
+non-UTF-8 release surfaces. It does not render local paths or tracebacks.
+
+The frozen public-data-free case file is
+`benchmarks/cases/real_use_semantic_support_synthetic.jsonl`, with SHA-256
+`7893a6646c36982be2213f43bac75c8c045e72612d5f4177deb27b26e56172d0`.
+Calibration and holdout are disjoint:
+
+| cohort | slice fingerprint | positive | negative | intended weak-hit cases |
+| --- | --- | ---: | ---: | ---: |
+| calibration | `40477d84e0ac82b26048161a46c784a06821f803d2e557203cf061e7da436edf` | 9 | 9 | 6 |
+| holdout | `b44ee705010bfc9de96407a16e7eba2328d435b93fe986e0c9173528a8e88959` | 9 | 13 | 6 |
+
+Both baseline cohorts reproduced the same positive first-loss distribution:
+
+| first-loss stage | count per cohort |
+| --- | ---: |
+| `memory_not_materialized` | 1 |
+| `not_retrieved_at_5` | 1 |
+| `retrieved_but_query_support_weak` | 6 |
+| `supported` | 1 |
+
+`baseline_support_gap_reproduction_rate` and
+`baseline_first_loss_classification_accuracy` were both 1.0. V2.58 was scoped
+only to `retrieved_but_query_support_weak`; the other first-loss stages remain
+future work.
+
+The single candidate was frozen in commit
+`bfc5842bea845dddceb1721a4d47b9155aa21e70`. Its identity was:
+
+| field | frozen value |
+| --- | --- |
+| model | `intfloat/multilingual-e5-small` |
+| model revision | `614241f622f53c4eeff9890bdc4f31cfecc418b3` |
+| model artifact-manifest SHA-256 | `8a945b5d9dde256c5bb6f0274845ac4d7a42e9a02b1e0ac76da66972d32299bb` |
+| model/runtime fingerprint | `89c7223e22f226e5142b3ebc9360f0127b436dc88ba8684922b55dbdabcd6437` |
+| sentence-transformers | 5.6.0 |
+| torch | 2.13.0 |
+| transformers | 5.14.1 |
+| prefix policy | `query:` / `passage:` |
+| threshold | 0.85 |
+| maximum candidates | 5 |
+| provider deadline | 1.75 seconds |
+| query-time network | disabled |
+
+The candidate only inspected eligible weak active/current hits already present
+in the first five lexical results. A private mode-0600 Unix socket carried one
+bounded query and up to five bounded candidate texts to the local provider.
+Provider absence, timeout, fingerprint mismatch, malformed output, unknown or
+duplicate IDs, and non-finite scores failed closed to the lexical result. A
+semantic score alone could not authorize an answer: active/current lifecycle,
+automatic or explicit provenance, matching layer/scope/project context, both
+summary and evidence paths, focused single-facet intent, polarity/currentness,
+and current-turn precedence were also required.
+
+Calibration passed and froze the threshold:
+
+| calibration metric | result |
+| --- | ---: |
+| `semantic_support_public_calibration_recall` | 1.0 |
+| `supported_decision_precision` | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 |
+| `wrong_scope_rejection_rate` | 1.0 |
+| `inactive_rejection_rate` | 1.0 |
+| `provider_failure_fail_closed_rate` | 1.0 |
+| `summary_evidence_resolution_rate` | 1.0 |
+| `legacy_v253_goal_preference_regression_rate` | 1.0 |
+| `semantic_positive_min` | 0.851811 |
+| `semantic_negative_max_evaluated` | 0.831818 |
+| `public_warm_query_p95_seconds` | 0.121655 |
+| `false_support_count` | 0 |
+| `case_specific_runtime_literal_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The frozen public holdout then failed the required recall threshold:
+
+| holdout metric | required | result |
+| --- | ---: | ---: |
+| `semantic_support_public_holdout_recall` | 1.0 | 0.8333333333333334 |
+| `summary_evidence_resolution_rate` | 1.0 | 0.8333333333333334 |
+| `supported_decision_precision` | 1.0 | 1.0 |
+| `hard_negative_rejection_rate` | 1.0 | 1.0 |
+| `wrong_scope_rejection_rate` | 1.0 | 1.0 |
+| `inactive_rejection_rate` | 1.0 | 1.0 |
+| `current_turn_precedence_accuracy` | 1.0 | 1.0 |
+| `provider_failure_fail_closed_rate` | 1.0 | 1.0 |
+| `legacy_v253_goal_preference_regression_rate` | 1.0 | 1.0 |
+| `public_warm_query_p95_seconds` | <= 2.0 | 0.105967 |
+| `false_support_count` | 0 | 0 |
+| `free_form_answerability_use_count` | 0 | 0 |
+| `case_specific_runtime_literal_count` | 0 | 0 |
+| `privacy_leak_count` | 0 | 0 |
+
+The aggregate holdout report was written outside this repository. No threshold,
+model, rule, or holdout case was changed after observing the result. Because
+public holdout failed, the one-shot private holdout was not run, no private
+archive was queried by the candidate admission, and no candidate was installed
+or deployed. `private_real_use_goal_preference_supported_recall` and
+`private_warm_query_p95_seconds` therefore have no V2.58 result and must not be
+reported as passing.
+
+The private gate validates the aggregate public-holdout admission and the exact
+deployed candidate search-runtime hash before it reads a private manifest or
+archive. In the V2.58 no-go release state, the approved lexical runtime therefore
+closes the private path before private inputs are accessed.
+
+The no-go candidate runtime was removed from every installable surface. The
+evaluation runner now loads the exact candidate scripts only from the frozen
+historical commit and verifies their SHA-256 values before replay. Production
+continues to use the approved lexical runtime, and the real-use Goal-preference
+weak-hit experience remains unresolved.
+
+Baseline taxonomy verification remains part of the canonical release gate:
+
+```bash
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort calibration --baseline-only
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort holdout --baseline-only
+```
+
+V2.58 proves a frozen public calibration/holdout admission decision and clean
+release-truth rollback. It does not prove real Goal-preference recall closure,
+private recall, no-hit semantic retrieval, vector search, a persistent
+embedding store, ranking quality, automatic induction quality, ontology
+discovery, LLM answer quality, or public leaderboard parity.
+
+## V2.59 Mainline Release Truth And Live Runtime Identity Convergence
+
+Date: 2026-07-28
+
+Decision: release convergence candidate accepted by the synthetic gate; final
+operational acceptance requires the live aggregate audit after branch
+integration and deployment.
+
+The V2.59 preflight observed `origin/main` as an ancestor of
+`origin/dev-feature`, with a left/right commit count of `0/20`. The three
+installed skills matched the integration branch, and the private runtime tool
+bundle reported `19/19 current`, but those two mutually consistent runtime
+layers were not tied to the latest approved release at `origin/main`. Existing
+runtime parity explicitly did not claim latest-release discovery.
+
+V2.59 adds the read-only
+`tools/audit_release_convergence.py` composition audit and the deterministic
+`benchmarks/release_convergence_gate.py`. The audit binds a clean approved Git
+ref to the complete three-skill source bundle, installed skill bundle, source
+tool bundle, deployed tool bundle, and live automation command contract. It
+reports `source_installed_skills_match`, `source_deployed_tools_match`, and
+`automation_contract_aligned` without rendering paths, prompt text, archive
+content, raw refs, or file contents.
+
+The pre-deployment three-skill source and installed bundle SHA-256 was
+`b921ab50355af8650b8b5696278e1b1f9dd6daec2d89973272c6271ddee7d17d`.
+The source and deployed runtime-tool bundle SHA-256 was
+`6c5535e99b9a568b060b7506bd2a6587e3504ee16fa719854f83d753dc7a6dd9`.
+These content identities remain valid across documentation-only integration
+commits. The authoritative final source commit is emitted by the live
+aggregate report and verified by equal remote refs; it is not self-embedded in
+the commit whose identity it would change.
+
+The synthetic gate runs the full case set twice and requires identical
+aggregate reports. Its accepted metrics are:
+
+| metric | result |
+| --- | ---: |
+| `current_release_acceptance_accuracy` | 1.0 |
+| `old_but_mutually_consistent_rejection_accuracy` | 1.0 |
+| `stale_installed_rejection_accuracy` | 1.0 |
+| `stale_private_runtime_rejection_accuracy` | 1.0 |
+| `unreleased_source_ref_rejection_accuracy` | 1.0 |
+| `automation_path_mismatch_rejection_accuracy` | 1.0 |
+| `automation_self_update_rejection_accuracy` | 1.0 |
+| `malformed_release_evidence_rejection_accuracy` | 1.0 |
+| `approved_search_runtime_acceptance_accuracy` | 1.0 |
+| `historical_no_go_runtime_rejection_accuracy` | 1.0 |
+| `audit_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The exact missing case is now fail closed: when installed skills and deployed
+tools are mutually consistent but both predate the approved source, the audit
+returns `drifted`. A source HEAD that does not equal the approved ref, an
+unmerged integration ref, a single stale layer, a wrong automation path, or
+malformed release evidence also cannot report `current`.
+
+The release procedure keeps scheduled execution unchanged. Scheduled
+automation consumes an explicitly deployed release and still must not pull,
+install, refresh, retry, or use direct Git publication. Release freshness is
+checked at the release/deployment boundary; scheduled runtime parity remains a
+consistency and safety gate.
+
+Final operational acceptance requires all of the following in one live audit
+receipt:
+
+- `origin/main` and `origin/dev-feature` resolve to the same source commit;
+- all three installed skills match the approved source bundle;
+- private runtime parity is current and matches the source tool bundle;
+- the live automation invokes the exact installed setup and transaction
+  adapter paths;
+- source and private repositories are clean and match their remote receipts.
+
+V2.59 is not Goal-preference recall closure, not semantic retrieval, not
+no-hit retrieval, not ranking quality, not vector search, not embedding
+storage, not ontology discovery, and not automatic induction quality. It is
+not LLM answer quality, not scheduler/network reliability, and not public leaderboard parity.
+The observed real-use Goal-preference recall gap remains the next bounded
+product-quality problem after release convergence.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

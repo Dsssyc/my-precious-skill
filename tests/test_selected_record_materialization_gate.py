@@ -31,6 +31,7 @@ class SelectedRecordMaterializationGateTests(unittest.TestCase):
         self.assertEqual(metrics["selected_record_source_anchor_parity_rate"], 1.0)
         self.assertEqual(metrics["selected_record_secret_policy_parity_rate"], 1.0)
         self.assertEqual(metrics["selected_record_mutation_rejection_rate"], 1.0)
+        self.assertEqual(metrics["selected_record_mutation_deferral_rate"], 1.0)
         self.assertEqual(metrics["direct_cli_regression_pass_rate"], 1.0)
         self.assertEqual(metrics["v239_throughput_regression_pass_rate"], 1.0)
         self.assertEqual(metrics["v238_single_writer_regression_pass_rate"], 1.0)

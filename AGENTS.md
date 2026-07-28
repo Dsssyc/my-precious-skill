@@ -95,6 +95,8 @@ Run packaged lifecycle/readiness gates when readiness contract changes:
 ```bash
 python3 benchmarks/packaged_lifecycle_gate.py
 python3 benchmarks/using_my_precious_runtime_gate.py
+python3 benchmarks/real_use_recall_utility_gate.py
+python3 benchmarks/copyable_goal_preference_recall_gate.py
 python3 benchmarks/query_support_recall_gate.py
 python3 benchmarks/progressive_source_drilldown_gate.py
 python3 benchmarks/authorized_original_source_gate.py
@@ -110,8 +112,12 @@ python3 benchmarks/scheduled_publish_search_gate.py
 python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
 python3 benchmarks/live_automation_prompt_alignment_gate.py
 python3 benchmarks/scheduled_update_single_writer_gate.py
+python3 benchmarks/scheduled_reboot_replay_gate.py
 python3 benchmarks/scheduled_update_throughput_gate.py
+python3 benchmarks/scheduled_live_source_deferral_gate.py
 python3 benchmarks/selected_record_materialization_gate.py
+python3 benchmarks/structured_redaction_integrity_gate.py
+python3 benchmarks/jsonl_record_boundary_recovery_gate.py
 python3 benchmarks/durable_event_projection_gate.py
 python3 benchmarks/durable_semantic_index_gate.py
 python3 benchmarks/induction_consolidation_gate.py
@@ -119,15 +125,68 @@ python3 benchmarks/lifecycle_governance_gate.py
 python3 benchmarks/long_horizon_memory_stress_gate.py
 python3 benchmarks/private_lifecycle_governance_shadow_gate.py --synthetic-fixture
 python3 benchmarks/search_tool_drift_repair_gate.py
+python3 benchmarks/search_memory_release_truth_gate.py
+python3 benchmarks/real_use_semantic_support_gate.py --cohort calibration --baseline-only
+python3 benchmarks/real_use_semantic_support_gate.py --cohort holdout --baseline-only
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
+python3 benchmarks/release_convergence_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
 python3 benchmarks/public_query_support_calibration_gate.py --offline-fixture
+python3 benchmarks/public_induction_first_loss_gate.py --offline-fixture
+python3 benchmarks/session_support_preservation_gate.py --offline-fixture
 python3 benchmarks/active_support_recall_closure_gate.py
 python3 benchmarks/reviewed_automatic_memory_publish_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
 ```
+
+Run the read-only live release audit at the release/deployment boundary, not
+from the scheduled memory transaction:
+
+```bash
+python3 tools/audit_release_convergence.py \
+  --source-repo /path/to/my-precious-skill \
+  --approved-ref origin/main \
+  --integration-ref origin/dev-feature \
+  --installed-root /path/to/installed-skills \
+  --deployment-repo /path/to/agent-memory \
+  --automation-config /path/to/automation.toml \
+  --report-json
+```
+
+V2.55 is an evaluation-only `no_go`. Its frozen holdout intentionally returns
+nonzero and is therefore not part of the passing canonical release gate. Run
+the dedicated calibration and holdout commands when reviewing that candidate:
+
+```bash
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort calibration
+python3 benchmarks/general_durable_preference_recall_gate.py --cohort holdout
+```
+
+V2.58 is a frozen public-holdout `no_go`. Its evaluation runner loads the
+candidate only from the pinned historical commit and requires a
+repository-external provider environment, model directory, work directory,
+and aggregate report:
+
+```bash
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort calibration \
+  --provider-python /external/provider-venv/bin/python \
+  --model-dir /external/models/multilingual-e5-small \
+  --work-dir /tmp/my-precious-v258-calibration \
+  --report-file /tmp/my-precious-v258-calibration-report.json
+
+python3 benchmarks/real_use_semantic_support_gate.py \
+  --cohort holdout \
+  --provider-python /external/provider-venv/bin/python \
+  --model-dir /external/models/multilingual-e5-small \
+  --work-dir /tmp/my-precious-v258-holdout \
+  --report-file /tmp/my-precious-v258-holdout-report.json
+```
+
+Do not run the private V2.58 holdout: the frozen public holdout did not report
+`go`.
 
 Run the external LongMemEval source-to-induction measurement only with a
 downloaded dataset and generated archives outside this repository:
@@ -160,14 +219,38 @@ python3 benchmarks/public_query_support_calibration_gate.py \
   --report-file /tmp/my-precious-query-support-holdout-report.json
 ```
 
+Run V2.44 public first-loss calibration and its frozen holdout only with the
+pinned dataset and generated aggregate reports outside this repository:
+
+```bash
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort calibration \
+  --work-dir /tmp/my-precious-first-loss-calibration \
+  --report-file /tmp/my-precious-first-loss-calibration-report.json
+
+python3 benchmarks/public_induction_first_loss_gate.py \
+  --public-input /tmp/longmemeval_s_cleaned.json \
+  --dataset-source-url https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_s_cleaned.json \
+  --cohort holdout \
+  --calibration-report /tmp/my-precious-first-loss-calibration-report.json \
+  --work-dir /tmp/my-precious-first-loss-holdout \
+  --report-file /tmp/my-precious-first-loss-holdout-report.json
+```
+
 Compile bundled scripts when implementation code changes:
 
 ```bash
 python3 -m py_compile \
   tools/validate_skills.py \
   tools/run_quality_gates.py \
+  tools/audit_release_convergence.py \
   benchmarks/packaged_lifecycle_gate.py \
   benchmarks/using_my_precious_runtime_gate.py \
+  benchmarks/real_use_recall_utility_gate.py \
+  benchmarks/copyable_goal_preference_recall_gate.py \
+  benchmarks/general_durable_preference_recall_gate.py \
   benchmarks/query_support_recall_gate.py \
   benchmarks/progressive_source_drilldown_gate.py \
   benchmarks/authorized_original_source_gate.py \
@@ -183,8 +266,13 @@ python3 -m py_compile \
   benchmarks/scheduled_content_noise_repair_closure_gate.py \
   benchmarks/live_automation_prompt_alignment_gate.py \
   benchmarks/scheduled_update_single_writer_gate.py \
+  benchmarks/scheduled_reboot_replay_gate.py \
   benchmarks/scheduled_update_throughput_gate.py \
+  benchmarks/scheduled_live_source_deferral_gate.py \
+  benchmarks/private_live_source_inventory_ab_gate.py \
   benchmarks/selected_record_materialization_gate.py \
+  benchmarks/structured_redaction_integrity_gate.py \
+  benchmarks/jsonl_record_boundary_recovery_gate.py \
   benchmarks/durable_event_projection_gate.py \
   benchmarks/durable_semantic_index_gate.py \
   benchmarks/induction_consolidation_gate.py \
@@ -192,10 +280,16 @@ python3 -m py_compile \
   benchmarks/long_horizon_memory_stress_gate.py \
   benchmarks/private_lifecycle_governance_shadow_gate.py \
   benchmarks/search_tool_drift_repair_gate.py \
+  benchmarks/search_memory_release_truth_gate.py \
+  benchmarks/real_use_semantic_support_gate.py \
+  benchmarks/private_real_use_semantic_support_gate.py \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
+  benchmarks/release_convergence_gate.py \
   benchmarks/public_induction_recall_gate.py \
   benchmarks/public_query_support_calibration_gate.py \
+  benchmarks/public_induction_first_loss_gate.py \
+  benchmarks/session_support_preservation_gate.py \
   benchmarks/active_support_recall_closure_gate.py \
   benchmarks/reviewed_automatic_memory_publish_gate.py \
   benchmarks/e2e_induction_recall_benchmark.py \
@@ -211,6 +305,7 @@ python3 -m py_compile \
   skills/setup-my-precious/scripts/setup_memory_archive.py \
   skills/update-my-precious/scripts/update_memory_archive.py \
   skills/update-my-precious/scripts/memory_consolidation.py \
+  skills/update-my-precious/scripts/run_scheduled_memory_transaction.py \
   skills/using-my-precious/scripts/search_memory.py \
   skills/using-my-precious/scripts/resolve_memory_source.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \

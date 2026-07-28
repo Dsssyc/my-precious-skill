@@ -1,13 +1,18 @@
 import importlib.util
 import json
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
+import types
 import unittest
 from pathlib import Path
 
 
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
+V258_CANDIDATE_COMMIT = "bfc5842bea845dddceb1721a4d47b9155aa21e70"
 
 
 def load_search_memory_module():
@@ -16,6 +21,31 @@ def load_search_memory_module():
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+def load_v258_candidate_search_memory_module():
+    result = subprocess.run(
+        [
+            "git",
+            "show",
+            (
+                f"{V258_CANDIDATE_COMMIT}:"
+                "templates/agent-memory-repo/tools/search_memory.py"
+            ),
+        ],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    name = "v258_candidate_search_memory_under_test"
+    module = types.ModuleType(name)
+    module.__file__ = str(SEARCH_SCRIPT)
+    sys.modules[name] = module
+    exec(
+        compile(result.stdout, module.__file__, "exec"),
+        module.__dict__,
+    )
     return module
 
 
@@ -63,7 +93,386 @@ def write_synthetic_memory_archive(repo: Path, rows: list[dict]) -> None:
     )
 
 
+def start_fake_semantic_provider(
+    socket_path: Path,
+    response_factory,
+) -> tuple[threading.Thread, list[dict], list[BaseException]]:
+    requests: list[dict] = []
+    errors: list[BaseException] = []
+    ready = threading.Event()
+
+    def serve() -> None:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(str(socket_path))
+                socket_path.chmod(0o600)
+                server.listen(1)
+                ready.set()
+                connection, _ = server.accept()
+                with connection:
+                    payload = bytearray()
+                    while not payload.endswith(b"\n"):
+                        chunk = connection.recv(65536)
+                        if not chunk:
+                            break
+                        payload.extend(chunk)
+                    request = json.loads(payload)
+                    requests.append(request)
+                    response = response_factory(request)
+                    if isinstance(response, bytes):
+                        rendered = response
+                    else:
+                        rendered = json.dumps(response, sort_keys=True).encode("utf-8") + b"\n"
+                    try:
+                        connection.sendall(rendered)
+                    except BrokenPipeError:
+                        pass
+        except BaseException as exc:
+            errors.append(exc)
+            ready.set()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    if not ready.wait(2):
+        raise AssertionError("fake semantic provider did not start")
+    if errors:
+        raise errors[0]
+    return thread, requests, errors
+
+
 class SearchMemoryTests(unittest.TestCase):
+    def semantic_support_hit(self, search_memory, *, suffix: str = ""):
+        return search_memory.Hit(
+            path=Path(f"index/memories.jsonl/semantic-support{suffix}"),
+            score=100,
+            source="memory",
+            why=["source:automatic"],
+            memory_id=f"semantic-support{suffix}",
+            layer="global",
+            scope="global",
+            topic="goal delivery preference",
+            text=(
+                "The user prefers CedarGoal deliverables as a single directly "
+                "reusable plain-text block."
+            ),
+            drill_paths=(
+                "sessions/synthetic/semantic-support/summary.md",
+                "sessions/synthetic/semantic-support/evidence.md",
+            ),
+            evidence_refs=("sessions/synthetic/semantic-support/evidence.md#ev_001",),
+            matched_tokens=("cedargoal",),
+            memory_provenance="automatic",
+        )
+
+    def test_context_package_can_authorize_one_bounded_local_semantic_hit(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "semantic.sock"
+
+            def response(request):
+                return {
+                    "report_kind": "semantic_support_response",
+                    "report_version": 1,
+                    "model_fingerprint": search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+                    "scores": [
+                        {
+                            "candidate_id": candidate["candidate_id"],
+                            "score": 0.91,
+                        }
+                        for candidate in request["candidates"]
+                    ],
+                }
+
+            thread, requests, errors = start_fake_semantic_provider(
+                socket_path,
+                response,
+            )
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[self.semantic_support_hit(search_memory)],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=socket_path,
+                ),
+            )
+            thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(requests[0]["candidates"]), 1)
+        self.assertEqual(
+            requests[0]["model_fingerprint"],
+            search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+        )
+        self.assertEqual(package["answerability"]["status"], "supported")
+        self.assertEqual(package["hits"][0]["query_support"]["status"], "supported")
+        self.assertEqual(
+            package["hits"][0]["query_support"]["policy"],
+            "bounded_local_semantic_support_v1",
+        )
+        self.assertEqual(
+            package["hits"][0]["query_support"]["lexical_status"],
+            "weak",
+        )
+        self.assertEqual(
+            package["semantic_support"]["candidate_evaluation_count"],
+            1,
+        )
+
+    def test_semantic_support_rejects_current_turn_override_before_provider_call(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = (
+            "Use a table this time; what was the CedarGoal delivery preference?"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[self.semantic_support_hit(search_memory)],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=Path(tmpdir) / "missing.sock",
+                ),
+            )
+
+        support = package["hits"][0]["query_support"]
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+        self.assertEqual(support["status"], "weak")
+        self.assertEqual(
+            support["semantic_support"]["status"],
+            "governance_rejected",
+        )
+        self.assertEqual(
+            support["semantic_support"]["reason"],
+            "current_turn_precedence",
+        )
+        self.assertEqual(
+            package["semantic_support"]["candidate_evaluation_count"],
+            0,
+        )
+
+    def test_semantic_mode_rejects_bare_subject_without_changing_lexical_status(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        hit = self.semantic_support_hit(search_memory)
+        hit.matched_tokens = ("cedargoal",)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query="CedarGoal",
+                query_tokens=["cedargoal"],
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[hit],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=Path(tmpdir) / "missing.sock",
+                ),
+            )
+
+        support = package["hits"][0]["query_support"]
+        self.assertEqual(support["status"], "supported")
+        self.assertEqual(
+            support["policy"],
+            "strict_meaningful_or_important_query_token_coverage",
+        )
+        self.assertEqual(
+            support["semantic_support"]["status"],
+            "governance_rejected",
+        )
+        self.assertEqual(
+            support["semantic_support"]["reason"],
+            "insufficient_facet_detail",
+        )
+        self.assertEqual(
+            package["hits"][0]["answerability"]["status"],
+            "unsupported",
+        )
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+
+    def test_semantic_provider_malformed_fingerprint_and_timeout_fail_closed(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        scenarios = (
+            ("malformed", lambda _request: b"{not-json\n", 0.2),
+            (
+                "fingerprint",
+                lambda request: {
+                    "report_kind": "semantic_support_response",
+                    "report_version": 1,
+                    "model_fingerprint": "wrong",
+                    "scores": [
+                        {
+                            "candidate_id": candidate["candidate_id"],
+                            "score": 0.99,
+                        }
+                        for candidate in request["candidates"]
+                    ],
+                },
+                0.2,
+            ),
+            (
+                "timeout",
+                lambda request: (
+                    time.sleep(0.2)
+                    or {
+                        "report_kind": "semantic_support_response",
+                        "report_version": 1,
+                        "model_fingerprint": search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+                        "scores": [
+                            {
+                                "candidate_id": candidate["candidate_id"],
+                                "score": 0.99,
+                            }
+                            for candidate in request["candidates"]
+                        ],
+                    }
+                ),
+                0.05,
+            ),
+        )
+        for name, response_factory, timeout_seconds in scenarios:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmpdir:
+                socket_path = Path(tmpdir) / "semantic.sock"
+                thread, _requests, errors = start_fake_semantic_provider(
+                    socket_path,
+                    response_factory,
+                )
+                package = search_memory.build_context_package(
+                    repo=Path("."),
+                    query=query,
+                    query_tokens=search_memory.unique_query_tokens(query),
+                    depth="evidence",
+                    limit=5,
+                    scope="all",
+                    preferred_scope="",
+                    legacy_sessions=False,
+                    project_path=None,
+                    hits=[self.semantic_support_hit(search_memory)],
+                    inactive_match_count=0,
+                    semantic_provider=search_memory.SemanticSupportProviderConfig(
+                        socket_path=socket_path,
+                        timeout_seconds=timeout_seconds,
+                    ),
+                )
+                thread.join(1)
+
+            self.assertEqual(errors, [])
+            self.assertEqual(package["answerability"]["status"], "unsupported")
+            self.assertEqual(package["hits"][0]["query_support"]["status"], "weak")
+            self.assertEqual(
+                package["hits"][0]["query_support"]["semantic_support"]["status"],
+                "provider_failure",
+            )
+
+    def test_missing_semantic_provider_fails_closed(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[self.semantic_support_hit(search_memory)],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=Path(tmpdir) / "missing.sock",
+                ),
+            )
+
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+        self.assertEqual(package["hits"][0]["query_support"]["status"], "weak")
+        self.assertEqual(
+            package["hits"][0]["query_support"]["semantic_support"]["status"],
+            "provider_failure",
+        )
+        self.assertEqual(
+            package["hits"][0]["query_support"]["semantic_support"]["reason"],
+            "provider_unavailable",
+        )
+
+    def test_semantic_candidate_evaluation_is_limited_to_top_five(self):
+        search_memory = load_v258_candidate_search_memory_module()
+        query = "How should CedarGoal arrive so I can paste it without cleanup?"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "semantic.sock"
+
+            def response(request):
+                return {
+                    "report_kind": "semantic_support_response",
+                    "report_version": 1,
+                    "model_fingerprint": search_memory.SEMANTIC_SUPPORT_MODEL_FINGERPRINT,
+                    "scores": [
+                        {
+                            "candidate_id": candidate["candidate_id"],
+                            "score": 0.91,
+                        }
+                        for candidate in request["candidates"]
+                    ],
+                }
+
+            thread, requests, errors = start_fake_semantic_provider(
+                socket_path,
+                response,
+            )
+            package = search_memory.build_context_package(
+                repo=Path("."),
+                query=query,
+                query_tokens=search_memory.unique_query_tokens(query),
+                depth="evidence",
+                limit=8,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path=None,
+                hits=[
+                    self.semantic_support_hit(search_memory, suffix=f"-{index}")
+                    for index in range(7)
+                ],
+                inactive_match_count=0,
+                semantic_provider=search_memory.SemanticSupportProviderConfig(
+                    socket_path=socket_path,
+                ),
+            )
+            thread.join(2)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(requests[0]["candidates"]), 5)
+        self.assertEqual(
+            package["semantic_support"]["candidate_evaluation_count"],
+            5,
+        )
+        self.assertEqual(
+            [hit["query_support"]["status"] for hit in package["hits"]],
+            ["supported"] * 5 + ["weak"] * 2,
+        )
+
     def test_source_map_reachability_accepts_versioned_source_anchor(self):
         search_memory = load_search_memory_module()
 
@@ -148,6 +557,134 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertEqual(package["hits"][0]["memory_id"], "mem_high_support")
         self.assertEqual(package["answerability"]["status"], "supported")
+
+    def test_context_package_recommends_bounded_decomposition_for_broad_query(self):
+        search_memory = load_search_memory_module()
+        query = "请找出我的全局偏好、项目历史、当前 HEAD"
+        query_tokens = search_memory.unique_query_tokens(query)
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query=query,
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[],
+            inactive_match_count=0,
+        )
+
+        self.assertTrue(package["query"]["decomposition_recommended"])
+        self.assertEqual(package["query"]["decomposition_reason"], "broad_or_multi_intent_query")
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+
+    def test_context_package_keeps_focused_query_without_decomposition_signal(self):
+        search_memory = load_search_memory_module()
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query="goal preference",
+            query_tokens=["goal", "preference"],
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[],
+            inactive_match_count=0,
+        )
+
+        self.assertFalse(package["query"]["decomposition_recommended"])
+        self.assertEqual(package["query"]["decomposition_reason"], "focused_query")
+
+    def test_context_package_does_not_split_single_facet_conjunctions(self):
+        search_memory = load_search_memory_module()
+
+        for query in (
+            "design and architecture preference",
+            "我希望默认使用中文并且保持简洁",
+        ):
+            with self.subTest(query=query):
+                package = search_memory.build_context_package(
+                    repo=Path("."),
+                    query=query,
+                    query_tokens=search_memory.unique_query_tokens(query),
+                    depth="evidence",
+                    limit=5,
+                    scope="all",
+                    preferred_scope="",
+                    legacy_sessions=False,
+                    project_path=None,
+                    hits=[],
+                    inactive_match_count=0,
+                )
+
+                self.assertFalse(package["query"]["decomposition_recommended"])
+                self.assertEqual(package["query"]["decomposition_reason"], "focused_query")
+
+    def test_context_package_decomposition_signal_is_answerability_orthogonal(self):
+        search_memory = load_search_memory_module()
+        query_tokens = [
+            "historical",
+            "preference",
+            "project",
+            "program",
+            "current",
+            "reviewed",
+            "state",
+        ]
+        supported_hit = search_memory.Hit(
+            path=Path("index/memories.jsonl/mem_decomposition_supported"),
+            score=100,
+            source="memory",
+            why=[],
+            memory_id="mem_decomposition_supported",
+            layer="global",
+            scope="global",
+            topic="decomposition-orthogonality",
+            drill_paths=(
+                "sessions/2026/01/10/decomposition/summary.md",
+                "sessions/2026/01/10/decomposition/evidence.md",
+            ),
+            matched_tokens=tuple(query_tokens),
+        )
+
+        supported = search_memory.build_context_package(
+            repo=Path("."),
+            query=" ".join(query_tokens),
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[supported_hit],
+            inactive_match_count=0,
+        )
+        inactive_only = search_memory.build_context_package(
+            repo=Path("."),
+            query=" ".join(query_tokens),
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[],
+            inactive_match_count=1,
+        )
+
+        self.assertTrue(supported["query"]["decomposition_recommended"])
+        self.assertEqual(supported["answerability"]["status"], "supported")
+        self.assertTrue(inactive_only["query"]["decomposition_recommended"])
+        self.assertEqual(inactive_only["answerability"]["status"], "unsupported")
+        self.assertEqual(inactive_only["answerability"]["reason"], "no_active_current_support")
 
     def test_prune_low_relative_memory_hits_requires_99_percent_floor(self):
         search_memory = load_search_memory_module()
