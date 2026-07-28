@@ -4074,6 +4074,86 @@ private recall, no-hit semantic retrieval, vector search, a persistent
 embedding store, ranking quality, automatic induction quality, ontology
 discovery, LLM answer quality, or public leaderboard parity.
 
+## V2.59 Mainline Release Truth And Live Runtime Identity Convergence
+
+Date: 2026-07-28
+
+Decision: release convergence candidate accepted by the synthetic gate; final
+operational acceptance requires the live aggregate audit after branch
+integration and deployment.
+
+The V2.59 preflight observed `origin/main` as an ancestor of
+`origin/dev-feature`, with a left/right commit count of `0/20`. The three
+installed skills matched the integration branch, and the private runtime tool
+bundle reported `19/19 current`, but those two mutually consistent runtime
+layers were not tied to the latest approved release at `origin/main`. Existing
+runtime parity explicitly did not claim latest-release discovery.
+
+V2.59 adds the read-only
+`tools/audit_release_convergence.py` composition audit and the deterministic
+`benchmarks/release_convergence_gate.py`. The audit binds a clean approved Git
+ref to the complete three-skill source bundle, installed skill bundle, source
+tool bundle, deployed tool bundle, and live automation command contract. It
+reports `source_installed_skills_match`, `source_deployed_tools_match`, and
+`automation_contract_aligned` without rendering paths, prompt text, archive
+content, raw refs, or file contents.
+
+The pre-deployment three-skill source and installed bundle SHA-256 was
+`b921ab50355af8650b8b5696278e1b1f9dd6daec2d89973272c6271ddee7d17d`.
+The source and deployed runtime-tool bundle SHA-256 was
+`6c5535e99b9a568b060b7506bd2a6587e3504ee16fa719854f83d753dc7a6dd9`.
+These content identities remain valid across documentation-only integration
+commits. The authoritative final source commit is emitted by the live
+aggregate report and verified by equal remote refs; it is not self-embedded in
+the commit whose identity it would change.
+
+The synthetic gate runs the full case set twice and requires identical
+aggregate reports. Its accepted metrics are:
+
+| metric | result |
+| --- | ---: |
+| `current_release_acceptance_accuracy` | 1.0 |
+| `old_but_mutually_consistent_rejection_accuracy` | 1.0 |
+| `stale_installed_rejection_accuracy` | 1.0 |
+| `stale_private_runtime_rejection_accuracy` | 1.0 |
+| `unreleased_source_ref_rejection_accuracy` | 1.0 |
+| `automation_path_mismatch_rejection_accuracy` | 1.0 |
+| `automation_self_update_rejection_accuracy` | 1.0 |
+| `malformed_release_evidence_rejection_accuracy` | 1.0 |
+| `approved_search_runtime_acceptance_accuracy` | 1.0 |
+| `historical_no_go_runtime_rejection_accuracy` | 1.0 |
+| `audit_mutation_count` | 0 |
+| `privacy_leak_count` | 0 |
+
+The exact missing case is now fail closed: when installed skills and deployed
+tools are mutually consistent but both predate the approved source, the audit
+returns `drifted`. A source HEAD that does not equal the approved ref, an
+unmerged integration ref, a single stale layer, a wrong automation path, or
+malformed release evidence also cannot report `current`.
+
+The release procedure keeps scheduled execution unchanged. Scheduled
+automation consumes an explicitly deployed release and still must not pull,
+install, refresh, retry, or use direct Git publication. Release freshness is
+checked at the release/deployment boundary; scheduled runtime parity remains a
+consistency and safety gate.
+
+Final operational acceptance requires all of the following in one live audit
+receipt:
+
+- `origin/main` and `origin/dev-feature` resolve to the same source commit;
+- all three installed skills match the approved source bundle;
+- private runtime parity is current and matches the source tool bundle;
+- the live automation invokes the exact installed setup and transaction
+  adapter paths;
+- source and private repositories are clean and match their remote receipts.
+
+V2.59 is not Goal-preference recall closure, not semantic retrieval, not
+no-hit retrieval, not ranking quality, not vector search, not embedding
+storage, not ontology discovery, and not automatic induction quality. It is
+not LLM answer quality, not scheduler/network reliability, and not public leaderboard parity.
+The observed real-use Goal-preference recall gap remains the next bounded
+product-quality problem after release convergence.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

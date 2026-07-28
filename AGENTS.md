@@ -130,6 +130,7 @@ python3 benchmarks/real_use_semantic_support_gate.py --cohort calibration --base
 python3 benchmarks/real_use_semantic_support_gate.py --cohort holdout --baseline-only
 python3 benchmarks/runtime_tool_bundle_parity_gate.py
 python3 benchmarks/three_layer_distribution_preflight_gate.py
+python3 benchmarks/release_convergence_gate.py
 python3 benchmarks/public_induction_recall_gate.py --offline-fixture
 python3 benchmarks/public_query_support_calibration_gate.py --offline-fixture
 python3 benchmarks/public_induction_first_loss_gate.py --offline-fixture
@@ -138,6 +139,20 @@ python3 benchmarks/active_support_recall_closure_gate.py
 python3 benchmarks/reviewed_automatic_memory_publish_gate.py
 python3 benchmarks/v1_readiness_gate.py --run-packaged
 python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
+```
+
+Run the read-only live release audit at the release/deployment boundary, not
+from the scheduled memory transaction:
+
+```bash
+python3 tools/audit_release_convergence.py \
+  --source-repo /path/to/my-precious-skill \
+  --approved-ref origin/main \
+  --integration-ref origin/dev-feature \
+  --installed-root /path/to/installed-skills \
+  --deployment-repo /path/to/agent-memory \
+  --automation-config /path/to/automation.toml \
+  --report-json
 ```
 
 V2.55 is an evaluation-only `no_go`. Its frozen holdout intentionally returns
@@ -230,6 +245,7 @@ Compile bundled scripts when implementation code changes:
 python3 -m py_compile \
   tools/validate_skills.py \
   tools/run_quality_gates.py \
+  tools/audit_release_convergence.py \
   benchmarks/packaged_lifecycle_gate.py \
   benchmarks/using_my_precious_runtime_gate.py \
   benchmarks/real_use_recall_utility_gate.py \
@@ -269,6 +285,7 @@ python3 -m py_compile \
   benchmarks/private_real_use_semantic_support_gate.py \
   benchmarks/runtime_tool_bundle_parity_gate.py \
   benchmarks/three_layer_distribution_preflight_gate.py \
+  benchmarks/release_convergence_gate.py \
   benchmarks/public_induction_recall_gate.py \
   benchmarks/public_query_support_calibration_gate.py \
   benchmarks/public_induction_first_loss_gate.py \

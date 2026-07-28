@@ -1472,6 +1472,33 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v259_release_identity_convergence(self):
+        section = self.evaluation_section(
+            "## V2.59 Mainline Release Truth And Live Runtime Identity Convergence"
+        )
+        for phrase in (
+            "tools/audit_release_convergence.py",
+            "benchmarks/release_convergence_gate.py",
+            "old_but_mutually_consistent_rejection_accuracy",
+            "automation_self_update_rejection_accuracy",
+            "source_installed_skills_match",
+            "source_deployed_tools_match",
+            "automation_contract_aligned",
+            "audit_mutation_count",
+            "privacy_leak_count",
+            "origin/main",
+            "origin/dev-feature",
+            "latest approved release",
+            "not Goal-preference recall closure",
+            "not semantic retrieval",
+            "not vector search",
+            "not scheduler/network reliability",
+            "not LLM answer quality",
+            "not public leaderboard parity",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (
             "explicit revision path",

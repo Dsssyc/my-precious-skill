@@ -141,6 +141,9 @@ class RunQualityGatesTests(unittest.TestCase):
             any("benchmarks/three_layer_distribution_preflight_gate.py" in command for command in commands)
         )
         self.assertTrue(
+            any("benchmarks/release_convergence_gate.py" in command for command in commands)
+        )
+        self.assertTrue(
             any("benchmarks/public_induction_recall_gate.py --offline-fixture" in command for command in commands)
         )
         self.assertTrue(
@@ -222,6 +225,8 @@ class RunQualityGatesTests(unittest.TestCase):
         )
         self.assertIn("benchmarks/runtime_tool_bundle_parity_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/three_layer_distribution_preflight_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("benchmarks/release_convergence_gate.py", module.PY_COMPILE_TARGETS)
+        self.assertIn("tools/audit_release_convergence.py", module.PY_COMPILE_TARGETS)
         self.assertIn("benchmarks/public_induction_recall_gate.py", module.PY_COMPILE_TARGETS)
         self.assertIn(
             "benchmarks/public_query_support_calibration_gate.py",

@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PY_COMPILE_TARGETS = (
     "tools/validate_skills.py",
     "tools/run_quality_gates.py",
+    "tools/audit_release_convergence.py",
     "benchmarks/packaged_lifecycle_gate.py",
     "benchmarks/using_my_precious_runtime_gate.py",
     "benchmarks/real_use_recall_utility_gate.py",
@@ -57,6 +58,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/private_real_use_semantic_support_gate.py",
     "benchmarks/runtime_tool_bundle_parity_gate.py",
     "benchmarks/three_layer_distribution_preflight_gate.py",
+    "benchmarks/release_convergence_gate.py",
     "benchmarks/public_induction_recall_gate.py",
     "benchmarks/public_query_support_calibration_gate.py",
     "benchmarks/public_induction_first_loss_gate.py",
@@ -263,6 +265,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "three_layer_distribution_preflight",
             ("python3", "benchmarks/three_layer_distribution_preflight_gate.py"),
+        ),
+        CheckSpec(
+            "release_convergence",
+            ("python3", "benchmarks/release_convergence_gate.py"),
         ),
         CheckSpec(
             "public_induction_recall_offline",
