@@ -4174,6 +4174,11 @@ Date: 2026-09-08
 
 Decision: `core_candidate_go`; semantic provider remains explicit opt-in.
 
+The immutable runtime candidate is commit
+`f3abc729745b7d2037acba2d01e5d991df18ecca`; its three synchronized
+`search_memory.py` release surfaces have SHA-256
+`18cd7b0413574d02117507d9374374e74f3d95a3f239a1c7914ebb516fc8e0f6`.
+
 V2.60 addresses three pre-answerability losses without relaxing the existing
 lexical support policy: project memory identity was stored in `scope` but not
 used by project-context matching; current-project memories could be removed by

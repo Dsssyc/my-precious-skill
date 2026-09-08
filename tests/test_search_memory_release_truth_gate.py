@@ -27,11 +27,11 @@ class SearchMemoryReleaseTruthGateTests(unittest.TestCase):
         self.assertEqual(report["status"], "passed")
         self.assertEqual(
             report["approved_runtime"]["sha256"],
-            "e73b7b6600db8a147d667f91f08eef0562b5029e487950a7fa228c4903f8d248",
+            "18cd7b0413574d02117507d9374374e74f3d95a3f239a1c7914ebb516fc8e0f6",
         )
         self.assertEqual(
             report["approved_runtime"]["source_commit"],
-            "b076f5585ee3bfe0a8b2db07718ec9b32a3e03dd",
+            "f3abc729745b7d2037acba2d01e5d991df18ecca",
         )
         self.assertEqual(report["metrics"]["release_surface_parity_rate"], 1.0)
         self.assertEqual(report["metrics"]["approved_runtime_match_rate"], 1.0)
