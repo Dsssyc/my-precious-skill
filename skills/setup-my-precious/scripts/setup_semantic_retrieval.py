@@ -266,7 +266,7 @@ def launchd_plist(
             device,
         ],
         "KeepAlive": True,
-        "ProcessType": "Background",
+        "ProcessType": "Interactive",
         "ThrottleInterval": 10,
         "StandardOutPath": str(layout.stdout_log_path),
         "StandardErrorPath": str(layout.stderr_log_path),

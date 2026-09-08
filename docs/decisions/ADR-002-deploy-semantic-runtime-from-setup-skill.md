@@ -58,8 +58,11 @@ query arriving before refresh completes safely falls back to lexical/FTS
 retrieval.
 
 On macOS, launchd is the supported persistent backend. The plist uses absolute
-`ProgramArguments`, `KeepAlive`, explicit offline environment variables, and
-logs outside the repositories. Other platforms may use `--service-backend
+`ProgramArguments`, `KeepAlive`, `ProcessType=Interactive`, explicit offline
+environment variables, and logs outside the repositories. Interactive is used
+because provider readiness and query latency are on the user-request path;
+`Background` CPU/I/O throttling exceeded the bounded startup health deadline in
+the measured deployment. Other platforms may use `--service-backend
 none` and manage the printed provider command externally; no system-wide or
 privileged service is installed.
 

@@ -127,6 +127,7 @@ class SetupSemanticRetrievalTests(unittest.TestCase):
         self.assertTrue(all(Path(value).is_absolute() for value in arguments[:2]))
         self.assertEqual(payload["Label"], setup.SERVICE_LABEL)
         self.assertTrue(payload["KeepAlive"])
+        self.assertEqual(payload["ProcessType"], "Interactive")
         self.assertEqual(payload["EnvironmentVariables"]["HF_HUB_OFFLINE"], "1")
         self.assertEqual(payload["EnvironmentVariables"]["TRANSFORMERS_OFFLINE"], "1")
 
