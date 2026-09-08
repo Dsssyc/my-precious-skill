@@ -63,6 +63,7 @@ my-precious-skill/
       agents/openai.yaml
       assets/agent-memory-repo/
       scripts/setup_memory_archive.py
+      scripts/setup_semantic_retrieval.py
     update-my-precious/
       SKILL.md
       agents/openai.yaml
@@ -135,6 +136,18 @@ $setup-my-precious 创建一个本地私有记忆归档仓库
 ```text
 $setup-my-precious 为我的记忆归档创建一个私有 Git 托管仓库
 ```
+
+把可选的本地 hybrid semantic runtime 作为 setup 的一部分部署：
+
+```text
+$setup-my-precious 先规划，再用 launchd 安装本地语义检索
+```
+
+setup skill 会先验证 deployment-tool parity，再执行
+`setup_semantic_retrieval.py --plan`；只有明确批准后才安装。固定依赖与模型放在
+两个仓库之外，launchd 返回绑定身份的健康结果后才写入私有 provider 配置。
+`--check` 验证完整运行时，`--disable` 提供不删除模型与环境的回滚路径。设计见
+[ADR-002](docs/decisions/ADR-002-deploy-semantic-runtime-from-setup-skill.md)。
 
 立刻更新归档仓库：
 

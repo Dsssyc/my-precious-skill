@@ -129,6 +129,50 @@ class SemanticRetrievalProviderTests(unittest.TestCase):
 
         self.assertEqual(embeddings.shape, (1, 3))
 
+    def test_refresh_provider_state_rebuilds_changed_memory_index(self):
+        provider = load_provider_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            index_path = Path(tmpdir) / "memories.jsonl"
+            index_path.write_text(
+                '{"memory_id":"mem_first","text":"first memory"}\n',
+                encoding="utf-8",
+            )
+            model = FakeEmbeddingModel()
+            corpus = provider.load_corpus(index_path)
+            state = provider.ProviderState(
+                identity=provider.ProviderIdentity(
+                    fingerprint="f" * 64,
+                    index_sha256=provider.file_sha256(index_path),
+                ),
+                corpus=corpus,
+                corpus_embeddings=provider.build_corpus_embeddings(
+                    model,
+                    corpus,
+                    document_prefix="passage: ",
+                    batch_size=8,
+                ),
+                embedding_model=model,
+                reranker_model=None,
+                query_prefix="query: ",
+                batch_size=8,
+                index_path=index_path,
+                document_prefix="passage: ",
+                index_signature=provider.memory_index_signature(index_path),
+            )
+            old_sha256 = state.identity.index_sha256
+            index_path.write_text(
+                '{"memory_id":"mem_first","text":"first memory"}\n'
+                '{"memory_id":"mem_second","text":"second memory"}\n',
+                encoding="utf-8",
+            )
+
+            changed = provider.refresh_provider_state_if_changed(state)
+
+        self.assertTrue(changed)
+        self.assertEqual(len(state.corpus), 2)
+        self.assertNotEqual(state.identity.index_sha256, old_sha256)
+        self.assertEqual(state.corpus_embeddings.shape, (2, 3))
+
     def test_score_request_retrieves_then_reranks_eligible_memories(self):
         provider = load_provider_module()
         corpus = [

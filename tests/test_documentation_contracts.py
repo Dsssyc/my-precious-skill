@@ -11,6 +11,9 @@ USING_SKILL = Path("skills/using-my-precious/SKILL.md")
 SETUP_SKILL = Path("skills/setup-my-precious/SKILL.md")
 TEMPLATE_AGENTS = Path("templates/agent-memory-repo/AGENTS.md")
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py")
+SEMANTIC_SETUP_ADR = Path(
+    "docs/decisions/ADR-002-deploy-semantic-runtime-from-setup-skill.md"
+)
 
 
 class DocumentationContractTests(unittest.TestCase):
@@ -1527,6 +1530,33 @@ class DocumentationContractTests(unittest.TestCase):
         ):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
+    def test_setup_skill_owns_optional_semantic_runtime_deployment(self):
+        setup_skill = SETUP_SKILL.read_text(encoding="utf-8")
+        adr = SEMANTIC_SETUP_ADR.read_text(encoding="utf-8")
+        for phrase in (
+            "setup_semantic_retrieval.py",
+            "--plan",
+            "--install",
+            "--check",
+            "--disable",
+            "repository-external",
+            "mode-`0600` socket",
+            "query-time provider execution",
+            "falls back to lexical/FTS retrieval",
+        ):
+            self.assert_contains(setup_skill, phrase)
+        for phrase in (
+            "Deploy the Semantic Read Runtime from the Setup Skill",
+            "pinned Hugging Face revisions",
+            "validate provider",
+            "health-check",
+            "enable private config",
+            "must remain a single governed archive mutation path",
+            "deleting environments, models",
+        ):
+            self.assert_contains(adr, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", setup_skill + adr))
 
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (

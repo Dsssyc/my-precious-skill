@@ -10,6 +10,7 @@ import os
 import signal
 import socket
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -59,6 +60,9 @@ class ProviderState:
     reranker_model: Any | None
     query_prefix: str
     batch_size: int
+    index_path: Path | None = None
+    document_prefix: str = ""
+    index_signature: tuple[int, int] | None = None
 
 
 def file_sha256(path: Path) -> str:
@@ -195,6 +199,38 @@ def build_corpus_embeddings(
         [f"{document_prefix}{entry.text}" for entry in corpus],
         batch_size=batch_size,
     )
+
+
+def memory_index_signature(index_path: Path) -> tuple[int, int]:
+    stat_result = index_path.stat()
+    return stat_result.st_mtime_ns, stat_result.st_size
+
+
+def refresh_provider_state_if_changed(state: ProviderState) -> bool:
+    if state.index_path is None:
+        return False
+    before = memory_index_signature(state.index_path)
+    if state.index_signature == before:
+        return False
+    corpus = load_corpus(state.index_path)
+    corpus_embeddings = build_corpus_embeddings(
+        state.embedding_model,
+        corpus,
+        document_prefix=state.document_prefix,
+        batch_size=state.batch_size,
+    )
+    index_sha256 = file_sha256(state.index_path)
+    after = memory_index_signature(state.index_path)
+    if before != after:
+        raise ProviderStartupError("memory_index_changed_during_refresh")
+    state.corpus = corpus
+    state.corpus_embeddings = corpus_embeddings
+    state.identity = ProviderIdentity(
+        fingerprint=state.identity.fingerprint,
+        index_sha256=index_sha256,
+    )
+    state.index_signature = after
+    return True
 
 
 def validate_request(
@@ -372,6 +408,7 @@ def serve(socket_path: Path, state: ProviderState) -> None:
 
     previous_term = signal.signal(signal.SIGTERM, stop)
     previous_int = signal.signal(signal.SIGINT, stop)
+    next_refresh_check = time.monotonic() + 5.0
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
             server.bind(str(socket_path))
@@ -382,6 +419,41 @@ def serve(socket_path: Path, state: ProviderState) -> None:
                 try:
                     connection, _ = server.accept()
                 except TimeoutError:
+                    if time.monotonic() >= next_refresh_check:
+                        try:
+                            changed = refresh_provider_state_if_changed(state)
+                            if changed:
+                                print(
+                                    json.dumps(
+                                        {
+                                            "report_kind": "memory_semantic_retrieval_provider_refresh",
+                                            "report_version": REPORT_VERSION,
+                                            "status": "refreshed",
+                                            "memory_count": len(state.corpus),
+                                        },
+                                        sort_keys=True,
+                                    ),
+                                    flush=True,
+                                )
+                        except Exception as exc:
+                            print(
+                                json.dumps(
+                                    {
+                                        "report_kind": "memory_semantic_retrieval_provider_refresh",
+                                        "report_version": REPORT_VERSION,
+                                        "status": "failed",
+                                        "reason": (
+                                            str(exc)
+                                            if isinstance(exc, ProviderStartupError)
+                                            else "provider_refresh_error"
+                                        ),
+                                    },
+                                    sort_keys=True,
+                                ),
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                        next_refresh_check = time.monotonic() + 5.0
                     continue
                 with connection:
                     try:
@@ -513,28 +585,37 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if not args.socket:
             raise ProviderStartupError("provider_socket_required")
+        index_signature_before = memory_index_signature(index_path)
         corpus = load_corpus(index_path)
         embedding_model, reranker_model = load_models(
             embedding_model_dir,
             reranker_model_dir,
             device=args.device,
         )
+        corpus_embeddings = build_corpus_embeddings(
+            embedding_model,
+            corpus,
+            document_prefix=args.document_prefix,
+            batch_size=args.batch_size,
+        )
+        index_sha256 = file_sha256(index_path)
+        index_signature_after = memory_index_signature(index_path)
+        if index_signature_before != index_signature_after:
+            raise ProviderStartupError("memory_index_changed_during_startup")
         state = ProviderState(
             identity=ProviderIdentity(
                 fingerprint=fingerprint,
-                index_sha256=file_sha256(index_path),
+                index_sha256=index_sha256,
             ),
             corpus=corpus,
-            corpus_embeddings=build_corpus_embeddings(
-                embedding_model,
-                corpus,
-                document_prefix=args.document_prefix,
-                batch_size=args.batch_size,
-            ),
+            corpus_embeddings=corpus_embeddings,
             embedding_model=embedding_model,
             reranker_model=reranker_model,
             query_prefix=args.query_prefix,
             batch_size=args.batch_size,
+            index_path=index_path,
+            document_prefix=args.document_prefix,
+            index_signature=index_signature_after,
         )
         print(
             json.dumps(

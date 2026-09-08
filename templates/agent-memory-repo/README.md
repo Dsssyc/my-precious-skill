@@ -72,6 +72,21 @@ expanding candidate generation. It fuses the weighted lexical scorer, SQLite
 FTS5 BM25, and CJK trigram rankings with reciprocal-rank fusion. SQLite indexes
 are created in memory for the request and are not committed to the archive.
 
+The preferred deployment path is the installed `setup-my-precious` skill. It
+first renders a read-only plan, then provisions and verifies the complete
+runtime after explicit approval:
+
+```bash
+python /path/to/setup-my-precious/scripts/setup_semantic_retrieval.py \
+  --plan --memory-repo "$PWD" --service-backend launchd
+python /path/to/setup-my-precious/scripts/setup_semantic_retrieval.py \
+  --install --memory-repo "$PWD" --service-backend launchd
+python /path/to/setup-my-precious/scripts/setup_semantic_retrieval.py \
+  --check --memory-repo "$PWD" --service-backend launchd
+```
+
+Use the lower-level commands below only when managing the provider manually.
+
 An optional local provider adds full-index dense retrieval and cross-encoder
 reranking. Install its pinned dependencies into a repository-external virtual
 environment, keep model directories outside this archive, and obtain the
@@ -96,7 +111,7 @@ configuration file:
     "socket": "/path/to/private-runtime/semantic-retrieval.sock",
     "provider_fingerprint": "<64-lowercase-hex-characters>",
     "support_threshold": 0.90,
-    "timeout_seconds": 2.0
+    "timeout_seconds": 5.0
   }
 }
 ```

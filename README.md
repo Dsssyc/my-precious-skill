@@ -73,6 +73,7 @@ my-precious-skill/
       agents/openai.yaml
       assets/agent-memory-repo/
       scripts/setup_memory_archive.py
+      scripts/setup_semantic_retrieval.py
     update-my-precious/
       SKILL.md
       agents/openai.yaml
@@ -147,6 +148,20 @@ $setup-my-precious create a local private memory archive
 ```text
 $setup-my-precious create a private hosted Git repository for my memory archive
 ```
+
+Provision the optional local hybrid semantic runtime as part of setup:
+
+```text
+$setup-my-precious plan and install local semantic retrieval with launchd
+```
+
+The setup skill first verifies deployment-tool parity, then uses
+`setup_semantic_retrieval.py --plan` before the explicitly approved install.
+Pinned dependencies and models live outside both repositories; the private
+provider config is written only after launchd returns an identity-bound health
+response. `--check` verifies the complete runtime and `--disable` provides a
+non-destructive rollback. See
+[ADR-002](docs/decisions/ADR-002-deploy-semantic-runtime-from-setup-skill.md).
 
 Update an archive now:
 

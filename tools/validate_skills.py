@@ -14,6 +14,7 @@ REQUIRED_SKILLS = {
         "SKILL.md",
         "agents/openai.yaml",
         "scripts/setup_memory_archive.py",
+        "scripts/setup_semantic_retrieval.py",
         "assets/agent-memory-repo/AGENTS.md",
     ),
     "update-my-precious": (

@@ -77,6 +77,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/source_stream_registry_benchmark.py",
     "benchmarks/v1_readiness_gate.py",
     "skills/setup-my-precious/scripts/setup_memory_archive.py",
+    "skills/setup-my-precious/scripts/setup_semantic_retrieval.py",
     "skills/update-my-precious/scripts/update_memory_archive.py",
     "skills/update-my-precious/scripts/memory_consolidation.py",
     "skills/update-my-precious/scripts/run_scheduled_memory_transaction.py",

@@ -85,6 +85,11 @@ and JSONL indexes.
   and scaffolds a local or hosted-Git-backed deployment repository.
 - `skills/setup-my-precious/scripts/setup_memory_archive.py`: copies the
   bundled archive template and optionally initializes Git/remote hosting.
+- `skills/setup-my-precious/scripts/setup_semantic_retrieval.py`: optional
+  read-runtime deployer. It plans, installs, checks, and non-destructively
+  disables a repository-external pinned Python/model environment; writes the
+  private provider config only after an identity-bound health check; and can
+  manage a user launchd service on macOS without scheduling archive writes.
 - `skills/update-my-precious/SKILL.md`: archives new source records for the
   current project into the deployment repository.
 - `skills/update-my-precious/scripts/update_memory_archive.py`: generic

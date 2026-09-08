@@ -10,8 +10,11 @@ Use `using-my-precious` later to search the archive.
 
 ## Core Boundary
 
-Set up the archive repository and location-discovery contract only.
-Do not summarize sessions, schedule recurring jobs, upload raw transcripts, or create memory entries in this skill.
+Set up the archive repository, location-discovery contract, and optional local
+read-path runtimes. Do not summarize sessions, schedule recurring archive
+updates, upload raw transcripts, or create memory entries in this skill. A
+semantic retrieval provider is an optional local read service, not an archive
+writer or update scheduler.
 
 ## Required Questions
 
@@ -35,6 +38,12 @@ Ask only what is needed, one step at a time:
 5. Ask whether the user wants scheduling only after a concrete archive command exists.
    - If no archive command exists yet, explain that scheduling can be prepared later but should not be enabled now.
    - If an archive command exists, ask for frequency and scheduler backend.
+
+6. Ask whether the user wants optional local semantic retrieval after the
+   archive tools are current. Explain that it downloads roughly 1 GB of pinned
+   model files plus an isolated Python environment outside the archive. Ask for
+   the service backend: `launchd` on macOS or `none` for manual startup. Do not
+   enable a persistent service without explicit approval.
 
 ## Setup Workflow
 
@@ -127,7 +136,61 @@ Ask only what is needed, one step at a time:
    source records, and user-owned config. A `blocked` result requires manual
    investigation. Do not use `--force` for this narrow repair.
 
-8. If the user requests scheduling, first verify the archive command exists and runs manually.
+8. If the user requests local semantic retrieval, require current runtime-tool
+   parity, then render the aggregate-only deployment plan:
+
+   ```bash
+   python scripts/setup_semantic_retrieval.py \
+     --plan \
+     --memory-repo "$MEMORY_REPO" \
+     --service-backend launchd
+   ```
+
+   Review the plan before installation. With explicit approval, install the
+   pinned environment, model artifacts, private config, and service:
+
+   ```bash
+   python scripts/setup_semantic_retrieval.py \
+     --install \
+     --memory-repo "$MEMORY_REPO" \
+     --service-backend launchd
+   ```
+
+   The runtime root defaults to
+   `~/.local/share/my-precious/semantic-retrieval`; socket and logs default to
+   `~/.local/state/my-precious/semantic-retrieval`; the private config remains
+   `~/.config/my-precious/config.json`. All are outside the deployment archive.
+   The installer uses a pinned Python dependency set and pinned Hugging Face
+   model revisions, downloads only the required model files, writes config and
+   launchd definitions atomically with private permissions, and waits for an
+   identity-bound health response before enabling the config.
+
+   Verify the complete runtime after installation or repair:
+
+   ```bash
+   python scripts/setup_semantic_retrieval.py \
+     --check \
+     --memory-repo "$MEMORY_REPO" \
+     --service-backend launchd
+   ```
+
+   `current` is the only enabled-ready result. The provider automatically
+   rebuilds its in-memory embeddings after `index/memories.jsonl` changes. A
+   query during refresh safely falls back to lexical/FTS retrieval.
+
+   Roll back without deleting models or environments:
+
+   ```bash
+   python scripts/setup_semantic_retrieval.py \
+     --disable \
+     --memory-repo "$MEMORY_REPO" \
+     --service-backend launchd
+   ```
+
+   Disable unloads the service and marks the private provider config disabled;
+   it removes no archive, runtime, or model files.
+
+9. If the user requests scheduling, first verify the archive command exists and runs manually.
    Then render reviewable scheduler configuration:
 
    ```bash
@@ -174,6 +237,25 @@ Ask only what is needed, one step at a time:
 - Logs should go outside the skill development repository.
 - Do not place credentials in scheduler files; rely on the user's existing environment or credential helper.
 
+## Semantic Retrieval Runtime Rules
+
+- Treat semantic retrieval as an optional read-path runtime and keep it outside
+  both the reusable source repository and private deployment archive.
+- Always run `--plan` before `--install`; enable a launchd service only after
+  explicit user approval.
+- Refresh the deployment tool bundle before provisioning so the service points
+  at the approved provider implementation.
+- Keep dependency versions, model revisions, allowed model files, provider
+  fingerprint, and current memory-index SHA-256 verifiable.
+- Require a user-owned mode-`0600` socket inside a mode-`0700` parent directory.
+- Keep model downloads and query-time provider execution separate: installation
+  may use the network, while the running provider must force offline mode.
+- Do not treat dense similarity alone as answer support. A configured reranker
+  score and the normal scope, lifecycle, provenance, summary, and evidence
+  checks remain mandatory.
+- Provider failure, refresh, timeout, or identity mismatch must fall back to
+  lexical/FTS retrieval rather than breaking archive search.
+
 ## Remote Repository Rules
 
 - Prefer private repositories.
@@ -195,3 +277,6 @@ A successful setup leaves the user with:
 - an optional private remote when requested and supported
 - a local archive-location config at `~/.config/my-precious/config.json` unless skipped
 - an optional `AGENT_SESSION_MEMORY_REPO` current-shell override
+- when approved, an optional repository-external semantic runtime with pinned
+  models, private config, a health-checked service, and a non-destructive
+  disable path

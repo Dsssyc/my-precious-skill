@@ -30,6 +30,7 @@ def write_required_repo(root: Path) -> None:
 
     (root / "skills/setup-my-precious/scripts").mkdir(parents=True)
     (root / "skills/setup-my-precious/scripts/setup_memory_archive.py").write_text("", encoding="utf-8")
+    (root / "skills/setup-my-precious/scripts/setup_semantic_retrieval.py").write_text("", encoding="utf-8")
     (root / "skills/setup-my-precious/assets/agent-memory-repo").mkdir(parents=True)
     (root / "skills/setup-my-precious/assets/agent-memory-repo/AGENTS.md").write_text("", encoding="utf-8")
     (root / "skills/setup-my-precious/agents").mkdir(parents=True)

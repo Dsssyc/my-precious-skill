@@ -1,4 +1,4 @@
 interface:
   display_name: "Setup My Precious"
   short_description: "Create private agent memory archives"
-  default_prompt: "Use $setup-my-precious to configure a private agent session memory archive."
+  default_prompt: "Use $setup-my-precious to configure a private agent session memory archive and, when explicitly approved, plan/install/check the optional repository-external local semantic retrieval runtime with pinned models, private configuration, health verification, and a non-destructive disable path."
