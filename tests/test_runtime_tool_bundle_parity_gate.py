@@ -21,7 +21,7 @@ class RuntimeToolBundleParityGateTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual(report["report_kind"], "runtime_tool_bundle_parity_gate")
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["expected_tool_count"], 19)
+        self.assertEqual(report["expected_tool_count"], 21)
         self.assertTrue(report["determinism"]["reports_match"])
         self.assertTrue(report["determinism"]["bundle_hash_valid"])
         for key, value in report["metrics"].items():

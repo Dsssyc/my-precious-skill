@@ -29,6 +29,7 @@ UNSUPPORTED_CASE = "unsupported_no_hit"
 INACTIVE_CASE = "inactive_superseded_only"
 WEAK_ACTIVE_CASE = "weak_active_current"
 SAME_TOPIC_NEAR_MISS_CASE = "same_topic_near_miss"
+CJK_FTS_CANDIDATE_CASE = "cjk_fts_candidate"
 MALFORMED_CASE = "malformed_package"
 
 SUPPORTED_QUERY = "packagefirst answerability marker"
@@ -36,11 +37,13 @@ UNSUPPORTED_QUERY = "zzabsent qxmissing factoid"
 INACTIVE_QUERY = "staleonly zetaomega legacyonly"
 WEAK_ACTIVE_QUERY = "weakonly support coverage marker"
 SAME_TOPIC_QUERY = "samealpha exactbeta answerdelta"
+CJK_FTS_QUERY = "为什么项目记忆召回能力很差"
 
 ACTIVE_MEMORY_TEXT = "packagefirst answerability marker active support"
 INACTIVE_MEMORY_TEXT = "staleonly zetaomega legacyonly stale support"
 WEAK_ACTIVE_MEMORY_TEXT = "weakonly generic active memory with drill paths"
 SAME_TOPIC_MEMORY_TEXT = "samealpha nearby topic active memory"
+CJK_FTS_MEMORY_TEXT = "当前项目记忆召回能力偏弱，需要采用混合检索与重排。"
 RAW_SOURCE_SENTINEL = "RAW TRANSCRIPT SHOULD NOT RENDER"
 SECRET_SENTINEL = "cookie=SHOULD_NOT_RENDER"
 LEAK_MARKERS = (
@@ -48,6 +51,7 @@ LEAK_MARKERS = (
     INACTIVE_MEMORY_TEXT,
     WEAK_ACTIVE_MEMORY_TEXT,
     SAME_TOPIC_MEMORY_TEXT,
+    CJK_FTS_MEMORY_TEXT,
     RAW_SOURCE_SENTINEL,
     SECRET_SENTINEL,
 )
@@ -158,6 +162,8 @@ def write_synthetic_archive(memory_repo: Path) -> None:
     weak_evidence = "sessions/synthetic/runtime-weak/evidence.md"
     same_topic_summary = "sessions/synthetic/runtime-same-topic/summary.md"
     same_topic_evidence = "sessions/synthetic/runtime-same-topic/evidence.md"
+    cjk_summary = "sessions/synthetic/runtime-cjk-fts/summary.md"
+    cjk_evidence = "sessions/synthetic/runtime-cjk-fts/evidence.md"
 
     write_support_file(memory_repo / supported_summary, "# Synthetic Runtime Support\n")
     write_support_file(
@@ -183,6 +189,11 @@ def write_synthetic_archive(memory_repo: Path) -> None:
     write_support_file(
         memory_repo / same_topic_evidence,
         "ev_runtime_gate_001: Synthetic evidence for a same-topic near miss.\n",
+    )
+    write_support_file(memory_repo / cjk_summary, "# Synthetic CJK FTS Candidate\n")
+    write_support_file(
+        memory_repo / cjk_evidence,
+        "ev_runtime_gate_001: Synthetic evidence for a CJK FTS candidate.\n",
     )
     write_support_file(
         memory_repo / "records/synthetic-runtime.jsonl",
@@ -233,6 +244,13 @@ def write_synthetic_archive(memory_repo: Path) -> None:
             evidence_path=same_topic_evidence,
             topic="samealpha",
         ),
+        memory_row(
+            "runtime_gate_cjk_fts_candidate",
+            CJK_FTS_MEMORY_TEXT,
+            summary_path=cjk_summary,
+            evidence_path=cjk_evidence,
+            topic="memory-retrieval",
+        ),
     ]
     index_path = memory_repo / "index/memories.jsonl"
     index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,6 +268,8 @@ def run_context_package(memory_repo: Path, query: str) -> str:
             query,
             "--repo",
             str(memory_repo),
+            "--retrieval-mode",
+            "hybrid_v1",
             "--depth",
             "evidence",
             "--context-json",
@@ -314,6 +334,7 @@ def run_cases(memory_repo: Path) -> list[CaseResult]:
         (INACTIVE_CASE, "abstain", run_context_package(memory_repo, INACTIVE_QUERY)),
         (WEAK_ACTIVE_CASE, "abstain", run_context_package(memory_repo, WEAK_ACTIVE_QUERY)),
         (SAME_TOPIC_NEAR_MISS_CASE, "abstain", run_context_package(memory_repo, SAME_TOPIC_QUERY)),
+        (CJK_FTS_CANDIDATE_CASE, "abstain", run_context_package(memory_repo, CJK_FTS_QUERY)),
         (MALFORMED_CASE, "abstain", "{not-json"),
     ]
     return [
@@ -373,6 +394,23 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
     ]
     near_miss_abstentions = sum(1 for result in near_miss_results if result.decision.action == "abstain")
     weak_active_rejection_count = near_miss_abstentions
+    cjk_candidate_recall_count = 0
+    cjk_false_support_count = 0
+    for result in results:
+        if result.case_id != CJK_FTS_CANDIDATE_CASE:
+            continue
+        package, parse_success, _report_kind = load_context_package(result.package_text)
+        if not parse_success or package is None or not isinstance(package.get("hits"), list):
+            continue
+        for hit in package["hits"]:
+            if not isinstance(hit, dict) or hit.get("memory_id") != "runtime_gate_cjk_fts_candidate":
+                continue
+            why = hit.get("why")
+            if isinstance(why, list) and "candidate-channel:fts5-trigram" in why:
+                cjk_candidate_recall_count = 1
+            answerability = hit.get("answerability")
+            if isinstance(answerability, dict) and answerability.get("status") == "supported":
+                cjk_false_support_count = 1
     case_outcomes = {result.case_id: result.decision.action for result in results}
     metrics: dict[str, object] = {
         "runtime_context_package_parse_success_rate": safe_rate(
@@ -392,6 +430,8 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
         "runtime_weak_active_rejection_count": weak_active_rejection_count,
         "runtime_inactive_rejection_count": inactive_rejection_count,
         "runtime_malformed_fail_closed_count": malformed_fail_closed_count,
+        "runtime_cjk_fts_candidate_recall": cjk_candidate_recall_count,
+        "runtime_cjk_fts_false_support_count": cjk_false_support_count,
         "privacy_leak_count": 0,
     }
     report: dict[str, object] = {
@@ -403,6 +443,7 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
         "command_contract": {
             "depth": "evidence",
             "context_json": True,
+            "retrieval_mode": "hybrid_v1",
             "answerability_source": CONTEXT_REPORT_KIND,
             "query_support_required": True,
         },
@@ -428,6 +469,8 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
         or weak_active_rejection_count != 2
         or inactive_rejection_count != 1
         or malformed_fail_closed_count != 1
+        or cjk_candidate_recall_count != 1
+        or cjk_false_support_count != 0
         or metrics["privacy_leak_count"] != 0
         or case_outcomes
         != {
@@ -436,6 +479,7 @@ def build_report(results: list[CaseResult]) -> dict[str, object]:
             INACTIVE_CASE: "abstain",
             WEAK_ACTIVE_CASE: "abstain",
             SAME_TOPIC_NEAR_MISS_CASE: "abstain",
+            CJK_FTS_CANDIDATE_CASE: "abstain",
             MALFORMED_CASE: "abstain",
         }
     ):

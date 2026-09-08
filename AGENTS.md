@@ -43,6 +43,9 @@ When changing shared tools:
   `skills/update-my-precious/scripts/memory_consolidation.py`.
 - Copy `templates/agent-memory-repo/tools/search_memory.py` to
   `skills/using-my-precious/scripts/search_memory.py`.
+- Copy `templates/agent-memory-repo/tools/semantic_retrieval_provider.py` and
+  `semantic_retrieval_provider_requirements.txt` to
+  `skills/using-my-precious/scripts/`.
 - Copy `templates/agent-memory-repo/tools/resolve_memory_source.py` to
   `skills/using-my-precious/scripts/resolve_memory_source.py`.
 - Copy all template changes into
@@ -55,6 +58,8 @@ diff -qr templates/agent-memory-repo skills/setup-my-precious/assets/agent-memor
 cmp -s templates/agent-memory-repo/tools/update_memory_archive.py skills/update-my-precious/scripts/update_memory_archive.py
 cmp -s templates/agent-memory-repo/tools/memory_consolidation.py skills/update-my-precious/scripts/memory_consolidation.py
 cmp -s templates/agent-memory-repo/tools/search_memory.py skills/using-my-precious/scripts/search_memory.py
+cmp -s templates/agent-memory-repo/tools/semantic_retrieval_provider.py skills/using-my-precious/scripts/semantic_retrieval_provider.py
+cmp -s templates/agent-memory-repo/tools/semantic_retrieval_provider_requirements.txt skills/using-my-precious/scripts/semantic_retrieval_provider_requirements.txt
 cmp -s templates/agent-memory-repo/tools/resolve_memory_source.py skills/using-my-precious/scripts/resolve_memory_source.py
 ```
 
@@ -307,6 +312,7 @@ python3 -m py_compile \
   skills/update-my-precious/scripts/memory_consolidation.py \
   skills/update-my-precious/scripts/run_scheduled_memory_transaction.py \
   skills/using-my-precious/scripts/search_memory.py \
+  skills/using-my-precious/scripts/semantic_retrieval_provider.py \
   skills/using-my-precious/scripts/resolve_memory_source.py \
   templates/agent-memory-repo/tools/run_memory_updates.py \
   templates/agent-memory-repo/tools/audit_memory_archive.py \
@@ -319,6 +325,7 @@ python3 -m py_compile \
   templates/agent-memory-repo/tools/update_memory_archive.py \
   templates/agent-memory-repo/tools/memory_consolidation.py \
   templates/agent-memory-repo/tools/search_memory.py \
+  templates/agent-memory-repo/tools/semantic_retrieval_provider.py \
   templates/agent-memory-repo/tools/resolve_memory_source.py \
   templates/agent-memory-repo/tools/upgrade_source_anchors.py \
   templates/agent-memory-repo/tools/generate_answer_records.py \

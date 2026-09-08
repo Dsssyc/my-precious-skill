@@ -350,7 +350,7 @@ def main() -> int:
         passed = (
             reports_match
             and valid_bundle_hash
-            and expected_count == 19
+            and expected_count == 21
             and metrics == expected_metrics()
         )
         report = {

@@ -58,11 +58,18 @@ and JSONL indexes.
 
 - `skills/using-my-precious/SKILL.md`: tells future agents when and how to
   search memory.
-- `skills/using-my-precious/scripts/search_memory.py`: dependency-free
-  fallback search script bundled with the skill. It uses hybrid lexical ranking
-  over JSONL indexes, summaries, and optional evidence files, with explicit
-  reasons for structured-field matches, exact phrase coverage, important token
-  coverage, and optional current-project context.
+- `skills/using-my-precious/scripts/search_memory.py`: standard-library search
+  script bundled with the skill. The approved compatibility mode retains the
+  weighted lexical scorer. `hybrid_v1` adds in-memory SQLite FTS5 BM25 and CJK
+  trigram candidate channels, reciprocal-rank fusion, scope-aware project
+  routing, and an optional private local semantic-provider protocol. Candidate
+  generation remains separate from answer authorization.
+- `skills/using-my-precious/scripts/semantic_retrieval_provider.py`: optional,
+  repository-external-model adapter. It embeds contextual memory-node fields,
+  performs full-index dense retrieval, optionally reranks the dense prefetch
+  with a cross-encoder, and serves only bounded memory IDs and numeric scores
+  over a mode-`0600` Unix socket. Index hash and provider fingerprint mismatch
+  fail closed; raw/source references are never embedded or rendered.
 - `skills/using-my-precious/references/archive-format.md`: stable archive
   contract for compatible deployment repos.
 - `memories/*.jsonl` and `index/memories.jsonl`: layered memory nodes induced

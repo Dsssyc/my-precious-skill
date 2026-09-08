@@ -36,6 +36,8 @@ agent-memory/
     YYYY/YYYY-MM-DD.md
   tools/
     search_memory.py
+    semantic_retrieval_provider.py
+    semantic_retrieval_provider_requirements.txt
     resolve_memory_source.py
     update_memory_archive.py
     run_memory_updates.py
@@ -66,6 +68,14 @@ scope plus source partition:
 ```json
 {"archive_scope":"domain:...","source_partition":"source:...","project":"...","project_path":"...","latest_source_updated_at":"2026-05-14T12:00:00Z","latest_summary_path":"sessions/.../summary.md"}
 ```
+
+The private runtime config may optionally contain a
+`semantic_retrieval_provider` block with `socket`, `provider_fingerprint`,
+`support_threshold`, and `timeout_seconds`. This is runtime configuration, not
+archive evidence, and must not be committed with user-specific paths. The
+provider reads the current combined memory index and returns memory IDs and
+numeric retrieval/support scores only. Search must verify the provider and
+index identities before using those results.
 
 `index/decisions.jsonl` should contain one JSON object per decision:
 

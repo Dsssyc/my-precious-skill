@@ -26,6 +26,8 @@ REQUIRED_SKILLS = {
         "SKILL.md",
         "agents/openai.yaml",
         "scripts/search_memory.py",
+        "scripts/semantic_retrieval_provider.py",
+        "scripts/semantic_retrieval_provider_requirements.txt",
         "references/archive-format.md",
     ),
 }

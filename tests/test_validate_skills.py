@@ -43,6 +43,14 @@ def write_required_repo(root: Path) -> None:
 
     (root / "skills/using-my-precious/scripts").mkdir(parents=True)
     (root / "skills/using-my-precious/scripts/search_memory.py").write_text("", encoding="utf-8")
+    (root / "skills/using-my-precious/scripts/semantic_retrieval_provider.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    (
+        root
+        / "skills/using-my-precious/scripts/semantic_retrieval_provider_requirements.txt"
+    ).write_text("", encoding="utf-8")
     (root / "skills/using-my-precious/references").mkdir(parents=True)
     (root / "skills/using-my-precious/references/archive-format.md").write_text("", encoding="utf-8")
     (root / "skills/using-my-precious/agents").mkdir(parents=True)

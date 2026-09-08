@@ -9,6 +9,7 @@ import time
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SEARCH_SCRIPT = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
@@ -141,6 +142,38 @@ def start_fake_semantic_provider(
 
 
 class SearchMemoryTests(unittest.TestCase):
+    def test_semantic_provider_can_be_loaded_from_private_config(self):
+        search_memory = load_search_memory_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "semantic_retrieval_provider": {
+                            "enabled": True,
+                            "socket": "/tmp/my-precious-semantic.sock",
+                            "provider_fingerprint": "a" * 64,
+                            "support_threshold": 0.91,
+                            "timeout_seconds": 1.5,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                "os.environ",
+                {"MY_PRECIOUS_CONFIG": str(config_path)},
+                clear=False,
+            ):
+                provider = search_memory.configured_semantic_retrieval_provider()
+
+        self.assertIsNotNone(provider)
+        assert provider is not None
+        self.assertEqual(provider.socket_path, Path("/tmp/my-precious-semantic.sock"))
+        self.assertEqual(provider.provider_fingerprint, "a" * 64)
+        self.assertEqual(provider.support_threshold, 0.91)
+        self.assertEqual(provider.timeout_seconds, 1.5)
+
     def semantic_support_hit(self, search_memory, *, suffix: str = ""):
         return search_memory.Hit(
             path=Path(f"index/memories.jsonl/semantic-support{suffix}"),
@@ -686,15 +719,510 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertEqual(inactive_only["answerability"]["status"], "unsupported")
         self.assertEqual(inactive_only["answerability"]["reason"], "no_active_current_support")
 
-    def test_prune_low_relative_memory_hits_requires_99_percent_floor(self):
+    def test_prune_low_relative_memory_hits_keeps_current_project_candidates(self):
         search_memory = load_search_memory_module()
         top = search_memory.Hit(path=Path("top"), score=1000, source="memory", why=[])
         near_tie = search_memory.Hit(path=Path("near-tie"), score=990, source="memory", why=[])
+        current_project = search_memory.Hit(
+            path=Path("current-project"),
+            score=700,
+            source="memory",
+            why=["project-context"],
+        )
         tail = search_memory.Hit(path=Path("tail"), score=989, source="memory", why=[])
 
-        kept = search_memory.prune_low_relative_memory_hits([tail, top, near_tie])
+        kept = search_memory.prune_low_relative_memory_hits(
+            [tail, top, current_project, near_tie]
+        )
 
-        self.assertEqual([hit.path.name for hit in kept], ["top", "near-tie"])
+        self.assertEqual(
+            [hit.path.name for hit in kept],
+            ["top", "near-tie", "current-project"],
+        )
+
+    def test_memory_scope_matches_current_project_context(self):
+        search_memory = load_search_memory_module()
+        project_path = "/Users/example/Desktop/codespace/mememe/my-precious-skill"
+
+        matched = search_memory.project_context_match(
+            {"scope": f"project:{project_path}"},
+            search_memory.project_context_terms(project_path),
+        )
+
+        self.assertTrue(matched)
+
+    def test_semantic_retrieval_prefilters_other_projects_but_keeps_shared_layers(self):
+        search_memory = load_search_memory_module()
+        project_path = "/Users/example/work/current-project"
+        context_terms = search_memory.project_context_terms(project_path)
+
+        self.assertTrue(
+            search_memory.semantic_retrieval_record_eligible(
+                {"layer": "project", "scope": f"project:{project_path}"},
+                context_terms,
+            )
+        )
+        self.assertFalse(
+            search_memory.semantic_retrieval_record_eligible(
+                {"layer": "project", "scope": "project:/Users/example/work/other"},
+                context_terms,
+            )
+        )
+        self.assertTrue(
+            search_memory.semantic_retrieval_record_eligible(
+                {"layer": "domain", "scope": "domain:memory-retrieval"},
+                context_terms,
+            )
+        )
+        self.assertTrue(
+            search_memory.semantic_retrieval_record_eligible(
+                {"layer": "global", "scope": "global"},
+                context_terms,
+            )
+        )
+
+    def test_hybrid_fts_mode_recalls_cjk_candidate_without_authorizing_it(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_cjk_recall_target",
+                        "当前项目记忆召回能力偏弱，需要采用混合检索与重排。",
+                        scope="project:/Users/example/work/current-project",
+                        topic="memory-retrieval",
+                    ),
+                    synthetic_memory_row(
+                        "mem_cjk_recall_distractor",
+                        "当前项目测试已经完成，发布流程保持不变。",
+                        scope="project:/Users/example/work/current-project",
+                        topic="release-workflow",
+                    ),
+                ],
+            )
+            query = "为什么这个项目记忆召回能力很差"
+
+            lexical = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    query,
+                    "--repo",
+                    str(repo),
+                    "--depth",
+                    "evidence",
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            hybrid = subprocess.run(
+                [
+                    sys.executable,
+                    str(SEARCH_SCRIPT),
+                    query,
+                    "--repo",
+                    str(repo),
+                    "--project-path",
+                    "/Users/example/work/current-project",
+                    "--retrieval-mode",
+                    "hybrid_fts_v1",
+                    "--depth",
+                    "evidence",
+                    "--context-json",
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        lexical_payload = json.loads(lexical.stdout)
+        hybrid_payload = json.loads(hybrid.stdout)
+        self.assertFalse(
+            any(hit["memory_id"] == "mem_cjk_recall_target" for hit in lexical_payload["hits"])
+        )
+        target = next(
+            hit
+            for hit in hybrid_payload["hits"]
+            if hit["memory_id"] == "mem_cjk_recall_target"
+        )
+        self.assertIn("candidate-channel:fts5-trigram", target["why"])
+        self.assertIn("project-context", target["why"])
+        self.assertEqual(target["query_support"]["status"], "weak")
+        self.assertEqual(target["answerability"]["status"], "unsupported")
+        self.assertEqual(hybrid_payload["answerability"]["status"], "unsupported")
+        self.assertEqual(hybrid_payload["query"]["retrieval_mode"], "hybrid_fts_v1")
+
+    def test_hybrid_mode_can_recall_and_authorize_semantic_project_candidate(self):
+        search_memory = load_search_memory_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "agent-memory"
+            repo.mkdir()
+            write_synthetic_memory_archive(
+                repo,
+                [
+                    synthetic_memory_row(
+                        "mem_semantic_project_target",
+                        "The project keeps durable decisions in evidence-bound memory nodes.",
+                        scope="project:/Users/example/work/current-project",
+                        topic="memory-retrieval",
+                    )
+                ],
+            )
+            evidence_path = repo / "sessions/2026/06/20/search-quality/evidence.md"
+            evidence_path.write_text(
+                "ev_001: Durable decisions retain evidence-bound memory support.\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    **synthetic_memory_row(
+                        "mem_semantic_project_target",
+                        "The project keeps durable decisions in evidence-bound memory nodes.",
+                        scope="project:/Users/example/work/current-project",
+                        topic="memory-retrieval",
+                    ),
+                    "source": "automatic",
+                    "evidence_refs": [
+                        {
+                            "path": "sessions/2026/06/20/search-quality/evidence.md",
+                            "quote_id": "ev_001",
+                        }
+                    ],
+                }
+            ]
+            (repo / "index/memories.jsonl").write_text(
+                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            socket_path = Path(tmpdir) / "semantic-retrieval.sock"
+            provider_fingerprint = "f" * 64
+
+            def response(request):
+                return {
+                    "report_kind": "memory_semantic_retrieval_response",
+                    "report_version": 1,
+                    "provider_fingerprint": provider_fingerprint,
+                    "index_sha256": request["index_sha256"],
+                    "results": [
+                        {
+                            "memory_id": "mem_semantic_project_target",
+                            "retrieval_score": 0.91,
+                            "support_score": 0.94,
+                        }
+                    ],
+                }
+
+            thread, requests, errors = start_fake_semantic_provider(socket_path, response)
+            query = "我们之前为这个工程确定的长期决策该怎样保存"
+            query_tokens = search_memory.unique_query_tokens(query)
+            context_terms = search_memory.project_context_terms(
+                "/Users/example/work/current-project"
+            )
+            hits = search_memory.collect_memory_hits(
+                repo,
+                query_tokens,
+                context_terms,
+                query=query,
+                retrieval_mode="hybrid_v1",
+                semantic_provider=search_memory.SemanticRetrievalProviderConfig(
+                    socket_path=socket_path,
+                    provider_fingerprint=provider_fingerprint,
+                    support_threshold=0.90,
+                ),
+            )
+            package = search_memory.build_context_package(
+                repo=repo,
+                query=query,
+                query_tokens=query_tokens,
+                depth="evidence",
+                limit=5,
+                scope="all",
+                preferred_scope="",
+                legacy_sessions=False,
+                project_path="/Users/example/work/current-project",
+                hits=hits,
+                inactive_match_count=0,
+                retrieval_mode="hybrid_v1",
+            )
+            thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(package["answerability"]["status"], "supported")
+        target = package["hits"][0]
+        self.assertEqual(target["memory_id"], "mem_semantic_project_target")
+        self.assertIn("candidate-channel:semantic-dense", target["why"])
+        self.assertIn("project-context", target["why"])
+        self.assertEqual(target["query_support"]["lexical_status"], "weak")
+        self.assertEqual(target["query_support"]["status"], "supported")
+        self.assertEqual(
+            target["query_support"]["policy"],
+            "local_semantic_retrieval_support_v1",
+        )
+        self.assertEqual(
+            target["query_support"]["semantic_support"]["provider_fingerprint"],
+            provider_fingerprint,
+        )
+
+    def test_semantic_candidate_cannot_authorize_wrong_project_scope(self):
+        search_memory = load_search_memory_module()
+        hit = search_memory.Hit(
+            path=Path("index/memories.jsonl/wrong-project"),
+            score=100,
+            source="memory",
+            why=["candidate-channel:semantic-dense"],
+            memory_id="mem_wrong_project_semantic",
+            layer="project",
+            scope="project:/Users/example/work/other-project",
+            topic="memory-retrieval",
+            text="Semantic candidate belongs to another project.",
+            drill_paths=(
+                "sessions/synthetic/wrong-project/summary.md",
+                "sessions/synthetic/wrong-project/evidence.md",
+            ),
+            semantic_retrieval_score=0.95,
+            semantic_support_score=0.98,
+            semantic_support_threshold=0.90,
+            semantic_provider_fingerprint="f" * 64,
+            semantic_support_allowed=False,
+        )
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query="What decision did we make for this project?",
+            query_tokens=search_memory.unique_query_tokens(
+                "What decision did we make for this project?"
+            ),
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path="/Users/example/work/current-project",
+            hits=[hit],
+            inactive_match_count=0,
+            retrieval_mode="hybrid_v1",
+        )
+
+        support = package["hits"][0]["query_support"]
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+        self.assertEqual(support["status"], "weak")
+        self.assertEqual(
+            support["semantic_support"]["reason"],
+            "wrong_scope_or_provenance",
+        )
+
+    def test_semantic_support_rejects_unsafe_query_shapes_before_threshold(self):
+        search_memory = load_search_memory_module()
+        scenarios = {
+            "CedarGoal": "insufficient_facet_detail",
+            "For this task only, make CedarGoal a table.": "current_turn_precedence",
+            "If CedarGoal used YAML, what would happen?": "hypothetical_context",
+            "Do not use the old CedarGoal format; what was it?": "polarity_conflict",
+            "Which CedarGoal preference and branch status did we have?": "multi_facet_query",
+            "The quoted template says CedarGoal YAML; what was the preference?": "quoted_context",
+        }
+        for query, expected_reason in scenarios.items():
+            with self.subTest(query=query):
+                hit = search_memory.Hit(
+                    path=Path("index/memories.jsonl/semantic-governance"),
+                    score=100,
+                    source="memory",
+                    why=["candidate-channel:semantic-dense"],
+                    memory_id="mem_semantic_governance",
+                    layer="global",
+                    scope="global",
+                    topic="preference",
+                    text="The user prefers CedarGoal as a plain text block.",
+                    drill_paths=(
+                        "sessions/synthetic/semantic-governance/summary.md",
+                        "sessions/synthetic/semantic-governance/evidence.md",
+                    ),
+                    semantic_retrieval_score=0.99,
+                    semantic_support_score=0.99,
+                    semantic_support_threshold=0.90,
+                    semantic_provider_fingerprint="f" * 64,
+                    semantic_support_allowed=True,
+                )
+                package = search_memory.build_context_package(
+                    repo=Path("."),
+                    query=query,
+                    query_tokens=search_memory.unique_query_tokens(query),
+                    depth="evidence",
+                    limit=5,
+                    scope="all",
+                    preferred_scope="",
+                    legacy_sessions=False,
+                    project_path=None,
+                    hits=[hit],
+                    inactive_match_count=0,
+                    retrieval_mode="hybrid_v1",
+                )
+
+                support = package["hits"][0]["query_support"]
+                self.assertEqual(package["answerability"]["status"], "unsupported")
+                self.assertEqual(support["status"], "weak")
+                self.assertEqual(
+                    support["semantic_support"]["reason"],
+                    expected_reason,
+                )
+
+    def test_semantic_governance_accepts_imperative_history_lookup(self):
+        search_memory = load_search_memory_module()
+        query = "帮我找一下之前为当前工程确定的长期决策"
+
+        reason = search_memory.semantic_query_governance_reason(
+            query,
+            search_memory.unique_query_tokens(query),
+        )
+
+        self.assertEqual(reason, "")
+
+    def test_semantic_current_turn_governance_overrides_lexical_support(self):
+        search_memory = load_search_memory_module()
+        query = "For this task only use the CedarGoal plain block preference."
+        query_tokens = search_memory.unique_query_tokens(query)
+        hit = search_memory.Hit(
+            path=Path("index/memories.jsonl/current-turn-lexical"),
+            score=100,
+            source="memory",
+            why=["candidate-channel:lexical-weighted", "candidate-channel:semantic-dense"],
+            memory_id="mem_current_turn_lexical",
+            layer="global",
+            scope="global",
+            topic="preference",
+            text="The user prefers the CedarGoal plain block preference.",
+            drill_paths=(
+                "sessions/synthetic/current-turn/summary.md",
+                "sessions/synthetic/current-turn/evidence.md",
+            ),
+            matched_tokens=tuple(query_tokens),
+            semantic_retrieval_score=0.99,
+            semantic_support_score=0.99,
+            semantic_support_threshold=0.90,
+            semantic_provider_fingerprint="f" * 64,
+            semantic_support_allowed=True,
+        )
+
+        package = search_memory.build_context_package(
+            repo=Path("."),
+            query=query,
+            query_tokens=query_tokens,
+            depth="evidence",
+            limit=5,
+            scope="all",
+            preferred_scope="",
+            legacy_sessions=False,
+            project_path=None,
+            hits=[hit],
+            inactive_match_count=0,
+            retrieval_mode="hybrid_v1",
+        )
+
+        support = package["hits"][0]["query_support"]
+        self.assertEqual(support["lexical_status"], "supported")
+        self.assertEqual(support["status"], "weak")
+        self.assertEqual(
+            support["semantic_support"]["reason"],
+            "current_turn_precedence",
+        )
+        self.assertEqual(package["answerability"]["status"], "unsupported")
+
+    def test_semantic_provider_index_mismatch_fails_closed(self):
+        search_memory = load_search_memory_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            index_path = root / "memories.jsonl"
+            index_path.write_text('{"memory_id":"mem_target"}\n', encoding="utf-8")
+            socket_path = root / "semantic-retrieval.sock"
+            provider_fingerprint = "e" * 64
+
+            def response(_request):
+                return {
+                    "report_kind": "memory_semantic_retrieval_response",
+                    "report_version": 1,
+                    "provider_fingerprint": provider_fingerprint,
+                    "index_sha256": "0" * 64,
+                    "results": [],
+                }
+
+            thread, _requests, errors = start_fake_semantic_provider(socket_path, response)
+            results, reason = search_memory.semantic_retrieval_provider_results(
+                search_memory.SemanticRetrievalProviderConfig(
+                    socket_path=socket_path,
+                    provider_fingerprint=provider_fingerprint,
+                    support_threshold=0.90,
+                ),
+                query="durable decision",
+                index_path=index_path,
+                eligible_memory_ids={"mem_target"},
+            )
+            thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(results, [])
+        self.assertEqual(reason, "provider_malformed")
+
+    def test_semantic_provider_preserves_reranked_result_order(self):
+        search_memory = load_search_memory_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            index_path = root / "memories.jsonl"
+            index_path.write_text(
+                '{"memory_id":"mem_dense"}\n{"memory_id":"mem_reranked"}\n',
+                encoding="utf-8",
+            )
+            socket_path = root / "semantic-retrieval.sock"
+            provider_fingerprint = "d" * 64
+
+            def response(request):
+                return {
+                    "report_kind": "memory_semantic_retrieval_response",
+                    "report_version": 1,
+                    "provider_fingerprint": provider_fingerprint,
+                    "index_sha256": request["index_sha256"],
+                    "results": [
+                        {
+                            "memory_id": "mem_reranked",
+                            "retrieval_score": 0.80,
+                            "support_score": 0.96,
+                        },
+                        {
+                            "memory_id": "mem_dense",
+                            "retrieval_score": 0.95,
+                            "support_score": 0.40,
+                        },
+                    ],
+                }
+
+            thread, _requests, errors = start_fake_semantic_provider(socket_path, response)
+            results, reason = search_memory.semantic_retrieval_provider_results(
+                search_memory.SemanticRetrievalProviderConfig(
+                    socket_path=socket_path,
+                    provider_fingerprint=provider_fingerprint,
+                    support_threshold=0.90,
+                ),
+                query="durable decision",
+                index_path=index_path,
+                eligible_memory_ids={"mem_dense", "mem_reranked"},
+            )
+            thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(reason, "")
+        self.assertEqual(
+            [result.memory_id for result in results],
+            ["mem_reranked", "mem_dense"],
+        )
 
     def test_search_memory_finds_index_and_summary_hits(self):
         script = Path("templates/agent-memory-repo/tools/search_memory.py").resolve()
@@ -1886,14 +2414,14 @@ class SearchMemoryTests(unittest.TestCase):
         self.assertIn("memory_id: mem_source_anchor_target", result.stdout)
         self.assertNotIn("memory_id: mem_process_repetition_neighbor", result.stdout)
 
-    def test_search_memory_prunes_same_layer_different_topic_tail_hits(self):
+    def test_search_memory_keeps_current_project_hits_across_topics(self):
         search_memory = load_search_memory_module()
         hits = [
             search_memory.Hit(
                 path=Path("anchor"),
                 score=1000,
                 source="memory",
-                why=[],
+                why=["project-context"],
                 memory_id="mem_source_depth_anchor",
                 layer="domain",
                 scope="domain:memory-retrieval",
@@ -1903,7 +2431,7 @@ class SearchMemoryTests(unittest.TestCase):
                 path=Path("same-scope"),
                 score=995,
                 source="memory",
-                why=[],
+                why=["project-context"],
                 memory_id="mem_same_scope_related",
                 layer="domain",
                 scope="domain:memory-retrieval",
@@ -1935,7 +2463,11 @@ class SearchMemoryTests(unittest.TestCase):
 
         self.assertEqual(
             [hit.memory_id for hit in kept],
-            ["mem_source_depth_anchor", "mem_same_topic_related"],
+            [
+                "mem_source_depth_anchor",
+                "mem_same_scope_related",
+                "mem_same_topic_related",
+            ],
         )
 
     def test_search_memory_prunes_weak_same_topic_cross_scope_tail_but_keeps_support(self):

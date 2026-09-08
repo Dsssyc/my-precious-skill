@@ -4168,6 +4168,89 @@ not LLM answer quality, not scheduler/network reliability, and not public leader
 The observed real-use Goal-preference recall gap remains the next bounded
 product-quality problem after release convergence.
 
+## V2.60 Wide Hybrid Recall And Local Semantic Provider Candidate
+
+Date: 2026-09-08
+
+Decision: `core_candidate_go`; semantic provider remains explicit opt-in.
+
+V2.60 addresses three pre-answerability losses without relaxing the existing
+lexical support policy: project memory identity was stored in `scope` but not
+used by project-context matching; current-project memories could be removed by
+coarse topic deduplication and a 99-percent relative-score floor; and CJK
+clauses had no indexed substring candidate channel.
+
+The new `hybrid_v1` path keeps `lexical_v1` as the direct CLI compatibility
+default and adds:
+
+- scope-aware current-project routing and preservation through the early
+  candidate-pruning stages;
+- request-local SQLite FTS5 BM25 and CJK-trigram channels;
+- reciprocal-rank fusion over weighted lexical, FTS5, and optional semantic
+  result orders;
+- a private local provider protocol for full-index dense retrieval and optional
+  cross-encoder reranking;
+- separate semantic support governance requiring a reranker `support_score`,
+  configured threshold, focused historical inquiry, active/current lifecycle,
+  automatic or explicit provenance, matching scope, and both summary and
+  evidence drill paths.
+
+The provider embeds contextual memory text, scope, topic, rationale, and tags.
+It does not embed or render evidence text, raw refs, source paths, or source
+records. The search client verifies a mode-`0600` user-owned Unix socket,
+provider fingerprint, exact memory-index SHA-256, bounded payloads, eligible
+memory IDs, and finite score ranges. Missing, stale, slow, malformed, or
+fingerprint-mismatched providers fail closed to lexical/FTS retrieval. A stale
+provider must be restarted after `index/memories.jsonl` changes.
+
+The clean packaged runtime gate now executes `hybrid_v1` without a provider and
+reports:
+
+| metric | result |
+| --- | ---: |
+| context-package parse success | 1.0 |
+| supported decision accuracy | 1.0 |
+| abstention accuracy | 1.0 |
+| CJK FTS candidate recall | 1 |
+| CJK FTS false support | 0 |
+| inactive rejection | 1 |
+| malformed fail-closed | 1 |
+| privacy leaks | 0 |
+
+One bounded aggregate-only real-archive shadow used 3,059 memory nodes and
+model artifacts outside both repositories. The embedding model was
+`intfloat/multilingual-e5-small` at revision
+`614241f622f53c4eeff9890bdc4f31cfecc418b3`; the reranker was
+`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` at revision
+`1427fd652930e4ba29e8149678df786c240d8825`. The combined provider fingerprint
+was `72c3057269da04648b8effe0580f303cd883650e12e61dd3440a26ebb8deaf04`.
+
+| private aggregate probe | lexical baseline | hybrid candidate |
+| --- | ---: | ---: |
+| natural preference positive supported | 0/1 | 1/1 |
+| current-turn override false support | - | 0/1 |
+| wrong-attribute false support | - | 0/1 |
+| current-project candidates in routing probe | 0 | 6 |
+| positive-query wall time | 1.17 s | 2.76 s |
+| canonical archive mutation count | 0 | 0 |
+| private config mutation count | 0 | 0 |
+| privacy leak count | 0 | 0 |
+
+The positive baseline returned no recall hits. The hybrid candidate returned
+one supported global memory through semantic policy while both negative probes
+abstained. A separate model comparison showed that raw reranker scores overlap
+between positive and negative query shapes; therefore no model-only threshold
+is treated as authorization, and current-turn, polarity, hypothetical, quoted,
+multi-facet, bare-subject, scope, lifecycle, and binding gates remain mandatory.
+
+This is evidence for the packaged contract and a deliberately small private
+real-use slice. It is not a general LongMemEval or private-manifest holdout, not
+automatic model installation, not provider lifecycle management, not
+GraphRAG, and not approval to mutate a deployed archive or live configuration.
+The provider was stopped after the shadow. Temporary redundant model downloads
+and incomplete candidates were removed; only the minimal evaluation environment
+remained outside the repository during verification.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27

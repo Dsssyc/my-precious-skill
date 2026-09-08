@@ -40,7 +40,12 @@ timestamp for the same archive scope plus source partition, and refreshes a
 previously archived source record in that same partition when its source hash
 changes.
 
-`using-my-precious` is the read-path skill. It only requires a deployment repository with stable Markdown summaries and JSONL indexes.
+`using-my-precious` is the read-path skill. It only requires a deployment
+repository with stable Markdown summaries and JSONL indexes. Its `hybrid_v1`
+candidate path combines weighted lexical scoring, in-memory SQLite FTS5
+BM25/CJK-trigram retrieval, and reciprocal-rank fusion. A repository-external,
+optional local provider can add full-index dense retrieval and cross-encoder
+support without making the core skill depend on a model runtime.
 
 The repository includes generic setup, update, search, safe Git-sync, and scheduler-template tooling. Source-specific ingestion adapters, credentials, enabled schedules, and private generated data still belong in the private deployment repository or optional adapters.
 
@@ -77,6 +82,8 @@ my-precious-skill/
       agents/openai.yaml
       references/archive-format.md
       scripts/search_memory.py
+      scripts/semantic_retrieval_provider.py
+      scripts/semantic_retrieval_provider_requirements.txt
   templates/
     agent-memory-repo/
       AGENTS.md
@@ -92,6 +99,8 @@ my-precious-skill/
       schemas/memory_node.schema.json
       schemas/session_summary.schema.json
       tools/search_memory.py
+      tools/semantic_retrieval_provider.py
+      tools/semantic_retrieval_provider_requirements.txt
       tools/generate_answer_records.py
       tools/update_memory_archive.py
       tools/capture_explicit_memory.py
@@ -108,6 +117,7 @@ my-precious-skill/
     test_audit_publish_readiness.py
     test_repair_publish_surfaces.py
     test_search_memory.py
+    test_semantic_retrieval_provider.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
     test_sync_memory_archive.py
@@ -643,7 +653,8 @@ by itself.
 Search without invoking an agent:
 
 ```bash
-python ~/repos/agent-memory/tools/search_memory.py "private session archive"
+python ~/repos/agent-memory/tools/search_memory.py \
+  "private session archive" --retrieval-mode hybrid_v1
 ```
 
 Search starts with layered memory nodes when `index/memories.jsonl` exists.
@@ -694,12 +705,13 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --preferred-scope domain
 ```
 
-Search uses dependency-free hybrid lexical ranking over JSONL indexes, summary
-files, and optional evidence files. The ranker weights high-signal fields such
-as decisions, reusable facts, unresolved tasks, summaries, and user intent;
-rewards exact query phrases and important literal tokens; and prints a `why:`
-line so agents can tell whether a hit came from a structured field, phrase
-match, important token coverage, project context, or scope preference.
+`lexical_v1` preserves the dependency-free compatibility path. `hybrid_v1`
+adds request-local SQLite FTS5 BM25/CJK-trigram candidates and RRF fusion, then
+uses an optional repository-external local semantic provider when configured.
+Dense similarity is candidate generation only; automatic semantic support
+requires a separate reranker score plus the existing lifecycle, scope,
+provenance, summary, and evidence checks. See
+[ADR-001](docs/decisions/ADR-001-hybrid-memory-retrieval.md).
 
 ### Layered Recall Benchmark
 

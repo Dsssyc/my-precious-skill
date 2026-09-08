@@ -1503,6 +1503,31 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(section, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
 
+    def test_docs_record_v260_wide_hybrid_retrieval_candidate(self):
+        section = self.evaluation_section(
+            "## V2.60 Wide Hybrid Recall And Local Semantic Provider Candidate"
+        )
+        for phrase in (
+            "Decision: `core_candidate_go`",
+            "hybrid_v1",
+            "SQLite FTS5 BM25",
+            "CJK-trigram",
+            "reciprocal-rank fusion",
+            "full-index dense retrieval",
+            "cross-encoder reranking",
+            "provider fingerprint",
+            "memory-index SHA-256",
+            "CJK FTS candidate recall",
+            "natural preference positive supported",
+            "current-turn override false support",
+            "wrong-attribute false support",
+            "canonical archive mutation count",
+            "privacy leak count",
+            "not a general LongMemEval",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (
             "explicit revision path",

@@ -12,8 +12,8 @@ Before answering a historical fact from memory, request the machine-readable
 recall context package and use `answerability.status` as the decision boundary:
 
 ```bash
-python tools/search_memory.py "<query>" --depth evidence --context-json
-python tools/search_memory.py "<query>" --project-path /path/to/current/project --depth evidence --context-json
+python tools/search_memory.py "<query>" --retrieval-mode hybrid_v1 --depth evidence --context-json
+python tools/search_memory.py "<query>" --project-path /path/to/current/project --retrieval-mode hybrid_v1 --depth evidence --context-json
 ```
 
 The JSON output has `report_kind: memory_recall_context_package`. Answer only
@@ -64,6 +64,61 @@ explicit memory layer but cross-layer fallback should remain possible.
 Read `why:` and `drill:` lines in search output. Prefer high-level memories
 with provenance, then open the supporting summaries or evidence. If no relevant
 result exists, say so instead of inferring historical facts.
+
+### Local Hybrid Retrieval
+
+`hybrid_v1` keeps the existing lifecycle and answerability boundaries while
+expanding candidate generation. It fuses the weighted lexical scorer, SQLite
+FTS5 BM25, and CJK trigram rankings with reciprocal-rank fusion. SQLite indexes
+are created in memory for the request and are not committed to the archive.
+
+An optional local provider adds full-index dense retrieval and cross-encoder
+reranking. Install its pinned dependencies into a repository-external virtual
+environment, keep model directories outside this archive, and obtain the
+provider fingerprint without loading the models:
+
+```bash
+python tools/semantic_retrieval_provider.py \
+  --repo "$PWD" \
+  --embedding-model-dir /path/to/local/embedding-model \
+  --reranker-model-dir /path/to/local/reranker-model \
+  --print-fingerprint
+```
+
+Add the returned fingerprint and a private socket path to the existing private
+configuration file:
+
+```json
+{
+  "memory_repo": "/path/to/agent-memory",
+  "semantic_retrieval_provider": {
+    "enabled": true,
+    "socket": "/path/to/private-runtime/semantic-retrieval.sock",
+    "provider_fingerprint": "<64-lowercase-hex-characters>",
+    "support_threshold": 0.90,
+    "timeout_seconds": 2.0
+  }
+}
+```
+
+Start the provider from the external environment:
+
+```bash
+python tools/semantic_retrieval_provider.py \
+  --repo "$PWD" \
+  --embedding-model-dir /path/to/local/embedding-model \
+  --reranker-model-dir /path/to/local/reranker-model \
+  --socket /path/to/private-runtime/semantic-retrieval.sock
+```
+
+The provider forces Hugging Face and Transformers offline mode, reads only
+`index/memories.jsonl`, embeds contextual memory fields without raw/source
+references, and renders aggregate startup state only. Restart it after the
+memory index changes. Search verifies the provider fingerprint, index SHA-256,
+socket ownership and permissions, result IDs, score bounds, and response size.
+Provider failure falls back to lexical/FTS candidates. Dense-only results stay
+unsupported; automatic semantic support requires the reranker score plus the
+normal active/current, scope, provenance, summary, and evidence checks.
 
 ## Update Now
 

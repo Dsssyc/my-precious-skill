@@ -10,9 +10,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
+import socket
+import sqlite3
+import stat
 import sys
+import unicodedata
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +93,26 @@ class Hit:
     evidence_refs: tuple[str, ...] = ()
     raw_refs: tuple[str, ...] = ()
     matched_tokens: tuple[str, ...] = ()
+    semantic_retrieval_score: float | None = None
+    semantic_support_score: float | None = None
+    semantic_support_threshold: float | None = None
+    semantic_provider_fingerprint: str = ""
+    semantic_support_allowed: bool = False
+
+
+@dataclass(frozen=True)
+class SemanticRetrievalProviderConfig:
+    socket_path: Path
+    provider_fingerprint: str
+    support_threshold: float
+    timeout_seconds: float = 2.0
+
+
+@dataclass(frozen=True)
+class SemanticRetrievalResult:
+    memory_id: str
+    retrieval_score: float
+    support_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +144,7 @@ HIGH_SIGNAL_FIELDS = {
     "unresolved_tasks",
     "user_intent",
 }
-CONTEXT_FIELDS = ("project_path", "cwd", "repository", "project")
+CONTEXT_FIELDS = ("project_path", "cwd", "repository", "project", "scope")
 GENERIC_SEARCH_TOKENS = {
     "agent",
     "archive",
@@ -144,6 +170,63 @@ LIFECYCLE_QUERY_TOKENS = {
     "withdrawn",
 }
 MEMORY_LAYERS = ("global", "domain", "project")
+MEMORY_CANDIDATE_POOL_LIMIT = 64
+RETRIEVAL_MODES = ("lexical_v1", "hybrid_fts_v1", "hybrid_v1")
+DEFAULT_RETRIEVAL_MODE = "lexical_v1"
+RRF_RANK_CONSTANT = 60
+RRF_SCORE_SCALE = 1_000_000
+CJK_SEQUENCE_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
+MAX_FTS_QUERY_TERMS = 48
+SEMANTIC_RETRIEVAL_POLICY = "local_semantic_retrieval_support_v1"
+SEMANTIC_RETRIEVAL_MAX_RESULTS = MEMORY_CANDIDATE_POOL_LIMIT
+SEMANTIC_RETRIEVAL_REQUEST_RESULTS = 16
+SEMANTIC_RETRIEVAL_MAX_PAYLOAD_BYTES = 512 * 1024
+SEMANTIC_RETRIEVAL_MAX_QUERY_LENGTH = 1000
+SEMANTIC_RETRIEVAL_MAX_TIMEOUT_SECONDS = 10.0
+SEMANTIC_CURRENT_TURN_PATTERNS = (
+    re.compile(
+        r"\b(?:this time|for (?:this|the current) (?:task|request)|"
+        r"only today|today only|right now|from now on)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:这次|本次|当前(?:任务|请求)|仅限今天|只在今天|从现在起)"),
+)
+SEMANTIC_NEGATION_PATTERNS = (
+    re.compile(r"\b(?:do not|don't|never|must not|should not)\b", re.IGNORECASE),
+    re.compile(r"(?:不要|别再|不得|不应|禁止)"),
+)
+SEMANTIC_HYPOTHETICAL_PATTERNS = (
+    re.compile(r"\b(?:if|suppose|hypothetical(?:ly)?|imagine)\b", re.IGNORECASE),
+    re.compile(r"(?:如果|假设|设想|假如)"),
+)
+SEMANTIC_QUOTED_PATTERNS = (
+    re.compile(
+        r"\b(?:quoted?|sample prompt|example prompt|template)\b.*"
+        r"\b(?:says?|claims?|states?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:引用|示例提示|模板).*(?:声称|写着|表示|要求)"),
+)
+SEMANTIC_INQUIRY_PATTERNS = (
+    re.compile(
+        r"[?？]|\b(?:how|what|which|does|do|is|are|why|when|where|"
+        r"normally|usual(?:ly)?|preferred?|preference|want|recall|remember|"
+        r"find|look up|previous|prior|historical)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:怎样|怎么|如何|为什么|何时|哪里|哪种|什么|偏好|通常|惯常|"
+        r"回忆|查找|找一下|之前|过去|历史)"
+    ),
+)
+SEMANTIC_MULTI_FACET_PATTERNS = (
+    re.compile(
+        r"\b(?:and|plus|as well as)\b.{0,100}"
+        r"\b(?:history|branch|status|head|tests?|progress|roadmap|decision)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:并且|以及|还要|同时).{0,100}(?:历史|分支|状态|进度|路线图|决策|测试)"),
+)
 PROCESS_MEMORY_PATTERN = re.compile(
     r"\b(?:"
     r"continue current goal|current goal|you are implementing|implementation progress|"
@@ -240,6 +323,266 @@ def compact_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def normalize_search_text(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).casefold()
+
+
+def has_cjk_text(text: str) -> bool:
+    return bool(CJK_SEQUENCE_PATTERN.search(text))
+
+
+def cjk_trigram_query_terms(text: str) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for match in CJK_SEQUENCE_PATTERN.finditer(normalize_search_text(text)):
+        value = match.group(0)
+        if len(value) < 3:
+            continue
+        for index in range(len(value) - 2):
+            term = value[index : index + 3]
+            if term in seen:
+                continue
+            seen.add(term)
+            terms.append(term)
+            if len(terms) >= MAX_FTS_QUERY_TERMS:
+                return terms
+    return terms
+
+
+def fts5_quoted_term(value: str) -> str:
+    return '"{}"'.format(value.replace('"', '""'))
+
+
+def fts5_or_query(terms: Iterable[str]) -> str:
+    return " OR ".join(fts5_quoted_term(term) for term in terms if term)
+
+
+def memory_fts_columns(record: dict) -> tuple[str, str, str, str, str]:
+    text = combined_record_text(
+        record,
+        ("text", "decision", "decisions", "task", "summary", "reusable_facts", "unresolved_tasks"),
+    )
+    rationale = combined_record_text(record, ("rationale", "user_intent"))
+    topic = compact_whitespace(str(record.get("topic") or ""))
+    tags = compact_whitespace(" ".join(iter_record_field_texts(record, "tags")))
+    scope = compact_whitespace(str(record.get("scope") or ""))
+    return text, rationale, topic, tags, scope
+
+
+def collect_fts5_memory_channel_orders(
+    records: list[dict],
+    query: str,
+    *,
+    limit: int = MEMORY_CANDIDATE_POOL_LIMIT,
+) -> dict[str, list[str]]:
+    if not query.strip() or limit <= 0:
+        return {}
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    for record in records:
+        memory_id = memory_record_id(record)
+        if not memory_id:
+            continue
+        text, rationale, topic, tags, scope = memory_fts_columns(record)
+        rows.append((memory_id, text, rationale, topic, tags, scope))
+    if not rows:
+        return {}
+
+    word_terms = [
+        token
+        for token in unique_query_tokens(query)
+        if not has_cjk_text(token) and len(token) >= 2
+    ][:MAX_FTS_QUERY_TERMS]
+    trigram_terms = cjk_trigram_query_terms(query)
+    if not word_terms and not trigram_terms:
+        return {}
+
+    channels: dict[str, list[str]] = {}
+    try:
+        with closing(sqlite3.connect(":memory:")) as connection:
+            connection.execute(
+                "CREATE VIRTUAL TABLE memory_words USING fts5("
+                "memory_id UNINDEXED, text, rationale, topic, tags, scope, "
+                "tokenize='unicode61 remove_diacritics 2')"
+            )
+            connection.execute(
+                "CREATE VIRTUAL TABLE memory_trigrams USING fts5("
+                "memory_id UNINDEXED, content, tokenize='trigram')"
+            )
+            connection.executemany(
+                "INSERT INTO memory_words(memory_id, text, rationale, topic, tags, scope) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            connection.executemany(
+                "INSERT INTO memory_trigrams(memory_id, content) VALUES (?, ?)",
+                [
+                    (memory_id, " ".join((text, rationale, topic, tags, scope)))
+                    for memory_id, text, rationale, topic, tags, scope in rows
+                ],
+            )
+            word_query = fts5_or_query(word_terms)
+            if word_query:
+                channels["fts5-bm25"] = [
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT memory_id FROM memory_words "
+                        "WHERE memory_words MATCH ? "
+                        "ORDER BY bm25(memory_words, 0.0, 12.0, 8.0, 5.0, 3.0, 1.0) "
+                        "LIMIT ?",
+                        (word_query, limit),
+                    )
+                ]
+            trigram_query = fts5_or_query(trigram_terms)
+            if trigram_query:
+                channels["fts5-trigram"] = [
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT memory_id FROM memory_trigrams "
+                        "WHERE memory_trigrams MATCH ? "
+                        "ORDER BY bm25(memory_trigrams, 0.0, 1.0) LIMIT ?",
+                        (trigram_query, limit),
+                    )
+                ]
+    except sqlite3.Error:
+        return {}
+    return {name: values for name, values in channels.items() if values}
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def semantic_retrieval_provider_results(
+    provider: SemanticRetrievalProviderConfig,
+    *,
+    query: str,
+    index_path: Path,
+    eligible_memory_ids: set[str],
+    limit: int = SEMANTIC_RETRIEVAL_REQUEST_RESULTS,
+) -> tuple[list[SemanticRetrievalResult], str]:
+    if (
+        not eligible_memory_ids
+        or not query.strip()
+        or len(query) > SEMANTIC_RETRIEVAL_MAX_QUERY_LENGTH
+        or limit <= 0
+        or limit > SEMANTIC_RETRIEVAL_MAX_RESULTS
+        or not provider.socket_path.is_absolute()
+        or not re.fullmatch(r"[0-9a-f]{64}", provider.provider_fingerprint)
+        or not 0.0 <= provider.support_threshold <= 1.0
+        or provider.timeout_seconds <= 0
+        or provider.timeout_seconds > SEMANTIC_RETRIEVAL_MAX_TIMEOUT_SECONDS
+    ):
+        return [], "invalid_provider_request"
+    try:
+        socket_stat = provider.socket_path.lstat()
+        index_sha256 = file_sha256(index_path)
+    except OSError:
+        return [], "provider_unavailable"
+    if (
+        not stat.S_ISSOCK(socket_stat.st_mode)
+        or socket_stat.st_uid != os.getuid()
+        or socket_stat.st_mode & 0o077
+    ):
+        return [], "provider_socket_not_private"
+
+    safe_query = safe_display_text(query, SEMANTIC_RETRIEVAL_MAX_QUERY_LENGTH)
+    if safe_query in ("", UNSAFE_DISPLAY_FIELD):
+        return [], "unsafe_provider_payload"
+    request = {
+        "report_kind": "memory_semantic_retrieval_request",
+        "report_version": 1,
+        "provider_fingerprint": provider.provider_fingerprint,
+        "index_sha256": index_sha256,
+        "query": safe_query,
+        "max_results": limit,
+        "eligible_memory_ids": sorted(eligible_memory_ids),
+    }
+    payload = json.dumps(
+        request,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    if len(payload) > SEMANTIC_RETRIEVAL_MAX_PAYLOAD_BYTES:
+        return [], "provider_request_too_large"
+
+    response_bytes = bytearray()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(provider.timeout_seconds)
+            client.connect(str(provider.socket_path))
+            client.sendall(payload)
+            while not response_bytes.endswith(b"\n"):
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                response_bytes.extend(chunk)
+                if len(response_bytes) > SEMANTIC_RETRIEVAL_MAX_PAYLOAD_BYTES:
+                    return [], "provider_response_too_large"
+    except TimeoutError:
+        return [], "provider_timeout"
+    except OSError:
+        return [], "provider_unavailable"
+
+    try:
+        response = json.loads(response_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return [], "provider_malformed"
+    if (
+        not isinstance(response, dict)
+        or response.get("report_kind") != "memory_semantic_retrieval_response"
+        or response.get("report_version") != 1
+        or response.get("provider_fingerprint") != provider.provider_fingerprint
+        or response.get("index_sha256") != index_sha256
+        or response.get("status") == "failed"
+        or not isinstance(response.get("results"), list)
+    ):
+        return [], "provider_malformed"
+
+    results: list[SemanticRetrievalResult] = []
+    seen: set[str] = set()
+    for item in response["results"]:
+        if not isinstance(item, dict):
+            return [], "provider_malformed"
+        memory_id = item.get("memory_id")
+        retrieval_score = item.get("retrieval_score")
+        support_score = item.get("support_score")
+        if (
+            not isinstance(memory_id, str)
+            or memory_id not in eligible_memory_ids
+            or memory_id in seen
+            or isinstance(retrieval_score, bool)
+            or not isinstance(retrieval_score, (int, float))
+            or not math.isfinite(float(retrieval_score))
+            or not -1.0 <= float(retrieval_score) <= 1.0
+            or (
+                support_score is not None
+                and (
+                    isinstance(support_score, bool)
+                    or not isinstance(support_score, (int, float))
+                    or not math.isfinite(float(support_score))
+                    or not 0.0 <= float(support_score) <= 1.0
+                )
+            )
+        ):
+            return [], "provider_malformed"
+        seen.add(memory_id)
+        results.append(
+            SemanticRetrievalResult(
+                memory_id=memory_id,
+                retrieval_score=float(retrieval_score),
+                support_score=float(support_score) if support_score is not None else None,
+            )
+        )
+    if len(results) > limit:
+        return [], "provider_malformed"
+    return results, ""
+
+
 def clip(text: str, limit: int = 180) -> str:
     text = compact_whitespace(text)
     if len(text) <= limit:
@@ -281,6 +624,55 @@ def configured_memory_repos() -> list[str]:
         if isinstance(value, str) and value.strip():
             repos.append(value)
     return repos
+
+
+def configured_semantic_retrieval_provider() -> SemanticRetrievalProviderConfig | None:
+    config_paths: list[str] = []
+    for name in CONFIG_CANDIDATES:
+        value = os.environ.get(name)
+        if value:
+            config_paths.append(value)
+    config_paths.append(str(DEFAULT_CONFIG_PATH))
+    for candidate in config_paths:
+        path = Path(candidate).expanduser()
+        if not path.exists() or path.is_symlink():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get("semantic_retrieval_provider")
+        if not isinstance(value, dict) or value.get("enabled") is False:
+            continue
+        socket_value = value.get("socket")
+        fingerprint = value.get("provider_fingerprint")
+        threshold = value.get("support_threshold", 0.90)
+        timeout = value.get("timeout_seconds", 2.0)
+        socket_path = Path(socket_value).expanduser() if isinstance(socket_value, str) else None
+        if (
+            not isinstance(socket_value, str)
+            or not socket_value.strip()
+            or socket_path is None
+            or not socket_path.is_absolute()
+            or not isinstance(fingerprint, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+            or isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or not 0.0 <= float(threshold) <= 1.0
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.0 < float(timeout) <= SEMANTIC_RETRIEVAL_MAX_TIMEOUT_SECONDS
+        ):
+            continue
+        return SemanticRetrievalProviderConfig(
+            socket_path=socket_path,
+            provider_fingerprint=fingerprint,
+            support_threshold=float(threshold),
+            timeout_seconds=float(timeout),
+        )
+    return None
 
 
 def resolve_repo(repo_arg: str | None) -> Path:
@@ -496,6 +888,35 @@ def project_context_match(record: dict, context_terms: list[str]) -> bool:
     return False
 
 
+def semantic_support_scope_allowed(
+    record: dict,
+    *,
+    context_terms: list[str],
+    requested_scope: str,
+    preferred_scope: str,
+) -> bool:
+    if scalar_field_lower(record, "source") not in ("automatic", "explicit"):
+        return False
+    layer = scalar_field_lower(record, "layer")
+    scope = scalar_field_lower(record, "scope")
+    if layer == "global":
+        return requested_scope in ("all", "global") and scope in ("", "global")
+    if layer == "domain":
+        return requested_scope == "domain" or preferred_scope == "domain"
+    if layer == "project":
+        return bool(context_terms) and project_context_match(record, context_terms)
+    return False
+
+
+def semantic_retrieval_record_eligible(record: dict, context_terms: list[str]) -> bool:
+    if not context_terms:
+        return True
+    layer = scalar_field_lower(record, "layer")
+    return layer in ("global", "domain") or (
+        layer == "project" and project_context_match(record, context_terms)
+    )
+
+
 def canonical_project_key(value: str) -> str:
     return "".join(re.findall(r"[a-z0-9]+", value.lower()))
 
@@ -588,6 +1009,29 @@ def query_decomposition_recommended(query: str, query_tokens: list[str]) -> bool
     return len(meaningful_tokens) > 5 or facet_count >= 2
 
 
+def semantic_query_governance_reason(query: str, query_tokens: list[str]) -> str:
+    if safe_display_text(query) == UNSAFE_DISPLAY_FIELD:
+        return "unsafe_query"
+    if any(pattern.search(query) for pattern in SEMANTIC_CURRENT_TURN_PATTERNS):
+        return "current_turn_precedence"
+    if any(pattern.search(query) for pattern in SEMANTIC_NEGATION_PATTERNS):
+        return "polarity_conflict"
+    if any(pattern.search(query) for pattern in SEMANTIC_HYPOTHETICAL_PATTERNS):
+        return "hypothetical_context"
+    if any(pattern.search(query) for pattern in SEMANTIC_QUOTED_PATTERNS):
+        return "quoted_context"
+    if query_decomposition_recommended(query, query_tokens) or any(
+        pattern.search(query) for pattern in SEMANTIC_MULTI_FACET_PATTERNS
+    ):
+        return "multi_facet_query"
+    meaningful_tokens = coverage_query_tokens(meaningful_query_tokens(query_tokens))
+    if len(meaningful_tokens) < 2 and len(cjk_trigram_query_terms(query)) < 2:
+        return "insufficient_facet_detail"
+    if not any(pattern.search(query) for pattern in SEMANTIC_INQUIRY_PATTERNS):
+        return "historical_inquiry_required"
+    return ""
+
+
 def has_meaningful_token_coverage(query_tokens: list[str], matched_tokens: list[str]) -> bool:
     required_tokens = meaningful_coverage_tokens(query_tokens)
     return bool(required_tokens) and all(token in matched_tokens for token in required_tokens)
@@ -660,10 +1104,11 @@ def prune_redundant_topic_scope_memory_hits(hits: list[Hit]) -> list[Hit]:
     for hit in ordered:
         key = (hit.layer, hit.scope, hit.topic)
         has_topic_scope = all(key)
-        if has_topic_scope and key in seen_topic_scope:
+        current_project_hit = "project-context" in hit.why
+        if has_topic_scope and key in seen_topic_scope and not current_project_hit:
             continue
         kept.append(hit)
-        if has_topic_scope:
+        if has_topic_scope and not current_project_hit:
             seen_topic_scope.add(key)
     return kept
 
@@ -673,7 +1118,44 @@ def prune_low_relative_memory_hits(hits: list[Hit]) -> list[Hit]:
         return hits
     top_score = max(hit.score for hit in hits)
     threshold = int(top_score * 0.99)
-    return [hit for hit in hits if hit.score >= threshold]
+    ordered = sorted(hits, key=lambda hit: (hit.score, hit.path.as_posix()), reverse=True)
+    return [
+        hit
+        for hit in ordered
+        if hit.score >= threshold or "project-context" in hit.why
+    ][:MEMORY_CANDIDATE_POOL_LIMIT]
+
+
+def rrf_fuse_memory_hits(
+    hits: list[Hit],
+    channel_orders: dict[str, list[str]],
+) -> list[Hit]:
+    if not hits:
+        return []
+    lexical_order = [
+        hit.memory_id
+        for hit in sorted(hits, key=lambda hit: (hit.score, hit.path.as_posix()), reverse=True)
+        if "candidate-channel:lexical-weighted" in hit.why and hit.memory_id
+    ]
+    orders = {"lexical-weighted": lexical_order, **channel_orders}
+    ranks = {
+        channel: {memory_id: rank for rank, memory_id in enumerate(order, 1)}
+        for channel, order in orders.items()
+        if order
+    }
+    for hit in hits:
+        score = 0.0
+        for channel, channel_ranks in ranks.items():
+            rank = channel_ranks.get(hit.memory_id)
+            if rank is None:
+                continue
+            score += 1.0 / (RRF_RANK_CONSTANT + rank)
+            add_reason(hit.why, f"fusion-channel:{channel}")
+        hit.score = max(1, round(score * RRF_SCORE_SCALE))
+        add_reason(hit.why, "fusion:rrf")
+    return sorted(hits, key=lambda hit: (hit.score, hit.path.as_posix()), reverse=True)[
+        :MEMORY_CANDIDATE_POOL_LIMIT
+    ]
 
 
 def hit_reason_value(hit: Hit, prefix: str) -> str:
@@ -715,6 +1197,9 @@ def prune_cross_scope_topic_tail_memory_hits(hits: list[Hit]) -> list[Hit]:
             and hit.topic == anchor.topic
             and hit.scope != anchor.scope
         )
+        if "project-context" in hit.why:
+            kept.append(hit)
+            continue
         if (
             same_topic_cross_scope
             and anchor.source == "memory"
@@ -1586,6 +2071,10 @@ def collect_memory_hits(
     context_terms: list[str] | None = None,
     scope: str = "all",
     preferred_scope: str = "",
+    *,
+    query: str = "",
+    retrieval_mode: str = DEFAULT_RETRIEVAL_MODE,
+    semantic_provider: SemanticRetrievalProviderConfig | None = None,
 ) -> list[Hit]:
     hits: list[Hit] = []
     index_path = repo / "index" / "memories.jsonl"
@@ -1608,6 +2097,7 @@ def collect_memory_hits(
         forward_deprecated_ids,
     )
     memory_records_by_id = active_memory_records_by_id(repo, records, inactive_ids)
+    eligible_records: list[tuple[int, dict]] = []
     for line_no, record in enumerate(records, 1):
         raw_memory_id = str(record.get("memory_id") or "")
         layer = safe_display_scalar(record.get("layer") or "", 60)
@@ -1617,13 +2107,69 @@ def collect_memory_hits(
             continue
         if not has_valid_memory_lifecycle(record):
             continue
+        eligible_records.append((line_no, record))
+
+    fts_channel_orders = (
+        collect_fts5_memory_channel_orders(
+            [record for _line_no, record in eligible_records],
+            query,
+        )
+        if retrieval_mode in ("hybrid_fts_v1", "hybrid_v1")
+        else {}
+    )
+    fts_channels_by_memory_id: dict[str, set[str]] = {}
+    for channel, memory_ids in fts_channel_orders.items():
+        for memory_id in memory_ids:
+            fts_channels_by_memory_id.setdefault(memory_id, set()).add(channel)
+
+    semantic_results: list[SemanticRetrievalResult] = []
+    if retrieval_mode == "hybrid_v1" and semantic_provider is not None:
+        semantic_eligible_memory_ids = {
+            str(record.get("memory_id") or "")
+            for _line_no, record in eligible_records
+            if str(record.get("memory_id") or "")
+            and is_safe_memory_identifier(record.get("memory_id"))
+            and semantic_retrieval_record_eligible(record, context_terms or [])
+        }
+        semantic_results, _semantic_failure = semantic_retrieval_provider_results(
+            semantic_provider,
+            query=query,
+            index_path=index_path,
+            eligible_memory_ids=semantic_eligible_memory_ids,
+        )
+    semantic_by_memory_id = {result.memory_id: result for result in semantic_results}
+    channel_orders = dict(fts_channel_orders)
+    if semantic_results:
+        channel_orders["semantic-dense"] = [result.memory_id for result in semantic_results]
+
+    for line_no, record in eligible_records:
+        raw_memory_id = str(record.get("memory_id") or "")
+        layer = safe_display_scalar(record.get("layer") or "", 60)
         score, matched, reasons = score_index_record(query_tokens, record, context_terms)
-        if not score:
+        lexical_score = score
+        fts_channels = fts_channels_by_memory_id.get(raw_memory_id, set())
+        semantic_result = semantic_by_memory_id.get(raw_memory_id)
+        if not lexical_score and not fts_channels and semantic_result is None:
             continue
-        if "low-signal-only" in reasons and "project-context" not in reasons:
+        if (
+            lexical_score
+            and "low-signal-only" in reasons
+            and "project-context" not in reasons
+            and not fts_channels
+        ):
             continue
+        if lexical_score:
+            add_reason(reasons, "candidate-channel:lexical-weighted")
+        for channel in sorted(fts_channels):
+            add_reason(reasons, f"candidate-channel:{channel}")
+        if semantic_result is not None:
+            add_reason(reasons, "candidate-channel:semantic-dense")
+        if (fts_channels or semantic_result is not None) and project_context_match(
+            record, context_terms or []
+        ):
+            add_reason(reasons, "project-context")
         rank_adjustment, rank_reasons = memory_rank_adjustment(record, query_tokens, preferred_scope)
-        score = max(1, score + rank_adjustment)
+        score = max(1, lexical_score + rank_adjustment)
         reasons.extend(reason for reason in rank_reasons if reason not in reasons)
         if has_strict_token_coverage(query_tokens, matched):
             add_reason(reasons, "strict-token-coverage")
@@ -1664,9 +2210,37 @@ def collect_memory_hits(
                 evidence_refs=support_refs.evidence_refs,
                 raw_refs=support_refs.raw_refs,
                 matched_tokens=tuple(matched),
+                semantic_retrieval_score=(
+                    semantic_result.retrieval_score if semantic_result is not None else None
+                ),
+                semantic_support_score=(
+                    semantic_result.support_score if semantic_result is not None else None
+                ),
+                semantic_support_threshold=(
+                    semantic_provider.support_threshold
+                    if semantic_result is not None and semantic_provider is not None
+                    else None
+                ),
+                semantic_provider_fingerprint=(
+                    semantic_provider.provider_fingerprint
+                    if semantic_result is not None and semantic_provider is not None
+                    else ""
+                ),
+                semantic_support_allowed=(
+                    semantic_result is not None
+                    and semantic_support_scope_allowed(
+                        record,
+                        context_terms=context_terms or [],
+                        requested_scope=scope,
+                        preferred_scope=preferred_scope,
+                    )
+                ),
             )
         )
     hits = prune_nonpreferred_scope_hits(preferred_scope, hits)
+    if retrieval_mode in ("hybrid_fts_v1", "hybrid_v1"):
+        hits = rrf_fuse_memory_hits(hits, channel_orders)
+        return prune_cross_scope_topic_tail_memory_hits(hits)
     hits = prune_redundant_topic_scope_memory_hits(hits)
     hits = prune_low_relative_memory_hits(hits)
     return prune_cross_scope_topic_tail_memory_hits(hits)
@@ -2056,6 +2630,7 @@ def context_hit(
     rank: int,
     depth: str,
     query_tokens: list[str],
+    semantic_query_rejection_reason: str = "",
 ) -> dict[str, object]:
     drill_paths = tuple(path for path in hit.drill_paths if safe_display_path(path) != UNSAFE_DISPLAY_FIELD)
     summary_drill_paths = [path for path in drill_paths if is_summary_drill_path(path)]
@@ -2063,10 +2638,50 @@ def context_hit(
     active_current = hit.source == "memory" and bool(hit.memory_id)
     support_path_count = len(summary_drill_paths) + len(evidence_drill_paths)
     query_support = context_query_support(query_tokens, list(hit.matched_tokens))
+    lexical_status = str(query_support["status"])
+    semantic_score = hit.semantic_support_score
+    semantic_threshold = hit.semantic_support_threshold
+    if hit.semantic_retrieval_score is not None:
+        semantic_status = "candidate_only"
+        semantic_reason = "support_score_missing"
+        if semantic_query_rejection_reason:
+            semantic_status = "governance_rejected"
+            semantic_reason = semantic_query_rejection_reason
+        elif not hit.semantic_support_allowed:
+            semantic_status = "governance_rejected"
+            semantic_reason = "wrong_scope_or_provenance"
+        elif not summary_drill_paths or not evidence_drill_paths:
+            semantic_status = "governance_rejected"
+            semantic_reason = "missing_summary_evidence_binding"
+        elif semantic_score is not None and semantic_threshold is not None:
+            semantic_status = (
+                "supported" if semantic_score >= semantic_threshold else "below_threshold"
+            )
+            semantic_reason = "threshold_met" if semantic_status == "supported" else "threshold_not_met"
+        query_support["semantic_support"] = {
+            "status": semantic_status,
+            "reason": semantic_reason,
+            "policy": SEMANTIC_RETRIEVAL_POLICY,
+            "retrieval_score": round(hit.semantic_retrieval_score, 6),
+            "support_score": round(semantic_score, 6) if semantic_score is not None else None,
+            "threshold": semantic_threshold,
+            "provider_fingerprint": hit.semantic_provider_fingerprint,
+        }
+        if semantic_query_rejection_reason and lexical_status == "supported":
+            query_support["lexical_status"] = lexical_status
+            query_support["status"] = "weak"
+        if semantic_status == "supported":
+            query_support["lexical_status"] = query_support["status"]
+            query_support["status"] = "supported"
+            query_support["policy"] = SEMANTIC_RETRIEVAL_POLICY
     query_supported = query_support["status"] == "supported"
     if active_current and support_path_count and query_supported:
         answerability_status = "supported"
-        answerability_reason = "active_current_memory_with_drilldown_and_query_support"
+        answerability_reason = (
+            "active_current_memory_with_summary_evidence_and_semantic_support"
+            if query_support["policy"] == SEMANTIC_RETRIEVAL_POLICY
+            else "active_current_memory_with_drilldown_and_query_support"
+        )
     elif active_current and support_path_count:
         answerability_status = "unsupported"
         answerability_reason = "insufficient_query_support"
@@ -2152,12 +2767,25 @@ def build_context_package(
     project_path: str | None,
     hits: list[Hit],
     inactive_match_count: int,
+    retrieval_mode: str = DEFAULT_RETRIEVAL_MODE,
 ) -> dict[str, object]:
+    decomposition_recommended = query_decomposition_recommended(query, query_tokens)
+    semantic_query_rejection_reason = (
+        semantic_query_governance_reason(query, query_tokens)
+        if retrieval_mode == "hybrid_v1"
+        else "semantic_mode_disabled"
+    )
     context_hits = [
-        context_hit(repo, hit, rank, depth, query_tokens)
+        context_hit(
+            repo,
+            hit,
+            rank,
+            depth,
+            query_tokens,
+            semantic_query_rejection_reason=semantic_query_rejection_reason,
+        )
         for rank, hit in enumerate(context_package_hits(hits, limit), 1)
     ]
-    decomposition_recommended = query_decomposition_recommended(query, query_tokens)
     return {
         "report_kind": "memory_recall_context_package",
         "report_version": 1,
@@ -2174,6 +2802,7 @@ def build_context_package(
             "preferred_scope": preferred_scope,
             "legacy_sessions": legacy_sessions,
             "project_context_provided": bool(project_path),
+            "retrieval_mode": retrieval_mode,
             "decomposition_recommended": decomposition_recommended,
             "decomposition_reason": (
                 "broad_or_multi_intent_query" if decomposition_recommended else "focused_query"
@@ -2244,10 +2873,49 @@ def main(argv: list[str] | None = None) -> int:
         "--project-path",
         help="Optional current project path used to boost matching archive records",
     )
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=RETRIEVAL_MODES,
+        default=DEFAULT_RETRIEVAL_MODE,
+        help=(
+            "Candidate retrieval policy. lexical_v1 preserves the approved exact path; "
+            "hybrid_fts_v1 adds in-memory SQLite FTS5 BM25/trigram candidates and RRF fusion; "
+            "hybrid_v1 also accepts a private local semantic retrieval provider"
+        ),
+    )
+    parser.add_argument("--semantic-retrieval-socket")
+    parser.add_argument("--semantic-provider-fingerprint")
+    parser.add_argument("--semantic-support-threshold", type=float, default=0.90)
+    parser.add_argument("--semantic-provider-timeout", type=float, default=2.0)
     args = parser.parse_args(argv)
 
     if args.limit <= 0:
         raise SystemExit("--limit must be greater than 0")
+    semantic_args_present = bool(
+        args.semantic_retrieval_socket or args.semantic_provider_fingerprint
+    )
+    if semantic_args_present and not (
+        args.semantic_retrieval_socket and args.semantic_provider_fingerprint
+    ):
+        raise SystemExit(
+            "--semantic-retrieval-socket and --semantic-provider-fingerprint must be provided together"
+        )
+    if semantic_args_present and args.retrieval_mode != "hybrid_v1":
+        raise SystemExit("semantic retrieval provider requires --retrieval-mode hybrid_v1")
+    semantic_provider = (
+        SemanticRetrievalProviderConfig(
+            socket_path=Path(args.semantic_retrieval_socket).expanduser(),
+            provider_fingerprint=args.semantic_provider_fingerprint,
+            support_threshold=args.semantic_support_threshold,
+            timeout_seconds=args.semantic_provider_timeout,
+        )
+        if semantic_args_present
+        else (
+            configured_semantic_retrieval_provider()
+            if args.retrieval_mode == "hybrid_v1"
+            else None
+        )
+    )
 
     repo = resolve_repo(args.repo)
     if args.health_check:
@@ -2269,7 +2937,16 @@ def main(argv: list[str] | None = None) -> int:
         selected_hits = session_hits
     else:
         preferred_scope = "" if args.scope != "all" else args.preferred_scope
-        memory_hits = collect_memory_hits(repo, query_tokens, context_terms, args.scope, preferred_scope)
+        memory_hits = collect_memory_hits(
+            repo,
+            query_tokens,
+            context_terms,
+            args.scope,
+            preferred_scope,
+            query=args.query,
+            retrieval_mode=args.retrieval_mode,
+            semantic_provider=semantic_provider,
+        )
         if memory_hits and (args.depth in ("session", "evidence", "source") or args.include_evidence):
             if args.depth in ("session", "evidence", "source"):
                 session_hits = drill_path_limited_hits(repo, session_hits, memory_hits, args.depth)
@@ -2299,6 +2976,7 @@ def main(argv: list[str] | None = None) -> int:
                     project_path=args.project_path,
                     hits=hits,
                     inactive_match_count=inactive_count,
+                    retrieval_mode=args.retrieval_mode,
                 ),
                 sort_keys=True,
             )

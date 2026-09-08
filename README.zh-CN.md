@@ -31,7 +31,11 @@ agent 可以先用 `$using-my-precious` 搜索私有 session memory archive，�
 
 `update-my-precious` 是 write-path skill。它扫描 source record 目录，用当前项目路径过滤 source records，写入选定 archive memory domain，并用 source partition 跟踪 freshness。默认 archive scope 和 source partition 都是解析后的项目路径，以保持兼容；部署时可以用 `--archive-scope` 选择稳定的非项目记忆域，并用 `--source-partition` 选择稳定的非路径 source stream。updater 会写入同一 archive scope 加 source partition 下最后归档时间之后的新记录；如果同一 partition 中已归档过的同一个 source record 的 hash 发生变化，也会刷新该记录。
 
-`using-my-precious` 是 read-path skill。它只要求部署仓库提供稳定的 Markdown summaries 和 JSONL indexes。
+`using-my-precious` 是 read-path skill。它只要求部署仓库提供稳定的
+Markdown summaries 和 JSONL indexes。新的 `hybrid_v1` 候选路径组合了
+加权词法评分、内存 SQLite FTS5 BM25/CJK trigram 检索与 RRF 融合；还可通过
+仓库外的可选本地 provider 加入全索引 dense retrieval 和 cross-encoder
+support，而不让核心 skill 依赖某个模型运行时。
 
 这个仓库提供通用 setup、update、search、安全 Git sync 和 scheduler-template 工具。特定来源的采集 adapter、凭证、已启用的定时任务和私有生成数据，仍然应该放在私有部署仓库或可选 adapter 中。
 
@@ -68,6 +72,8 @@ my-precious-skill/
       agents/openai.yaml
       references/archive-format.md
       scripts/search_memory.py
+      scripts/semantic_retrieval_provider.py
+      scripts/semantic_retrieval_provider_requirements.txt
   templates/
     agent-memory-repo/
       AGENTS.md
@@ -83,6 +89,8 @@ my-precious-skill/
       schemas/memory_node.schema.json
       schemas/session_summary.schema.json
       tools/search_memory.py
+      tools/semantic_retrieval_provider.py
+      tools/semantic_retrieval_provider_requirements.txt
       tools/update_memory_archive.py
       tools/capture_explicit_memory.py
       tools/run_memory_updates.py
@@ -97,6 +105,7 @@ my-precious-skill/
     test_audit_publish_readiness.py
     test_repair_publish_surfaces.py
     test_search_memory.py
+    test_semantic_retrieval_provider.py
     test_run_memory_updates.py
     test_setup_memory_archive.py
     test_sync_memory_archive.py
@@ -491,7 +500,8 @@ quality。
 不用 agent，也可以直接运行搜索脚本：
 
 ```bash
-python ~/repos/agent-memory/tools/search_memory.py "private session archive"
+python ~/repos/agent-memory/tools/search_memory.py \
+  "private session archive" --retrieval-mode hybrid_v1
 ```
 
 当 `index/memories.jsonl` 存在时，搜索会先从分层 memory nodes 开始。
@@ -540,11 +550,12 @@ python ~/repos/agent-memory/tools/search_memory.py \
   --project-path /path/to/current/project
 ```
 
-搜索脚本使用无依赖的 hybrid lexical 排序，覆盖 JSONL 索引、summary 文件和
-可选 evidence 文件。排序会提高 decision、reusable facts、unresolved tasks、
-summary、user intent 等高信号字段的权重，奖励精确短语和重要 literal token，
-并输出 `why:` 行，帮助 agent 判断命中来自结构化字段、短语匹配、重要 token
-覆盖，还是当前项目上下文。
+`lexical_v1` 保留无依赖兼容路径。`hybrid_v1` 增加 request-local SQLite
+FTS5 BM25/CJK trigram 候选与 RRF 融合，并在配置后调用仓库外的可选本地语义
+provider。dense similarity 只负责候选生成；自动 semantic support 还必须有
+独立 reranker score，并通过既有 lifecycle、scope、provenance、summary 和
+evidence 检查。设计理由见
+[ADR-001](docs/decisions/ADR-001-hybrid-memory-retrieval.md)。
 
 ### 分层召回 Benchmark
 

@@ -61,7 +61,8 @@ cross-language translations.
    first:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --depth evidence --context-json
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" \
+     --retrieval-mode hybrid_v1 --depth evidence --context-json
    ```
 
    The package must have `report_kind: memory_recall_context_package`,
@@ -71,12 +72,24 @@ cross-language translations.
 2. For a project-history facet tied to a local project, pass project context:
 
    ```bash
-   python "$MEMORY_REPO/tools/search_memory.py" "<query>" --project-path "$PWD" --depth evidence --context-json
+   python "$MEMORY_REPO/tools/search_memory.py" "<query>" \
+     --project-path "$PWD" --retrieval-mode hybrid_v1 \
+     --depth evidence --context-json
    ```
 
    This boosts matching `project_path`, `cwd`, `repository`, or project
-   records without hiding cross-project hits. Do not use `--project-path` for
+   `scope` records without hiding cross-project hits. Do not use `--project-path` for
    a global-preference facet.
+
+   `hybrid_v1` combines the approved weighted lexical path with in-memory
+   SQLite FTS5 BM25 and CJK trigram candidates through reciprocal-rank fusion.
+   When the private archive config contains a local
+   `semantic_retrieval_provider`, it also adds full-index dense retrieval and
+   reranker support. Missing, stale, malformed, slow, non-private, or
+   fingerprint-mismatched providers fail closed to the lexical/FTS candidates.
+   Dense similarity alone is candidate generation: only a provider result with
+   a separate `support_score`, matching scope/provenance, and both summary and
+   evidence drill paths may become supported.
 
 3. Apply the context-package decision recipe:
 
@@ -150,7 +163,8 @@ cross-language translations.
 6. If the deployment repo has no search tool, use the bundled script:
 
    ```bash
-   python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO" --depth evidence --context-json
+   python scripts/search_memory.py "<query>" --repo "$MEMORY_REPO" \
+     --retrieval-mode hybrid_v1 --depth evidence --context-json
    ```
 
    If the deployment repo has no resolver but does have a compatible copied

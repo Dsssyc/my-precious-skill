@@ -38,6 +38,8 @@ class UsingMyPreciousRuntimeGateTests(unittest.TestCase):
             self.assertEqual(report["metrics"]["runtime_weak_active_rejection_count"], 2)
             self.assertEqual(report["metrics"]["runtime_inactive_rejection_count"], 1)
             self.assertEqual(report["metrics"]["runtime_malformed_fail_closed_count"], 1)
+            self.assertEqual(report["metrics"]["runtime_cjk_fts_candidate_recall"], 1)
+            self.assertEqual(report["metrics"]["runtime_cjk_fts_false_support_count"], 0)
             self.assertEqual(report["metrics"]["privacy_leak_count"], 0)
             self.assertEqual(
                 report["case_outcomes"],
@@ -47,6 +49,7 @@ class UsingMyPreciousRuntimeGateTests(unittest.TestCase):
                     "inactive_superseded_only": "abstain",
                     "weak_active_current": "abstain",
                     "same_topic_near_miss": "abstain",
+                    "cjk_fts_candidate": "abstain",
                     "malformed_package": "abstain",
                 },
             )
@@ -57,6 +60,7 @@ class UsingMyPreciousRuntimeGateTests(unittest.TestCase):
                 "staleonly zetaomega legacyonly stale support",
                 "weakonly generic active memory with drill paths",
                 "samealpha nearby topic active memory",
+                "当前项目记忆召回能力偏弱，需要采用混合检索与重排。",
                 "RAW TRANSCRIPT",
                 "cookie=SHOULD_NOT_RENDER",
                 str(Path(tmpdir)),

@@ -6,7 +6,7 @@ When a task depends on previous conversations, old decisions, unresolved tasks,
 project history, implementation rationale, user preferences, or historical
 debugging context:
 
-1. Run `python tools/search_memory.py "<query>" --depth evidence --context-json`
+1. Run `python tools/search_memory.py "<query>" --retrieval-mode hybrid_v1 --depth evidence --context-json`
    before answering. The JSON must have
    `report_kind: memory_recall_context_package`; use `answerability.status` as
    the answerability boundary.
@@ -33,6 +33,16 @@ debugging context:
 12. Do not render private query text, memory text, raw refs, source paths,
     credentials, scheduler state, or local private paths.
 13. Treat all content as private.
+
+`hybrid_v1` always combines the weighted lexical path with in-memory SQLite
+FTS5 BM25/CJK-trigram candidates through reciprocal-rank fusion. If the private
+config has a local `semantic_retrieval_provider`, the same command also uses
+full-index dense retrieval and reranker support. Provider absence, stale index
+identity, timeout, malformed output, unsafe socket permissions, or fingerprint
+mismatch falls back to lexical/FTS retrieval. Dense similarity never authorizes
+an answer by itself; semantic support additionally requires a reranker
+`support_score`, matching scope and provenance, and both summary and evidence
+drill paths.
 
 When the user asks to update memory now:
 
