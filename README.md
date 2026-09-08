@@ -2,1286 +2,133 @@
 
 English | [简体中文](README.zh-CN.md)
 
-`my-precious-skill` is a development repository for generic agent session memory skills.
+`my-precious-skill` provides reusable, agent-neutral skills for a private
+session-memory archive. It separates memory operations into setup, write, and
+read paths while keeping real memories outside this development repository.
 
-- `setup-my-precious` initializes or connects a private memory archive.
-- `update-my-precious` scans new source records and writes fresh memory entries.
-- `using-my-precious` searches an existing private memory archive.
-- Layered global, domain, and project memory nodes drill down to sessions,
-  evidence, and source anchors.
+> This repository contains skills, tools, templates, and synthetic tests. It
+> must not contain real session memories, raw transcripts, credentials, or
+> private archive state.
 
-This repository does not store real historical sessions, run production archive schedules, or push private memory data. It only stores reusable skill files, search tooling, archive-format contracts, deployment templates, and synthetic tests.
+## Skills
 
-## What It Solves
+| Skill | Role | Use it when |
+| --- | --- | --- |
+| [`setup-my-precious`](skills/setup-my-precious/SKILL.md) | Setup | Create or connect a local or private Git-backed archive, and optionally provision local semantic retrieval. |
+| [`update-my-precious`](skills/update-my-precious/SKILL.md) | Write | Capture explicit facts or incrementally turn new source records into durable, searchable memory. |
+| [`using-my-precious`](skills/using-my-precious/SKILL.md) | Read | Retrieve prior decisions, preferences, project history, unresolved work, and supporting evidence. |
 
-When a future agent task depends on:
+## Quick Start
 
-- previous conversations
-- prior agent work
-- historical implementation decisions
-- unresolved follow-up tasks
-- user preferences and project conventions
-- old debugging context
-
-the agent can use `$using-my-precious` to search a private session memory archive instead of guessing from vague context. If no archive exists yet, use `$setup-my-precious` first. To capture new records immediately, use `$update-my-precious`.
-
-## Design
-
-`setup-my-precious` is the setup-path skill. It asks how the archive should be stored, scaffolds a local archive folder, and can connect it to a private hosted Git repository when requested.
-
-`update-my-precious` is the write-path skill. It scans a source record
-directory, uses the current project path to filter source records, writes into
-a selected archive memory domain, and tracks freshness by a source partition.
-The default archive scope and source partition are both the resolved project
-path for compatibility. Deployments can opt into a stable non-project memory
-domain with `--archive-scope` and a stable non-path source stream with
-`--source-partition`. The updater archives records newer than the latest
-timestamp for the same archive scope plus source partition, and refreshes a
-previously archived source record in that same partition when its source hash
-changes.
-
-`using-my-precious` is the read-path skill. It only requires a deployment
-repository with stable Markdown summaries and JSONL indexes. Its `hybrid_v1`
-candidate path combines weighted lexical scoring, in-memory SQLite FTS5
-BM25/CJK-trigram retrieval, and reciprocal-rank fusion. A repository-external,
-optional local provider can add full-index dense retrieval and cross-encoder
-support without making the core skill depend on a model runtime.
-
-The repository includes generic setup, update, search, safe Git-sync, and scheduler-template tooling. Source-specific ingestion adapters, credentials, enabled schedules, and private generated data still belong in the private deployment repository or optional adapters.
-
-## Repository Layout
-
-```text
-my-precious-skill/
-  AGENTS.md
-  README.md
-  README.zh-CN.md
-  docs/
-    design.md
-  benchmarks/
-    e2e_induction_recall_benchmark.py
-    updater_induction_benchmark.py
-    layered_recall_benchmark.py
-    generated_answer_case_audit.py
-    generated_answer_benchmark.py
-    private_generated_answer_dogfood_gate.py
-    cases/
-    quality-gates/
-  skills/
-    setup-my-precious/
-      SKILL.md
-      agents/openai.yaml
-      assets/agent-memory-repo/
-      scripts/setup_memory_archive.py
-      scripts/setup_semantic_retrieval.py
-    update-my-precious/
-      SKILL.md
-      agents/openai.yaml
-      scripts/update_memory_archive.py
-    using-my-precious/
-      SKILL.md
-      agents/openai.yaml
-      references/archive-format.md
-      scripts/search_memory.py
-      scripts/semantic_retrieval_provider.py
-      scripts/semantic_retrieval_provider_requirements.txt
-  templates/
-    agent-memory-repo/
-      AGENTS.md
-      INDEX.md
-      README.md
-      .gitignore
-      config/
-      memories/
-      index/
-      daily/
-      sessions/
-      prompts/summarize_session.prompt.md
-      schemas/memory_node.schema.json
-      schemas/session_summary.schema.json
-      tools/search_memory.py
-      tools/semantic_retrieval_provider.py
-      tools/semantic_retrieval_provider_requirements.txt
-      tools/generate_answer_records.py
-      tools/update_memory_archive.py
-      tools/capture_explicit_memory.py
-      tools/induction_consolidation_audit.py
-      tools/run_memory_updates.py
-      tools/audit_memory_archive.py
-      tools/audit_publish_readiness.py
-      tools/repair_publish_surfaces.py
-      tools/backfill_memory_archive.py
-      tools/render_scheduler.py
-      tools/sync_memory_archive.py
-  tests/
-    test_audit_memory_archive.py
-    test_audit_publish_readiness.py
-    test_repair_publish_surfaces.py
-    test_search_memory.py
-    test_semantic_retrieval_provider.py
-    test_run_memory_updates.py
-    test_setup_memory_archive.py
-    test_sync_memory_archive.py
-    test_update_memory_archive.py
-```
-
-## Point An Agent At This Repository
-
-Give this repository URL to an agent that supports skill repositories:
+Give this repository to a compatible agent or skill installer:
 
 ```text
 https://github.com/Dsssyc/my-precious-skill
 ```
 
-The repository contains the `setup-my-precious`, `update-my-precious`, and
-`using-my-precious` skills under `skills/`. A capable agent or skill installer
-can discover them from the repository URL.
+Then use the skills in order.
 
-## Use The Skill
+1. Create or connect a private archive:
 
-Set up an archive:
+   ```text
+   $setup-my-precious create a local private memory archive
+   ```
 
-```text
-$setup-my-precious create a local private memory archive
-```
+   For Git-backed storage or local semantic retrieval, include that request in
+   the same setup conversation.
 
-```text
-$setup-my-precious create a private hosted Git repository for my memory archive
-```
+2. Capture new memory:
 
-Provision the optional local hybrid semantic runtime as part of setup:
+   ```text
+   $update-my-precious archive new session records for the current project
+   ```
 
-```text
-$setup-my-precious plan and install local semantic retrieval with launchd
-```
+3. Retrieve historical context:
 
-The setup skill first verifies deployment-tool parity, then uses
-`setup_semantic_retrieval.py --plan` before the explicitly approved install.
-Pinned dependencies and models live outside both repositories; the private
-provider config is written only after launchd returns an identity-bound health
-response. `--check` verifies the complete runtime and `--disable` provides a
-non-destructive rollback. See
-[ADR-002](docs/decisions/ADR-002-deploy-semantic-runtime-from-setup-skill.md).
+   ```text
+   $using-my-precious find the previous decisions about the migration strategy
+   ```
 
-Update an archive now:
+Setup records the private archive location in
+`~/.config/my-precious/config.json`. `AGENT_SESSION_MEMORY_REPO` remains an
+optional current-shell override.
 
-```text
-$update-my-precious scan the current project's new session records and update memory
-```
+## How It Works
 
-```text
-$update-my-precious archive new records from /path/to/session-records for this project
-```
+1. A source adapter supplies session or event records.
+2. The write path redacts sensitive values, extracts durable information, and
+   creates summaries, short evidence, indexes, and layered memory nodes.
+3. Memory is scoped as `global`, `domain`, or `project`, with provenance and
+   lifecycle links kept separately from ranking.
+4. The read path uses weighted lexical retrieval, SQLite FTS5 BM25, CJK
+   trigrams, and reciprocal-rank fusion. An optional local provider adds
+   full-index dense retrieval and cross-encoder reranking.
+5. Retrieval returns a machine-readable context package. An agent answers only
+   from supported, active/current memories with summary and evidence paths;
+   otherwise it abstains.
 
-Search an archive:
-
-```text
-$using-my-precious find prior decisions about the migration strategy
-```
-
-```text
-$using-my-precious search my historical agent memory for why raw transcripts should not be uploaded by default
-```
-
-```text
-$using-my-precious find previous context about the production incident investigation
-```
-
-For agent-facing source-grounded handoff, the default read path is to request a
-deterministic recall context package before answering from memory:
+Direct retrieval from a deployment archive looks like this:
 
 ```bash
 python "$AGENT_SESSION_MEMORY_REPO/tools/search_memory.py" \
   "prior decisions about the migration strategy" \
+  --retrieval-mode hybrid_v1 \
   --depth evidence \
   --context-json
 ```
 
-The JSON output has `report_kind: memory_recall_context_package` plus
-`answerability.status`. Agents should answer only from supported
-active/current hits and cite the listed summary or evidence drill paths. If the
-package is unsupported, inactive/superseded-only, malformed, or missing, they
-should abstain. Free-form search output is only for exploration or drilldown
-after the package decision; it is not the answerability source. The package
-omits memory text, raw refs, raw source content, credentials, scheduler state,
-and local private paths, and agents should not render private query text in
-answers or aggregate reports.
+See [ADR-001](docs/decisions/ADR-001-hybrid-memory-retrieval.md) for the
+retrieval design and
+[ADR-002](docs/decisions/ADR-002-deploy-semantic-runtime-from-setup-skill.md)
+for semantic-runtime deployment and rollback.
 
-`$setup-my-precious` records the archive location in
-`~/.config/my-precious/config.json` by default. The environment variable is an
-override for current shells and automation, not the primary setup mechanism.
-The config file is written with private file permissions when the platform
-supports them.
+## Development Repository vs. Private Archive
 
-The tools locate the private deployment repository in this order:
+This repository owns reusable implementation:
 
-1. explicit command argument such as `--repo` or `--memory-repo`
-2. a colocated deployment repository when the script runs from one
-3. `AGENT_SESSION_MEMORY_REPO`
-4. `AGENT_MEMORY_REPO`
-5. `MY_PRECIOUS_CONFIG` or `AGENT_SESSION_MEMORY_CONFIG`
-6. `~/.config/my-precious/config.json`
-7. `~/repos/agent-memory`
+- installable Skill folders and bundled scripts
+- the deployment-repository template
+- archive schemas and format contracts
+- synthetic benchmarks and quality gates
+- design decisions and aggregate evaluation records
 
-Optional current-shell override:
+The private deployment repository owns user-specific runtime state:
 
-```bash
-export AGENT_SESSION_MEMORY_REPO="$HOME/repos/agent-memory"
-```
+- generated `sessions/`, `daily/`, `memories/`, and `index/` data
+- project and source-stream registries
+- review decisions, scheduling configuration, and local state
+- private Git remotes and deployment-specific adapters
 
-## Create A Private Deployment Repository
+The template under [`templates/agent-memory-repo`](templates/agent-memory-repo)
+is the source deployment layout. Its bundled copy under the setup skill must
+remain byte-for-byte synchronized.
 
-The recommended path is to let `$setup-my-precious` ask for the storage mode and scaffold the repository. Manual setup is also possible:
-
-Copy the template into a separate private repository:
-
-```bash
-REPO="/path/to/my-precious-skill"
-MEMORY_REPO="$HOME/repos/agent-memory"
-
-mkdir -p "$MEMORY_REPO"
-rsync -a "$REPO/templates/agent-memory-repo/" "$MEMORY_REPO/"
-
-cd "$MEMORY_REPO"
-git init
-```
-
-If using a private hosted Git repository, create it with your normal Git hosting workflow and push this deployment repository there. Keep credentials out of repository files, shell history, logs, and generated summaries. If the local archive folder already has Git history, review it before pushing; the setup helper refuses to publish preexisting history unless `--allow-existing-history` is explicitly passed.
-
-The deployment repository is where real memory data belongs:
+## Repository Layout
 
 ```text
-agent-memory/
-  config/projects.jsonl
-  memories/*.jsonl
-  index/memories.jsonl
-  index/*.jsonl
-  daily/YYYY/YYYY-MM-DD.md
-  sessions/YYYY/MM/DD/<session>/summary.md
-  sessions/YYYY/MM/DD/<session>/evidence.md
-  sessions/YYYY/MM/DD/<session>/meta.json
-  sessions/YYYY/MM/DD/<session>/source-map.json
+skills/                         installable setup, write, and read skills
+templates/agent-memory-repo/    source template for private deployments
+benchmarks/                     synthetic and aggregate-only quality gates
+tests/                          synthetic tests
+docs/decisions/                 architecture decision records
+docs/evaluations/               evaluation history and current limitations
+tools/                          validation and release tooling
 ```
 
-## Use The Deployment Repository Directly
-
-Run a global update from a shared source record directory:
-
-```bash
-python ~/repos/agent-memory/tools/run_memory_updates.py \
-  --memory-repo ~/repos/agent-memory \
-  --source-dir /path/to/session-records \
-  --allow-redacted-secrets
-```
-
-If `config/projects.jsonl` is empty, the runner scans source records for project
-metadata such as `cwd` or `project_path`, registers discovered projects, and
-then updates each enabled project.
-Registered project rows may include `archive_scope` to make scheduled updates
-write into a stable memory domain that is not the project path. They may also
-include `source_partition` to make high-water and source-hash freshness follow
-a stable source stream that is independent from `project_path`. When omitted,
-the source partition defaults to the resolved project path, so one project path
-cannot hide older unarchived records from another path in the same domain
-stream.
-
-For non-project domains, register explicit source streams in
-`config/source_streams.jsonl`:
-
-```json
-{"stream_id":"domain-agent-memory","source_dir":"/path/to/source-records","archive_scope":"domain:agent-memory","source_partition":"source:agent-memory","project":"agent-memory-domain","enabled":true}
-```
-
-Enabled source stream rows must include stable `archive_scope` and
-`source_partition` values. `project_path` is optional and is used only as
-source-record filter context when present; otherwise the stream `source_dir` is
-used as that context. This is a deliberate non-project registry path, not
-automatic ontology discovery.
-
-For a deliberate historical repair pass, add `--rewrite-existing`. That mode
-rebuilds matching source records and replaces older archive entries for the
-same project/source record; it is not the normal incremental path.
-
-For broad repair of entries already present in the archive, prefer the
-meta-driven backfill tool:
-
-```bash
-python ~/repos/agent-memory/tools/backfill_memory_archive.py \
-  --memory-repo ~/repos/agent-memory \
-  --allow-redacted-secrets
-```
-
-`--allow-redacted-secrets` keeps secret detection enabled but permits archive
-entries after recognized secret patterns are redacted. Omit it when a human
-should inspect secret-like source records before anything is written.
-
-Update memory from a source record directory:
-
-```bash
-python ~/repos/agent-memory/tools/update_memory_archive.py \
-  --memory-repo ~/repos/agent-memory \
-  --source-dir /path/to/session-records \
-  --project-path /path/to/project
-```
-
-Use an explicit non-project memory domain when needed:
-
-```bash
-python ~/repos/agent-memory/tools/update_memory_archive.py \
-  --memory-repo ~/repos/agent-memory \
-  --source-dir /path/to/session-records \
-  --project-path /path/to/project \
-  --archive-scope domain:agent-memory
-```
-
-For shared source directories that contain records from multiple projects,
-require explicit project metadata:
-
-```bash
-python ~/repos/agent-memory/tools/update_memory_archive.py \
-  --source-dir /path/to/session-records \
-  --project-path /path/to/project \
-  --require-project-metadata
-```
-
-Audit generated archive quality:
-
-```bash
-python ~/repos/agent-memory/tools/audit_memory_archive.py \
-  --memory-repo ~/repos/agent-memory
-```
-
-The audit checks generated text quality, unsafe key-like values, memory-node
-drilldown paths, and evidence `quote_id` reachability.
-
-Audit automatic induction and consolidation behavior without rendering private
-memory text or source paths:
-
-```bash
-python ~/repos/agent-memory/tools/induction_consolidation_audit.py \
-  --repo ~/repos/agent-memory
-```
-
-The induction report includes candidate, promotion, noise-rejection, review
-reason distribution, overlap buckets, low-risk review compression, contradiction,
-lifecycle reciprocity, evidence reachability, and privacy-pass metrics.
-
-Generate aggregate-safe natural induction review decision skeletons:
-
-```bash
-python ~/repos/agent-memory/tools/author_induction_review_decisions.py \
-  --memory-repo ~/repos/agent-memory \
-  --dry-run
-```
-
-The recommended flow is: generate the skeleton report with `--dry-run`, append
-missing skeleton rows with `--write`, have a reviewer fill the private
-`reviews/induction_review_decisions.jsonl` actions, then run
-`apply_memory_review_decisions.py --dry-run` followed by `--write`. Skeleton
-rows contain `candidate_id`, `candidate_text_sha256`, and
-`candidate_fingerprint` only; the authoring report is aggregate JSON and never
-prints candidate text, memory text, source paths, queries, raw refs, or
-transcripts. This is a safe authoring helper for the private deployment archive,
-not an approval UI and not generated private archive data for this development
-repository.
-
-Preview or apply lifecycle review decisions without rendering private memory
-text:
-
-```bash
-python ~/repos/agent-memory/tools/apply_memory_review_decisions.py \
-  --memory-repo ~/repos/agent-memory \
-  --dry-run
-```
-
-Review decisions live in the private deployment archive at
-`reviews/memory_lifecycle_decisions.jsonl`. The dry-run report is aggregate
-JSON only; it reports decision counts, applied/ignored action counts, and
-before/after lifecycle relation counts. Use `--write` only after reviewing the
-decision file; it rebuilds archive indexes and applies approved lifecycle
-relations.
-
-Run a privacy-safe shadow evaluation without copying private source records
-into this development repository:
-
-```bash
-python ~/repos/agent-memory/tools/shadow_eval_memory_archive.py \
-  --repo ~/repos/agent-memory \
-  --cases /path/to/redacted_probe_cases.jsonl \
-  --audit-script ~/repos/agent-memory/tools/audit_memory_archive.py \
-  --fail-under memory_recall_at_5=1.0 \
-  --fail-over top_k_noise_at_5=0.25
-```
-
-The shadow report is aggregate JSON only. Probe cases can use the legacy
-`expected_memory_id` field or the plural `expected_memory_ids` field when a
-query has several acceptable memory-node answers. `expected_layer` is a soft
-preferred layer; `expected_not_memory_id` checks active-memory suppression; and
-`forbidden_output_patterns` contains private or secret-like regular expressions
-that must not appear in audit/search outputs. Top-k precision and noise are
-computed against the full relevant-ID set, so another listed relevant memory is
-not counted as noise. The report includes recall, active-memory suppression,
-abstain pass rate, abstain false-positive result count, lifecycle integrity,
-top-k noise, provenance coverage, and aggregate hashed `case_details`
-count/status fields, plus `noise_sources_at_5` buckets for broad lexical, scope-mixed,
-inactive lifecycle, and low-signal memory-node results. It also includes
-`noise_relation_to_expected_at_5` aggregate buckets that classify noise hits by
-their layer/scope/topic relation to expected memory records without rendering
-the underlying values. `expected_abstain: true` cases pass only when no memory
-hits are returned. The runner can also
-report legacy archives that do not yet have `index/memories.jsonl`, but memory
-top-k metrics remain `null` until layered memory nodes exist.
-The JSON report also includes a privacy-safe `diagnostics` block that groups
-failure cases by `recall_miss`, `abstain_false_positive`,
-`suppression_failure`, `privacy_failure`, and `top_k_noise`. Diagnostic entries
-use only case ordinals, short case-label hashes, counts, noise-source buckets,
-and noise-relation buckets; they do not render probe queries, memory IDs,
-source paths, raw refs, or forbidden patterns.
-The report-level `privacy` block declares that it is aggregate-only and that
-private probe cases, queries, memory IDs, memory text, source refs, source
-content, source paths, and raw refs were not rendered.
-`--fail-under`, `--fail-over`, `--fail-under-file`, and `--fail-over-file`
-enforce numeric aggregate metrics or dotted metric paths such as
-`metrics.provenance_coverage.score`. Threshold failures print only metric names,
-actual values, and thresholds; they do not print the JSON report. It does not
-render memory text, evidence text, source paths, raw anchors, returned memory
-IDs, queries, or forbidden-pattern text.
-Invalid `forbidden_output_patterns` regular expressions fail the run without
-rendering the pattern text.
-
-Run the v1 readiness convergence gate from existing aggregate reports:
-
-```bash
-python benchmarks/v1_readiness_gate.py \
-  --layered-report /tmp/layered.json \
-  --updater-report /tmp/updater.json \
-  --e2e-report /tmp/e2e.json \
-  --source-stream-report /tmp/source-stream.json
-```
-
-Or run the packaged synthetic gates directly:
-
-```bash
-python benchmarks/v1_readiness_gate.py --run-packaged
-```
-
-The readiness gate emits aggregate-only JSON. With `--run-packaged`, it requires
-the packaged layered recall, updater induction, e2e induction-to-recall,
-explicit source stream registry, and clean-room packaged lifecycle dimensions to
-pass before reporting `core_synthetic_ready`. The lifecycle dimension summarizes
-archive/update/search/audit counts only; it does not render raw source text,
-memory text, search hits, source paths, or temporary paths.
-Source-stream reports must also be aggregate-only and must state that case
-details, memory text, source content, source paths, and raw refs were not
-rendered; passing metrics alone are not accepted as source-stream readiness
-evidence.
-Optional `--public-report` and
-`--shadow-report` inputs can add adapted public-benchmark and private
-real-archive aggregate evidence. Shadow reports must include the aggregate-only
-privacy shape from `shadow_eval_memory_archive.py`; passing metrics alone are
-not accepted as private shadow evidence. Required shadow reports must also meet
-the current real-archive quality floor: `memory_precision_at_5 >= 0.4`,
-`top_k_noise_at_5 <= 0.6`, `abstain_pass_rate == 1.0`,
-`active_memory_suppression == 1.0`,
-`noise_sources_at_5.scope_mixed <= 3`, and
-`noise_sources_at_5.inactive_lifecycle == 0`. Stricter v1.1 shadow gates also
-check `noise_relation_to_expected_at_5.expected_record_missing == 0` so stale
-private probe expectations are not mistaken for ranking defects. This floor
-prevents recall-only greenwashing; it is not a claim that real retrieval noise
-is solved. Optional
-`--answer-report` can add offline generated-answer grading evidence. Answer
-reports must include aggregate `source_benchmarks` and `case_origins` counts;
-passing answer metrics alone are not accepted as provenance-backed answer
-evidence. Required answer reports must also include deterministic answer
-handoff metrics: every non-abstention answer needs active/current memory
-support with `support_refs`, unsupported claims and inactive-memory answers
-must be zero, and abstention cases must be represented in the handoff contract.
-When a run needs to prove a specific dogfood or benchmark answer stream rather
-than any answer report, add one or more
-`--require-answer-source-benchmark NAME` or
-`--require-answer-case-origin NAME` checks; each required key must be present
-with a positive aggregate count, and either check makes the answer dimension
-required even if `--require-answer` was omitted. For example,
-`--require-answer-case-origin private_dogfood` prevents the packaged synthetic
-fixture or public-only answer report from standing in for private dogfood
-answer evidence. Add `--require-public`, `--require-shadow`, or
-`--require-answer` when those optional dimensions should fail the gate if
-absent. When
-`--run-packaged --require-answer` is used without an
-`--answer-report`, the gate builds the packaged synthetic generated-answer
-archive, generates extractive answer handoff records with
-`generate_answer_records.py`, grades them, and includes that aggregate report
-automatically. Public reports must be
-layered recall reports produced from converted
-public benchmark cases, including aggregate `source_benchmarks` counts and
-`case_origins.public_benchmark_adapter`; converter-only output or ordinary
-synthetic layered reports are not accepted as public evidence. A
-`core_synthetic_ready` result is deliberately bounded: it means the core
-synthetic gates passed, including the explicit non-project source stream path;
-it does not prove full v1 readiness, automatic ontology discovery, public
-leaderboard parity, generated-answer accuracy without an answer report, or
-long-horizon multi-principal governance.
-
-Score generated answers offline without rendering queries, generated answers,
-or reference answers:
-
-```bash
-python benchmarks/generated_answer_benchmark.py \
-  --cases benchmarks/cases/generated_answer_synthetic.jsonl \
-  --answers benchmarks/cases/generated_answer_synthetic_answers.jsonl \
-  --details-jsonl /tmp/generated-answer-details.jsonl \
-  --fail-under case_pass_rate=1.0 \
-  --fail-under answer_normalized_match_rate=1.0 \
-  --fail-under abstention_accuracy=1.0 \
-  --fail-under answer_scorable_case_rate=1.0 \
-  --fail-under answer_handoff_present_rate=1.0 \
-  --fail-under answer_handoff_support_coverage_rate=1.0 \
-  --fail-under answer_handoff_supported_case_count=1 \
-  --fail-under answer_handoff_abstain_case_count=1 \
-  --fail-over privacy_leak_count=0 \
-  --fail-over failed_case_count=0 \
-  --fail-over missing_answer_count=0 \
-  --fail-over duplicate_answer_count=0 \
-  --fail-over unknown_answer_count=0 \
-  --fail-over positive_without_reference_answer=0 \
-  --fail-over unsupported_claim_count=0 \
-  --fail-over inactive_memory_answer_count=0
-```
-
-The answer benchmark reports aggregate `case_pass_rate`,
-`answer_exact_match_rate`, `answer_normalized_match_rate`, `answer_token_f1`,
-`abstention_accuracy`, missing/duplicate/unknown answer counts, answer-scorable
-case coverage, positive cases without reference answers, answer handoff
-presence, answer handoff support coverage, supported/abstention handoff counts,
-unsupported claim count, inactive-memory answer count, and privacy counts. It
-also reports aggregate `source_benchmarks` and `case_origins` so
-`v1_readiness_gate.py` can reject source-less answer reports. Required answer
-reports must have `answer_scorable_case_rate: 1.0`,
-`positive_without_reference_answer: 0`,
-`answer_handoff_present_rate: 1.0`,
-`answer_handoff_support_coverage_rate: 1.0`,
-`unsupported_claim_count: 0`, and `inactive_memory_answer_count: 0`; otherwise
-the gate cannot prove source-grounded answer handoff coverage for positive
-cases. Its claim boundary is narrow: it grades provided answer records against
-reference answers and audits deterministic handoff metadata; it does not call a
-model, generate answers, or claim semantic equivalence beyond exact,
-normalized, and token-overlap checks.
-
-Before generating answers, audit a private or public generated-answer case set
-for scoreability and aggregate provenance without rendering case IDs, queries,
-or reference answers:
-
-```bash
-python benchmarks/generated_answer_case_audit.py \
-  --cases /path/to/private-generated-answer-cases.jsonl \
-  --require-source-benchmark MyPreciousPrivateDogfood \
-  --require-case-origin private_dogfood \
-  --fail-under answer_scorable_case_rate=1.0 \
-  --fail-over positive_without_reference_answer=0 \
-  --fail-over privacy_leak_count=0 \
-  --fail-over unsafe_aggregate_identifier_count=0
-```
-
-The case audit reports aggregate case counts, positive/abstention split,
-reference-answer coverage, answer-scorable coverage, forbidden-pattern
-coverage, safe aggregate `source_benchmarks` and `case_origins`, and
-`cases_sha256`. It is a readiness check for the case set only; it does not
-produce answer records or prove answer correctness.
-
-Run the full private generated-answer dogfood readiness gate as a repeatable
-operational check:
-
-```bash
-python benchmarks/private_generated_answer_dogfood_gate.py \
-  --memory-repo ~/repos/agent-memory
-```
-
-The runner authors temporary private dogfood cases under
-`.tmp/generated-answer-dogfood/`, audits case scoreability, generates
-extractive answer records under `/tmp`, grades them with strict answer gates,
-runs private shadow eval, then combines packaged, shadow, and answer evidence
-through `v1_readiness_gate.py`. It fails closed when the private repository
-already has dirty `eval/` or `.tmp/` artifacts, cleans generated artifacts on
-success, and emits aggregate-only JSON. On failure it reports the failed step
-without rendering private queries, reference answers, generated answers,
-memory IDs, source paths, or raw refs; add `--cleanup-on-failure` when the
-failure artifacts are not needed for local diagnosis. Custom external
-`--work-dir` values must use a dogfood-specific directory name such as
-`my_precious_generated_answer_dogfood` so cleanup cannot target a generic
-temporary or repository directory.
-
-The private dogfood wrapper is also validated by `v1_readiness_gate.py`: the
-nested answer benchmark must carry the V1.6 `answer_handoff` metrics, and the
-wrapper privacy block must declare that private paths, memory text, memory IDs,
-source paths, and raw refs were not rendered. Cleanup removes only the known
-dogfood-generated artifacts and then prunes empty dogfood directories, so
-unowned files in the work directory are preserved.
-
-Author an initial private dogfood generated-answer case set from an existing
-deployment archive's layered memories:
-
-```bash
-python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
-  --repo ~/repos/agent-memory \
-  --output .tmp/generated-answer-dogfood/cases.jsonl \
-  --limit 25 \
-  --abstain-limit 5 \
-  --dry-run
-python ~/repos/agent-memory/tools/author_generated_answer_cases.py \
-  --repo ~/repos/agent-memory \
-  --output .tmp/generated-answer-dogfood/cases.jsonl \
-  --limit 25 \
-  --abstain-limit 5 \
-  --write
-```
-
-The authoring helper writes private cases only inside the deployment archive.
-Its stdout is aggregate-only and reports selected case counts, skip counts,
-source benchmark counts, case-origin counts, and privacy flags. The generated
-case file contains private queries and reference answers; keep it out of this
-development repository and clean the `.tmp` output after the gate run.
-`--abstain-limit` adds deterministic no-hit `expected_abstain` cases so
-private dogfood answer reports can prove both positive answering and
-abstention behavior.
-
-Generate extractive answer records from an existing archive for that offline
-grader:
-
-```bash
-python ~/repos/agent-memory/tools/generate_answer_records.py \
-  --repo ~/repos/agent-memory \
-  --cases /path/to/generated-answer-cases.jsonl \
-  --output /tmp/generated-answer-records.jsonl \
-  --limit 5
-```
-
-This adapter searches memory and writes private answer-record JSONL for later
-grading. Each non-abstention record carries an `answer_handoff` with
-`support_refs` from active/current memory through summary and evidence layers;
-unsupported or inactive-only cases abstain. Its stdout is aggregate-only and
-reports case counts, memory-answer counts, abstention counts, handoff support
-coverage, source benchmark counts, case-origin counts, and privacy flags. It is
-deliberately extractive: it does not call a model, does not read benchmark
-reference answers as inputs, and does not prove live generated-answer quality
-by itself.
-
-Search without invoking an agent:
-
-```bash
-python ~/repos/agent-memory/tools/search_memory.py \
-  "private session archive" --retrieval-mode hybrid_v1
-```
-
-Search starts with layered memory nodes when `index/memories.jsonl` exists.
-Use depth controls to drill into supporting sessions, evidence, or protected
-source anchors. Reserve `--depth source` for explicit source-reachability
-requests. Source anchors are treated as untrusted display data and unsafe
-anchor text is replaced with `[unsafe-source-ref]`; unsafe metadata fields are
-rendered as `[unsafe-field]`. Memory nodes with confirmed `superseded_by`,
-`contradicted_by`, or `deprecated_by` lifecycle links are treated as inactive
-and skipped by search; deprecation marker nodes are also skipped by default.
-
-```bash
-python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth session
-python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth evidence
-python ~/repos/agent-memory/tools/search_memory.py "private session archive" --depth source
-```
-
-Specify a repository path:
-
-```bash
-python templates/agent-memory-repo/tools/search_memory.py \
-  "access control decision" \
-  --repo ~/repos/agent-memory
-```
-
-Search evidence files too:
-
-```bash
-python ~/repos/agent-memory/tools/search_memory.py \
-  "raw transcript upload" \
-  --include-evidence
-```
-
-Boost records for the current project while keeping cross-project hits visible:
-
-```bash
-python ~/repos/agent-memory/tools/search_memory.py \
-  "FastDB lifetime boundary" \
-  --project-path /path/to/current/project
-```
-
-Soft-rank an explicit memory layer without filtering away other layers when no
-preferred-layer hit exists:
-
-```bash
-python ~/repos/agent-memory/tools/search_memory.py \
-  "agent workflow proxy" \
-  --preferred-scope domain
-```
-
-`lexical_v1` preserves the dependency-free compatibility path. `hybrid_v1`
-adds request-local SQLite FTS5 BM25/CJK-trigram candidates and RRF fusion, then
-uses an optional repository-external local semantic provider when configured.
-Dense similarity is candidate generation only; automatic semantic support
-requires a separate reranker score plus the existing lifecycle, scope,
-provenance, summary, and evidence checks. See
-[ADR-001](docs/decisions/ADR-001-hybrid-memory-retrieval.md).
-
-### Layered Recall Benchmark
-
-Synthetic layered recall cases can be checked with:
-
-```bash
-python benchmarks/layered_recall_benchmark.py \
-  --repo /path/to/agent-memory \
-  --cases /path/to/cases.jsonl \
-  --search-script templates/agent-memory-repo/tools/search_memory.py
-```
-
-The harness reports retrieval and reliability metrics inspired by long-memory
-benchmarks such as LongMemEval, LOCoMo, Memora, and RULER-style retrieval
-stress tests:
-
-- `memory_recall_at_1`, `memory_recall_at_5`, `memory_mrr`,
-  `memory_ndcg_at_5`, `memory_precision_at_5`, and
-  `memory_micro_precision_at_5`, plus `memory_noise_count_at_5` and
-  `top_k_noise_at_5` for top-k result noise
-- `memory_explainability`, with `memory_explainability_cases`, to check that
-  ranked expected-memory hits are backed by high-signal `why:` reasons instead
-  of only broad or low-signal matches
-- `layer_calibration`, with `layer_calibration_cases`, for cases that require
-  the expected memory to be recalled from a specific `global`, `domain`, or
-  `project` layer
-- `layer_path_success_rate`, which requires top-5 memory recall, the supporting
-  summary path, and any configured expected layer to line up
-- `scope_filter_recall`, with `scope_filter_cases`, to verify those layer
-  cases still recall the expected memory when search runs with
-  `--scope <expected_layer>`
-- `wrong_scope_suppression`, with `wrong_scope_suppression_cases`, to verify
-  scoped search does not return the expected memory from other layers
-- rank distribution fields `memory_ranked_cases`,
-  `memory_rank_missing_cases`, `memory_rank_mean`,
-  `memory_rank_median`, and `memory_rank_histogram`
-- `session_drilldown_at_5`, `drilldown_success_rate`, `source_reachability`,
-  `source_ref_reachability`, `source_depth_policy_pass_rate`,
-  `raw_preview_redaction_pass_rate`, `raw_preview_authorization_pass_rate`,
-  `source_drilldown_privacy_pass_rate`,
-  `evidence_reachability`, and `evidence_text_reachability` with
-  `evidence_text_cases`
-- `answer_reachability`, `answer_normalized_reachability`, and
-  `answer_token_f1` for reference-answer snippets that should be present in
-  recalled memory/session/source output or in verified local drilldown files
-- `abstention_accuracy`, `abstention_answer_cases`,
-  `abstention_answer_pass_rate`, `negative_memory_suppression`,
-  `stale_memory_suppression`, `update_consistency`,
-  `lifecycle_supersession_cases`, `lifecycle_supersession_reciprocity`, and
-  aggregate `suppression_pass_rate`
-- `privacy_boundary_pass_rate`, `privacy_leak_count`, total `latency_ms`,
-  `latency_mean_ms`,
-  `latency_max_ms`, and per-category summaries
-- denominator counts such as `positive_cases`, `answer_cases`, `stale_cases`,
-  and `privacy_cases` so zero-denominator metrics are visible
-- input provenance fields `cases_path`, `cases_sha256`, `search_script_path`,
-  and `search_script_sha256` so score reports can be reproduced against the
-  same case set and search implementation
-
-Positive JSONL cases must include `query`, `expected_memory_id`,
-`expected_summary_path`, and `expected_source_anchor`. Optional fields include
-`case_id`, `category`, `source_benchmark`, `reference_answer`,
-`reference_evidence`, `required_evidence_paths`, `expected_not_memory_id`,
-`stale_memory_id`, `temporal_scope`, `expected_layer`, and
-`forbidden_output_patterns`.
-The packaged synthetic suite includes explicit `broad_lexical_noise` abstain
-cases so broad lexical overlap is measured separately from ordinary abstention.
-`forbidden_output_patterns` entries are Python regular expressions matched
-against combined memory, session, source, and explicit raw-preview output.
-`privacy_leak_count` also treats generic secret-like output identifiers as
-leaks even when a case does not configure explicit forbidden patterns.
-When present, `case_id` must be unique within the case file.
-Abstention cases set `expected_abstain` to `true` and do not need positive
-expected fields. Some public-benchmark adapter abstention cases include
-reference answers such as "not mentioned" or "not enough information"; those
-count toward `abstention_answer_cases` and may pass when structured related
-context is reachable while the requested fact is absent. `answer_reachability`
-checks exact reference-answer text reachability in expected-memory search output
-or in verified local drilldown files; `answer_normalized_reachability` ignores
-case and punctuation; `answer_token_f1` reports best-window token overlap.
-These are retrieval-side checks, not generated-answer semantic grading. Use
-`benchmarks/generated_answer_benchmark.py` when the input is a JSONL file of
-already generated answers that need aggregate-only grading.
-`evidence_text_reachability`
-checks that required evidence files contain exact `reference_evidence` snippets,
-so source-depth claims are backed by reachable evidence text rather than only
-path references.
-At source depth, search output reports source refs as stable
-`source_ref_id`, `status`, and `reason` fields. It does not print raw source
-content by default. A short redacted raw-source snippet is only requested
-explicitly with both `--raw-source-preview <source_ref_id|all>` and
-`--authorize-raw-source-preview`, and the benchmark checks that the authorized
-preview path is used, preview output stays redacted, and source-drilldown output
-remains inside the privacy boundary.
-
-Locally downloaded public benchmark files can be converted into this case
-schema without committing the source data:
-
-```bash
-python benchmarks/convert_public_memory_benchmark.py \
-  --source longmemeval \
-  --input /path/outside/repo/longmemeval.json \
-  --output /tmp/longmemeval-cases.jsonl \
-  --build-synthetic-archive /tmp/longmemeval-synthetic-archive
-
-python benchmarks/convert_public_memory_benchmark.py \
-  --source locomo \
-  --input /path/outside/repo/locomo.json \
-  --output /tmp/locomo-cases.jsonl
-
-python benchmarks/convert_public_memory_benchmark.py \
-  --source memora \
-  --input /path/outside/repo/memora-evaluation.json \
-  --output /tmp/memora-cases.jsonl
-```
-
-The converter supports schema shapes used by the official
-[LongMemEval](https://github.com/xiaowu0162/longmemeval),
-[LoCoMo](https://github.com/snap-research/locomo), and
-[Memora](https://github.com/geniesinc/Memora) releases. It creates deterministic
-external memory IDs and protected source anchors for local evaluation; it does
-not download, vendor, or commit public benchmark records.
-Use `--limit N` for bounded adapter probes. For JSONL files and top-level JSON
-arrays, the converter stops reading once enough input records are available;
-for other JSON shapes it may still need to parse the full local file before
-applying the converted-case limit.
-`--build-synthetic-archive` is optional. It creates a temporary synthetic
-archive from the converted case targets, which lets you dry-run the adapter
-through the real search benchmark before evaluating a real memory archive.
-Add `--include-superseded-distractors` with that option to create stale-memory
-distractors for converted cases that declare `stale_memory_id`.
-
-Converted public-style cases can be scored with the same quantitative gate:
-
-```bash
-python benchmarks/layered_recall_benchmark.py \
-  --repo /tmp/longmemeval-synthetic-archive \
-  --cases /tmp/longmemeval-cases.jsonl \
-  --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/longmemeval-details.jsonl \
-  --fail-under memory_recall_at_5=0.95 \
-  --fail-under answer_normalized_reachability=0.90 \
-  --fail-under categories.temporal_reasoning.memory_recall_at_5=0.90
-```
-
-The repository also includes a public-benchmark-inspired synthetic case suite:
-
-```bash
-benchmarks/cases/layered_recall_synthetic.jsonl
-```
-
-To produce a quantitative synthetic score report, build a temporary synthetic
-archive and run the benchmark against the real search script:
-
-```bash
-python benchmarks/build_synthetic_recall_archive.py \
-  --repo /tmp/my-precious-synthetic-archive \
-  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
-  --include-superseded-distractors
-
-python benchmarks/layered_recall_benchmark.py \
-  --repo /tmp/my-precious-synthetic-archive \
-  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
-  --search-script templates/agent-memory-repo/tools/search_memory.py \
-  --details-jsonl /tmp/my-precious-synthetic-details.jsonl \
-  --failures-json /tmp/my-precious-synthetic-failures.json \
-  --fail-under-file benchmarks/quality-gates/layered_recall_synthetic.json \
-  --fail-over-file benchmarks/quality-gates/layered_recall_synthetic_max.json
-```
-
-`--details-jsonl` writes one row per case with rank, drill-down, source,
-evidence, abstention, stale-suppression, lifecycle-supersession, privacy
-outcomes, safe case metadata, source-depth policy outcomes, and a
-`failed_checks` list naming the failed applicable metrics for that case.
-The detail rows include benchmark source, temporal scope, expected stale or
-negative memory IDs, stable case IDs when provided, required evidence paths,
-and forbidden-pattern counts, but they do not render raw `reference_answer` or
-`forbidden_output_patterns` text.
-They also include safe returned identifiers such as memory result IDs, session
-paths, and source ref IDs, without returned hit titles, raw source paths, or
-snippets.
-Sensitive-looking or control-character-bearing returned identifiers are written
-as `[unsafe-result-identifier]`.
-`--failures-json`
-writes structured quality-gate failures with `metric`, `value`, and `threshold`
-fields for CI systems that should not parse stderr. It also includes safe
-per-case failure summaries with case ID, line number, category, source
-benchmark, failed check names, memory rank, recall flags, session drilldown
-status, and source reachability status; it still omits raw queries, expected
-memory IDs, reference answers, and returned snippets. `--fail-under` keeps the
-aggregate JSON on stdout and exits non-zero when a configured numeric metric
-falls below its threshold, which makes the benchmark usable as a CI quality
-gate. Thresholds can target top-level metrics or dotted category paths such as
-`categories.knowledge_update.update_consistency=1.0`. Threshold values must be
-finite numbers; NaN and Infinity are rejected before comparison.
-`--fail-under-file` accepts a JSON object using the same metric paths, for
-example:
-
-```json
-{
-  "answer_normalized_reachability": 0.9,
-  "categories.knowledge_update.update_consistency": 1.0,
-  "lifecycle_supersession_reciprocity": 1.0,
-  "memory_recall_at_5": 0.95,
-  "privacy_boundary_pass_rate": 1.0,
-  "source_depth_policy_pass_rate": 1.0,
-  "source_ref_reachability": 1.0
-}
-```
-
-Direct `--fail-under` arguments override duplicate metric keys loaded from
-threshold files. The packaged `benchmarks/quality-gates/layered_recall_synthetic.json`
-gate covers the synthetic suite's recall, rank coverage, source/evidence,
-evidence-text reachability, answer reachability, abstention, broad lexical
-noise resistance, stale/update, lifecycle reciprocity, source-depth governance,
-layer path and drilldown success, suppression, privacy, and denominator-count
-checks. The paired
-`benchmarks/quality-gates/layered_recall_synthetic_max.json`
-uses `--fail-over-file` for upper-bound checks such as `failed_case_count`,
-`memory_rank_missing_cases`, `memory_rank_mean`, `memory_rank_median`,
-`top_k_noise_at_5`, and `privacy_leak_count`. Add additional answer-metric
-gates to custom threshold files when an evaluated case set has broader
-`reference_answer` coverage. Each memory/session/source search
-subprocess has a default 30 second timeout; set finite positive
-`--search-timeout-s` values lower for CI smoke tests or higher for large local
-archives.
-
-The packaged quality-gate command above includes superseded distractor nodes so
-`lifecycle_supersession_cases` has a non-zero denominator. To stress
-stale-memory suppression manually, add the same option when building a temporary
-archive:
-
-```bash
-python benchmarks/build_synthetic_recall_archive.py \
-  --repo /tmp/my-precious-synthetic-archive \
-  --cases benchmarks/cases/layered_recall_synthetic.jsonl \
-  --include-superseded-distractors
-```
-
-Those cases are synthetic templates only. They do not contain private memory
-data or copied public benchmark records. External benchmark downloads should be
-kept outside this repository and locally converted to the same JSONL case
-schema when needed. This benchmark is designed for My Precious layered recall,
-not as a direct score comparison against systems that store verbatim transcript
-embeddings.
-
-The repository also includes an updater-driven synthetic induction benchmark.
-Unlike the layered recall benchmark, it does not prebuild `memories/*.jsonl`.
-It creates temporary synthetic source records, runs `setup_memory_archive.py`,
-then runs the deployed template's `tools/update_memory_archive.py` and scores
-the generated archive:
-
-```bash
-python benchmarks/updater_induction_benchmark.py \
-  --cases benchmarks/cases/updater_induction_synthetic.jsonl \
-  --fail-under-file benchmarks/quality-gates/updater_induction_synthetic.json \
-  --fail-over-file benchmarks/quality-gates/updater_induction_synthetic_max.json
-```
-
-The induction benchmark reports aggregate-only JSON metrics:
-`induction_success_rate`, `natural_induction_success_rate`,
-`natural_false_promotion_rate`, `auto_promotion_precision`,
-`cross_project_generalization_rate`, `project_scope_precision`,
-`ambiguous_candidate_review_rate`, `induction_review_routing_rate`,
-`induction_review_decision_apply_rate`,
-`induction_review_approve_promotion_rate`,
-`induction_review_ignore_suppression_rate`,
-`low_confidence_review_rate`, `scope_change_review_rate`,
-`conflict_review_rate`,
-`review_routing_rate`, `process_noise_rejection_rate`,
-`ephemeral_status_rejection_rate`, `hypothetical_rejection_rate`,
-`acknowledgement_only_rejection_rate`,
-`temporary_local_decision_rejection_rate`, `generic_rule_rejection_rate`,
-`evidence_retention_rate`, `source_ref_policy_pass_rate`,
-`lifecycle_link_accuracy`, `forced_memory_capture_rate`,
-`privacy_refusal_pass_rate`, `privacy_redaction_pass_rate`, and
-`privacy_leak_count`. Its packaged synthetic suite covers cross-project
-automatic induction, natural-language preference and workflow induction,
-project-scoped implementation constraints, ambiguous scope candidates routed to
-review, natural induction review calibration, adversarial natural-language
-precision cases, process-noise rejection, source-record forced memory,
-supersede/contradict/deprecate lifecycle links, redacted source records, and
-default refusal of likely-secret source records.
-Natural review calibration covers repeated statements with partial support,
-conflicting preferences, scope broadening or narrowing, low-confidence one-off
-candidates, and candidates that should remain reviewable instead of being
-rejected or promoted. Review candidate rows preserve evidence/source refs for
-audit, but store `candidate_text_sha256` instead of rendering candidate text.
-Synthetic induction review decisions use private
-`reviews/induction_review_decisions.jsonl` rows with `approve_promote`,
-`reject`, or `noop`; approve decisions are the only path that promotes those
-review candidates into memory nodes. Decision-set validation rejects duplicate
-`decision_id` values, repeated exact rows, and conflicting actions for the same
-candidate or candidate fingerprint. Dry-run reports expose only aggregate
-duplicate/conflict/stale/unsafe/unknown counts, never candidate text, memory
-text, source paths, or raw refs. The aggregate-safe authoring helper can append
-pending skeleton rows for active candidates while preserving existing manual
-decisions and skipping already reflected decisions; reviewers still fill the
-private action field themselves before apply preflight/write.
-The adversarial precision cases cover one-off status or progress updates with
-`should`/`must`, acknowledgement-only replies, hypothetical `we could` or
-`maybe` statements, temporary local implementation choices, test-result
-chatter, quoted prompt-like text, and broad generic rules without distinctive
-support. It does not render source content, memory text, source paths, raw refs,
-or per-case details.
-
-The end-to-end synthetic benchmark connects the write and read paths. It
-creates temporary synthetic source records, runs the real setup and updater,
-derives recall cases from the generated `index/memories.jsonl`, then scores
-those cases with the real layered recall benchmark and copied
-`tools/search_memory.py`:
-
-```bash
-python benchmarks/e2e_induction_recall_benchmark.py \
-  --cases benchmarks/cases/e2e_induction_recall_synthetic.jsonl \
-  --fail-under-file benchmarks/quality-gates/e2e_induction_recall_synthetic.json \
-  --fail-over-file benchmarks/quality-gates/e2e_induction_recall_synthetic_max.json
-```
-
-It reports aggregate-only e2e metrics:
-`natural_induction_success_rate`, `cross_project_generalization_rate`,
-`project_scope_precision`, `ambiguous_candidate_review_rate`,
-`process_noise_rejection_rate`, `e2e_memory_recall_at_1`,
-`e2e_memory_recall_at_5`,
-`e2e_layer_assignment_accuracy`, `e2e_session_drilldown_rate`,
-`e2e_evidence_reachability_rate`, `e2e_source_policy_pass_rate`,
-`e2e_lifecycle_active_suppression_rate`, `e2e_forced_memory_recall_rate`,
-and `privacy_leak_count`. The packaged suite covers cross-project automatic
-induction, natural-language preference and workflow induction,
-project-scoped implementation constraints, ambiguous scope candidates routed to
-review, process-noise rejection, source-record forced memory,
-supersede/contradict/deprecate lifecycle suppression, redacted source records,
-and default refusal of likely-secret source records without rendering private
-case details.
-
-The source stream registry synthetic benchmark exercises the explicit
-non-project runner path. It creates a temporary archive, writes
-`config/source_streams.jsonl` with an empty project registry, archives a
-metadata-free synthetic source stream through `tools/run_memory_updates.py`,
-then scores the induced memory through the real layered recall scorer:
-
-```bash
-python benchmarks/source_stream_registry_benchmark.py \
-  --cases benchmarks/cases/source_stream_registry_synthetic.jsonl \
-  --fail-under-file benchmarks/quality-gates/source_stream_registry_synthetic.json \
-  --fail-over-file benchmarks/quality-gates/source_stream_registry_synthetic_max.json
-```
-
-It gates `source_stream_update_rate`,
-`project_registry_independence_rate`, `metadata_free_source_record_rate`,
-`archive_scope_assignment_rate`, `source_partition_assignment_rate`,
-`source_stream_memory_recall_at_5`,
-`source_stream_session_drilldown_rate`,
-`source_stream_evidence_reachability_rate`,
-`source_stream_source_policy_pass_rate`, `case_pass_rate`, and privacy counts.
-The emitted aggregate report includes an explicit privacy block, and the v1
-readiness gate rejects source-stream reports that omit it or claim rendered
-case details, memory text, source content, source paths, or raw refs.
-This proves the explicit source-stream path in a synthetic archive; it does not
-solve automatic source discovery or ontology mapping.
-
-Render a default global scheduler:
-
-```bash
-python ~/repos/agent-memory/tools/render_scheduler.py \
-  --memory-repo ~/repos/agent-memory \
-  --source-dir /path/to/session-records \
-  --backend launchd \
-  --schedule daily \
-  --output ~/repos/agent-memory/.tmp/agent-memory.plist
-```
-
-Add `--project-path /path/to/project` only when you want one scheduler per
-project instead of the global runner.
-
-Render an agent-native automation prompt:
-
-```bash
-python ~/repos/agent-memory/tools/render_scheduler.py \
-  --memory-repo ~/repos/agent-memory \
-  --source-dir /path/to/session-records \
-  --backend agent-native \
-  --allow-redacted-secrets \
-  --push-after-update \
-  --output ~/repos/agent-memory/.tmp/agent-native-update.txt
-```
-
-Agent-native automations should use the deployment repository as their only
-working directory. Multiple working directories can create multiple concurrent
-automation conversations.
-
-The rendered agent-native prompt includes a daily record content contract:
-`daily/YYYY/YYYY-MM-DD.md` files are durable memory indexes, not automation run
-logs. They should contain durable session summaries, durable decisions, and
-actual unresolved tasks, while excluding command progress, dry-run/live-run
-status, permission or sandbox chatter, raw prompts, AGENTS/environment/policy
-blocks, raw source paths, raw refs, full queries, original secret values, and
-generic process narration. The generated daily summaries use `Durable Sessions`,
-`Durable Decisions`, and `Durable Unresolved Tasks` sections.
-
-Safely commit and push generated archive updates:
-
-```bash
-python ~/repos/agent-memory/tools/sync_memory_archive.py \
-  --memory-repo ~/repos/agent-memory \
-  --push
-```
-
-The sync helper only stages publish-safe archive paths (`INDEX.md`,
-`config/projects.jsonl`, `index/`, `daily/`, `memories/explicit.jsonl`, and
-`sessions/`). It refuses tool/script edits, automatic memory/review node files,
-archive audit findings, publish readiness failures in `daily/` or text-bearing
-indexed summary fields, unredacted key-like values, and whitespace errors before
-committing. Publish readiness reports are aggregate-only and include
-archive-relative paths, categories, and counts without matched snippets.
-
-## Archive Contract
-
-A compatible deployment repository should expose:
-
-- `INDEX.md`: overview for humans and agents.
-- `config/projects.jsonl`: optional project registry used by the global runner.
-  Rows may include `archive_scope` for a memory domain independent from
-  `project_path` and `source_partition` for a high-water/source-hash stream
-  independent from `project_path`.
-- `memories/global.jsonl`, `memories/domains.jsonl`, `memories/projects.jsonl`,
-  and `memories/explicit.jsonl`: layered memory nodes.
-- `reviews/memory_lifecycle_decisions.jsonl`: private reviewer decisions for
-  ambiguous lifecycle candidates.
-- `reviews/induction_review_decisions.jsonl`: private reviewer decisions for
-  natural induction candidates. Duplicate IDs, exact duplicate rows, and
-  conflicting actions for the same candidate or fingerprint are rejected.
-- `index/memories.jsonl`: combined layered-memory search index.
-- `index/memory_review_candidates.jsonl`: ambiguous lifecycle pairs requiring
-  manual review before automatic retirement.
-- `index/induction_review_candidates.jsonl`: aggregate-safe natural induction
-  candidates that require review before promotion.
-- `index/induction_review_decision_results.jsonl`: aggregate-safe applied/ignored
-  induction review decision statuses.
-- `index/memory_review_decision_results.jsonl`: aggregate-safe applied/ignored
-  review decision statuses.
-- `index/memory_consolidation_trace.jsonl`: explainable merge, supersede,
-  contradict, deprecate, and skip decisions from the updater.
-- `index/sessions.jsonl`: one row per session.
-- `index/source_partitions.jsonl`: one generated row per archive scope plus
-  source partition.
-- `index/decisions.jsonl`: one row per reusable decision.
-- `index/unresolved.jsonl`: one row per follow-up task.
-- `sessions/YYYY/MM/DD/.../summary.md`: structured per-session summary.
-- `sessions/YYYY/MM/DD/.../evidence.md`: short evidence snippets for important claims.
-
-Detailed format:
-
-```text
-skills/using-my-precious/references/archive-format.md
-```
-
-## Implemented
-
-- `setup-my-precious` skill.
-- `update-my-precious` skill.
-- `using-my-precious` skill.
-- Skill UI metadata in `agents/openai.yaml`.
-- Generic archive format reference.
-- Layered global, domain, and project memory nodes with drilldown to sessions,
-  evidence, and source anchors.
-- Dependency-light semantic consolidation for automatic memory nodes, including
-  paraphrase support merge, false partial-supersession guards, contradiction
-  links, deprecation links, partial supersession, confidence revision for
-  retired nodes, and robustness benchmark gates.
-- Ambiguity review queue and consolidation decision trace indexes for semantic
-  lifecycle cases that should not be auto-retired.
-- Aggregate-safe natural induction review candidate index for low-confidence,
-  conflicting, or scope-changing natural candidates that should not be
-  auto-promoted.
-- Aggregate-safe induction review decision results for synthetic approve,
-  reject, noop, duplicate, conflict, stale, unsafe, and unknown calibration.
-- Aggregate-only review-decision dry-run/apply tool for converting approved
-  lifecycle review decisions into reciprocal memory links.
-- Privacy-safe real-archive shadow evaluation runner with aggregate recall,
-  suppression, lifecycle, noise-source, provenance, multi-relevant precision,
-  case-detail count metrics, and numeric quality gates.
-- End-to-end synthetic induction-to-recall benchmark that runs setup, updater,
-  generated layered recall cases, and the copied search script with
-  aggregate-only quality gates.
-- Source stream registry synthetic benchmark that proves an explicit
-  `config/source_streams.jsonl` stream can update without project registry
-  rows and still pass layered recall, evidence, and source-policy gates.
-- Updater-driven natural-induction precision gates for adversarial synthetic
-  false-promotion cases and review routing, including induction-review routing
-  rates for low-confidence, scope-change, and conflict candidates.
-- Dependency-free hybrid lexical search script with field weighting, phrase
-  coverage, optional project-context boost, low-signal memory-node filtering,
-  optional preferred-scope ranking, and explainable result reasons.
-- Incremental update script keyed by archive scope, explicit source partition,
-  and source/session timestamp, defaulting both archive scope and source
-  partition to project path for compatibility.
-- Searchable summary, short evidence snippet, source-map, daily summary, and JSONL index generation.
-- Secret-pattern detection that refuses risky source records by default.
-- Optional project-metadata requirement for shared source record directories.
-- Global update runner that bootstraps an empty project registry from source
-  records and can run explicit non-project source streams from
-  `config/source_streams.jsonl`.
-- Backfill mode for deliberately rewriting existing source-record entries.
-- Meta-driven backfill tool for repairing existing archive entries without repeated full source scans.
-- Archive audit tool for wrapper-field noise, process-update text, and key-like values.
-- Reviewable scheduler template generator for launchd and cron formats.
-- Agent-native automation prompt rendering with a single working directory.
-- Safe Git sync helper for generated archive updates.
-- Private deployment repository template.
-- Synthetic setup, update, global-runner, and search tests.
-
-## Responsibility Map
-
-This repository should provide reusable, non-private building blocks:
-
-- skills and their bundled scripts/assets
-- archive format contracts and schemas
-- deployment repository templates
-- generic search tools
-- reusable setup helpers
-- reusable archive pipeline components such as redaction, rendering, indexing, validation, global update running, safe Git sync, scheduler-template generation, and source-adapter interfaces
-
-`$setup-my-precious` should perform runtime setup actions after asking the user:
-
-- choose local-only storage or Git-backed storage
-- choose or create the local archive directory
-- optionally create/connect a private hosted Git repository
-- copy the deployment template
-- initialize Git when requested
-- write the archive location to `~/.config/my-precious/config.json`
-- report an optional `AGENT_SESSION_MEMORY_REPO` current-shell override
-- optionally configure a recurring archive job, but only after concrete archive and sync commands exist in the deployment repository
-
-The private deployment repository should contain user-specific state and operations:
-
-- generated `sessions/`, `daily/`, and `index/` data
-- archive-scope plus source-partition high-water marks and source-record hash
-  freshness state
-- local config and logs
-- configured remotes
-- active scheduled jobs or scheduler config
-- source-specific ingestion settings
-
-The deployment repository should not commit raw transcripts, credentials, cookies, private keys, or unredacted data.
-
-Runtime setup work that belongs in `$setup-my-precious`:
-
-- prompt the user for storage mode and path
-- prompt for hosted Git repository name when needed
-- create/connect the private repository
-- ask whether to render and then configure scheduling once the archive command exists
-- verify the resulting search command works
-
-## Verification
+## Documentation
+
+- [System design](docs/design.md)
+- [Archive format contract](skills/using-my-precious/references/archive-format.md)
+- [Hybrid retrieval decision](docs/decisions/ADR-001-hybrid-memory-retrieval.md)
+- [Semantic runtime deployment decision](docs/decisions/ADR-002-deploy-semantic-runtime-from-setup-skill.md)
+- [Recall readiness and known limitations](docs/evaluations/layered-memory-readiness.md)
+- [Contributor and release rules](AGENTS.md)
+
+The Skill files are the operational source of truth. Design documents explain
+why the system is structured this way; evaluation documents record measured
+capabilities and limits. The README intentionally does not duplicate either.
+
+## Development
 
 Run the canonical release gate before publishing or opening a release PR:
 
@@ -1289,71 +136,22 @@ Run the canonical release gate before publishing or opening a release PR:
 python3 tools/run_quality_gates.py
 ```
 
-The release gate emits aggregate-only JSON and summarizes the v1 readiness
-scorecards without rendering child command stdout/stderr, memory text, search
-hits, source paths, temporary paths, or raw refs.
-
-For focused debugging, run the underlying checks directly:
+Useful focused checks:
 
 ```bash
-python3 tools/validate_skills.py
-
-python3 benchmarks/packaged_lifecycle_gate.py
-
-python3 benchmarks/automation_publish_readiness_gate.py
-
-python3 benchmarks/publish_surface_repair_gate.py
-
-python3 benchmarks/scheduled_publish_recovery_gate.py
-
-python3 benchmarks/scheduled_publish_search_gate.py
-
-python3 benchmarks/scheduled_content_noise_repair_closure_gate.py
-
-python3 benchmarks/v1_readiness_gate.py --run-packaged
-
-python3 benchmarks/v1_readiness_gate.py --run-packaged --require-answer
-
 python3 -m unittest discover -s tests -p 'test_*.py'
-
-python3 -m py_compile \
-  tools/validate_skills.py \
-  tools/run_quality_gates.py \
-  benchmarks/packaged_lifecycle_gate.py \
-  benchmarks/automation_publish_readiness_gate.py \
-  benchmarks/publish_surface_repair_gate.py \
-  benchmarks/scheduled_publish_recovery_gate.py \
-  benchmarks/scheduled_publish_search_gate.py \
-  benchmarks/scheduled_content_noise_repair_closure_gate.py \
-  benchmarks/e2e_induction_recall_benchmark.py \
-  benchmarks/updater_induction_benchmark.py \
-  benchmarks/layered_recall_benchmark.py \
-  benchmarks/build_synthetic_recall_archive.py \
-  benchmarks/convert_public_memory_benchmark.py \
-  benchmarks/source_stream_registry_benchmark.py \
-  benchmarks/v1_readiness_gate.py \
-  skills/setup-my-precious/scripts/setup_memory_archive.py \
-  skills/update-my-precious/scripts/update_memory_archive.py \
-  skills/update-my-precious/scripts/memory_consolidation.py \
-  skills/using-my-precious/scripts/search_memory.py \
-  templates/agent-memory-repo/tools/run_memory_updates.py \
-  templates/agent-memory-repo/tools/audit_memory_archive.py \
-  templates/agent-memory-repo/tools/audit_publish_readiness.py \
-  templates/agent-memory-repo/tools/repair_publish_surfaces.py \
-  templates/agent-memory-repo/tools/backfill_memory_archive.py \
-  templates/agent-memory-repo/tools/capture_explicit_memory.py \
-  templates/agent-memory-repo/tools/update_memory_archive.py \
-  templates/agent-memory-repo/tools/memory_consolidation.py \
-  templates/agent-memory-repo/tools/search_memory.py \
-  templates/agent-memory-repo/tools/induction_consolidation_audit.py \
-  templates/agent-memory-repo/tools/render_scheduler.py \
-  templates/agent-memory-repo/tools/sync_memory_archive.py
+python3 tools/validate_skills.py
 ```
+
+The full verification matrix and template-sync rules live in
+[`AGENTS.md`](AGENTS.md).
 
 ## Security Boundary
 
-- Do not upload raw transcripts by default.
-- Do not commit tokens, cookies, private keys, or `.env` files.
-- Keep this repository limited to reusable tooling and synthetic tests.
-- Keep the real memory repository private.
-- Prefer `summary.md`; read `evidence.md` only when support is needed.
+- Redact before summarization or evidence rendering.
+- Refuse likely-secret source records by default.
+- Keep evidence snippets short and source access explicitly authorized.
+- Keep models, virtual environments, credentials, logs, scheduler state, and
+  generated private data outside this repository.
+- Treat benchmark success as bounded evidence, not proof of universally strong
+  recall across every archive and query shape.
