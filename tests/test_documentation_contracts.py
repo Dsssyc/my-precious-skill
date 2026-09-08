@@ -1558,6 +1558,29 @@ class DocumentationContractTests(unittest.TestCase):
             self.assert_contains(adr, phrase)
         self.assertIsNone(re.search(r"/Users/[^\s)`]+", setup_skill + adr))
 
+    def test_docs_record_v261_semantic_runtime_deployment_closure(self):
+        section = self.evaluation_section(
+            "## V2.61 Setup-Owned Semantic Runtime Deployment Closure"
+        )
+        for phrase in (
+            "Decision: `go`",
+            "setup_semantic_retrieval.py",
+            "semantic_provider_health_timeout",
+            "ProcessType=Interactive",
+            "32.856 seconds",
+            "provider memory count",
+            "3,059",
+            "21/21 current",
+            "01b077ef",
+            "current_turn_precedence",
+            "Query-time provider execution",
+            "archive content mutation count",
+            "--disable",
+            "V2.61 does not make semantic retrieval a",
+        ):
+            self.assert_contains(section, phrase)
+        self.assertIsNone(re.search(r"/Users/[^\s)`]+", section))
+
     def test_skill_docs_record_explicit_revision_adapter_contract(self):
         for phrase in (
             "explicit revision path",

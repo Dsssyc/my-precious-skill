@@ -4256,6 +4256,90 @@ The provider was stopped after the shadow. Temporary redundant model downloads
 and incomplete candidates were removed; only the minimal evaluation environment
 remained outside the repository during verification.
 
+## V2.61 Setup-Owned Semantic Runtime Deployment Closure
+
+Date: 2026-09-08
+
+Decision: `go` for the approved local deployment.
+
+V2.61 makes the V2.60 provider operational through `setup-my-precious` rather
+than leaving environment construction as manual documentation. The new
+`setup_semantic_retrieval.py` exposes aggregate-only `--plan`, `--install`,
+`--check`, and non-destructive `--disable` actions. It provisions pinned
+dependencies and model revisions outside both repositories, manages a private
+socket and logs, writes config only after provider health, and installs a user
+LaunchAgent on macOS.
+
+The deployment source commits were:
+
+- `add988f`: setup-owned environment, model, config, launchd, health, refresh,
+  and rollback lifecycle;
+- `51c297b`: classify the provider as launchd `ProcessType=Interactive` after
+  the first live startup attribution.
+
+The first approved install provisioned the complete reusable environment and
+both pinned models, then correctly returned
+`blocked: semantic_provider_health_timeout`. Read-only diagnosis showed the
+provider still computing embeddings with no socket or startup report after the
+180-second deadline. The installer unloaded launchd, left the private config
+unchanged and disabled, and retained the complete environment for recovery.
+No archive content was changed.
+
+Running the identical provider directly reached ready in under 30 seconds.
+Apple's installed `launchd.plist(5)` documentation states that `Background`
+jobs receive CPU and I/O limits; this classified the initial failure as service
+QoS throttling rather than model, index, permission, or provider failure. The
+plist was changed to `Interactive` because readiness and query latency are on
+the user-request path. Its focused regression test passed before retry.
+
+The second install reused the existing environment and model artifacts, so its
+model download count was zero. The aggregate receipt was:
+
+| install metric | result |
+| --- | ---: |
+| provider health ready | 1 |
+| provider memory count | 3,059 |
+| health wait | 32.856 seconds |
+| config changed | 1 |
+| private config backup created | 1 |
+| launchd plist changed | 1 |
+| service newly loaded | 1 |
+| repository mutation count | 0 |
+| archive content mutation count | 0 |
+
+The deployed provider fingerprint is
+`7cc844c2703c5c5374e4e0d6ff6f4bed78e49a6d00cc26013d052a834ecf740a`.
+The environment uses `intfloat/multilingual-e5-small` revision
+`614241f622f53c4eeff9890bdc4f31cfecc418b3` and
+`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` revision
+`1427fd652930e4ba29e8149678df786c240d8825`. Query-time provider execution is
+offline.
+
+Post-install checks from the installed setup skill reported every runtime
+check true: config identity and mode, venv, both models, runtime/state modes,
+service definition, loaded service, and provider health. The three installed
+skills matched the source trees byte-for-byte. The private deployment tool
+bundle was `21/21 current`. Its tool-only deployment commit was `01b077ef`, and
+a fresh fetch proved local `HEAD` equals `origin/main`.
+
+The live positive smoke test returned one semantic-policy-supported memory
+where lexical support count remained zero. A same-topic current-turn override
+probe returned zero semantic support with
+`reason: current_turn_precedence`. Both reports retained the context-package
+privacy boundary: no memory text, raw refs, source content, credentials,
+scheduler state, or local paths were rendered.
+
+The provider now checks the memory index while idle and rebuilds its in-memory
+embeddings when the index signature changes. Search binds responses to the
+current index SHA-256, so a query before refresh completes falls back to
+lexical/FTS rather than accepting stale semantic results.
+
+Rollback remains recoverable: `--disable` unloads launchd and marks the provider
+disabled without deleting the venv, models, logs, plist, config backup, archive
+data, or prior installed-skill backup. V2.61 does not make semantic retrieval a
+cloud dependency, alter scheduled archive-writer ownership, prove a broad
+private holdout, or claim GraphRAG or public leaderboard parity.
+
 ## Current Baseline
 
 Baseline date: 2026-06-27
