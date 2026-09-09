@@ -843,6 +843,11 @@ fingerprints remain fatal. Known finalizer exceptions are returned as the bounde
 aggregate reasons `memory_review_decision_invalid` or
 `archive_finalization_failed`, leaving `child_failure_unclassified` for report
 protocol failures rather than known archive validation failures.
+Archive placeholder auditing is field-exact: standalone placeholder titles,
+facts, summaries, and evidence lines remain blocked, while a durable diagnosis
+that quotes a placeholder string as the defect being discussed is not itself a
+placeholder. Secret, noise, raw-title, provenance, and lifecycle audits remain
+unchanged.
 
 The transaction contract adds a successful `deferred` terminal status and a
 `source_batch_complete` bit. `published` may be incomplete at the source-batch

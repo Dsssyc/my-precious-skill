@@ -44,6 +44,47 @@ def write_memory_node_provenance(memory_repo, slug, quote_id="ev_001"):
 
 
 class AuditMemoryArchiveTests(unittest.TestCase):
+    def test_audit_allows_durable_critique_that_quotes_placeholder_text(self):
+        setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo = root / "agent-memory"
+            subprocess.run(
+                [sys.executable, str(setup_script), "--path", str(memory_repo), "--mode", "local", "--skip-config"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            critique = (
+                "The prior summary used Archive source record for my-precious-skill, "
+                "which has no durable retrieval value."
+            )
+            (memory_repo / "INDEX.md").write_text(critique + "\n", encoding="utf-8")
+            (memory_repo / "index/sessions.jsonl").write_text(
+                json.dumps({"summary": critique}, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            note_dir = memory_repo / "sessions/2026/06/12/critique"
+            note_dir.mkdir(parents=True)
+            (note_dir / "summary.md").write_text("## Reusable Facts\n\n- " + critique + "\n", encoding="utf-8")
+            (note_dir / "evidence.md").write_text("ev_001: " + critique + "\n", encoding="utf-8")
+            (note_dir / "notes.json").write_text(
+                json.dumps({"text": critique}, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(memory_repo / "tools/audit_memory_archive.py"), "--memory-repo", str(memory_repo)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("category=placeholder", result.stdout + result.stderr)
+
     def test_audit_accepts_versioned_source_map_anchor(self):
         setup_script = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
         audit_script = Path("templates/agent-memory-repo/tools/audit_memory_archive.py").resolve()

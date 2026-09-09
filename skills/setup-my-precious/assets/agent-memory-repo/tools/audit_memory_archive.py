@@ -531,6 +531,22 @@ def quality_text_segments(text: str) -> tuple[str, ...]:
     return tuple(segments)
 
 
+def is_placeholder_text(text: str) -> bool:
+    compacted = re.sub(r"\s+", " ", text).strip()
+    if not compacted:
+        return False
+    json_property = re.fullmatch(r'"[^"\\]+"\s*:\s*("(?:[^"\\]|\\.)*")\s*,?', compacted)
+    if json_property:
+        try:
+            compacted = str(json.loads(json_property.group(1)))
+        except json.JSONDecodeError:
+            return False
+    compacted = re.sub(r"^#+\s*(?:Session:\s*)?", "", compacted, flags=re.IGNORECASE)
+    compacted = re.sub(r"^[-*]\s+", "", compacted)
+    compacted = re.sub(r"^ev_[A-Za-z0-9_.:-]+:\s*", "", compacted)
+    return bool(PLACEHOLDER_PATTERN.fullmatch(compacted.strip(" .:;")))
+
+
 def is_redaction_category_text(text: str) -> bool:
     compacted = re.sub(r"\s+", " ", text).strip().lower()
     if not compacted:
@@ -601,7 +617,7 @@ def scan_file(repo: Path, path: Path, check_process_updates: bool) -> list[Findi
         for category, pattern in NOISE_PATTERNS.items():
             if pattern.search(line):
                 findings.append(Finding(relative, line_number, category))
-        if PLACEHOLDER_PATTERN.search(line):
+        if any(is_placeholder_text(segment) for segment in quality_segments):
             findings.append(Finding(relative, line_number, "placeholder"))
         if RAW_TITLE_PATTERN.search(line):
             findings.append(Finding(relative, line_number, "raw_title"))
