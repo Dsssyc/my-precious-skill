@@ -169,7 +169,16 @@ if marker:
         encoding="utf-8",
     )
     (tools / "audit_memory_archive.py").write_text(
-        "import os\nraise SystemExit(1 if os.environ.get('SYNTHETIC_AUDIT_FAIL') else 0)\n",
+        """import os
+import sys
+from pathlib import Path
+args = sys.argv[1:]
+repo = Path(args[args.index('--memory-repo') + 1])
+index = repo / 'INDEX.md'
+always_fail = bool(os.environ.get('SYNTHETIC_AUDIT_FAIL'))
+repairable_fail = bool(os.environ.get('SYNTHETIC_AUDIT_REPAIRABLE')) and index.exists() and index.read_text(encoding='utf-8') == 'needs-repair\\n'
+raise SystemExit(1 if always_fail or repairable_fail else 0)
+""",
         encoding="utf-8",
     )
     (tools / "audit_publish_readiness.py").write_text(
@@ -1161,6 +1170,29 @@ class ScheduledMemoryTransactionTests(unittest.TestCase):
             state = root / "state"
 
             result, report = invoke(canonical, source, state, env={**os.environ, "SYNTHETIC_TRANSACTION_MODE": "repair"})
+
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(report["status"], "published")
+            self.assertEqual(report["metrics"]["repair_attempt_count"], 1)
+            self.assertEqual((canonical / "INDEX.md").read_text(encoding="utf-8"), "repaired\n")
+
+    def test_archive_audit_failure_runs_one_bounded_repair_then_publishes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            canonical, source, _remote = setup_archive(root)
+            install_synthetic_runtime(canonical)
+            state = root / "state"
+
+            result, report = invoke(
+                canonical,
+                source,
+                state,
+                env={
+                    **os.environ,
+                    "SYNTHETIC_TRANSACTION_MODE": "repair",
+                    "SYNTHETIC_AUDIT_REPAIRABLE": "1",
+                },
+            )
 
             self.assertEqual(result.returncode, 0)
             self.assertEqual(report["status"], "published")

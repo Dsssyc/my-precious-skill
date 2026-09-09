@@ -859,6 +859,10 @@ The repair scan also compares standard session-summary title and Search Tags
 surfaces with cleaned metadata. Summary-only drift is counted as
 `summary_surfaces_rewritten`, makes dry-run mode `repairable`, and is updated
 through the safe archive writer before global indexes are rebuilt.
+The scheduled transaction invokes that single bounded repair when either the
+initial archive audit or publish-readiness gate fails, then requires both gates
+to pass on fresh reruns. A persistent failure remains blocked and never causes
+a second repair attempt or alternate publication path.
 
 The transaction contract adds a successful `deferred` terminal status and a
 `source_batch_complete` bit. `published` may be incomplete at the source-batch

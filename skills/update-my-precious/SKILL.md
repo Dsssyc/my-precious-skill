@@ -73,6 +73,9 @@ stale fingerprints still fail closed. A structured finalizer failure uses the bo
 reason `memory_review_decision_invalid` or `archive_finalization_failed`;
 `child_failure_unclassified` remains reserved for a missing, malformed, extra,
 or exit-inconsistent child report.
+An initial archive-audit or publish-readiness failure may trigger the same one
+bounded publish-surface repair. The adapter then reruns both gates; a remaining
+failure stays blocked, and no second repair attempt is allowed.
 An interrupted no-publication run whose persisted `complete` candidate equals
 its base is reconciled to its original `no_op_current` or `deferred` result;
 it is not a failed remote receipt. Pending-source retry state is private

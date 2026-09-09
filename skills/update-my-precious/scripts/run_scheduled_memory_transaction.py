@@ -1166,10 +1166,9 @@ def _execute(
             source_target_deferred_count=metrics["source_target_deferred_count"],
             source_batch_complete=source_batch_complete,
         )
-        if run_python_tool(staging, "audit_memory_archive.py", *audit_arguments).returncode != 0:
-            raise TransactionBlocked("archive_audit_failed")
+        archive_audit = run_python_tool(staging, "audit_memory_archive.py", *audit_arguments)
         readiness = run_python_tool(staging, "audit_publish_readiness.py", *audit_arguments)
-        if readiness.returncode != 0:
+        if archive_audit.returncode != 0 or readiness.returncode != 0:
             metrics["repair_attempt_count"] = 1
             write_state(
                 state_dir,
