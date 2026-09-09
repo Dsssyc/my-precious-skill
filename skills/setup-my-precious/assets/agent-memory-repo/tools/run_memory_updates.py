@@ -1008,7 +1008,14 @@ def parse_update_target_report(result: subprocess.CompletedProcess[str]) -> dict
         or payload.get("report_version") != UPDATE_TARGET_REPORT_VERSION
         or payload.get("status") not in {"updated", "deferred", "blocked"}
         or payload.get("reason")
-        not in {"updated", "source_records_deferred", "source_inventory_invalid", "secret_records_rejected"}
+        not in {
+            "updated",
+            "source_records_deferred",
+            "source_inventory_invalid",
+            "secret_records_rejected",
+            "memory_review_decision_invalid",
+            "archive_finalization_failed",
+        }
         or not isinstance(payload.get("source_batch_complete"), bool)
     ):
         return None
@@ -1040,7 +1047,12 @@ def parse_update_target_report(result: subprocess.CompletedProcess[str]) -> dict
     valid_reasons = {
         "updated": {"updated"},
         "deferred": {"source_records_deferred"},
-        "blocked": {"source_inventory_invalid", "secret_records_rejected"},
+        "blocked": {
+            "source_inventory_invalid",
+            "secret_records_rejected",
+            "memory_review_decision_invalid",
+            "archive_finalization_failed",
+        },
     }
     if payload["reason"] not in valid_reasons[payload["status"]]:
         return None

@@ -834,6 +834,15 @@ accept only bounded versioned JSON reports; missing, malformed, or unknown
 child results, invalid status/reason pairs, and inconsistent selected/process/
 deferred counts become `child_failure_unclassified` and stay blocked without
 rendering captured output. JSON and JSONL source records must parse completely.
+Finalization does not replay an already-consumed lifecycle decision against a
+different candidate. It may reuse the exact prior result only when the
+decision key and fingerprint match and either referenced node has retired. If
+both nodes still exist, the current candidate and fingerprint remain required
+before the approved relation is rebuilt. New unknown decisions and stale
+fingerprints remain fatal. Known finalizer exceptions are returned as the bounded
+aggregate reasons `memory_review_decision_invalid` or
+`archive_finalization_failed`, leaving `child_failure_unclassified` for report
+protocol failures rather than known archive validation failures.
 
 The transaction contract adds a successful `deferred` terminal status and a
 `source_batch_complete` bit. `published` may be incomplete at the source-batch

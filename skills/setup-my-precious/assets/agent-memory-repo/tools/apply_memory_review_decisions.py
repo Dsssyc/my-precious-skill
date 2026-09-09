@@ -148,7 +148,11 @@ def result_reflected_by_nodes(result: dict, nodes_by_id: dict[str, dict]) -> boo
     current = nodes_by_id.get(current_id)
     old = nodes_by_id.get(older_id)
     if current is None or old is None:
-        return False
+        # The exact persisted result proves this decision was already consumed.
+        # Once either source-backed node retires, there is no complete live
+        # relation to reapply and the historical decision must not block later
+        # rebuilds.
+        return True
     action = result.get("action")
     if action == "approve_supersedes":
         return (

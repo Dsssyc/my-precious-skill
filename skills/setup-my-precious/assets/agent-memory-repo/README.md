@@ -355,6 +355,11 @@ dry-run output is aggregate JSON with decision counts, applied/ignored action
 counts, and before/after lifecycle relation counts. Use `--write` only after
 reviewing the decision file; it rebuilds archive indexes and applies approved
 supersession, contradiction, or deprecation links.
+An exact persisted result remains consumed when either referenced memory node
+later retires, so historical review decisions do not block unrelated archive
+finalization or leave dangling relations. Unknown decisions without that prior
+result, stale fingerprints, and candidate-less decisions whose targets both
+still exist continue to fail closed.
 Induction review decisions live in `reviews/induction_review_decisions.jsonl`.
 The tool rejects duplicate IDs, repeated exact rows, and conflicting actions for
 the same candidate or candidate fingerprint. Dry-run preflight reports only

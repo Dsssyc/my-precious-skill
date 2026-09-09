@@ -67,6 +67,7 @@ CONFIG_CANDIDATES = (
 )
 DEFAULT_CONFIG_PATH = Path("~/.config/my-precious/config.json")
 MEMORY_REVIEW_DECISION_REL_PATH = Path("reviews/memory_lifecycle_decisions.jsonl")
+MEMORY_REVIEW_DECISION_RESULT_REL_PATH = Path("index/memory_review_decision_results.jsonl")
 INDUCTION_REVIEW_DECISION_REL_PATH = Path("reviews/induction_review_decisions.jsonl")
 SAFE_MEMORY_REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 SHA256_HEX_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -120,6 +121,18 @@ INDUCTION_REVIEW_DECISION_SET_ERROR_KEYS = (
     "stale",
     "unknown",
     "unsafe",
+)
+REVIEW_DECISION_FAILURE_MESSAGES = frozenset(
+    {
+        "invalid induction review decision set",
+        "stale induction review decision",
+        "stale memory review decision",
+        "unknown induction review candidate",
+        "unknown memory review candidate",
+        "unknown memory review target",
+        "unsafe induction review decision",
+        "unsafe memory review decision",
+    }
 )
 MEMORY_REVIEW_CANDIDATE_FINGERPRINT_FIELDS = (
     "candidate_type",
@@ -5205,10 +5218,28 @@ def build_memory_review_candidate_index(candidates: list[dict]) -> dict[tuple[st
     return index
 
 
+def memory_review_decision_result_key(row: dict) -> tuple[str, str, str, str, str]:
+    return (
+        str(row.get("decision_id") or ""),
+        str(row.get("action") or ""),
+        str(row.get("current_memory_id") or ""),
+        str(row.get("older_memory_id") or ""),
+        str(row.get("candidate_fingerprint") or ""),
+    )
+
+
+def load_memory_review_decision_results(memory_repo: Path) -> list[dict]:
+    path = memory_repo / MEMORY_REVIEW_DECISION_RESULT_REL_PATH
+    if not is_safe_repo_path(memory_repo, path):
+        raise SystemExit("Refusing to read unsafe memory review decision result path")
+    return list(iter_jsonl(path))
+
+
 def apply_memory_review_decisions(
     nodes: list[dict],
     review_candidates: list[dict],
     review_decisions: list[dict],
+    prior_results: list[dict] | None = None,
 ) -> list[dict]:
     nodes_by_id = {
         memory_id: node
@@ -5216,6 +5247,10 @@ def apply_memory_review_decisions(
         if (memory_id := safe_node_memory_id(node))
     }
     candidates_by_pair = build_memory_review_candidate_index(review_candidates)
+    prior_results_by_key = {
+        memory_review_decision_result_key(result): result
+        for result in prior_results or []
+    }
     results: list[dict] = []
     for decision in review_decisions:
         action = decision.get("action")
@@ -5230,17 +5265,23 @@ def apply_memory_review_decisions(
         ):
             raise SystemExit("unsafe memory review decision")
         candidate = candidates_by_pair.get((current_id, older_id))
-        if candidate is None:
+        current = nodes_by_id.get(current_id)
+        old = nodes_by_id.get(older_id)
+        expected_status = "ignored" if action in MEMORY_REVIEW_IGNORE_ACTIONS else "applied"
+        prior_result = prior_results_by_key.get(memory_review_decision_result_key(decision))
+        replaying_prior_result = candidate is None and (
+            prior_result is not None and prior_result.get("status") == expected_status
+            and (current is None or old is None)
+        )
+        if candidate is None and not replaying_prior_result:
             raise SystemExit("unknown memory review candidate")
         candidate_fingerprint = decision.get("candidate_fingerprint")
-        if (
+        if candidate is not None and (
             not isinstance(candidate_fingerprint, str)
             or candidate_fingerprint != review_candidate_fingerprint(candidate)
         ):
             raise SystemExit("stale memory review decision")
-        current = nodes_by_id.get(current_id)
-        old = nodes_by_id.get(older_id)
-        if current is None or old is None:
+        if (current is None or old is None) and not replaying_prior_result:
             raise SystemExit("unknown memory review target")
         result = {
             "decision_id": safe_memory_review_scalar(decision.get("decision_id") or "", 120),
@@ -5251,6 +5292,10 @@ def apply_memory_review_decisions(
         }
         if action in MEMORY_REVIEW_IGNORE_ACTIONS:
             result["status"] = "ignored"
+            results.append(result)
+            continue
+        if current is None or old is None:
+            result["status"] = "applied"
             results.append(result)
             continue
         if action == "approve_supersedes":
@@ -5598,11 +5643,13 @@ def rebuild_indexes(memory_repo: Path, *, reconcile_removed_refs: bool = True) -
         induction_review_decisions,
     )
     review_decisions = load_memory_review_decisions(memory_repo)
+    prior_review_decision_results = load_memory_review_decision_results(memory_repo)
     initial_review_candidates = build_memory_review_candidates(memory_nodes)
     review_decision_results = apply_memory_review_decisions(
         memory_nodes,
         initial_review_candidates,
         review_decisions,
+        prior_review_decision_results,
     )
     memory_nodes = write_memory_nodes(
         memory_repo,
@@ -6004,7 +6051,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     memory_repo = resolve_memory_repo(args.memory_repo)
     if args.finalize_archive:
-        rebuild_indexes(memory_repo, reconcile_removed_refs=True)
+        try:
+            rebuild_indexes(memory_repo, reconcile_removed_refs=True)
+        except SystemExit as exc:
+            if not args.report_json:
+                raise
+            reason = (
+                "memory_review_decision_invalid"
+                if str(exc) in REVIEW_DECISION_FAILURE_MESSAGES
+                else "archive_finalization_failed"
+            )
+            emit_update_target_report(update_target_report("blocked", reason))
+            return 2
+        except Exception:
+            if not args.report_json:
+                raise
+            emit_update_target_report(update_target_report("blocked", "archive_finalization_failed"))
+            return 2
         if args.report_json:
             emit_update_target_report(update_target_report("updated", "updated"))
         return 0

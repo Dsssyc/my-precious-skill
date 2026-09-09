@@ -1241,12 +1241,13 @@ if mode == 'unknown-failure':
     print('PRIVATE_CHILD_FAILURE_DETAIL', file=sys.stderr)
     raise SystemExit(9)
 deferred = 1 if mode == 'deferred' and '--finalize-archive' not in args else 0
+finalization_failure = mode == 'finalization-review-failure' and '--finalize-archive' in args
 payload = {
     'report_kind': 'memory_update_target_report',
     'report_version': 1,
-    'status': 'deferred' if deferred else 'updated',
-    'reason': 'source_records_deferred' if deferred else 'updated',
-    'source_batch_complete': not deferred,
+    'status': 'blocked' if finalization_failure else ('deferred' if deferred else 'updated'),
+    'reason': 'memory_review_decision_invalid' if finalization_failure else ('source_records_deferred' if deferred else 'updated'),
+    'source_batch_complete': not deferred and not finalization_failure,
     'metrics': {
         'records_selected_count': deferred,
         'records_processed_count': 0,
@@ -1264,6 +1265,8 @@ if mode == 'invalid-pair':
     payload['reason'] = 'secret_records_rejected'
 if '--report-json' in args:
     print(json.dumps(payload, sort_keys=True, separators=(',', ':')))
+if finalization_failure:
+    raise SystemExit(2)
 """,
             encoding="utf-8",
         )
@@ -1316,6 +1319,30 @@ if '--report-json' in args:
             self.assertEqual(report["failure_stage"], "project_update")
             self.assertEqual(report["metrics"]["child_failure_count"], 1)
             self.assertNotIn("PRIVATE_CHILD_FAILURE_DETAIL", result.stdout + result.stderr)
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_report_json_preserves_structured_finalization_review_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            memory_repo, source_dir = self.make_fake_repo(root)
+            self.install_structured_fake_updater(memory_repo)
+
+            result = subprocess.run(
+                [*self.runner_command(memory_repo, source_dir), "--report-json"],
+                cwd=memory_repo,
+                env={**os.environ, "MY_PRECIOUS_TEST_STRUCTURED_MODE": "finalization-review-failure"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "blocked")
+            self.assertEqual(report["reason"], "memory_review_decision_invalid")
+            self.assertEqual(report["failure_stage"], "archive_finalization")
+            self.assertEqual(report["metrics"]["projects_updated_count"], 1)
+            self.assertEqual(report["metrics"]["child_failure_count"], 1)
             self.assertNotIn(str(root), result.stdout + result.stderr)
 
     def test_report_json_rejects_semantically_impossible_child_report(self):

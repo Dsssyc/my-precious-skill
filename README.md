@@ -63,9 +63,9 @@ optional current-shell override.
 4. The read path uses weighted lexical retrieval, SQLite FTS5 BM25, CJK
    trigrams, and reciprocal-rank fusion. An optional local provider adds
    full-index dense retrieval and cross-encoder reranking.
-5. Retrieval returns a machine-readable context package. An agent answers only
-   from supported, active/current memories with summary and evidence paths;
-   otherwise it abstains.
+5. Retrieval returns a machine-readable `memory_recall_context_package` with
+   `answerability.status`. An agent answers only from supported, active/current
+   memories with summary and evidence paths; otherwise it abstains.
 
 Direct retrieval from a deployment archive looks like this:
 

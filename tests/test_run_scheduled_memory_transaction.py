@@ -962,6 +962,44 @@ class ScheduledMemoryTransactionTests(unittest.TestCase):
             self.assertEqual(git(canonical, "rev-parse", "origin/main").stdout.strip(), starting)
             self.assertEqual(git(canonical, "status", "--porcelain=v1", "--untracked-files=all").stdout, "")
 
+    def test_update_batch_parser_accepts_structured_finalization_review_failure(self):
+        module = load_module()
+        payload = {
+            "report_kind": "memory_update_batch_report",
+            "report_version": 1,
+            "status": "blocked",
+            "reason": "memory_review_decision_invalid",
+            "failure_stage": "archive_finalization",
+            "source_batch_complete": False,
+            "metrics": {
+                "inventory_worker_count": 1,
+                "projects_updated_count": 123,
+                "source_streams_updated_count": 0,
+                "archive_finalization_count": 0,
+                "records_deferred_count": 1,
+                "targets_deferred_count": 1,
+                "child_failure_count": 1,
+            },
+            "privacy": {
+                "aggregate_only": True,
+                "paths_rendered": False,
+                "source_content_rendered": False,
+                "child_output_rendered": False,
+            },
+        }
+        result = subprocess.CompletedProcess(
+            args=[],
+            returncode=2,
+            stdout=json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+            stderr="",
+        )
+
+        parsed = module.parse_update_batch_report(result)
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["reason"], "memory_review_decision_invalid")
+        self.assertEqual(parsed["failure_stage"], "archive_finalization")
+
     def test_structured_update_failure_preserves_aggregate_stage_and_counts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

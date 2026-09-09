@@ -65,6 +65,14 @@ completion. The report exposes aggregate deferred-target/record counts only;
 `failure_stage` plus processed/child-failure counts identify a blocked update
 without forwarding arbitrary diagnostics. It never renders source paths,
 source content, or child output.
+Archive finalization preserves an exact prior lifecycle-review result when its
+decision was already consumed and either referenced node has since retired.
+If both nodes still exist, the current candidate and fingerprint remain
+required before the approved relation is rebuilt. New unknown decisions and
+stale fingerprints still fail closed. A structured finalizer failure uses the bounded
+reason `memory_review_decision_invalid` or `archive_finalization_failed`;
+`child_failure_unclassified` remains reserved for a missing, malformed, extra,
+or exit-inconsistent child report.
 An interrupted no-publication run whose persisted `complete` candidate equals
 its base is reconciled to its original `no_op_current` or `deferred` result;
 it is not a failed remote receipt. Pending-source retry state is private

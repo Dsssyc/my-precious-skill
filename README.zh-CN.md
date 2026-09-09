@@ -59,8 +59,9 @@ https://github.com/Dsssyc/my-precious-skill
    排序逻辑保存。
 4. 读取路径组合字段加权检索、SQLite FTS5 BM25、中文 trigram 和 RRF；可选的
    本地 provider 再加入全索引向量召回和 cross-encoder 重排。
-5. 检索输出机器可读的 context package。agent 只能根据有摘要、证据路径且状态为
-   active/current 的受支持记忆作答，否则拒答。
+5. 检索输出机器可读的 `memory_recall_context_package`，其中包含
+   `answerability.status`。agent 只能根据有摘要、证据路径且状态为 active/current
+   的受支持记忆作答，否则拒答。
 
 直接查询部署归档的示例：
 

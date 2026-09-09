@@ -2078,6 +2078,24 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "unknown memory review candidate"):
             module.apply_memory_review_decisions([current, old], [candidate], [decision])
 
+    def test_apply_memory_review_decisions_refuses_prior_result_without_current_candidate(self):
+        module = load_update_module()
+        current = self.synthetic_memory_node("mem_current", "Current synthetic review memory.")
+        old = self.synthetic_memory_node("mem_old", "Older synthetic review memory.")
+        candidate = self.synthetic_review_candidate()
+        decision = self.synthetic_review_decision(module, candidate, "approve_supersedes")
+        prior_result = {
+            "decision_id": decision["decision_id"],
+            "action": decision["action"],
+            "current_memory_id": decision["current_memory_id"],
+            "older_memory_id": decision["older_memory_id"],
+            "candidate_fingerprint": decision["candidate_fingerprint"],
+            "status": "applied",
+        }
+
+        with self.assertRaisesRegex(SystemExit, "unknown memory review candidate"):
+            module.apply_memory_review_decisions([current, old], [], [decision], [prior_result])
+
     def test_apply_memory_review_decisions_refuses_stale_candidate_fingerprint(self):
         module = load_update_module()
         current = self.synthetic_memory_node("mem_current", "Current synthetic review memory.")
@@ -2188,6 +2206,86 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
                 for row in trace_rows
             )
         )
+
+    def test_rebuild_indexes_preserves_consumed_review_result_after_one_target_retires(self):
+        module = load_update_module()
+        current_fact = "Cache backend snapshot archive compact policy should stay reviewable."
+        old_fact = "Cache backend snapshot archive rebuild metadata should stay reviewable."
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            rows = [
+                {
+                    "session_id": "old-session",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/old.jsonl",
+                    "source_updated_at": "2026-06-01T10:00:00Z",
+                    "summary_path": "sessions/2026/06/01/old/summary.md",
+                    "evidence_path": "sessions/2026/06/01/old/evidence.md",
+                    "reusable_facts": [old_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["cache", "archive"],
+                },
+                {
+                    "session_id": "current-session",
+                    "project": "alpha",
+                    "project_path": "/tmp/alpha",
+                    "source_record": "source-records/current.jsonl",
+                    "source_updated_at": "2026-06-02T10:00:00Z",
+                    "summary_path": "sessions/2026/06/02/current/summary.md",
+                    "evidence_path": "sessions/2026/06/02/current/evidence.md",
+                    "reusable_facts": [current_fact],
+                    "decisions": [],
+                    "unresolved_tasks": [],
+                    "tags": ["cache", "archive"],
+                },
+            ]
+            meta_paths = []
+            for row in rows:
+                entry_dir = memory_repo / Path(row["summary_path"]).parent
+                entry_dir.mkdir(parents=True, exist_ok=True)
+                (entry_dir / "summary.md").write_text(f"Summary for {row['session_id']}\n", encoding="utf-8")
+                (entry_dir / "evidence.md").write_text("ev_001: Synthetic evidence\n", encoding="utf-8")
+                meta_path = entry_dir / "meta.json"
+                meta_path.write_text(json.dumps(row, sort_keys=True) + "\n", encoding="utf-8")
+                meta_paths.append(meta_path)
+
+            module.rebuild_indexes(memory_repo)
+            candidate = json.loads((memory_repo / "index/memory_review_candidates.jsonl").read_text(encoding="utf-8"))
+            decision = {
+                "decision_id": "review_confirm_supersession",
+                "action": "approve_supersedes",
+                "current_memory_id": candidate["current_memory_id"],
+                "older_memory_id": candidate["older_memory_id"],
+                "candidate_fingerprint": module.review_candidate_fingerprint(candidate),
+                "reviewed_at": "2026-06-23T00:00:00Z",
+                "reviewer": "synthetic",
+                "rationale": "Synthetic reviewer confirmed the newer memory supersedes the older one.",
+            }
+            decision_dir = memory_repo / "reviews"
+            decision_dir.mkdir()
+            (decision_dir / "memory_lifecycle_decisions.jsonl").write_text(
+                json.dumps(decision, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            module.rebuild_indexes(memory_repo)
+            result_before = (memory_repo / "index/memory_review_decision_results.jsonl").read_text(encoding="utf-8")
+
+            meta_paths[0].unlink()
+            module.rebuild_indexes(memory_repo)
+
+            result_after = (memory_repo / "index/memory_review_decision_results.jsonl").read_text(encoding="utf-8")
+            nodes_after = [
+                json.loads(line)
+                for line in (memory_repo / "index/memories.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(result_after, result_before)
+        self.assertEqual([node["memory_id"] for node in nodes_after], [candidate["current_memory_id"]])
+        self.assertEqual(nodes_after[0]["supersedes"], [])
 
     def test_apply_memory_review_decisions_tool_dry_run_outputs_aggregate_only(self):
         module = load_update_module()
@@ -6674,6 +6772,38 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             rebuild.assert_called_once_with(memory_repo.resolve(), reconcile_removed_refs=True)
+
+    def test_finalize_archive_report_json_classifies_review_decision_failure(self):
+        module = load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_repo = Path(tmpdir) / "agent-memory"
+            (memory_repo / "index").mkdir(parents=True)
+            (memory_repo / "sessions").mkdir()
+            stdout = io.StringIO()
+
+            with (
+                mock.patch.object(
+                    module,
+                    "rebuild_indexes",
+                    side_effect=SystemExit("unknown memory review candidate"),
+                ),
+                mock.patch("sys.stdout", stdout),
+            ):
+                result = module.main(
+                    [
+                        "--memory-repo",
+                        str(memory_repo),
+                        "--finalize-archive",
+                        "--report-json",
+                    ]
+                )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(result, 2)
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["reason"], "memory_review_decision_invalid")
+        self.assertFalse(payload["source_batch_complete"])
 
     def test_defer_global_rebuild_writes_session_without_rebuilding_derived_surfaces(self):
         module = load_update_module()

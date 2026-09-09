@@ -39,6 +39,8 @@ UPDATE_BATCH_METRIC_KEYS = {
 KNOWN_UPDATE_BLOCK_REASONS = {
     "source_inventory_invalid",
     "secret_records_rejected",
+    "memory_review_decision_invalid",
+    "archive_finalization_failed",
     "child_failure_unclassified",
     "clean_worktree_unavailable",
     "lock_unavailable",
