@@ -848,6 +848,17 @@ facts, summaries, and evidence lines remain blocked, while a durable diagnosis
 that quotes a placeholder string as the defect being discussed is not itself a
 placeholder. Secret, noise, raw-title, provenance, and lifecycle audits remain
 unchanged.
+Publish-surface repair may replace a noisy scalar title from already-clean
+user-intent, fact, decision, unresolved-task, final-state, or summary fields;
+without a clean fallback it remains blocked. Compound operational tags such as
+`dry-run` are rejected at generation time so index rebuilding cannot reintroduce
+them after metadata repair. The memory-node write boundary also removes noisy
+tags from retained explicit or previously merged nodes, closing historical
+residue without changing memory text or provenance.
+The repair scan also compares standard session-summary title and Search Tags
+surfaces with cleaned metadata. Summary-only drift is counted as
+`summary_surfaces_rewritten`, makes dry-run mode `repairable`, and is updated
+through the safe archive writer before global indexes are rebuilt.
 
 The transaction contract adds a successful `deferred` terminal status and a
 `source_batch_complete` bit. `published` may be incomplete at the source-batch

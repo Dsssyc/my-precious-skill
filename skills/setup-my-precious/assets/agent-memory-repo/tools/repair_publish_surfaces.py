@@ -43,6 +43,7 @@ class RepairStats:
     scalar_fields_rewritten: int = 0
     raw_source_fields_cleared: int = 0
     ambiguous_scalar_count: int = 0
+    summary_surfaces_rewritten: int = 0
     rebuild_performed: bool = False
     category_counts: Counter[str] = field(default_factory=Counter)
 
@@ -57,6 +58,7 @@ class RepairStats:
             + self.scalar_segments_removed
             + self.scalar_fields_rewritten
             + self.raw_source_fields_cleared
+            + self.summary_surfaces_rewritten
         )
 
 
@@ -225,6 +227,33 @@ def summary_fallback_from_metadata(
     return ""
 
 
+def title_fallback_from_metadata(
+    payload: dict[str, object],
+    field_results: dict[str, tuple[object, CleanResult]],
+) -> str:
+    results_by_normalized_key = {key.lower(): result for key, result in field_results.items()}
+    payload_by_normalized_key = {str(key).lower(): value for key, value in payload.items()}
+
+    def cleaned_value(field_name: str) -> object:
+        field_result = results_by_normalized_key.get(field_name)
+        return field_result[1].value if field_result is not None else payload_by_normalized_key.get(field_name)
+
+    candidate = updater.memory_title(
+        {
+            "user_intent": cleaned_value("user_intent"),
+            "facts": cleaned_value("reusable_facts"),
+            "decisions": cleaned_value("decisions"),
+            "unresolved_tasks": cleaned_value("unresolved_tasks"),
+            "final_state": cleaned_value("final_state"),
+            "summary": cleaned_value("summary"),
+        },
+        "",
+    )
+    if candidate and not text_counts(candidate, force_raw=False):
+        return candidate
+    return ""
+
+
 def iter_meta_paths(memory_repo: Path) -> list[Path]:
     sessions = memory_repo / "sessions"
     if not sessions.exists():
@@ -262,9 +291,14 @@ def scan_repairs(memory_repo: Path) -> tuple[RepairStats, list[tuple[Path, dict[
             field_results[str(key)] = (key, result)
 
         for key_text, (key, result) in list(field_results.items()):
-            if str(key).lower() != "summary" or result.ambiguous_count == 0:
+            normalized_key = str(key).lower()
+            if result.ambiguous_count == 0 or normalized_key not in {"summary", "title"}:
                 continue
-            fallback = summary_fallback_from_metadata(payload, field_results)
+            fallback = (
+                summary_fallback_from_metadata(payload, field_results)
+                if normalized_key == "summary"
+                else title_fallback_from_metadata(payload, field_results)
+            )
             if not fallback:
                 continue
             replacement = CleanResult(value=fallback, changed=True, scalar_fields_rewritten=1)
@@ -283,10 +317,53 @@ def scan_repairs(memory_repo: Path) -> tuple[RepairStats, list[tuple[Path, dict[
                 stats.fields_with_repair += 1
                 cleaned[key] = result.value
                 file_changed = True
+        summary_changed = repair_summary_surface(memory_repo, cleaned, apply=False)
+        if summary_changed:
+            stats.summary_surfaces_rewritten += 1
+        if file_changed or summary_changed:
+            replacements.append((meta_path, cleaned))
         if file_changed:
             stats.meta_files_with_repair += 1
-            replacements.append((meta_path, cleaned))
     return stats, replacements
+
+
+def repair_summary_surface(
+    memory_repo: Path,
+    payload: dict[str, object],
+    *,
+    apply: bool,
+) -> bool:
+    relative = payload.get("summary_path")
+    if not isinstance(relative, str) or not relative.strip():
+        return False
+    summary_path = memory_repo / relative
+    if summary_path.is_symlink() or not updater.is_safe_repo_path(memory_repo, summary_path):
+        raise SystemExit("unsafe session summary repair target")
+    if not summary_path.is_file():
+        return False
+    text = summary_path.read_text(encoding="utf-8")
+    repaired = text
+    title = payload.get("title")
+    if isinstance(title, str) and title.strip() and repaired.startswith("# Session: "):
+        repaired = re.sub(r"\A# Session: [^\n]*", f"# Session: {title.strip()}", repaired, count=1)
+    tags = payload.get("tags")
+    if isinstance(tags, list) and "## Search Tags\n" in repaired:
+        rendered_tags = ", ".join(str(tag) for tag in tags if isinstance(tag, str) and tag.strip())
+        repaired = re.sub(
+            r"(?m)(^## Search Tags\n)[^\n]*(?=\n(?:\n|\Z))",
+            lambda match: match.group(1) + rendered_tags,
+            repaired,
+            count=1,
+        )
+    changed = repaired != text
+    if changed and apply:
+        updater.write_safe_archive_text(
+            memory_repo,
+            summary_path,
+            repaired,
+            "session summary file",
+        )
+    return changed
 
 
 def apply_repairs(memory_repo: Path, replacements: list[tuple[Path, dict[str, object]]]) -> None:
@@ -297,6 +374,7 @@ def apply_repairs(memory_repo: Path, replacements: list[tuple[Path, dict[str, ob
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             "session metadata file",
         )
+        repair_summary_surface(memory_repo, payload, apply=True)
     if replacements:
         updater.rebuild_indexes(memory_repo)
 
@@ -328,6 +406,7 @@ def build_report(stats: RepairStats, *, apply: bool) -> dict[str, object]:
             "scalar_fields_rewritten": stats.scalar_fields_rewritten,
             "raw_source_fields_cleared": stats.raw_source_fields_cleared,
             "ambiguous_scalar_count": stats.ambiguous_scalar_count,
+            "summary_surfaces_rewritten": stats.summary_surfaces_rewritten,
             "rebuild_performed": stats.rebuild_performed,
         },
         "category_counts": category_counts,

@@ -159,6 +159,7 @@ NOISY_TAGS = {
     "message",
     "last",
     "dry",
+    "dry-run",
     "live",
     "update",
     "updated",

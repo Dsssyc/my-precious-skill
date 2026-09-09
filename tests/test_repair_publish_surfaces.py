@@ -218,6 +218,99 @@ class RepairPublishSurfacesTests(unittest.TestCase):
             rendered = json.dumps(repaired_meta, sort_keys=True)
             self.assertIn("Durable package-first recall remains current.", rendered)
 
+    def test_ambiguous_title_uses_clean_metadata_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = setup_archive(Path(tmpdir))
+            meta_path = write_session(
+                repo,
+                summary="Durable package-first recall remains current.",
+            )
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["title"] = "git status --short confirmed a clean archive PRIVATE_TITLE_SENTINEL"
+            meta["user_intent"] = "Preserve durable package-first recall across archive rebuilds."
+            meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            summary_path = repo / str(meta["summary_path"])
+            summary_path.write_text(
+                (
+                    "# Session: git status --short confirmed a clean archive PRIVATE_TITLE_SENTINEL\n\n"
+                    "## Reusable Facts\n"
+                    "- Durable package-first recall remains current.\n\n"
+                    "## Search Tags\n"
+                    "package-first, unit tests PRIVATE_TAG_SENTINEL\n\n"
+                    "## Evidence Pointers\n"
+                    "See evidence.md for support.\n"
+                ),
+                encoding="utf-8",
+            )
+            rebuild(repo)
+            self.assertNotEqual(audit(repo).returncode, 0)
+
+            result = repair(repo, apply=True)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["status"], "repaired")
+            self.assertEqual(report["metrics"]["ambiguous_scalar_count"], 0)
+            self.assertGreaterEqual(report["metrics"]["scalar_fields_rewritten"], 1)
+            self.assertTrue(report["metrics"]["rebuild_performed"])
+            self.assertEqual(audit(repo).returncode, 0)
+            repaired_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            self.assertNotIn("PRIVATE_TITLE_SENTINEL", repaired_meta["title"])
+            self.assertNotIn("git status --short", repaired_meta["title"])
+            self.assertIn("package-first recall", repaired_meta["title"])
+            repaired_summary = summary_path.read_text(encoding="utf-8")
+            self.assertNotIn("PRIVATE_TITLE_SENTINEL", repaired_summary)
+            self.assertNotIn("PRIVATE_TAG_SENTINEL", repaired_summary)
+            self.assertIn(f"# Session: {repaired_meta['title']}", repaired_summary)
+
+    def test_summary_only_noisy_tags_are_detected_and_repaired(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = setup_archive(Path(tmpdir))
+            meta_path = write_session(
+                repo,
+                summary="Durable package-first recall remains current.",
+            )
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["title"] = "Durable package-first archive repair"
+            meta["tags"] = ["package-first"]
+            meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            summary_path = repo / str(meta["summary_path"])
+            summary_path.write_text(
+                (
+                    "# Session: Durable package-first archive repair\n\n"
+                    "## Search Tags\n"
+                    "package-first, dry-run\n\n"
+                    "## Evidence Pointers\n"
+                    "See evidence.md for support.\n"
+                ),
+                encoding="utf-8",
+            )
+            rebuild(repo)
+            audit_before = run(
+                [sys.executable, str(repo / "tools/audit_memory_archive.py"), "--memory-repo", str(repo)],
+                cwd=repo,
+                check=False,
+            )
+            self.assertIn("category=noisy_tag", audit_before.stdout + audit_before.stderr)
+
+            dry = repair(repo)
+            applied = repair(repo, apply=True)
+
+            self.assertEqual(dry.returncode, 0, dry.stderr)
+            self.assertEqual(json.loads(dry.stdout)["status"], "repairable")
+            self.assertEqual(json.loads(dry.stdout)["metrics"]["summary_surfaces_rewritten"], 1)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            report = json.loads(applied.stdout)
+            self.assertEqual(report["status"], "repaired")
+            self.assertEqual(report["metrics"]["summary_surfaces_rewritten"], 1)
+            self.assertNotIn("dry-run", summary_path.read_text(encoding="utf-8"))
+            audit_after = run(
+                [sys.executable, str(repo / "tools/audit_memory_archive.py"), "--memory-repo", str(repo)],
+                cwd=repo,
+                check=False,
+            )
+            self.assertNotIn("category=noisy_tag", audit_after.stdout + audit_after.stderr)
+
     def test_malformed_metadata_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = setup_archive(Path(tmpdir))

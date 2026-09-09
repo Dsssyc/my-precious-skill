@@ -645,6 +645,7 @@ NOISY_TAGS = {
     "without",
     "important",
     "dry",
+    "dry-run",
     "live",
     "update",
     "updated",
@@ -4925,6 +4926,24 @@ def reconcile_removed_memory_references(
     return reconciled
 
 
+def remove_noisy_memory_node_tags(nodes: list[dict]) -> list[dict]:
+    cleaned: list[dict] = []
+    for node in nodes:
+        updated = dict(node)
+        tags = updated.get("tags")
+        if isinstance(tags, list):
+            updated["tags"] = [
+                tag
+                for tag in tags
+                if isinstance(tag, str)
+                and tag.strip()
+                and tag.strip().lower() not in NOISY_TAGS
+                and not tag.strip().lower().endswith(".py")
+            ]
+        cleaned.append(updated)
+    return cleaned
+
+
 def write_memory_nodes(
     memory_repo: Path,
     nodes: list[dict],
@@ -4950,6 +4969,7 @@ def write_memory_nodes(
     apply_memory_id_supersession_links(nodes)
     apply_memory_id_contradiction_links(nodes)
     apply_memory_id_deprecation_links(nodes)
+    nodes = remove_noisy_memory_node_tags(nodes)
     memories_dir = memory_repo / "memories"
     if not is_safe_repo_path(memory_repo, memories_dir):
         raise SystemExit(f"Refusing to write unsafe archive memories path: {safe_diagnostic_path(memories_dir)}")

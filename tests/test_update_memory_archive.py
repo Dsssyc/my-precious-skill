@@ -40,13 +40,25 @@ class UpdateMemoryArchiveTests(unittest.TestCase):
             [
                 "CHANGES_REQUESTED durable reconnect diagnosis",
                 "DONE_WITH_CONCERNS bounded recovery contract",
+                "dry-run output should not become a retrieval tag",
             ],
         )
 
         self.assertNotIn("changes_requested", tags)
         self.assertNotIn("done_with_concerns", tags)
+        self.assertNotIn("dry-run", tags)
         self.assertIn("reconnect", tags)
         self.assertIn("recovery", tags)
+
+    def test_remove_noisy_memory_node_tags_cleans_existing_nodes(self):
+        module = load_update_module()
+        node = self.synthetic_memory_node("mem_existing", "Existing durable memory remains useful.")
+        node["tags"] = ["durable-topic", "dry-run", "TEST_HELPER.py", "lifecycle-policy"]
+
+        cleaned = module.remove_noisy_memory_node_tags([node])
+
+        self.assertEqual(cleaned[0]["tags"], ["durable-topic", "lifecycle-policy"])
+        self.assertEqual(node["tags"], ["durable-topic", "dry-run", "TEST_HELPER.py", "lifecycle-policy"])
 
     def test_redact_source_text_preserves_jsonl_structure_for_cookie_header(self):
         module = load_update_module()
