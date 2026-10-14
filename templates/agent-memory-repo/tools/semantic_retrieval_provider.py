@@ -4,16 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import signal
 import socket
+import stat
+import subprocess
 import sys
 import time
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 import numpy as np
 
@@ -389,17 +393,111 @@ def receive_request(connection: socket.socket) -> object:
         raise ProviderRequestError("invalid_request") from exc
 
 
-def serve(socket_path: Path, state: ProviderState) -> None:
+def remove_owned_socket(socket_path: Path, identity: tuple[int, int]) -> None:
+    try:
+        current = socket_path.lstat()
+        if stat.S_ISSOCK(current.st_mode) and (current.st_dev, current.st_ino) == identity:
+            socket_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def verify_socket_has_no_holder(socket_path: Path) -> None:
+    # Darwin can refuse connections when a live listener's backlog is full.
+    if sys.platform != "darwin":
+        return
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/lsof", "-nP", "-a", "-U", "-Fpn", "--", str(socket_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProviderStartupError("provider_socket_holder_unknown") from exc
+    if result.returncode != 1 or result.stdout or result.stderr:
+        raise ProviderStartupError("provider_socket_already_exists")
+
+
+@contextmanager
+def provider_socket(socket_path: Path) -> Iterator[socket.socket]:
+    # Keep the lock inode across restarts; the kernel releases its lock on exit.
+    import fcntl
+
     if not socket_path.is_absolute():
         raise ProviderStartupError("provider_socket_must_be_absolute")
-    if socket_path.exists() or socket_path.is_symlink():
-        raise ProviderStartupError("provider_socket_already_exists")
     if not socket_path.parent.is_dir() or socket_path.parent.is_symlink():
         raise ProviderStartupError("provider_socket_parent_unavailable")
     parent_stat = socket_path.parent.stat()
     if parent_stat.st_uid != os.getuid() or parent_stat.st_mode & 0o077:
         raise ProviderStartupError("provider_socket_parent_not_private")
 
+    lock_path = socket_path.with_name(socket_path.name + ".lock")
+    lock_fd = os.open(
+        lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
+    )
+    with os.fdopen(lock_fd, "rb") as lock:
+        lock_stat = os.fstat(lock.fileno())
+        if (
+            not stat.S_ISREG(lock_stat.st_mode)
+            or lock_stat.st_uid != os.getuid()
+            or lock_stat.st_mode & 0o077
+        ):
+            raise ProviderStartupError("provider_socket_lock_not_private")
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProviderStartupError("provider_socket_already_exists") from exc
+
+        try:
+            existing = socket_path.lstat()
+        except FileNotFoundError:
+            existing = None
+        if existing is not None:
+            if (
+                not stat.S_ISSOCK(existing.st_mode)
+                or existing.st_uid != os.getuid()
+                or existing.st_mode & 0o077
+            ):
+                raise ProviderStartupError("provider_socket_not_private")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.25)
+                try:
+                    probe.connect(str(socket_path))
+                except OSError as exc:
+                    if exc.errno not in (errno.ECONNREFUSED, errno.ENOENT):
+                        raise ProviderStartupError("provider_socket_already_exists") from exc
+                    if exc.errno == errno.ECONNREFUSED:
+                        verify_socket_has_no_holder(socket_path)
+                else:
+                    raise ProviderStartupError("provider_socket_already_exists")
+            remove_owned_socket(socket_path, (existing.st_dev, existing.st_ino))
+
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            server.bind(str(socket_path))
+            bound = socket_path.lstat()
+            identity = (bound.st_dev, bound.st_ino)
+            try:
+                socket_path.chmod(0o600)
+                server.listen(8)
+                server.settimeout(0.25)
+
+                def stop_initialization(_signum, _frame) -> None:
+                    raise SystemExit(0)
+
+                previous_term = signal.signal(signal.SIGTERM, stop_initialization)
+                previous_int = signal.signal(signal.SIGINT, stop_initialization)
+                try:
+                    yield server
+                finally:
+                    signal.signal(signal.SIGTERM, previous_term)
+                    signal.signal(signal.SIGINT, previous_int)
+            finally:
+                remove_owned_socket(socket_path, identity)
+
+
+def serve(server: socket.socket, state: ProviderState) -> None:
     should_stop = False
 
     def stop(_signum, _frame) -> None:
@@ -410,84 +508,74 @@ def serve(socket_path: Path, state: ProviderState) -> None:
     previous_int = signal.signal(signal.SIGINT, stop)
     next_refresh_check = time.monotonic() + 5.0
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-            server.bind(str(socket_path))
-            socket_path.chmod(0o600)
-            server.listen(8)
-            server.settimeout(0.25)
-            while not should_stop:
-                try:
-                    connection, _ = server.accept()
-                except TimeoutError:
-                    if time.monotonic() >= next_refresh_check:
-                        try:
-                            changed = refresh_provider_state_if_changed(state)
-                            if changed:
-                                print(
-                                    json.dumps(
-                                        {
-                                            "report_kind": "memory_semantic_retrieval_provider_refresh",
-                                            "report_version": REPORT_VERSION,
-                                            "status": "refreshed",
-                                            "memory_count": len(state.corpus),
-                                        },
-                                        sort_keys=True,
-                                    ),
-                                    flush=True,
-                                )
-                        except Exception as exc:
+        while not should_stop:
+            try:
+                connection, _ = server.accept()
+            except TimeoutError:
+                if time.monotonic() >= next_refresh_check:
+                    try:
+                        changed = refresh_provider_state_if_changed(state)
+                        if changed:
                             print(
                                 json.dumps(
                                     {
                                         "report_kind": "memory_semantic_retrieval_provider_refresh",
                                         "report_version": REPORT_VERSION,
-                                        "status": "failed",
-                                        "reason": (
-                                            str(exc)
-                                            if isinstance(exc, ProviderStartupError)
-                                            else "provider_refresh_error"
-                                        ),
+                                        "status": "refreshed",
+                                        "memory_count": len(state.corpus),
                                     },
                                     sort_keys=True,
                                 ),
-                                file=sys.stderr,
                                 flush=True,
                             )
-                        next_refresh_check = time.monotonic() + 5.0
-                    continue
-                with connection:
-                    try:
-                        request = receive_request(connection)
-                        if (
-                            isinstance(request, dict)
-                            and request.get("report_kind") == HEALTH_REQUEST_KIND
-                            and request.get("provider_fingerprint")
-                            == state.identity.fingerprint
-                        ):
-                            response = health_response(state)
-                        else:
-                            response = score_request(state, request)
-                    except Exception:
-                        response = failure_response(state)
-                    try:
-                        connection.sendall(
+                    except Exception as exc:
+                        print(
                             json.dumps(
-                                response,
-                                separators=(",", ":"),
+                                {
+                                    "report_kind": "memory_semantic_retrieval_provider_refresh",
+                                    "report_version": REPORT_VERSION,
+                                    "status": "failed",
+                                    "reason": (
+                                        str(exc)
+                                        if isinstance(exc, ProviderStartupError)
+                                        else "provider_refresh_error"
+                                    ),
+                                },
                                 sort_keys=True,
-                            ).encode("utf-8")
-                            + b"\n"
+                            ),
+                            file=sys.stderr,
+                            flush=True,
                         )
-                    except OSError:
-                        pass
+                    next_refresh_check = time.monotonic() + 5.0
+                continue
+            with connection:
+                try:
+                    request = receive_request(connection)
+                    if (
+                        isinstance(request, dict)
+                        and request.get("report_kind") == HEALTH_REQUEST_KIND
+                        and request.get("provider_fingerprint")
+                        == state.identity.fingerprint
+                    ):
+                        response = health_response(state)
+                    else:
+                        response = score_request(state, request)
+                except Exception:
+                    response = failure_response(state)
+                try:
+                    connection.sendall(
+                        json.dumps(
+                            response,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ).encode("utf-8")
+                        + b"\n"
+                    )
+                except OSError:
+                    pass
     finally:
         signal.signal(signal.SIGTERM, previous_term)
         signal.signal(signal.SIGINT, previous_int)
-        try:
-            if socket_path.is_socket() and socket_path.lstat().st_uid == os.getuid():
-                socket_path.unlink()
-        except OSError:
-            pass
 
 
 def load_models(
@@ -541,6 +629,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    resources = ExitStack()
     try:
         if args.batch_size <= 0:
             raise ProviderStartupError("invalid_batch_size")
@@ -558,6 +647,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.reranker_model_dir
             else None
         )
+        if not args.print_fingerprint:
+            if not args.socket:
+                raise ProviderStartupError("provider_socket_required")
+            server = resources.enter_context(
+                provider_socket(Path(args.socket).expanduser())
+            )
         embedding_manifest = directory_manifest_sha256(embedding_model_dir)
         reranker_manifest = (
             directory_manifest_sha256(reranker_model_dir)
@@ -583,8 +678,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        if not args.socket:
-            raise ProviderStartupError("provider_socket_required")
         index_signature_before = memory_index_signature(index_path)
         corpus = load_corpus(index_path)
         embedding_model, reranker_model = load_models(
@@ -631,7 +724,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             flush=True,
         )
-        serve(Path(args.socket).expanduser(), state)
+        serve(server, state)
         return 0
     except Exception as exc:
         print(
@@ -650,6 +743,8 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    finally:
+        resources.close()
 
 
 if __name__ == "__main__":

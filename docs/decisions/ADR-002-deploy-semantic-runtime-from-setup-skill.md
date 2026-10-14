@@ -57,6 +57,18 @@ rebuilds the in-memory corpus embeddings and advances its index identity. A
 query arriving before refresh completes safely falls back to lexical/FTS
 retrieval.
 
+Before hashing model artifacts or building corpus embeddings, the provider
+validates its private socket directory and reserves a listening endpoint. A
+nonblocking, process-lifetime file lock serializes startup and stale-socket
+recovery. Only a private socket owned by the current user and confirmed to
+have no listener may be reclaimed; active listeners, non-socket files,
+symlinks, and unsafe directories are refused before model work. The provider
+checks system socket holders with `lsof` on macOS, where a full listener
+backlog can also refuse connections; inconclusive checks refuse recovery.
+The provider emits `ready` after initialization completes, and removes only its own socket
+inode on shutdown or initialization failure. Abrupt termination releases the
+kernel lock, allowing the next startup to recover a socket left on disk.
+
 On macOS, launchd is the supported persistent backend. The plist uses absolute
 `ProgramArguments`, `KeepAlive`, `ProcessType=Interactive`, explicit offline
 environment variables, and logs outside the repositories. Interactive is used
