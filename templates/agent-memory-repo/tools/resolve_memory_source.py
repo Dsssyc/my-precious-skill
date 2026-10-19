@@ -16,6 +16,12 @@ from types import ModuleType
 from typing import Any, Iterable
 
 
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+from source_record_io import SourceRecordDecodeError, decompress_source_bytes, source_format
+
+
 REPORT_KIND = "memory_source_preview_package"
 CONTEXT_REPORT_KIND = "memory_recall_context_package"
 SOURCE_REF_ID_PATTERN = re.compile(r"^src_[0-9a-f]{12}$")
@@ -285,12 +291,25 @@ def allowed_source_path(source_record: str, allow_root: Path) -> tuple[Path | No
 
 
 def read_jsonl_value_and_hash(path: Path, line_number: int) -> tuple[object | None, str, str]:
-    if path.suffix.lower() != ".jsonl":
+    if source_format(path).lower() != ".jsonl":
         return None, "unsupported_source_format", ""
     digest = hashlib.sha256()
     target_line: bytes | None = None
     target_error = ""
     try:
+        if path.name.lower().endswith(".jsonl.zst"):
+            raw = path.read_bytes()
+            digest.update(raw)
+            logical_lines = decompress_source_bytes(path, raw).splitlines(keepends=True)
+            selected = logical_lines[line_number - 1] if 0 < line_number <= len(logical_lines) else None
+            if selected is None:
+                return None, "source_anchor_missing", digest.hexdigest()
+            if len(selected) > MAX_JSONL_LINE_BYTES:
+                return None, "source_event_too_large", digest.hexdigest()
+            try:
+                return json.loads(selected.decode("utf-8")), "", digest.hexdigest()
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return None, "source_event_malformed", digest.hexdigest()
         with path.open("rb") as handle:
             for current_line, raw_line in enumerate(handle, 1):
                 digest.update(raw_line)
@@ -299,6 +318,8 @@ def read_jsonl_value_and_hash(path: Path, line_number: int) -> tuple[object | No
                         target_error = "source_event_too_large"
                     else:
                         target_line = raw_line
+    except SourceRecordDecodeError:
+        return None, "source_compression_unavailable", ""
     except OSError:
         return None, "source_record_unavailable", ""
     source_hash = digest.hexdigest()

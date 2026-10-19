@@ -1,5 +1,6 @@
 """Synthetic migration regressions: durable retries, lineage and trusted locations."""
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -9,6 +10,11 @@ from pathlib import Path
 
 
 SCRIPT = Path('templates/agent-memory-repo/tools/update_memory_archive.py').resolve()
+try:
+    from compression import zstd
+except ImportError:
+    zstd = None
+
 IDENTITY_A = '11111111-1111-4111-8111-111111111111'
 IDENTITY_B = '22222222-2222-4222-8222-222222222222'
 IDENTITY_C = '33333333-3333-4333-8333-333333333333'
@@ -40,7 +46,8 @@ class SourceRelocationTests(unittest.TestCase):
         rows = []
         for path in paths:
             raw = path.read_bytes()
-            values = [json.loads(line) for line in raw.splitlines()]
+            logical = zstd.decompress(raw) if path.name.endswith(".jsonl.zst") else raw
+            values = [json.loads(line) for line in logical.splitlines()]
             root = next(root for root in (self.active, self.archived) if path.is_relative_to(root))
             row = {'relative_path': path.relative_to(root).as_posix(), 'sha256': hashlib.sha256(raw).hexdigest(),
                    'size': len(raw), 'mtime_ns': path.stat().st_mtime_ns,
@@ -162,6 +169,57 @@ class SourceRelocationTests(unittest.TestCase):
         before = self.queue.read_bytes()
         self.assertEqual(self.run_update(self.inventory([source]), expected=2)['status'], 'blocked')
         self.assertEqual(self.queue.read_bytes(), before)
+        self.assertFalse(self.metas())
+
+    def test_changed_migrated_source_preserves_prior_entry_until_stable_retry(self):
+        original = self.source(self.active / 'original.jsonl')
+        self.run_update(self.inventory([original]))
+        before = self.metas()
+        moved = original.rename(self.archived / 'moved.jsonl')
+        stale = self.inventory([moved])
+        with moved.open('a') as handle:
+            handle.write('{}\n')
+        self.assertEqual(self.run_update(stale)['metrics']['records_deferred_count'], 1)
+        self.assertEqual(self.metas(), before)
+        self.assertEqual(self.run_update(self.inventory([moved]))['metrics']['records_processed_count'], 1)
+        self.assertFalse(self.queue.exists())
+        self.assertEqual([row['source_record'] for row in self.metas()], [str(moved)])
+
+    def test_empty_inventory_identity_cannot_hide_embedded_session(self):
+        source = self.source(self.active / 'first.jsonl')
+        payload = self.inventory([source])
+        payload['records'][0]['source_identity'] = ''
+        self.assertEqual(self.run_update(payload, expected=2)['status'], 'blocked')
+        self.assertFalse(self.metas())
+
+    @unittest.skipIf(zstd is None, 'stdlib zstd compression fixture requires Python 3.14')
+    def test_compressed_migration_uses_physical_hash_and_logical_event_anchors(self):
+        original = self.source(self.active / f'rollout-2026-07-13T10-00-00-{IDENTITY_A}.jsonl')
+        self.run_update(self.inventory([original], version=2), adapter=False)
+        self.pending([original])
+        raw = original.read_bytes()
+        moved = self.archived / 'compressed-renamed.jsonl.zst'
+        moved.write_bytes(zstd.compress(raw))
+        original.unlink()
+        self.assertEqual(self.run_update(self.inventory([moved]))['metrics']['records_processed_count'], 1)
+        self.assertFalse(self.queue.exists())
+        self.assertEqual(len(self.metas()), 1)
+        physical_hash = hashlib.sha256(moved.read_bytes()).hexdigest()
+        self.assertEqual(self.metas()[0]['source_record_sha256'], physical_hash)
+        spec = importlib.util.spec_from_file_location('migration_resolver', SCRIPT.with_name('resolve_memory_source.py'))
+        resolver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(resolver)
+        value, reason, actual_hash = resolver.read_jsonl_value_and_hash(moved, 2)
+        self.assertEqual(reason, '')
+        self.assertEqual(actual_hash, physical_hash)
+        self.assertEqual(value, json.loads(raw.splitlines()[1]))
+
+    def test_source_symlink_cannot_escape_declared_roots(self):
+        source = self.source(self.active / 'first.jsonl')
+        payload = self.inventory([source])
+        outside = source.rename(self.root / 'outside.jsonl')
+        source.symlink_to(outside)
+        self.assertEqual(self.run_update(payload, expected=2)['status'], 'blocked')
         self.assertFalse(self.metas())
 
 

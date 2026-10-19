@@ -48,6 +48,8 @@ When changing shared tools:
   `skills/using-my-precious/scripts/`.
 - Copy `templates/agent-memory-repo/tools/resolve_memory_source.py` to
   `skills/using-my-precious/scripts/resolve_memory_source.py`.
+- Copy `templates/agent-memory-repo/tools/source_record_io.py` to both
+  `skills/update-my-precious/scripts/` and `skills/using-my-precious/scripts/`.
 - Copy all template changes into
   `skills/setup-my-precious/assets/agent-memory-repo/`.
 
@@ -61,6 +63,8 @@ cmp -s templates/agent-memory-repo/tools/search_memory.py skills/using-my-precio
 cmp -s templates/agent-memory-repo/tools/semantic_retrieval_provider.py skills/using-my-precious/scripts/semantic_retrieval_provider.py
 cmp -s templates/agent-memory-repo/tools/semantic_retrieval_provider_requirements.txt skills/using-my-precious/scripts/semantic_retrieval_provider_requirements.txt
 cmp -s templates/agent-memory-repo/tools/resolve_memory_source.py skills/using-my-precious/scripts/resolve_memory_source.py
+cmp -s templates/agent-memory-repo/tools/source_record_io.py skills/update-my-precious/scripts/source_record_io.py
+cmp -s templates/agent-memory-repo/tools/source_record_io.py skills/using-my-precious/scripts/source_record_io.py
 ```
 
 ## Privacy And Security
@@ -120,6 +124,7 @@ python3 benchmarks/scheduled_update_single_writer_gate.py
 python3 benchmarks/scheduled_reboot_replay_gate.py
 python3 benchmarks/scheduled_update_throughput_gate.py
 python3 benchmarks/scheduled_live_source_deferral_gate.py
+python3 benchmarks/scheduled_source_relocation_gate.py
 python3 benchmarks/selected_record_materialization_gate.py
 python3 benchmarks/structured_redaction_integrity_gate.py
 python3 benchmarks/jsonl_record_boundary_recovery_gate.py

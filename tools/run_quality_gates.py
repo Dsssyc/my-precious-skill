@@ -17,6 +17,9 @@ from typing import Any, Callable, TextIO
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PY_COMPILE_TARGETS = (
+    "skills/using-my-precious/scripts/source_record_io.py",
+    "skills/update-my-precious/scripts/source_record_io.py",
+    "templates/agent-memory-repo/tools/source_record_io.py",
     "tools/validate_skills.py",
     "tools/run_quality_gates.py",
     "tools/audit_release_convergence.py",
@@ -43,6 +46,7 @@ PY_COMPILE_TARGETS = (
     "benchmarks/scheduled_reboot_replay_gate.py",
     "benchmarks/scheduled_update_throughput_gate.py",
     "benchmarks/scheduled_live_source_deferral_gate.py",
+    "benchmarks/scheduled_source_relocation_gate.py",
     "benchmarks/private_live_source_inventory_ab_gate.py",
     "benchmarks/selected_record_materialization_gate.py",
     "benchmarks/structured_redaction_integrity_gate.py",
@@ -196,6 +200,10 @@ def build_release_checks() -> list[CheckSpec]:
         CheckSpec(
             "scheduled_live_source_deferral",
             ("python3", "benchmarks/scheduled_live_source_deferral_gate.py"),
+        ),
+        CheckSpec(
+            "scheduled_source_relocation",
+            ("python3", "benchmarks/scheduled_source_relocation_gate.py"),
         ),
         CheckSpec(
             "selected_record_materialization",
@@ -362,6 +370,14 @@ def build_release_checks() -> list[CheckSpec]:
                 "templates/agent-memory-repo/tools/resolve_memory_source.py",
                 "skills/using-my-precious/scripts/resolve_memory_source.py",
             ),
+        ),
+        CheckSpec(
+            "template_sync_update_source_io",
+            ("cmp", "-s", "templates/agent-memory-repo/tools/source_record_io.py", "skills/update-my-precious/scripts/source_record_io.py"),
+        ),
+        CheckSpec(
+            "template_sync_using_source_io",
+            ("cmp", "-s", "templates/agent-memory-repo/tools/source_record_io.py", "skills/using-my-precious/scripts/source_record_io.py"),
         ),
         CheckSpec("git_diff_check", ("git", "diff", "--check")),
     ]

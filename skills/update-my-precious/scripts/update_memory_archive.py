@@ -27,6 +27,8 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+from source_record_io import SourceRecordDecodeError, decompress_source_bytes, source_format
+
 from memory_consolidation import (
     add_contradiction_link,
     add_deprecation_link,
@@ -49,7 +51,7 @@ from memory_consolidation import (
 )
 
 
-DEFAULT_PATTERNS = ("*.jsonl", "*.json", "*.md", "*.txt", "*.log")
+DEFAULT_PATTERNS = ("*.jsonl", "*.jsonl.zst", "*.json", "*.md", "*.txt", "*.log")
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env"}
 TIMESTAMP_KEYS = {"timestamp", "created_at", "updated_at", "started_at", "ended_at", "date"}
 PROJECT_PATH_KEYS = {
@@ -463,26 +465,6 @@ def legacy_codex_source_identity(path: str) -> str:
         Path(path).name.lower(),
     )
     return "codex-session:" + match[1] if match else ""
-
-
-def archived_source_identities(memory_repo: Path, archive_scope: str, source_partition: str) -> dict[str, str]:
-    identities: dict[str, str] = {}
-    for meta_path in (memory_repo / "sessions").glob("**/meta.json"):
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if archive_scope_for_row(meta) != archive_scope or not row_matches_source_partition(meta, source_partition):
-            continue
-        path = meta.get("source_record")
-        if not isinstance(path, str) or not Path(path).is_absolute():
-            continue
-        identity = meta.get("source_identity", "") or legacy_codex_source_identity(path)
-        if identity:
-            if not valid_source_identity(identity):
-                raise SourceInventoryError("archived source identity is invalid")
-            identities[str(Path(path).resolve())] = identity
-    return identities
 
 
 def select_source_records(
@@ -1087,6 +1069,7 @@ def archived_project_state(
     source_partition: str | None = None,
     *,
     include_generated_index: bool = True,
+    source_identities: dict[str, str] | None = None,
 ) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
     scope_key = archive_scope or str(project_path.resolve())
     partition_key = source_partition or str(project_path.resolve())
@@ -1118,6 +1101,12 @@ def archived_project_state(
         source_key = ""
         if isinstance(source_record, str) and source_record:
             source_key = str(Path(source_record).expanduser().resolve())
+        if source_identities is not None and source_key:
+            identity = meta.get("source_identity", "") or legacy_codex_source_identity(source_key)
+            if identity:
+                if not valid_source_identity(identity) or source_identities.get(source_key, identity) != identity:
+                    raise SourceInventoryError("archived source identity is invalid")
+                source_identities[source_key] = identity
         source_hash = meta.get("source_record_sha256")
         if isinstance(source_hash, str) and source_hash:
             archived_hashes.add(source_hash)
@@ -1277,7 +1266,7 @@ def walk_json_values(value: object) -> Iterable[tuple[str, object]]:
 
 
 def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
-    if path.suffix == ".jsonl":
+    if source_format(path) == ".jsonl":
         for raw_line in jsonl_physical_lines(text):
             raw_line = raw_line.strip()
             if not raw_line:
@@ -1501,13 +1490,18 @@ def discover_records_from_inventory(
             root_value = row.get("source_root")
             identity = row.get("source_identity", "")
             if (
-                not isinstance(root_value, str) or not Path(root_value).is_absolute()
-                or Path(root_value).resolve() not in allowed_roots
+                not isinstance(root_value, str) or any(ord(char) < 32 or ord(char) == 127 for char in root_value)
+                or not Path(root_value).is_absolute()
                 or (identity and (not source_identity_adapter or not valid_source_identity(identity)))
                 or not isinstance(identity, str)
             ):
                 raise SourceInventoryError("source inventory location is invalid")
-            source_root = Path(root_value).resolve()
+            try:
+                source_root = Path(root_value).resolve()
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SourceInventoryError("source inventory location is invalid") from exc
+            if source_root not in allowed_roots:
+                raise SourceInventoryError("source inventory location is invalid")
         relative_path = row.get("relative_path")
         expected_hash = row.get("sha256")
         expected_size = row.get("size")
@@ -1574,7 +1568,11 @@ def read_validated_inventory_record(record: SourceRecord) -> tuple[str, float]:
         or hashlib.sha256(raw).hexdigest() != record.sha256
     ):
         raise SourceInventoryError("source inventory record changed")
-    return raw.decode("utf-8", errors="replace"), final_stat.st_mtime
+    try:
+        text = decompress_source_bytes(record.path, raw).decode("utf-8", errors="replace")
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+    return text, final_stat.st_mtime
 
 
 def redact_text(text: str) -> tuple[str, dict[str, int]]:
@@ -1601,7 +1599,7 @@ def redact_json_value(value: object, counts: dict[str, int]) -> object:
 
 
 def redact_source_text(path: Path, text: str) -> tuple[str, dict[str, int]]:
-    if path.suffix not in {".json", ".jsonl"}:
+    if source_format(path) not in {".json", ".jsonl"}:
         return redact_text(text)
 
     counts: dict[str, int] = {}
@@ -1675,7 +1673,10 @@ def has_sensitive_identifier_token(text: str) -> bool:
 
 
 def read_record_text(path: Path) -> str:
-    return path.read_bytes().decode("utf-8", errors="replace")
+    try:
+        return decompress_source_bytes(path, path.read_bytes()).decode("utf-8", errors="replace")
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
 
 
 def compact_whitespace(text: str) -> str:
@@ -2545,7 +2546,7 @@ def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[M
 def extract_source_events(path: Path, text: str, hash_text: str | None = None) -> list[MemoryEvent]:
     events: list[MemoryEvent] = []
     parsed_any = False
-    if path.suffix == ".jsonl":
+    if source_format(path) == ".jsonl":
         events = jsonl_events_with_locators(text, hash_text)
         parsed_any = jsonl_contains_value(text)
     else:
@@ -3969,7 +3970,7 @@ def prepare_inventory_record(
 ) -> PreparedArchiveRecord:
     source_text, source_mtime = read_validated_inventory_record(record)
     redacted_text, redaction_counts = redact_source_text(record.path, source_text)
-    if record.path.suffix == ".jsonl":
+    if source_format(record.path) == ".jsonl":
         source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
     else:
         source_values = list(iter_source_json_values(record.path, source_text))
@@ -6303,18 +6304,18 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
-    latest, archived_hashes, archived_source_hashes = archived_project_state(
-        memory_repo,
-        project_path,
-        archive_scope,
-        source_partition,
-        include_generated_index=not args.defer_global_rebuild,
-    )
+    known_source_identities = {}
     try:
+        latest, archived_hashes, archived_source_hashes = archived_project_state(
+            memory_repo,
+            project_path,
+            archive_scope,
+            source_partition,
+            include_generated_index=not args.defer_global_rebuild,
+            source_identities=known_source_identities if args.source_identity_adapter else None,
+        )
         pending_source_paths = deferred_source_paths(memory_repo, archive_scope, source_partition)
-        known_source_identities = {}
         if args.source_identity_adapter:
-            known_source_identities = archived_source_identities(memory_repo, archive_scope, source_partition)
             for row in load_deferred_source_rows(memory_repo):
                 if row["archive_scope"] == archive_scope and row["source_partition"] == source_partition:
                     identity = row.get("source_identity") or legacy_codex_source_identity(row["source_record"])
