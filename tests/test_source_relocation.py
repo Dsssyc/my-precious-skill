@@ -5,6 +5,8 @@ import json
 import subprocess
 import sys
 import tempfile
+import shutil
+import os
 import unittest
 from pathlib import Path
 
@@ -47,7 +49,7 @@ class SourceRelocationTests(unittest.TestCase):
         for path in paths:
             raw = path.read_bytes()
             logical = zstd.decompress(raw) if path.name.endswith(".jsonl.zst") else raw
-            values = [json.loads(line) for line in logical.splitlines()]
+            values = [json.loads(line) for line in logical.split(b"\n") if line.strip()]
             root = next(root for root in (self.active, self.archived) if path.is_relative_to(root))
             row = {'relative_path': path.relative_to(root).as_posix(), 'sha256': hashlib.sha256(raw).hexdigest(),
                    'size': len(raw), 'mtime_ns': path.stat().st_mtime_ns,
@@ -197,7 +199,7 @@ class SourceRelocationTests(unittest.TestCase):
         original = self.source(self.active / f'rollout-2026-07-13T10-00-00-{IDENTITY_A}.jsonl')
         self.run_update(self.inventory([original], version=2), adapter=False)
         self.pending([original])
-        raw = original.read_bytes()
+        raw = b"\r" + original.read_bytes()
         moved = self.archived / 'compressed-renamed.jsonl.zst'
         moved.write_bytes(zstd.compress(raw))
         original.unlink()
@@ -212,7 +214,126 @@ class SourceRelocationTests(unittest.TestCase):
         value, reason, actual_hash = resolver.read_jsonl_value_and_hash(moved, 2)
         self.assertEqual(reason, '')
         self.assertEqual(actual_hash, physical_hash)
-        self.assertEqual(value, json.loads(raw.splitlines()[1]))
+        self.assertEqual(value, json.loads(raw.split(b"\n")[1]))
+
+    def test_forked_source_uses_owner_identity_with_declared_parent_metadata(self):
+        source = self.source(self.active / 'forked.jsonl')
+        rows = [json.loads(line) for line in source.read_text().splitlines()]
+        rows[0]['payload']['forked_from_id'] = IDENTITY_B
+        rows.append({'type': 'session_meta', 'payload': {'id': IDENTITY_B}})
+        source.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.assertEqual(self.run_update(self.inventory([source]))['metrics']['records_processed_count'], 1)
+        self.assertEqual(self.metas()[0]['source_identity'], 'codex-session:' + IDENTITY_A)
+
+    def test_unrelated_embedded_header_cannot_claim_fork_ancestry(self):
+        source = self.source(self.active / 'conflicting.jsonl')
+        with source.open('a') as handle:
+            handle.write(json.dumps({'type': 'session_meta', 'payload': {'id': IDENTITY_B}}) + '\n')
+        self.assertEqual(self.run_update(self.inventory([source]), expected=2)['status'], 'blocked')
+        self.assertFalse(self.metas())
+
+    def test_direct_entry_checks_cross_project_duplicate_before_any_mutation(self):
+        first = self.source(self.active / 'first.jsonl')
+        second = self.source(self.archived / 'other-project.jsonl')
+        rows = [json.loads(line) for line in second.read_text().splitlines()]
+        for row in rows:
+            if 'cwd' in row:
+                row['cwd'] = str(self.root / 'foreign-project')
+            if 'payload' in row:
+                row['payload']['cwd'] = str(self.root / 'foreign-project')
+        second.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        self.pending([first])
+        before = self.queue.read_bytes()
+        result = subprocess.run([sys.executable, str(SCRIPT), '--memory-repo', str(self.repo),
+            '--source-dir', str(self.active), '--source-relocation-dir', str(self.archived),
+            '--source-identity-adapter', 'codex-session', '--project-path', str(self.project),
+            '--require-project-metadata', '--report-json'], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)['status'], 'blocked')
+        self.assertEqual(self.queue.read_bytes(), before)
+        self.assertFalse(self.metas())
+
+    def test_json_metadata_uses_the_generic_format_without_a_jsonl_identity(self):
+        path = self.active / 'metadata.json'
+        value = {'type': 'session_meta', 'timestamp': '2026-07-13T10:00:00Z',
+                 'payload': {'id': IDENTITY_A, 'cwd': str(self.project)}}
+        path.write_text(json.dumps(value))
+        raw = path.read_bytes()
+        payload = {'report_kind': 'memory_source_inventory', 'report_version': 3, 'records': [{
+            'relative_path': path.name, 'source_root': str(self.active), 'source_identity': '',
+            'source_updated_at': value['timestamp'], 'sha256': hashlib.sha256(raw).hexdigest(),
+            'size': len(raw), 'mtime_ns': path.stat().st_mtime_ns}]}
+        self.assertEqual(self.run_update(payload)['status'], 'updated')
+
+    def configure_runner(self, projects, *, discover_after=None):
+        shutil.copytree(SCRIPT.parent.parent, self.repo, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        (self.repo / 'config/projects.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in projects))
+        location = dict(source_dir=str(self.active), relocation_dirs=[str(self.archived)],
+                        identity_adapter='codex-session', enabled=True)
+        if discover_after:
+            location['discover_after'] = discover_after
+        (self.repo / 'config/source_locations.jsonl').write_text(json.dumps(location) + '\n')
+
+    def runner(self):
+        result = subprocess.run([sys.executable, str(self.repo / 'tools/run_memory_updates.py'),
+            '--memory-repo', str(self.repo), '--source-dir', str(self.active), '--report-json'],
+            text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return json.loads(result.stdout)
+
+    def test_secondary_root_registration_reuses_the_collection_inventory(self):
+        self.source(self.active / 'first.jsonl')
+        second = self.source(self.archived / 'second.jsonl', IDENTITY_B)
+        other = self.root / 'other-project'
+        other.mkdir()
+        second.write_text(second.read_text().replace(str(self.project), str(other)))
+        self.configure_runner([{'project_path': str(self.project), 'source_dir': str(self.active), 'enabled': True},
+                               {'project_path': str(other), 'source_dir': str(self.archived), 'enabled': True}])
+        report = self.runner()
+        self.assertEqual(report['metrics']['inventory_worker_count'], 2)
+        self.assertEqual(len(self.metas()), 2)
+
+    def test_unchanged_legacy_source_is_enrolled_before_a_later_move(self):
+        original = self.source(self.active / f'rollout-2026-07-13T10-00-00-{IDENTITY_A}.jsonl')
+        os.utime(original, (1783944000, 1783944000))
+        self.run_update(self.inventory([original], version=2), adapter=False)
+        self.configure_runner([{'project_path': str(self.project), 'source_dir': str(self.active), 'enabled': True}],
+                              discover_after='2026-07-14T00:00:00Z')
+        self.runner()
+        registry = self.repo / 'index/source_identities.jsonl'
+        self.assertEqual(json.loads(registry.read_text())['source_identity'], 'codex-session:' + IDENTITY_A)
+        moved = original.rename(self.archived / 'older-renamed.jsonl')
+        self.runner()
+        self.assertEqual([row['source_record'] for row in self.metas()], [str(moved)])
+        self.assertEqual(self.metas()[0]['source_identity'], 'codex-session:' + IDENTITY_A)
+
+    @unittest.skipIf(zstd is None, 'stdlib zstd fixture requires Python 3.14')
+    def test_enrollment_selects_legacy_pending_and_future_unknown_moves(self):
+        pending_path = self.active / f'rollout-2026-07-13T10-00-00-{IDENTITY_A}.jsonl'
+        pending = self.source(self.archived / 'renamed.jsonl')
+        unrelated = self.source(self.archived / 'historical.jsonl', IDENTITY_B)
+        with unrelated.open('a') as handle:
+            handle.write(json.dumps({'role': 'assistant', 'content': 'x' * 10000}) + '\n')
+        future = self.source(self.archived / 'new-moved.jsonl', IDENTITY_C)
+        compressed = []
+        for path in (pending, unrelated, future):
+            target = path.with_suffix('.jsonl.zst')
+            target.write_bytes(zstd.compress(path.read_bytes()))
+            path.unlink()
+            compressed.append(target)
+        for path in compressed[:2]:
+            os.utime(path, (1783944000, 1783944000))
+        self.configure_runner([{'project_path': str(self.project), 'source_dir': str(self.active), 'enabled': True}],
+                              discover_after='2026-07-14T00:00:00Z')
+        self.pending([pending_path])
+        codec = self.repo / 'tools/source_record_io.py'
+        codec.write_text(codec.read_text().replace('        return decoded', '        if len(decoded) > 4096:\n            raise SourceRecordDecodeError("unselected_history_materialized")\n        return decoded'))
+        report = self.runner()
+        self.assertEqual(report['metrics']['records_deferred_count'], 0)
+        self.assertFalse(self.queue.exists())
+        self.assertEqual({row['source_identity'] for row in self.metas()},
+                         {'codex-session:' + IDENTITY_A, 'codex-session:' + IDENTITY_C})
 
     def test_source_symlink_cannot_escape_declared_roots(self):
         source = self.source(self.active / 'first.jsonl')

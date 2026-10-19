@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -300,8 +301,11 @@ def read_jsonl_value_and_hash(path: Path, line_number: int) -> tuple[object | No
         if path.name.lower().endswith(".jsonl.zst"):
             raw = path.read_bytes()
             digest.update(raw)
-            logical_lines = decompress_source_bytes(path, raw).splitlines(keepends=True)
-            selected = logical_lines[line_number - 1] if 0 < line_number <= len(logical_lines) else None
+            selected = None
+            for current_line, raw_line in enumerate(io.BytesIO(decompress_source_bytes(path, raw)), 1):
+                if current_line == line_number:
+                    selected = raw_line
+                    break
             if selected is None:
                 return None, "source_anchor_missing", digest.hexdigest()
             if len(selected) > MAX_JSONL_LINE_BYTES:

@@ -658,7 +658,12 @@ Only declared roots are scanned. The optional Codex adapter verifies embedded
 session IDs, retries older pending identities, and refreshes source references
 after moves and renames. Conflicting identities block the update; missing sources
 remain pending. `.jsonl.zst` sources require Python 3.14 or the optional
-`zstandard` package; decoded records are limited to 512 MiB. Physical file hashes
-and decoded event anchors are both verified. Raw sources remain outside the
+`zstandard` package; physical file hashes and decoded event anchors are both verified. Raw sources remain outside the
 archive. Single-root configurations and other source formats keep their existing
 behavior.
+
+For an existing deployment, optional `discover_after` may record the collection's
+activation time as a UTC timestamp. Older moved/compressed records are located
+by pending or persisted identity; records modified after activation are also
+discovered when first seen after a move. The boundary stays fixed. Omit it to
+scan all declared history.

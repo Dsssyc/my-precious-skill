@@ -34,9 +34,15 @@ def git(repo: Path, *args: str) -> str:
 
 
 def write_source(path: Path, project: Path, identity: str, stamp: str) -> None:
-    path.write_text(json.dumps({'type': 'session_meta', 'payload': {'id': identity, 'cwd': str(project)}}) + '\n'
-        + json.dumps({'timestamp': stamp, 'role': 'user', 'cwd': str(project),
-                      'content': 'Please remember: Ledger synchronization retains unresolved invoice keys until the server acknowledges delivery.'}) + '\n')
+    header = {'type': 'session_meta', 'payload': {'id': identity, 'cwd': str(project)}}
+    if identity == IDS[0]:
+        header['payload']['forked_from_id'] = IDS[1]
+    rows = [header, {'timestamp': stamp, 'role': 'user', 'cwd': str(project),
+        'content': 'Please remember: Ledger synchronization retains unresolved invoice keys until the server acknowledges delivery.'}]
+    if identity == IDS[0]:
+        rows.append({'type': 'session_meta', 'payload': {'id': IDS[1]}})
+    path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
 
 
 def metadata(repo: Path) -> list[dict]:
@@ -80,10 +86,12 @@ def run_case(root: Path) -> dict[str, int]:
     with old_b.open('a') as handle:
         handle.write(json.dumps({'timestamp': '2026-07-13T10:30:00Z', 'role': 'assistant',
                                  'content': 'Fixed: include the complete durable migrated session.'}) + '\n')
+    for old in (old_a, old_b):
+        os.utime(old, (1783944000, 1783944000))
     newer = active / 'newer.jsonl'
     write_source(newer, project, IDS[2], '2026-07-14T12:00:00Z')
     (repo / 'config/source_locations.jsonl').write_text(json.dumps({'source_dir': str(active),
-        'relocation_dirs': [str(archived)], 'identity_adapter': 'codex-session', 'enabled': True}) + '\n')
+        'relocation_dirs': [str(archived)], 'identity_adapter': 'codex-session', 'enabled': True, 'discover_after': '2026-07-14T00:00:00Z'}) + '\n')
     # Legacy path-only state is already committed before migration. The wrapper
     # moves sources after the shared inventory, reproducing a real selection race.
     queue = repo / 'index/deferred_sources.jsonl'
@@ -134,7 +142,7 @@ def run_case(root: Path) -> dict[str, int]:
     assert all(row['source_record'] != str(archived / old_b.name) for row in metadata(repo))
     rendered = ''.join(outputs)
     assert str(root) not in rendered and IDS[0] not in rendered
-    return {'published_transaction_count': 4, 'compressed_source_case_count': int(zstd is not None), 'legacy_records_recovered_count': 2,
+    return {'published_transaction_count': 4, 'compressed_source_case_count': int(zstd is not None), 'forked_source_case_count': 1, 'legacy_records_recovered_count': 2,
             'duplicate_lineage_count': 0, 'pending_records_remaining_count': 0,
             'source_content_mutation_count': 0, 'privacy_leak_count': 0}
 

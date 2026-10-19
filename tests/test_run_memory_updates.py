@@ -1318,6 +1318,7 @@ class RunMemoryUpdatesReliabilityTests(unittest.TestCase):
         config_dir.mkdir()
         source_dir.mkdir()
         shutil.copyfile(self.runner_source, tools_dir / "run_memory_updates.py")
+        shutil.copyfile(self.runner_source.with_name("source_record_io.py"), tools_dir / "source_record_io.py")
 
         projects = []
         for ordinal in range(project_count):

@@ -27,7 +27,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from source_record_io import SourceRecordDecodeError, decompress_source_bytes, source_format
+from source_record_io import SourceRecordDecodeError, codex_session_identity as read_codex_session_identity, decompress_source_bytes, source_format
 
 from memory_consolidation import (
     add_contradiction_link,
@@ -442,19 +442,10 @@ def valid_source_identity(value: object) -> bool:
 
 
 def codex_session_identity(values: Iterable[object]) -> str:
-    """Optional runtime adapter: only authoritative session metadata supplies identity."""
-    identities: set[str] = set()
-    for value in values:
-        if not isinstance(value, dict) or value.get("type") != "session_meta":
-            continue
-        payload = value.get("payload")
-        identity = payload.get("id") if isinstance(payload, dict) else None
-        if not isinstance(identity, str) or not re.fullmatch(CODEX_SESSION_UUID, identity.lower()):
-            raise SourceInventoryError("source session identity is invalid")
-        identities.add("codex-session:" + identity.lower())
-    if len(identities) > 1:
-        raise SourceInventoryError("source session identity is ambiguous")
-    return next(iter(identities), "")
+    try:
+        return read_codex_session_identity(values)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
 
 
 def legacy_codex_source_identity(path: str) -> str:
@@ -1424,6 +1415,8 @@ def discover_records(
     source_identity_adapter: str = "",
 ) -> list[SourceRecord]:
     records: list[SourceRecord] = []
+    eligible_paths: set[Path] = set()
+    seen_identities: set[str] = set()
     seen: set[Path] = set()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
@@ -1438,15 +1431,20 @@ def discover_records(
         text = read_record_text(path)
         if is_codex_automation_thread_source(path, text):
             continue
-        if not record_matches_project(path, text, project_path, require_project_metadata):
-            continue
+        if record_matches_project(path, text, project_path, require_project_metadata):
+            eligible_paths.add(path)
         updated_at = source_timestamp(path, text)
         source_hash = sha256_file(path)
-        identity = codex_session_identity(iter_source_json_values(path, text)) if source_identity_adapter else ""
+        identity = codex_session_identity(iter_source_json_values(path, text)) if source_identity_adapter and source_format(path) == ".jsonl" else ""
+        if identity and identity in seen_identities:
+            raise SourceInventoryError("source inventory contains duplicate identities")
+        if identity:
+            seen_identities.add(identity)
         records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash,
                                     source_identity=identity, identity_adapter=source_identity_adapter))
     return select_source_records(
-        records, after, archived_hashes, archived_source_hashes, pending_source_paths, known_source_identities or {},
+        [record for record in records if record.path in eligible_paths], after, archived_hashes,
+        archived_source_hashes, pending_source_paths, known_source_identities or {},
     )
 
 
@@ -1527,6 +1525,8 @@ def discover_records_from_inventory(
             path.relative_to(source_root)
         except (OSError, ValueError) as exc:
             raise SourceInventoryError("source inventory path is unsafe") from exc
+        if identity and source_format(path) != ".jsonl":
+            raise SourceInventoryError("source inventory identity format mismatch")
         if path in seen:
             raise SourceInventoryError("source inventory contains duplicate paths")
         seen.add(path)
@@ -3975,7 +3975,7 @@ def prepare_inventory_record(
     else:
         source_values = list(iter_source_json_values(record.path, source_text))
         source_events = extract_source_events(record.path, redacted_text, source_text)
-    if record.identity_adapter and codex_session_identity(source_values) != record.source_identity:
+    if record.identity_adapter and source_format(record.path) == ".jsonl" and codex_session_identity(source_values) != record.source_identity:
         raise SourceInventoryError("source inventory identity mismatch")
     if source_values_are_automation(source_values):
         raise SourceInventoryError("source inventory contains an automation record")
@@ -4025,7 +4025,7 @@ def write_record(
 ) -> Path | None:
     source_text = read_record_text(record.path)
     redacted_text, redaction_counts = redact_source_text(record.path, source_text)
-    if record.identity_adapter and codex_session_identity(iter_source_json_values(record.path, source_text)) != record.source_identity:
+    if record.identity_adapter and source_format(record.path) == ".jsonl" and codex_session_identity(iter_source_json_values(record.path, source_text)) != record.source_identity:
         raise SourceInventoryError("source inventory identity mismatch")
     source_events = extract_source_events(record.path, redacted_text, source_text)
     prepared = prepare_record(

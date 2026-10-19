@@ -53,4 +53,27 @@ keep SHA-256, size and mtime tied to the physical compressed file. Event anchors
 continue to address decoded JSONL lines. Original-event resolution verifies both
 the physical digest and the logical event digest. Decoding requires Python 3.14's
 `compression.zstd` or the optional `zstandard` package; unavailable codecs,
-malformed frames, or decoded sources over 512 MiB block rather than omit data.
+or malformed frames block rather than omit data.
+
+Forked Codex logs can include ancestor headers. The first authoritative session
+header identifies the owner; additional IDs must be reachable through explicit
+`forked_from_id` links from that owner. Conflicting parent declarations, cycles
+and unrelated headers fail closed. A parent header never changes ownership of
+the child source record. Filename-based ownership inference remains confined to
+legacy lookup hints.
+
+An existing deployment may set `discover_after` to its activation time. Older
+relocated/compressed records are selected by durable pending identity or an
+identity already persisted by this updater; only their owner headers are probed
+for this lookup. All records modified after activation remain discoverable,
+including sessions first seen after a move. Ordinary uncompressed primary-root
+discovery is unchanged. The activation boundary never advances as an archive
+high-water mark. Omitting it inventories all declared history. This supports a
+scoped legacy backfill without enrolling every historical compressed copy.
+
+`index/source_identities.jsonl` enrolls all verified collection identities only
+after collection preflight, including unchanged primary records. Enrollment is
+selection metadata, never evidence of archival freshness. This lets an unchanged
+legacy source move later without losing lookup eligibility. The scheduled
+transaction publishes enrollment together with retry state and archive updates;
+an interrupted unpublished staging clone cannot advance it independently.
