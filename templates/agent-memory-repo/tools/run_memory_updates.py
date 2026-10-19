@@ -87,6 +87,19 @@ class SourceInventoryRecord:
 
 
 @dataclass(frozen=True)
+class SourceIdentityHeader:
+    source_root: Path
+    relative_path: str
+    source_identity: str
+
+
+class SourceInventory(list):
+    def __init__(self, records=(), source_headers=()):
+        super().__init__(records)
+        self.source_headers = tuple(source_headers)
+
+
+@dataclass(frozen=True)
 class SourceLocation:
     source_dir: Path
     relocation_dirs: tuple[Path, ...]
@@ -593,6 +606,25 @@ def validate_inventory_identities(inventory: Iterable[SourceInventoryRecord]) ->
         seen.add(record.source_identity)
 
 
+def combine_source_collection(root_inventories: Iterable[SourceInventory]) -> list[SourceInventoryRecord]:
+    root_inventories = list(root_inventories)
+    inventory = [record for records in root_inventories for record in records]
+    validate_inventory_identities(inventory)
+    locations: dict[str, set[Path]] = {}
+    selected = {record.source_identity for record in inventory if record.source_identity}
+    for record in inventory:
+        if record.source_identity:
+            if record.source_root is None:
+                raise SourceInventoryError("source_inventory_manifest_invalid")
+            locations.setdefault(record.source_identity, set()).add(record.source_root / record.relative_path)
+    for records in root_inventories:
+        for header in getattr(records, "source_headers", ()):
+            locations.setdefault(header.source_identity, set()).add(header.source_root / header.relative_path)
+    if any(len(paths) > 1 for identity, paths in locations.items() if identity in selected):
+        raise SourceInventoryError("source_inventory_identity_conflict")
+    return inventory
+
+
 def build_source_inventory(
     source_dir: Path,
     patterns: tuple[str, ...],
@@ -610,6 +642,7 @@ def build_source_inventory(
         patterns = tuple(dict.fromkeys((*patterns, "*.jsonl.zst")))
     source_root = source_dir.resolve()
     inventory: list[SourceInventoryRecord] = []
+    source_headers: list[SourceIdentityHeader] = []
     seen: set[Path] = set()
     for path in iter_candidate_files(source_root, patterns):
         resolved = path.resolve()
@@ -623,9 +656,15 @@ def build_source_inventory(
         if discover_after is not None and (not include_existing or resolved.name.endswith(".jsonl.zst")):
             from source_record_io import source_header_identity, SourceRecordDecodeError
             try:
-                if datetime.fromtimestamp(resolved.stat().st_mtime, tz=UTC) < discover_after:
-                    from source_record_io import source_header_identity, SourceRecordDecodeError
-                    if source_header_identity(resolved) not in required_identities:
+                probe_stat = resolved.stat()
+                if datetime.fromtimestamp(probe_stat.st_mtime, tz=UTC) < discover_after:
+                    identity = source_header_identity(resolved) if source_format(resolved) == ".jsonl" else ""
+                    final_probe_stat = resolved.stat()
+                    if (probe_stat.st_size, probe_stat.st_mtime_ns) != (final_probe_stat.st_size, final_probe_stat.st_mtime_ns):
+                        raise SourceInventoryError("source_inventory_changed")
+                    if identity:
+                        source_headers.append(SourceIdentityHeader(source_root, resolved.relative_to(source_root).as_posix(), identity))
+                    if identity not in required_identities:
                         continue
             except (OSError, SourceRecordDecodeError) as exc:
                 raise SourceInventoryError("source_inventory_header_unavailable") from exc
@@ -704,7 +743,7 @@ def build_source_inventory(
         )
     if identity_adapter:
         validate_inventory_identities(inventory)
-    return sorted(inventory, key=lambda record: record.relative_path)
+    return SourceInventory(sorted(inventory, key=lambda record: record.relative_path), source_headers)
 
 
 def discover_projects_from_inventory(inventory: Iterable[SourceInventoryRecord]) -> list[Path]:
@@ -775,11 +814,12 @@ def source_inventory_payload(
 
 
 def source_inventory_manifest_payload(inventory: Iterable[SourceInventoryRecord]) -> dict[str, object]:
+    headers = getattr(inventory, "source_headers", ())
     inventory = list(inventory)
     extended = any(record.source_root is not None or record.source_identity for record in inventory)
     return {
         "report_kind": SOURCE_INVENTORY_MANIFEST_KIND,
-        "report_version": 2 if extended else SOURCE_INVENTORY_MANIFEST_VERSION,
+        "report_version": 3 if headers else 2 if extended else SOURCE_INVENTORY_MANIFEST_VERSION,
         "records": [
             {
                 **source_inventory_record_payload(record, extended=extended),
@@ -787,6 +827,8 @@ def source_inventory_manifest_payload(inventory: Iterable[SourceInventoryRecord]
             }
             for record in inventory
         ],
+        **({"source_headers": [{"source_root": str(header.source_root), "relative_path": header.relative_path,
+                                "source_identity": header.source_identity} for header in headers]} if headers else {}),
     }
 
 
@@ -831,7 +873,7 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
             raise SourceInventoryError("source_inventory_manifest_invalid")
         text = path.read_text(encoding="utf-8")
         payload = json.loads(text)
-        if isinstance(payload, dict) and payload.get("report_version") == 2:
+        if isinstance(payload, dict) and payload.get("report_version") in (2, 3):
             payload = json.loads(text, object_pairs_hook=unique_json_object)
     except SourceInventoryError:
         raise
@@ -840,15 +882,16 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
     if (
         not isinstance(payload, dict)
         or payload.get("report_kind") != SOURCE_INVENTORY_MANIFEST_KIND
-        or payload.get("report_version") not in (SOURCE_INVENTORY_MANIFEST_VERSION, 2)
+        or payload.get("report_version") not in (SOURCE_INVENTORY_MANIFEST_VERSION, 2, 3)
         or not isinstance(payload.get("records"), list)
     ):
         raise SourceInventoryError("source_inventory_manifest_invalid")
     inventory: list[SourceInventoryRecord] = []
-    extended = payload["report_version"] == 2
+    extended = payload["report_version"] in (2, 3)
     if extended and (
         type(payload["report_version"]) is not int
-        or set(payload) != {"report_kind", "report_version", "records"}
+        or set(payload) != ({"report_kind", "report_version", "records", "source_headers"}
+                            if payload["report_version"] == 3 else {"report_kind", "report_version", "records"})
     ):
         raise SourceInventoryError("source_inventory_manifest_invalid")
     seen: set[tuple[Path | None, str]] = set()
@@ -927,7 +970,30 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
             )
         )
     validate_inventory_identities(inventory)
-    return sorted(inventory, key=lambda record: (str(record.source_root or ""), record.relative_path))
+    headers = []
+    raw_headers = payload.get("source_headers", [])
+    if not isinstance(raw_headers, list):
+        raise SourceInventoryError("source_inventory_manifest_invalid")
+    seen_headers = set()
+    for row in raw_headers:
+        if not isinstance(row, dict) or set(row) != {"source_root", "relative_path", "source_identity"}:
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        root = source_location_root(row["source_root"])
+        relative = row["relative_path"]
+        identity = row["source_identity"]
+        if (not isinstance(relative, str) or not relative or Path(relative).is_absolute()
+            or has_control_characters(relative) or Path(relative).as_posix() != relative
+            or any(part in {".", ".."} for part in Path(relative).parts)
+            or not isinstance(identity, str) or not re.fullmatch(r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", identity)
+            or (root, relative) in seen_headers):
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        try:
+            (root / relative).resolve().relative_to(root)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise SourceInventoryError("source_inventory_manifest_invalid") from exc
+        seen_headers.add((root, relative))
+        headers.append(SourceIdentityHeader(root, relative, identity))
+    return SourceInventory(sorted(inventory, key=lambda record: (str(record.source_root or ""), record.relative_path)), headers)
 
 
 def build_source_inventory_isolated(
@@ -963,7 +1029,7 @@ def build_source_inventory_isolated(
     if any(
         record.source_root != (source_root if identity_adapter else None)
         for record in inventory
-    ):
+    ) or any(header.source_root != source_root for header in getattr(inventory, "source_headers", ())):
         raise SourceInventoryError("source_inventory_manifest_invalid")
     return inventory
 
@@ -1624,19 +1690,18 @@ def run_updates(
 
         def inventory_for(candidate: Path) -> list[SourceInventoryRecord]:
             source_root = candidate.expanduser().resolve()
-            location = source_locations.get(source_root)
+            location = locations_by_root.get(source_root)
             if location is None:
                 return inventory_at(source_root, "")
-            if source_root not in collection_inventories:
-                inventory = [
-                    replace(record, source_root=root)
-                    for root in (source_root, *location.relocation_dirs)
-                    for record in inventory_at(root, location.identity_adapter)
-                ]
-                # Target filtering must never hide a conflicting embedded identity.
-                validate_inventory_identities(inventory)
-                collection_inventories[source_root] = inventory
-            return collection_inventories[source_root]
+            primary_root = location.source_dir
+            if primary_root not in collection_inventories:
+                root_inventories = [inventory_at(root, location.identity_adapter)
+                                    for root in (primary_root, *location.relocation_dirs)]
+                inventory = combine_source_collection(root_inventories)
+                collection_inventories[primary_root] = inventory
+            if source_root == primary_root:
+                return collection_inventories[primary_root]
+            return inventory_at(source_root, location.identity_adapter)
 
         discovered = discover_projects_from_inventory(inventory_for(source_dir))
         projects, added = merge_discovered_projects(registered, discovered, source_dir)

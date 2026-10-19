@@ -275,12 +275,61 @@ class SourceRelocationTests(unittest.TestCase):
             location['discover_after'] = discover_after
         (self.repo / 'config/source_locations.jsonl').write_text(json.dumps(location) + '\n')
 
-    def runner(self):
+    def runner(self, *, source_dir=None, blocked=False):
         result = subprocess.run([sys.executable, str(self.repo / 'tools/run_memory_updates.py'),
-            '--memory-repo', str(self.repo), '--source-dir', str(self.active), '--report-json'],
+            '--memory-repo', str(self.repo), '--source-dir', str(source_dir or self.active), '--report-json'],
             text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        if blocked:
+            self.assertNotEqual(result.returncode, 0)
+        else:
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout)
+
+    def assert_identity_location_conflict(self, *, discover_after=None):
+        spec = importlib.util.spec_from_file_location('collection_conflict_under_test', SCRIPT.with_name('run_memory_updates.py'))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        cutoff = module.parse_source_timestamp(discover_after) if discover_after else None
+        inventories = [module.build_source_inventory(root, module.DEFAULT_PATTERNS, 'codex-session',
+            discover_after=cutoff, include_existing=root == self.active) for root in (self.active, self.archived)]
+        with self.assertRaisesRegex(module.SourceInventoryError, 'source_inventory_identity_conflict'):
+            module.combine_source_collection(inventories)
+
+    @unittest.skipIf(zstd is None, 'stdlib zstd fixture requires Python 3.14')
+    def test_cold_start_checks_old_compressed_copies_before_enrollment(self):
+        first = self.source(self.active / 'current.jsonl')
+        copy = self.archived / 'historical-copy.jsonl.zst'
+        copy.write_bytes(zstd.compress(first.read_bytes()))
+        os.utime(copy, (1783944000, 1783944000))
+        self.configure_runner([{'project_path': str(self.project), 'source_dir': str(self.active), 'enabled': True}],
+                              discover_after='2026-07-14T00:00:00Z')
+        self.pending([self.active / f'rollout-2026-07-13T10-00-00-{IDENTITY_C}.jsonl'])
+        before = self.queue.read_bytes()
+        registry = self.repo / 'config/projects.jsonl'
+        before_registry = registry.read_bytes()
+        self.assert_identity_location_conflict(discover_after='2026-07-14T00:00:00Z')
+        report = self.runner(blocked=True)
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(report['reason'], 'source_inventory_invalid')
+        self.assertEqual(self.queue.read_bytes(), before)
+        self.assertEqual(registry.read_bytes(), before_registry)
+        self.assertFalse((self.repo / 'index/source_identities.jsonl').exists())
+        self.assertFalse(self.metas())
+
+    def test_secondary_only_start_validates_the_primary_collection(self):
+        self.source(self.active / 'first.jsonl')
+        self.source(self.archived / 'copy.jsonl')
+        self.configure_runner([{'project_path': str(self.project), 'source_dir': str(self.archived), 'enabled': True}])
+        registry = self.repo / 'config/projects.jsonl'
+        before = registry.read_bytes()
+        self.assert_identity_location_conflict()
+        report = self.runner(source_dir=self.archived, blocked=True)
+        self.assertEqual(report['status'], 'blocked')
+        self.assertEqual(report['reason'], 'source_inventory_invalid')
+        self.assertEqual(registry.read_bytes(), before)
+        self.assertFalse((self.repo / 'index/source_identities.jsonl').exists())
+        self.assertFalse(self.metas())
 
     def test_secondary_root_registration_reuses_the_collection_inventory(self):
         self.source(self.active / 'first.jsonl')

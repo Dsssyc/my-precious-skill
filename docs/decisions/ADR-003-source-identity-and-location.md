@@ -77,3 +77,14 @@ selection metadata, never evidence of archival freshness. This lets an unchanged
 legacy source move later without losing lookup eligibility. The scheduled
 transaction publishes enrollment together with retry state and archive updates;
 an interrupted unpublished staging clone cannot advance it independently.
+
+With an activation boundary, private inventory manifest version 3 also carries
+owner headers for older unmaterialized locations. Before enrollment or target
+filtering, every selected identity is checked against all these physical
+locations, including identities first seen in the current primary inventory.
+Unselected historical identities do not establish freshness or enter enrollment.
+Starting from a secondary root validates its entire owning collection first and
+then dispatches only that root's requested inventory. No root is rescanned.
+Legacy entries already moved before activation, with neither pending state nor
+persisted identity, require explicit historical enrollment or a full-history run;
+the activation boundary is not a blanket historical source-map repair.
