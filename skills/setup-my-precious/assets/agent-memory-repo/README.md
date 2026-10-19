@@ -644,3 +644,26 @@ Expected archive data:
 - Shadow evaluation emits aggregate metrics only and should not render raw source content, source paths, returned memory IDs, queries, or forbidden-pattern text.
 - Credentials must never be committed.
 - Keep this repository private.
+
+### Source collections and relocated sessions
+
+To retain session identity when a runtime moves completed records, review and
+commit a `config/source_locations.jsonl` collection before scheduled updates:
+
+```json
+{"source_dir":"/path/to/active-records","relocation_dirs":["/path/to/archived-records"],"identity_adapter":"codex-session","enabled":true}
+```
+
+Only declared roots are scanned. The optional Codex adapter verifies embedded
+session IDs, retries older pending identities, and refreshes source references
+after moves and renames. Conflicting identities block the update; missing sources
+remain pending. `.jsonl.zst` sources require Python 3.14 or the optional
+`zstandard` package; physical file hashes and decoded event anchors are both verified. Raw sources remain outside the
+archive. Single-root configurations and other source formats keep their existing
+behavior.
+
+For an existing deployment, optional `discover_after` may record the collection's
+activation time as a UTC timestamp. Older moved/compressed records are located
+by pending or persisted identity; records modified after activation are also
+discovered when first seen after a move. The boundary stays fixed. Omit it to
+scan all declared history.

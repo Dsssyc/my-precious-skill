@@ -27,6 +27,8 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+from source_record_io import SourceRecordDecodeError, codex_session_identity as read_codex_session_identity, decompress_source_bytes, source_format
+
 from memory_consolidation import (
     add_contradiction_link,
     add_deprecation_link,
@@ -49,7 +51,7 @@ from memory_consolidation import (
 )
 
 
-DEFAULT_PATTERNS = ("*.jsonl", "*.json", "*.md", "*.txt", "*.log")
+DEFAULT_PATTERNS = ("*.jsonl", "*.jsonl.zst", "*.json", "*.md", "*.txt", "*.log")
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env"}
 TIMESTAMP_KEYS = {"timestamp", "created_at", "updated_at", "started_at", "ended_at", "date"}
 PROJECT_PATH_KEYS = {
@@ -422,10 +424,79 @@ class SourceRecord:
     sha256: str
     expected_size: int | None = None
     expected_mtime_ns: int | None = None
+    source_identity: str = ""
+    identity_adapter: str = ""
+    prior_source_paths: tuple[str, ...] = ()
+    pending_source_paths: tuple[str, ...] = ()
 
 
 class SourceInventoryError(ValueError):
     pass
+
+
+CODEX_SESSION_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+def valid_source_identity(value: object) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch("codex-session:" + CODEX_SESSION_UUID, value))
+
+
+def codex_session_identity(values: Iterable[object]) -> str:
+    try:
+        return read_codex_session_identity(values)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+
+
+def legacy_codex_source_identity(path: str) -> str:
+    # Legacy pending rows only had a path. A rollout UUID is a lookup hint;
+    # the selected file's embedded session metadata must independently verify it.
+    match = re.fullmatch(
+        r"rollout-\d{4}-\d{2}-\d{2}t\d{2}-\d{2}-\d{2}-(" + CODEX_SESSION_UUID + r")\.jsonl",
+        Path(path).name.lower(),
+    )
+    return "codex-session:" + match[1] if match else ""
+
+
+def select_source_records(
+    records: list[SourceRecord],
+    after: datetime | None,
+    archived_hashes: set[str],
+    archived_source_hashes: dict[str, set[str]],
+    pending_source_paths: set[str],
+    known_source_identities: dict[str, str],
+) -> list[SourceRecord]:
+    by_identity: dict[str, set[str]] = {}
+    for path, identity in known_source_identities.items():
+        if identity:
+            by_identity.setdefault(identity, set()).add(path)
+    seen_identities: set[str] = set()
+    selected = []
+    for record in records:
+        path = str(record.path)
+        identity = record.source_identity
+        if identity:
+            if identity in seen_identities:
+                raise SourceInventoryError("source inventory contains duplicate identities")
+            seen_identities.add(identity)
+        if path in known_source_identities and known_source_identities[path] != identity:
+            raise SourceInventoryError("source path identity mismatch")
+        lineage = by_identity.get(identity, set()) if identity else set()
+        prior_paths = (lineage | {path}) & archived_source_hashes.keys()
+        pending_paths = (lineage | {path}) & pending_source_paths
+        record.prior_source_paths = tuple(sorted(prior_paths))
+        record.pending_source_paths = tuple(sorted(pending_paths))
+        prior_hashes = set().union(*(archived_source_hashes[value] for value in prior_paths))
+        changed = bool(prior_hashes) and record.sha256 not in prior_hashes
+        relocated = bool(prior_paths - {path})
+        unseen_identity = bool(identity) and not (lineage & archived_source_hashes.keys())
+        if after is not None and not (pending_paths or relocated or unseen_identity):
+            if record.updated_at < after and not changed:
+                continue
+            if record.updated_at == after and record.sha256 in archived_hashes:
+                continue
+        selected.append(record)
+    return sorted(selected, key=lambda item: (item.updated_at, item.path.as_posix()))
 
 
 def update_target_report(
@@ -989,6 +1060,7 @@ def archived_project_state(
     source_partition: str | None = None,
     *,
     include_generated_index: bool = True,
+    source_identities: dict[str, str] | None = None,
 ) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
     scope_key = archive_scope or str(project_path.resolve())
     partition_key = source_partition or str(project_path.resolve())
@@ -1020,6 +1092,12 @@ def archived_project_state(
         source_key = ""
         if isinstance(source_record, str) and source_record:
             source_key = str(Path(source_record).expanduser().resolve())
+        if source_identities is not None and source_key:
+            identity = meta.get("source_identity", "") or legacy_codex_source_identity(source_key)
+            if identity:
+                if not valid_source_identity(identity) or source_identities.get(source_key, identity) != identity:
+                    raise SourceInventoryError("archived source identity is invalid")
+                source_identities[source_key] = identity
         source_hash = meta.get("source_record_sha256")
         if isinstance(source_hash, str) and source_hash:
             archived_hashes.add(source_hash)
@@ -1051,11 +1129,11 @@ def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
             row = json.loads(raw_line)
         except json.JSONDecodeError as exc:
             raise SourceInventoryError("deferred source state is malformed") from exc
-        if not isinstance(row, dict) or set(row) != {
+        if not isinstance(row, dict) or set(row) not in ({
             "archive_scope",
             "source_partition",
             "source_record",
-        }:
+        }, {"archive_scope", "source_partition", "source_record", "source_identity"}):
             raise SourceInventoryError("deferred source state is malformed")
         archive_scope = row.get("archive_scope")
         source_partition = row.get("source_partition")
@@ -1068,6 +1146,7 @@ def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
             or not isinstance(source_record, str)
             or not Path(source_record).is_absolute()
             or any(ord(char) < 32 or ord(char) == 127 for char in source_record)
+            or ("source_identity" in row and not valid_source_identity(row["source_identity"]))
         ):
             raise SourceInventoryError("deferred source state is malformed")
         rows.append(
@@ -1075,6 +1154,7 @@ def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
                 "archive_scope": archive_scope,
                 "source_partition": source_partition,
                 "source_record": str(Path(source_record).expanduser().resolve()),
+                **({"source_identity": row["source_identity"]} if "source_identity" in row else {}),
             }
         )
     return rows
@@ -1099,6 +1179,7 @@ def update_deferred_source_paths(
     *,
     add: Iterable[str] = (),
     remove: Iterable[str] = (),
+    source_identities: dict[str, str] | None = None,
 ) -> None:
     rows = load_deferred_source_rows(memory_repo)
     keyed = {
@@ -1111,10 +1192,14 @@ def update_deferred_source_paths(
     for value in add:
         source_record = str(Path(value).expanduser().resolve())
         key = (archive_scope, source_partition, source_record)
+        identity = (source_identities or {}).get(source_record) or keyed.get(key, {}).get("source_identity", "")
+        if identity and not valid_source_identity(identity):
+            raise SourceInventoryError("deferred source identity is invalid")
         keyed[key] = {
             "archive_scope": archive_scope,
             "source_partition": source_partition,
             "source_record": source_record,
+            **({"source_identity": identity} if identity else {}),
         }
     path = memory_repo / DEFERRED_SOURCE_STATE_REL_PATH
     if not keyed:
@@ -1172,7 +1257,7 @@ def walk_json_values(value: object) -> Iterable[tuple[str, object]]:
 
 
 def iter_source_json_values(path: Path, text: str) -> Iterable[object]:
-    if path.suffix == ".jsonl":
+    if source_format(path) == ".jsonl":
         for raw_line in jsonl_physical_lines(text):
             raw_line = raw_line.strip()
             if not raw_line:
@@ -1325,13 +1410,20 @@ def discover_records(
     archived_source_hashes: dict[str, set[str]] | None = None,
     require_project_metadata: bool = False,
     pending_source_paths: set[str] | None = None,
+    known_source_identities: dict[str, str] | None = None,
+    source_roots: tuple[Path, ...] = (),
+    source_identity_adapter: str = "",
 ) -> list[SourceRecord]:
     records: list[SourceRecord] = []
+    eligible_paths: set[Path] = set()
+    seen_identities: set[str] = set()
     seen: set[Path] = set()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
     pending_source_paths = pending_source_paths or set()
-    for path in iter_candidate_files(source_dir, patterns):
+    for path in (path for root in (source_dir, *source_roots) for path in iter_candidate_files(root, patterns)):
+        if not any(path.resolve().is_relative_to(root.resolve()) for root in (source_dir, *source_roots)):
+            raise SourceInventoryError("source inventory path is unsafe")
         path = path.resolve()
         if path in seen:
             continue
@@ -1339,20 +1431,21 @@ def discover_records(
         text = read_record_text(path)
         if is_codex_automation_thread_source(path, text):
             continue
-        if not record_matches_project(path, text, project_path, require_project_metadata):
-            continue
+        if record_matches_project(path, text, project_path, require_project_metadata):
+            eligible_paths.add(path)
         updated_at = source_timestamp(path, text)
         source_hash = sha256_file(path)
-        source_key = str(path)
-        prior_hashes_for_source = archived_source_hashes.get(source_key, set())
-        source_changed_since_archive = bool(prior_hashes_for_source) and source_hash not in prior_hashes_for_source
-        if after is not None and source_key not in pending_source_paths:
-            if updated_at < after and not source_changed_since_archive:
-                continue
-            if updated_at == after and source_hash in archived_hashes:
-                continue
-        records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash))
-    return sorted(records, key=lambda item: (item.updated_at, item.path.as_posix()))
+        identity = codex_session_identity(iter_source_json_values(path, text)) if source_identity_adapter and source_format(path) == ".jsonl" else ""
+        if identity and identity in seen_identities:
+            raise SourceInventoryError("source inventory contains duplicate identities")
+        if identity:
+            seen_identities.add(identity)
+        records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash,
+                                    source_identity=identity, identity_adapter=source_identity_adapter))
+    return select_source_records(
+        [record for record in records if record.path in eligible_paths], after, archived_hashes,
+        archived_source_hashes, pending_source_paths, known_source_identities or {},
+    )
 
 
 def discover_records_from_inventory(
@@ -1364,6 +1457,9 @@ def discover_records_from_inventory(
     archived_source_hashes: dict[str, set[str]] | None = None,
     require_project_metadata: bool = False,
     pending_source_paths: set[str] | None = None,
+    known_source_identities: dict[str, str] | None = None,
+    source_roots: tuple[Path, ...] = (),
+    source_identity_adapter: str = "",
 ) -> list[SourceRecord]:
     try:
         payload = json.loads(payload_text)
@@ -1372,12 +1468,12 @@ def discover_records_from_inventory(
     if (
         not isinstance(payload, dict)
         or payload.get("report_kind") != SOURCE_INVENTORY_REPORT_KIND
-        or payload.get("report_version") != SOURCE_INVENTORY_REPORT_VERSION
+        or payload.get("report_version") not in (SOURCE_INVENTORY_REPORT_VERSION, 3)
         or not isinstance(payload.get("records"), list)
     ):
         raise SourceInventoryError("source inventory contract is invalid")
 
-    source_root = source_dir.resolve()
+    allowed_roots = {root.resolve() for root in (source_dir, *source_roots)}
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
     pending_source_paths = pending_source_paths or set()
@@ -1386,6 +1482,24 @@ def discover_records_from_inventory(
     for row in payload["records"]:
         if not isinstance(row, dict):
             raise SourceInventoryError("source inventory row is invalid")
+        source_root = source_dir.resolve()
+        identity = ""
+        if payload["report_version"] == 3:
+            root_value = row.get("source_root")
+            identity = row.get("source_identity", "")
+            if (
+                not isinstance(root_value, str) or any(ord(char) < 32 or ord(char) == 127 for char in root_value)
+                or not Path(root_value).is_absolute()
+                or (identity and (not source_identity_adapter or not valid_source_identity(identity)))
+                or not isinstance(identity, str)
+            ):
+                raise SourceInventoryError("source inventory location is invalid")
+            try:
+                source_root = Path(root_value).resolve()
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SourceInventoryError("source inventory location is invalid") from exc
+            if source_root not in allowed_roots:
+                raise SourceInventoryError("source inventory location is invalid")
         relative_path = row.get("relative_path")
         expected_hash = row.get("sha256")
         expected_size = row.get("size")
@@ -1411,17 +1525,11 @@ def discover_records_from_inventory(
             path.relative_to(source_root)
         except (OSError, ValueError) as exc:
             raise SourceInventoryError("source inventory path is unsafe") from exc
+        if identity and source_format(path) != ".jsonl":
+            raise SourceInventoryError("source inventory identity format mismatch")
         if path in seen:
             raise SourceInventoryError("source inventory contains duplicate paths")
         seen.add(path)
-        source_key = str(path)
-        prior_hashes_for_source = archived_source_hashes.get(source_key, set())
-        source_changed_since_archive = bool(prior_hashes_for_source) and expected_hash not in prior_hashes_for_source
-        if after is not None and source_key not in pending_source_paths:
-            if updated_at < after and not source_changed_since_archive:
-                continue
-            if updated_at == after and expected_hash in archived_hashes:
-                continue
         records.append(
             SourceRecord(
                 path=path,
@@ -1429,9 +1537,13 @@ def discover_records_from_inventory(
                 sha256=expected_hash,
                 expected_size=expected_size,
                 expected_mtime_ns=expected_mtime_ns,
+                source_identity=identity,
+                identity_adapter=source_identity_adapter,
             )
         )
-    return sorted(records, key=lambda item: (item.updated_at, item.path.as_posix()))
+    return select_source_records(
+        records, after, archived_hashes, archived_source_hashes, pending_source_paths, known_source_identities or {},
+    )
 
 
 def read_validated_inventory_record(record: SourceRecord) -> tuple[str, float]:
@@ -1456,7 +1568,11 @@ def read_validated_inventory_record(record: SourceRecord) -> tuple[str, float]:
         or hashlib.sha256(raw).hexdigest() != record.sha256
     ):
         raise SourceInventoryError("source inventory record changed")
-    return raw.decode("utf-8", errors="replace"), final_stat.st_mtime
+    try:
+        text = decompress_source_bytes(record.path, raw).decode("utf-8", errors="replace")
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+    return text, final_stat.st_mtime
 
 
 def redact_text(text: str) -> tuple[str, dict[str, int]]:
@@ -1483,7 +1599,7 @@ def redact_json_value(value: object, counts: dict[str, int]) -> object:
 
 
 def redact_source_text(path: Path, text: str) -> tuple[str, dict[str, int]]:
-    if path.suffix not in {".json", ".jsonl"}:
+    if source_format(path) not in {".json", ".jsonl"}:
         return redact_text(text)
 
     counts: dict[str, int] = {}
@@ -1557,7 +1673,10 @@ def has_sensitive_identifier_token(text: str) -> bool:
 
 
 def read_record_text(path: Path) -> str:
-    return path.read_bytes().decode("utf-8", errors="replace")
+    try:
+        return decompress_source_bytes(path, path.read_bytes()).decode("utf-8", errors="replace")
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
 
 
 def compact_whitespace(text: str) -> str:
@@ -2427,7 +2546,7 @@ def analyze_selected_jsonl(source_text: str, redacted_text: str) -> tuple[list[M
 def extract_source_events(path: Path, text: str, hash_text: str | None = None) -> list[MemoryEvent]:
     events: list[MemoryEvent] = []
     parsed_any = False
-    if path.suffix == ".jsonl":
+    if source_format(path) == ".jsonl":
         events = jsonl_events_with_locators(text, hash_text)
         parsed_any = jsonl_contains_value(text)
     else:
@@ -3775,6 +3894,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_partition": source_partition,
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
+        **({"source_identity": record.source_identity} if record.source_identity else {}),
         "source_updated_at": isoformat(record.updated_at),
         "archived_at": isoformat(archived_at),
         "summary_path": str(rel_summary),
@@ -3801,6 +3921,7 @@ See `evidence.md` for short redacted snippets that support the summary.
     source_map = {
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
+        **({"source_identity": record.source_identity} if record.source_identity else {}),
         "source_updated_at": isoformat(record.updated_at),
         "project_path": str(project_path),
         "archive_scope": archive_scope,
@@ -3849,11 +3970,13 @@ def prepare_inventory_record(
 ) -> PreparedArchiveRecord:
     source_text, source_mtime = read_validated_inventory_record(record)
     redacted_text, redaction_counts = redact_source_text(record.path, source_text)
-    if record.path.suffix == ".jsonl":
+    if source_format(record.path) == ".jsonl":
         source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
     else:
         source_values = list(iter_source_json_values(record.path, source_text))
         source_events = extract_source_events(record.path, redacted_text, source_text)
+    if record.identity_adapter and source_format(record.path) == ".jsonl" and codex_session_identity(source_values) != record.source_identity:
+        raise SourceInventoryError("source inventory identity mismatch")
     if source_values_are_automation(source_values):
         raise SourceInventoryError("source inventory contains an automation record")
     if not record_matches_project_values(source_values, project_path, require_project_metadata):
@@ -3902,6 +4025,8 @@ def write_record(
 ) -> Path | None:
     source_text = read_record_text(record.path)
     redacted_text, redaction_counts = redact_source_text(record.path, source_text)
+    if record.identity_adapter and source_format(record.path) == ".jsonl" and codex_session_identity(iter_source_json_values(record.path, source_text)) != record.source_identity:
+        raise SourceInventoryError("source inventory identity mismatch")
     source_events = extract_source_events(record.path, redacted_text, source_text)
     prepared = prepare_record(
         memory_repo,
@@ -5975,6 +6100,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--memory-repo", help="Path to the private memory repository")
     parser.add_argument("--source-dir", help="Directory containing source records to scan")
+    parser.add_argument("--source-relocation-dir", action="append", default=[], help="Additional explicitly trusted source root; may be repeated")
+    parser.add_argument("--source-identity-adapter", choices=("codex-session",), default="", help="Optional source identity adapter")
     parser.add_argument("--project-path", default=os.getcwd(), help="Project path used for source-record filtering and legacy scope defaults")
     parser.add_argument(
         "--archive-scope",
@@ -6177,15 +6304,30 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
-    latest, archived_hashes, archived_source_hashes = archived_project_state(
-        memory_repo,
-        project_path,
-        archive_scope,
-        source_partition,
-        include_generated_index=not args.defer_global_rebuild,
-    )
+    known_source_identities = {}
     try:
+        latest, archived_hashes, archived_source_hashes = archived_project_state(
+            memory_repo,
+            project_path,
+            archive_scope,
+            source_partition,
+            include_generated_index=not args.defer_global_rebuild,
+            source_identities=known_source_identities if args.source_identity_adapter else None,
+        )
         pending_source_paths = deferred_source_paths(memory_repo, archive_scope, source_partition)
+        if args.source_identity_adapter:
+            for row in load_deferred_source_rows(memory_repo):
+                if row["archive_scope"] == archive_scope and row["source_partition"] == source_partition:
+                    identity = row.get("source_identity") or legacy_codex_source_identity(row["source_record"])
+                    if identity:
+                        if known_source_identities.get(row["source_record"], identity) != identity:
+                            raise SourceInventoryError("source path identity mismatch")
+                        known_source_identities[row["source_record"]] = identity
+        source_roots = tuple(Path(value).expanduser().resolve() for value in args.source_relocation_dir)
+        all_roots = (source_dir, *source_roots)
+        if any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
+               for index, a in enumerate(all_roots) for b in all_roots[index + 1:]):
+            raise SourceInventoryError("source inventory roots overlap")
     except SourceInventoryError:
         if args.report_json:
             emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
@@ -6206,6 +6348,9 @@ def main(argv: list[str] | None = None) -> int:
                 *discovery_args,
                 require_project_metadata=args.require_project_metadata,
                 pending_source_paths=pending_source_paths,
+                known_source_identities=known_source_identities,
+                source_roots=source_roots,
+                source_identity_adapter=args.source_identity_adapter,
             )
         else:
             records = discover_records(
@@ -6214,6 +6359,9 @@ def main(argv: list[str] | None = None) -> int:
                 *discovery_args,
                 require_project_metadata=args.require_project_metadata,
                 pending_source_paths=pending_source_paths,
+                known_source_identities=known_source_identities,
+                source_roots=source_roots,
+                source_identity_adapter=args.source_identity_adapter,
             )
     except SourceInventoryError:
         if args.report_json:
@@ -6224,7 +6372,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_records >= 0:
         records = records[: args.max_records]
 
-    selected_source_paths = {str(record.path.resolve()) for record in records}
+    selected_source_paths = {path for record in records for path in (*record.pending_source_paths, str(record.path))}
+    deferred_identities = dict(known_source_identities)
     unresolved_pending_paths = pending_source_paths - selected_source_paths
     selected_record_count = len(records) + len(unresolved_pending_paths)
     deferred_record_count = len(unresolved_pending_paths)
@@ -6248,7 +6397,10 @@ def main(argv: list[str] | None = None) -> int:
             except SourceInventoryError as exc:
                 if str(exc) in DEFERABLE_SOURCE_INVENTORY_ERRORS:
                     deferred_record_count += 1
-                    deferred_source_records.add(str(record.path.resolve()))
+                    retry_paths = record.pending_source_paths or (str(record.path),)
+                    deferred_source_records.update(retry_paths)
+                    if record.source_identity:
+                        deferred_identities.update(dict.fromkeys(retry_paths, record.source_identity))
                     continue
                 if args.report_json:
                     emit_update_target_report(
@@ -6331,6 +6483,7 @@ def main(argv: list[str] | None = None) -> int:
                 archive_scope,
                 source_partition,
                 add=deferred_source_records,
+                source_identities=deferred_identities,
             )
         except SourceInventoryError:
             if args.report_json:
@@ -6349,13 +6502,9 @@ def main(argv: list[str] | None = None) -> int:
     removed_entries = 0
     skipped_records = 0
     for record_index, record in enumerate(records):
-        if args.rewrite_existing or str(record.path.resolve()) in archived_source_hashes:
+        for prior_path in set(record.prior_source_paths) | ({str(record.path)} if args.rewrite_existing else set()):
             removed_entries += remove_existing_entries_for_source(
-                memory_repo,
-                project_path,
-                record.path,
-                archive_scope,
-                source_partition,
+                memory_repo, project_path, Path(prior_path), archive_scope, source_partition,
             )
         if prepared_records is None:
             written = write_record(
@@ -6372,7 +6521,7 @@ def main(argv: list[str] | None = None) -> int:
         if written is None:
             skipped_records += 1
     completed_pending_paths = pending_source_paths & {
-        str(record.path.resolve()) for record in records
+        path for record in records for path in (*record.pending_source_paths, str(record.path))
     }
     if completed_pending_paths:
         try:

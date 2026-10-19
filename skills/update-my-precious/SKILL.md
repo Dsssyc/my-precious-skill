@@ -83,6 +83,23 @@ selection metadata only and never proves archived freshness or currentness.
 Do not replace this adapter with a prose-driven chain of direct updater, audit,
 or Git commands in scheduled automation.
 
+## Source relocation
+
+For a source runtime that moves completed sessions between directories, declare
+its trusted collection in the deployment's `config/source_locations.jsonl`:
+
+```json
+{"source_dir":"/path/to/active-records","relocation_dirs":["/path/to/archived-records"],"identity_adapter":"codex-session","enabled":true}
+```
+
+The optional `codex-session` adapter identifies sessions from authoritative
+metadata. Moves and renames within these declared roots preserve pending retries
+and refresh source references, even below the timestamp high-water. Ambiguous
+identities or unsafe locations fail closed; unavailable sources remain pending.
+Review and publish this deployment configuration before running the scheduled
+adapter. Do not copy source records into their former locations or clear pending
+rows to repair a migration. Other source runtimes retain the existing behavior.
+
 ## Required Inputs
 
 Resolve or ask for:

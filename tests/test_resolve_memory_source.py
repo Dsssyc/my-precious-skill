@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+try:
+    from compression import zstd
+except ImportError:
+    zstd = None
+
 SETUP_SCRIPT = Path("skills/setup-my-precious/scripts/setup_memory_archive.py").resolve()
 
 
@@ -28,7 +33,7 @@ def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedP
 
 
 class ResolveMemorySourceTests(unittest.TestCase):
-    def build_archive(self, root: Path, *, secret_token: str = "") -> tuple[Path, Path, str, str]:
+    def build_archive(self, root: Path, *, secret_token: str = "", compressed: bool = False) -> tuple[Path, Path, str, str]:
         memory_repo = root / "agent-memory"
         source_root = root / "source-records"
         project_path = root / "project"
@@ -54,6 +59,11 @@ class ResolveMemorySourceTests(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        if compressed:
+            compressed_source = source.with_suffix('.jsonl.zst')
+            compressed_source.write_bytes(zstd.compress(source.read_bytes()))
+            source.unlink()
+            source = compressed_source
         set_mtime(source, "2026-07-11T12:00:00Z")
         update = run(
             [
@@ -159,6 +169,18 @@ class ResolveMemorySourceTests(unittest.TestCase):
         self.assertFalse(package["privacy"]["source_path_rendered"])
         self.assertFalse(package["privacy"]["raw_ref_rendered"])
         self.assertFalse(package["privacy"]["unrestricted_source_content_rendered"])
+
+    @unittest.skipIf(zstd is None, 'stdlib zstd fixture requires Python 3.14')
+    def test_compressed_exact_ref_verifies_physical_hash_and_logical_event(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, source_root, query, fact = self.build_archive(Path(tmpdir), compressed=True)
+            ref = self.source_ref_id(repo, query)
+            result, package = self.resolve(repo, source_root, query, ref)
+            self.assertEqual(package['status'], 'resolved')
+            self.assertTrue(package['integrity']['source_hash_verified'])
+            self.assertTrue(package['integrity']['source_anchor_verified'])
+            self.assertIn(fact, package['preview'])
+            self.assertNotIn(str(source_root), result.stdout + result.stderr)
 
     def test_missing_authorization_blocks_without_preview(self):
         with tempfile.TemporaryDirectory() as tmpdir:

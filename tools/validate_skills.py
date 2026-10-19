@@ -22,11 +22,13 @@ REQUIRED_SKILLS = {
         "agents/openai.yaml",
         "scripts/update_memory_archive.py",
         "scripts/memory_consolidation.py",
+        "scripts/source_record_io.py",
     ),
     "using-my-precious": (
         "SKILL.md",
         "agents/openai.yaml",
         "scripts/search_memory.py",
+        "scripts/source_record_io.py",
         "scripts/semantic_retrieval_provider.py",
         "scripts/semantic_retrieval_provider_requirements.txt",
         "references/archive-format.md",

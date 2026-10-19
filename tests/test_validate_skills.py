@@ -39,11 +39,13 @@ def write_required_repo(root: Path) -> None:
     (root / "skills/update-my-precious/scripts").mkdir(parents=True)
     (root / "skills/update-my-precious/scripts/update_memory_archive.py").write_text("", encoding="utf-8")
     (root / "skills/update-my-precious/scripts/memory_consolidation.py").write_text("", encoding="utf-8")
+    (root / "skills/update-my-precious/scripts/source_record_io.py").write_text("", encoding="utf-8")
     (root / "skills/update-my-precious/agents").mkdir(parents=True)
     (root / "skills/update-my-precious/agents/openai.yaml").write_text("", encoding="utf-8")
 
     (root / "skills/using-my-precious/scripts").mkdir(parents=True)
     (root / "skills/using-my-precious/scripts/search_memory.py").write_text("", encoding="utf-8")
+    (root / "skills/using-my-precious/scripts/source_record_io.py").write_text("", encoding="utf-8")
     (root / "skills/using-my-precious/scripts/semantic_retrieval_provider.py").write_text(
         "",
         encoding="utf-8",

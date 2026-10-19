@@ -21,10 +21,16 @@ import stat
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
+
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
 
 if os.name == "posix":
     import fcntl
@@ -50,6 +56,7 @@ PROJECT_PATH_KEYS = {
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env"}
 PROJECT_REGISTRY = Path("config/projects.jsonl")
 SOURCE_STREAM_REGISTRY = Path("config/source_streams.jsonl")
+SOURCE_LOCATION_REGISTRY = Path("config/source_locations.jsonl")
 UNSAFE_PATH = "[unsafe-path]"
 UNSAFE_IDENTIFIER = "[unsafe-identifier]"
 CONCURRENT_UPDATE_EXIT = getattr(os, "EX_TEMPFAIL", 75)
@@ -75,6 +82,29 @@ class SourceInventoryRecord:
     mtime_ns: int
     source_updated_at: str
     project_paths: tuple[Path, ...]
+    source_root: Path | None = None
+    source_identity: str = ""
+
+
+@dataclass(frozen=True)
+class SourceIdentityHeader:
+    source_root: Path
+    relative_path: str
+    source_identity: str
+
+
+class SourceInventory(list):
+    def __init__(self, records=(), source_headers=()):
+        super().__init__(records)
+        self.source_headers = tuple(source_headers)
+
+
+@dataclass(frozen=True)
+class SourceLocation:
+    source_dir: Path
+    relocation_dirs: tuple[Path, ...]
+    identity_adapter: str
+    discover_after: datetime | None = None
 
 
 class SourceInventoryError(ValueError):
@@ -440,27 +470,32 @@ def iter_candidate_files(source_dir: Path, patterns: tuple[str, ...]) -> Iterabl
                 yield path
 
 
-def iter_json_values(path: Path, text: str) -> Iterable[object]:
-    if path.suffix == ".jsonl":
+def source_format(path: Path) -> str:
+    return ".jsonl" if path.name.lower().endswith(".jsonl.zst") else path.suffix
+
+
+def iter_json_values(path: Path, text: str, *, strict_objects: bool = False) -> Iterable[object]:
+    json_options = {"object_pairs_hook": unique_json_object} if strict_objects else {}
+    if source_format(path) == ".jsonl":
         for raw_line in jsonl_physical_lines(text):
             raw_line = raw_line.strip()
             if not raw_line:
                 continue
             try:
-                yield json.loads(raw_line)
+                yield json.loads(raw_line, **json_options)
             except json.JSONDecodeError as exc:
                 raise SourceInventoryError("source_inventory_malformed") from exc
         return
 
     if path.suffix == ".json":
         try:
-            yield json.loads(text)
+            yield json.loads(text, **json_options)
         except json.JSONDecodeError as exc:
             raise SourceInventoryError("source_inventory_malformed") from exc
         return
 
     try:
-        yield json.loads(text)
+        yield json.loads(text, **json_options)
         return
     except json.JSONDecodeError:
         pass
@@ -470,7 +505,7 @@ def iter_json_values(path: Path, text: str) -> Iterable[object]:
         if not raw_line:
             continue
         try:
-            yield json.loads(raw_line)
+            yield json.loads(raw_line, **json_options)
         except json.JSONDecodeError as exc:
             raise SourceInventoryError("source_inventory_malformed") from exc
 
@@ -550,14 +585,64 @@ def source_updated_at_from_values(path: Path, values: Iterable[object], mtime: f
     return selected.isoformat().replace("+00:00", "Z")
 
 
+def codex_session_identity(values: Iterable[object]) -> str:
+    try:
+        from source_record_io import SourceRecordDecodeError, codex_session_identity as read_identity
+    except ImportError as exc:
+        raise SourceInventoryError("source_identity_adapter_unavailable") from exc
+    try:
+        return read_identity(values)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+
+
+def validate_inventory_identities(inventory: Iterable[SourceInventoryRecord]) -> None:
+    seen: set[str] = set()
+    for record in inventory:
+        if not record.source_identity:
+            continue
+        if record.source_identity in seen:
+            raise SourceInventoryError("source_inventory_identity_conflict")
+        seen.add(record.source_identity)
+
+
+def combine_source_collection(root_inventories: Iterable[SourceInventory]) -> list[SourceInventoryRecord]:
+    root_inventories = list(root_inventories)
+    inventory = [record for records in root_inventories for record in records]
+    validate_inventory_identities(inventory)
+    locations: dict[str, set[Path]] = {}
+    selected = {record.source_identity for record in inventory if record.source_identity}
+    for record in inventory:
+        if record.source_identity:
+            if record.source_root is None:
+                raise SourceInventoryError("source_inventory_manifest_invalid")
+            locations.setdefault(record.source_identity, set()).add(record.source_root / record.relative_path)
+    for records in root_inventories:
+        for header in getattr(records, "source_headers", ()):
+            locations.setdefault(header.source_identity, set()).add(header.source_root / header.relative_path)
+    if any(len(paths) > 1 for identity, paths in locations.items() if identity in selected):
+        raise SourceInventoryError("source_inventory_identity_conflict")
+    return inventory
+
+
 def build_source_inventory(
     source_dir: Path,
     patterns: tuple[str, ...],
+    identity_adapter: str = "",
+    *,
+    discover_after: datetime | None = None,
+    required_identities: frozenset[str] = frozenset(),
+    include_existing: bool = True,
 ) -> list[SourceInventoryRecord]:
+    if identity_adapter not in ("", "codex-session"):
+        raise SourceInventoryError("source_inventory_identity_adapter_invalid")
     if not source_dir.exists() or not source_dir.is_dir():
         return []
+    if identity_adapter == "codex-session":
+        patterns = tuple(dict.fromkeys((*patterns, "*.jsonl.zst")))
     source_root = source_dir.resolve()
     inventory: list[SourceInventoryRecord] = []
+    source_headers: list[SourceIdentityHeader] = []
     seen: set[Path] = set()
     for path in iter_candidate_files(source_root, patterns):
         resolved = path.resolve()
@@ -568,6 +653,21 @@ def build_source_inventory(
         if resolved in seen:
             continue
         seen.add(resolved)
+        if discover_after is not None and (not include_existing or resolved.name.endswith(".jsonl.zst")):
+            from source_record_io import source_header_identity, SourceRecordDecodeError
+            try:
+                probe_stat = resolved.stat()
+                if datetime.fromtimestamp(probe_stat.st_mtime, tz=UTC) < discover_after:
+                    identity = source_header_identity(resolved) if source_format(resolved) == ".jsonl" else ""
+                    final_probe_stat = resolved.stat()
+                    if (probe_stat.st_size, probe_stat.st_mtime_ns) != (final_probe_stat.st_size, final_probe_stat.st_mtime_ns):
+                        raise SourceInventoryError("source_inventory_changed")
+                    if identity:
+                        source_headers.append(SourceIdentityHeader(source_root, resolved.relative_to(source_root).as_posix(), identity))
+                    if identity not in required_identities:
+                        continue
+            except (OSError, SourceRecordDecodeError) as exc:
+                raise SourceInventoryError("source_inventory_header_unavailable") from exc
         try:
             relative_path = resolved.relative_to(source_root).as_posix()
             initial_stat = resolved.stat()
@@ -581,14 +681,34 @@ def build_source_inventory(
             or initial_stat.st_mtime_ns != final_stat.st_mtime_ns
         ):
             raise SourceInventoryError("source_inventory_changed")
-        text = raw.decode("utf-8", errors="replace")
+        if resolved.name.lower().endswith(".jsonl.zst"):
+            try:
+                from source_record_io import SourceRecordDecodeError, decompress_source_bytes
+                raw_text = decompress_source_bytes(resolved, raw)
+            except ImportError as exc:
+                raise SourceInventoryError("source_compression_unavailable") from exc
+            except SourceRecordDecodeError as exc:
+                raise SourceInventoryError(str(exc)) from exc
+        else:
+            raw_text = raw
+        text = raw_text.decode("utf-8", errors="replace")
         project_paths: set[Path] = set()
         latest_source_timestamp: datetime | None = None
         automation_source = False
-        for value in iter_json_values(resolved, text):
+        source_identity = ""
+        identity_metadata = []
+        identity_records = identity_adapter == "codex-session" and source_format(resolved) == ".jsonl"
+        for value in iter_json_values(resolved, text, strict_objects=identity_records):
+            if identity_records:
+                if isinstance(value, dict) and value.get("type") == "session_meta":
+                    payload = value.get("payload")
+                    identity_metadata.append({"type": "session_meta", "payload": {
+                        key: payload.get(key) for key in ("id", "forked_from_id")
+                    } if isinstance(payload, dict) else None})
             if source_value_is_automation(value):
                 automation_source = True
-                break
+                if not identity_adapter:
+                    break
             for timestamp in direct_source_timestamps(value):
                 if latest_source_timestamp is None or timestamp > latest_source_timestamp:
                     latest_source_timestamp = timestamp
@@ -598,6 +718,8 @@ def build_source_inventory(
                 candidate = Path(child).expanduser()
                 if candidate.is_absolute():
                     project_paths.add(candidate.resolve())
+        if identity_records:
+            source_identity = codex_session_identity(identity_metadata)
         if automation_source:
             continue
         filename_timestamp = timestamp_from_source_filename(resolved)
@@ -615,9 +737,13 @@ def build_source_inventory(
                 mtime_ns=final_stat.st_mtime_ns,
                 source_updated_at=latest_source_timestamp.isoformat().replace("+00:00", "Z"),
                 project_paths=tuple(sorted(project_paths, key=lambda item: item.as_posix())),
+                source_root=source_root if identity_adapter else None,
+                source_identity=source_identity,
             )
         )
-    return sorted(inventory, key=lambda record: record.relative_path)
+    if identity_adapter:
+        validate_inventory_identities(inventory)
+    return SourceInventory(sorted(inventory, key=lambda record: record.relative_path), source_headers)
 
 
 def discover_projects_from_inventory(inventory: Iterable[SourceInventoryRecord]) -> list[Path]:
@@ -640,19 +766,45 @@ def inventory_records_for_target(
     ]
 
 
-def source_inventory_payload(inventory: Iterable[SourceInventoryRecord]) -> str:
+def source_inventory_record_payload(
+    record: SourceInventoryRecord, *, extended: bool
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "relative_path": record.relative_path,
+        "sha256": record.sha256,
+        "size": record.size,
+        "mtime_ns": record.mtime_ns,
+        "source_updated_at": record.source_updated_at,
+    }
+    if extended:
+        if (
+            not isinstance(record.source_root, Path)
+            or not record.source_root.is_absolute()
+            or has_control_characters(str(record.source_root))
+            or not isinstance(record.source_identity, str)
+            or (record.source_identity and not re.fullmatch(
+                r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",
+                record.source_identity,
+            ))
+        ):
+            raise SourceInventoryError("source_inventory_extension_invalid")
+        row.update(source_root=str(record.source_root), source_identity=record.source_identity)
+    return row
+
+
+def source_inventory_payload(
+    inventory: Iterable[SourceInventoryRecord], *, extended: bool = False
+) -> str:
+    inventory = list(inventory)
+    extended = extended or any(
+        record.source_root is not None or record.source_identity for record in inventory
+    )
     return json.dumps(
         {
             "report_kind": SOURCE_INVENTORY_REPORT_KIND,
-            "report_version": SOURCE_INVENTORY_REPORT_VERSION,
+            "report_version": 3 if extended else SOURCE_INVENTORY_REPORT_VERSION,
             "records": [
-                {
-                    "relative_path": record.relative_path,
-                    "sha256": record.sha256,
-                    "size": record.size,
-                    "mtime_ns": record.mtime_ns,
-                    "source_updated_at": record.source_updated_at,
-                }
+                source_inventory_record_payload(record, extended=extended)
                 for record in inventory
             ],
         },
@@ -662,20 +814,21 @@ def source_inventory_payload(inventory: Iterable[SourceInventoryRecord]) -> str:
 
 
 def source_inventory_manifest_payload(inventory: Iterable[SourceInventoryRecord]) -> dict[str, object]:
+    headers = getattr(inventory, "source_headers", ())
+    inventory = list(inventory)
+    extended = any(record.source_root is not None or record.source_identity for record in inventory)
     return {
         "report_kind": SOURCE_INVENTORY_MANIFEST_KIND,
-        "report_version": SOURCE_INVENTORY_MANIFEST_VERSION,
+        "report_version": 3 if headers else 2 if extended else SOURCE_INVENTORY_MANIFEST_VERSION,
         "records": [
             {
-                "relative_path": record.relative_path,
-                "sha256": record.sha256,
-                "size": record.size,
-                "mtime_ns": record.mtime_ns,
-                "source_updated_at": record.source_updated_at,
+                **source_inventory_record_payload(record, extended=extended),
                 "project_paths": [str(path) for path in record.project_paths],
             }
             for record in inventory
         ],
+        **({"source_headers": [{"source_root": str(header.source_root), "relative_path": header.relative_path,
+                                "source_identity": header.source_identity} for header in headers]} if headers else {}),
     }
 
 
@@ -718,29 +871,37 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
             or file_stat.st_size > MAX_INVENTORY_MANIFEST_BYTES
         ):
             raise SourceInventoryError("source_inventory_manifest_invalid")
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        payload = json.loads(text)
+        if isinstance(payload, dict) and payload.get("report_version") in (2, 3):
+            payload = json.loads(text, object_pairs_hook=unique_json_object)
     except SourceInventoryError:
         raise
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         raise SourceInventoryError("source_inventory_manifest_invalid") from exc
     if (
         not isinstance(payload, dict)
         or payload.get("report_kind") != SOURCE_INVENTORY_MANIFEST_KIND
-        or payload.get("report_version") != SOURCE_INVENTORY_MANIFEST_VERSION
+        or payload.get("report_version") not in (SOURCE_INVENTORY_MANIFEST_VERSION, 2, 3)
         or not isinstance(payload.get("records"), list)
     ):
         raise SourceInventoryError("source_inventory_manifest_invalid")
     inventory: list[SourceInventoryRecord] = []
-    seen: set[str] = set()
+    extended = payload["report_version"] in (2, 3)
+    if extended and (
+        type(payload["report_version"]) is not int
+        or set(payload) != ({"report_kind", "report_version", "records", "source_headers"}
+                            if payload["report_version"] == 3 else {"report_kind", "report_version", "records"})
+    ):
+        raise SourceInventoryError("source_inventory_manifest_invalid")
+    seen: set[tuple[Path | None, str]] = set()
+    fields = {
+        "relative_path", "sha256", "size", "mtime_ns", "source_updated_at", "project_paths"
+    }
+    if extended:
+        fields.update({"source_root", "source_identity"})
     for row in payload["records"]:
-        if not isinstance(row, dict) or set(row) != {
-            "relative_path",
-            "sha256",
-            "size",
-            "mtime_ns",
-            "source_updated_at",
-            "project_paths",
-        }:
+        if not isinstance(row, dict) or set(row) != fields:
             raise SourceInventoryError("source_inventory_manifest_invalid")
         relative_path = row["relative_path"]
         digest = row["sha256"]
@@ -748,25 +909,54 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
         mtime_ns = row["mtime_ns"]
         source_updated_at = row["source_updated_at"]
         project_paths = row["project_paths"]
+        source_root = None
+        source_identity = ""
+        if extended:
+            try:
+                source_root = source_location_root(row["source_root"])
+                if str(source_root) != row["source_root"]:
+                    raise SourceInventoryError("source_inventory_manifest_invalid")
+            except (SourceInventoryError, OSError, ValueError, RuntimeError) as exc:
+                raise SourceInventoryError("source_inventory_manifest_invalid") from exc
+            source_identity = row["source_identity"]
         if (
             not isinstance(relative_path, str)
             or not relative_path
             or Path(relative_path).is_absolute()
+            or (extended and (
+                has_control_characters(relative_path) or Path(relative_path).as_posix() != relative_path
+            ))
             or any(part in {"", ".", ".."} for part in Path(relative_path).parts)
-            or relative_path in seen
+            or (source_root, relative_path) in seen
             or not isinstance(digest, str)
             or not re.fullmatch(r"[0-9a-f]{64}", digest)
             or not isinstance(size, int)
+            or (extended and type(size) is not int)
             or size < 0
             or not isinstance(mtime_ns, int)
+            or (extended and type(mtime_ns) is not int)
             or mtime_ns < 0
             or not isinstance(source_updated_at, str)
             or parse_source_timestamp(source_updated_at) is None
             or not isinstance(project_paths, list)
-            or any(not isinstance(value, str) or not Path(value).is_absolute() for value in project_paths)
+            or any(
+                not isinstance(value, str)
+                or (extended and has_control_characters(value))
+                or not Path(value).is_absolute()
+                for value in project_paths
+            )
+            or not isinstance(source_identity, str)
+            or (source_identity and not re.fullmatch(
+                r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", source_identity
+            ))
         ):
             raise SourceInventoryError("source_inventory_manifest_invalid")
-        seen.add(relative_path)
+        if source_root is not None:
+            try:
+                (source_root / relative_path).resolve().relative_to(source_root)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise SourceInventoryError("source_inventory_manifest_invalid") from exc
+        seen.add((source_root, relative_path))
         inventory.append(
             SourceInventoryRecord(
                 relative_path=relative_path,
@@ -775,9 +965,35 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
                 mtime_ns=mtime_ns,
                 source_updated_at=source_updated_at,
                 project_paths=tuple(Path(value).resolve() for value in project_paths),
+                source_root=source_root,
+                source_identity=source_identity,
             )
         )
-    return sorted(inventory, key=lambda record: record.relative_path)
+    validate_inventory_identities(inventory)
+    headers = []
+    raw_headers = payload.get("source_headers", [])
+    if not isinstance(raw_headers, list):
+        raise SourceInventoryError("source_inventory_manifest_invalid")
+    seen_headers = set()
+    for row in raw_headers:
+        if not isinstance(row, dict) or set(row) != {"source_root", "relative_path", "source_identity"}:
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        root = source_location_root(row["source_root"])
+        relative = row["relative_path"]
+        identity = row["source_identity"]
+        if (not isinstance(relative, str) or not relative or Path(relative).is_absolute()
+            or has_control_characters(relative) or Path(relative).as_posix() != relative
+            or any(part in {".", ".."} for part in Path(relative).parts)
+            or not isinstance(identity, str) or not re.fullmatch(r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", identity)
+            or (root, relative) in seen_headers):
+            raise SourceInventoryError("source_inventory_manifest_invalid")
+        try:
+            (root / relative).resolve().relative_to(root)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise SourceInventoryError("source_inventory_manifest_invalid") from exc
+        seen_headers.add((root, relative))
+        headers.append(SourceIdentityHeader(root, relative, identity))
+    return SourceInventory(sorted(inventory, key=lambda record: (str(record.source_root or ""), record.relative_path)), headers)
 
 
 def build_source_inventory_isolated(
@@ -786,6 +1002,8 @@ def build_source_inventory_isolated(
     source_dir: Path,
     patterns: tuple[str, ...],
     manifest_path: Path,
+    identity_adapter: str = "",
+    selection: dict[str, object] | None = None,
 ) -> list[SourceInventoryRecord]:
     command = [
         sys.executable,
@@ -797,10 +1015,23 @@ def build_source_inventory_isolated(
     ]
     for pattern in patterns:
         command.extend(["--pattern", pattern])
-    result = controller.run(command, memory_repo)
+    if identity_adapter:
+        command.extend(["--source-identity-adapter", identity_adapter])
+    if selection is not None:
+        command.append("--inventory-selection-stdin")
+        result = controller.run(command, memory_repo, input_text=json.dumps(selection, sort_keys=True))
+    else:
+        result = controller.run(command, memory_repo)
     if result.returncode != 0:
         raise SourceInventoryError("source_inventory_worker_failed")
-    return load_source_inventory_manifest(manifest_path)
+    inventory = load_source_inventory_manifest(manifest_path)
+    source_root = source_dir.resolve()
+    if any(
+        record.source_root != (source_root if identity_adapter else None)
+        for record in inventory
+    ) or any(header.source_root != source_root for header in getattr(inventory, "source_headers", ())):
+        raise SourceInventoryError("source_inventory_manifest_invalid")
+    return inventory
 
 
 def discover_projects(source_dir: Path, patterns: tuple[str, ...]) -> list[Path]:
@@ -813,6 +1044,130 @@ def registry_path(memory_repo: Path) -> Path:
 
 def source_stream_registry_path(memory_repo: Path) -> Path:
     return memory_repo / SOURCE_STREAM_REGISTRY
+
+
+def has_control_characters(value: str) -> bool:
+    return any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)
+
+
+def unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise SourceInventoryError("source_inventory_duplicate_field")
+        result[key] = value
+    return result
+
+
+def source_location_root(value: object) -> Path:
+    if not isinstance(value, str) or not value or has_control_characters(value):
+        raise SourceInventoryError("source_locations_invalid")
+    path = Path(value)
+    if not path.is_absolute():
+        raise SourceInventoryError("source_locations_invalid")
+    return path.resolve()
+
+
+SOURCE_IDENTITY_REGISTRY = Path("index/source_identities.jsonl")
+
+
+def enrolled_source_identities(memory_repo: Path) -> frozenset[str]:
+    path = memory_repo / SOURCE_IDENTITY_REGISTRY
+    if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+        raise SourceInventoryError("source_inventory_tracking_invalid")
+    if not path.exists():
+        return frozenset()
+    try:
+        rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        if any(not isinstance(row, dict) or set(row) != {"source_identity"} or not isinstance(row["source_identity"], str)
+               or not re.fullmatch(r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", row["source_identity"]) for row in rows):
+            raise SourceInventoryError("source_inventory_tracking_invalid")
+        return frozenset(row["source_identity"] for row in rows)
+    except (OSError, ValueError) as exc:
+        raise SourceInventoryError("source_inventory_tracking_invalid") from exc
+
+
+def enroll_source_identities(memory_repo: Path, identities: Iterable[str], *, dry_run: bool) -> None:
+    previous = enrolled_source_identities(memory_repo)
+    current = previous | frozenset(identities)
+    if dry_run or current == previous:
+        return
+    path = memory_repo / SOURCE_IDENTITY_REGISTRY
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not is_safe_repo_path(memory_repo, path) or path.is_symlink():
+        raise SourceInventoryError("source_inventory_tracking_invalid")
+    path.write_text(''.join(json.dumps({"source_identity": value}, sort_keys=True) + "\n" for value in sorted(current)))
+
+
+def tracked_source_identities(memory_repo: Path) -> frozenset[str]:
+    from source_record_io import legacy_codex_source_identity
+    identities = set(enrolled_source_identities(memory_repo))
+    pending = memory_repo / "index/deferred_sources.jsonl"
+    paths = [*sorted((memory_repo / "sessions").glob("**/meta.json"))]
+    try:
+        if pending.exists():
+            if pending.is_symlink() or not is_safe_repo_path(memory_repo, pending):
+                raise SourceInventoryError("source_inventory_tracking_invalid")
+            for line in pending.read_text().splitlines():
+                if line.strip():
+                    row = json.loads(line)
+                    identity = row.get("source_identity") or legacy_codex_source_identity(row.get("source_record", ""))
+                    if identity:
+                        identities.add(identity)
+        for path in paths:
+            if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+                raise SourceInventoryError("source_inventory_tracking_invalid")
+            row = json.loads(path.read_text())
+            if row.get("source_identity"):
+                identities.add(row["source_identity"])
+        if any(not isinstance(value, str) or not re.fullmatch(r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) for value in identities):
+            raise SourceInventoryError("source_inventory_tracking_invalid")
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        raise SourceInventoryError("source_inventory_tracking_invalid") from exc
+    return frozenset(identities)
+
+
+def load_source_locations(memory_repo: Path) -> dict[Path, SourceLocation]:
+    path = memory_repo / SOURCE_LOCATION_REGISTRY
+    locations: dict[Path, SourceLocation] = {}
+    roots: list[Path] = []
+    try:
+        if path.is_symlink() or not is_safe_repo_path(memory_repo, path):
+            raise SourceInventoryError("source_locations_invalid")
+        if not path.exists():
+            return locations
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                row = json.loads(line, object_pairs_hook=unique_json_object)
+                if (
+                    not isinstance(row, dict)
+                    or not {"source_dir", "relocation_dirs", "identity_adapter"}.issubset(row)
+                    or set(row) - {"source_dir", "relocation_dirs", "identity_adapter", "enabled", "discover_after"}
+                    or not isinstance(row["relocation_dirs"], list)
+                    or row["identity_adapter"] != "codex-session"
+                    or type(row.get("enabled", True)) is not bool
+                ):
+                    raise SourceInventoryError("source_locations_invalid")
+                discover_after = parse_source_timestamp(row.get("discover_after"))
+                if "discover_after" in row and discover_after is None:
+                    raise SourceInventoryError("source_locations_invalid")
+                source_root = source_location_root(row["source_dir"])
+                relocation_dirs = tuple(source_location_root(value) for value in row["relocation_dirs"])
+                for root in (source_root, *relocation_dirs):
+                    if any(root.is_relative_to(other) or other.is_relative_to(root) for other in roots):
+                        raise SourceInventoryError("source_locations_invalid")
+                    roots.append(root)
+                if row.get("enabled", True):
+                    locations[source_root] = SourceLocation(
+                        source_root, relocation_dirs, "codex-session", discover_after
+                    )
+    except SourceInventoryError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise SourceInventoryError("source_locations_invalid") from exc
+    return locations
 
 
 def is_safe_repo_path(memory_repo: Path, path: Path) -> bool:
@@ -1090,6 +1445,7 @@ def run_project_update(
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
     report_json: bool,
+    source_location: SourceLocation | None = None,
 ) -> subprocess.CompletedProcess[str]:
     project_path = str(project["project_path"])
     source_dir = Path(str(project.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -1106,6 +1462,10 @@ def run_project_update(
         "--source-inventory-stdin",
         "--defer-global-rebuild",
     ]
+    if source_location is not None:
+        for relocation_dir in source_location.relocation_dirs:
+            command.extend(["--source-relocation-dir", str(relocation_dir)])
+        command.extend(["--source-identity-adapter", source_location.identity_adapter])
     project_name = project.get("project")
     if isinstance(project_name, str) and project_name.strip():
         command.extend(["--project", project_name])
@@ -1133,7 +1493,7 @@ def run_project_update(
     result = controller.run(
         command,
         memory_repo,
-        input_text=source_inventory_payload(inventory),
+        input_text=source_inventory_payload(inventory, extended=source_location is not None),
     )
     if result.returncode and not report_json:
         print("update_status=failed reason=project_update_failed", file=sys.stderr)
@@ -1152,6 +1512,7 @@ def run_source_stream_update(
     allow_redacted_secrets: bool,
     rewrite_existing: bool,
     report_json: bool,
+    source_location: SourceLocation | None = None,
 ) -> subprocess.CompletedProcess[str]:
     stream_id = str(stream["stream_id"])
     source_dir = Path(str(stream.get("source_dir") or default_source_dir)).expanduser().resolve()
@@ -1179,6 +1540,10 @@ def run_source_stream_update(
         "--source-inventory-stdin",
         "--defer-global-rebuild",
     ]
+    if source_location is not None:
+        for relocation_dir in source_location.relocation_dirs:
+            command.extend(["--source-relocation-dir", str(relocation_dir)])
+        command.extend(["--source-identity-adapter", source_location.identity_adapter])
     if stream.get("require_project_metadata") is True:
         command.append("--require-project-metadata")
     if max_records is not None:
@@ -1199,7 +1564,7 @@ def run_source_stream_update(
     result = controller.run(
         command,
         memory_repo,
-        input_text=source_inventory_payload(inventory),
+        input_text=source_inventory_payload(inventory, extended=source_location is not None),
     )
     if result.returncode and not report_json:
         print("update_status=failed reason=source_stream_update_failed", file=sys.stderr)
@@ -1255,9 +1620,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Emit one aggregate machine-readable batch report",
     )
+    parser.add_argument("--inventory-selection-stdin", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--inventory-worker-manifest",
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--source-identity-adapter", choices=("codex-session",), default="", help=argparse.SUPPRESS
     )
     parser.add_argument("--dry-run", action="store_true", help="Discover and run project updates without writing records")
     return parser.parse_args(argv)
@@ -1281,28 +1650,63 @@ def run_updates(
 
     registered = load_registry(memory_repo)
     source_streams = load_source_stream_registry(memory_repo)
-    inventories: dict[Path, list[SourceInventoryRecord]] = {}
+    source_locations = load_source_locations(memory_repo)
+    locations_by_root = {root: location for location in source_locations.values()
+                         for root in (location.source_dir, *location.relocation_dirs)}
+    required_identities = tracked_source_identities(memory_repo) if any(location.discover_after for location in source_locations.values()) else frozenset()
+
+    def target_location(root: Path) -> SourceLocation | None:
+        location = locations_by_root.get(root)
+        if location is not None and location.source_dir != root:
+            return SourceLocation(root, (), location.identity_adapter, location.discover_after)
+        return location
+
+    inventories: dict[tuple[Path, str], list[SourceInventoryRecord]] = {}
+    collection_inventories: dict[Path, list[SourceInventoryRecord]] = {}
     with tempfile.TemporaryDirectory(prefix="my-precious-inventory-") as manifest_dir_text:
         manifest_dir = Path(manifest_dir_text)
         manifest_dir.chmod(0o700)
 
-        def inventory_for(candidate: Path) -> list[SourceInventoryRecord]:
-            source_root = candidate.expanduser().resolve()
-            if source_root not in inventories:
+        def inventory_at(source_root: Path, identity_adapter: str) -> list[SourceInventoryRecord]:
+            location = locations_by_root.get(source_root)
+            if location is not None:
+                identity_adapter = location.identity_adapter
+            key = (source_root, identity_adapter)
+            if key not in inventories:
                 manifest_path = manifest_dir / f"inventory-{len(inventories):04d}.json"
                 metrics["inventory_worker_count"] += 1
-                inventories[source_root] = build_source_inventory_isolated(
+                inventories[key] = build_source_inventory_isolated(
                     controller,
                     memory_repo,
                     source_root,
                     patterns,
                     manifest_path,
+                    identity_adapter,
+                    *([{"discover_after": location.discover_after.isoformat(),
+                        "required_identities": sorted(required_identities),
+                        "include_existing": source_root == location.source_dir}] if location and location.discover_after else []),
                 )
-            return inventories[source_root]
+            return inventories[key]
+
+        def inventory_for(candidate: Path) -> list[SourceInventoryRecord]:
+            source_root = candidate.expanduser().resolve()
+            location = locations_by_root.get(source_root)
+            if location is None:
+                return inventory_at(source_root, "")
+            primary_root = location.source_dir
+            if primary_root not in collection_inventories:
+                root_inventories = [inventory_at(root, location.identity_adapter)
+                                    for root in (primary_root, *location.relocation_dirs)]
+                inventory = combine_source_collection(root_inventories)
+                collection_inventories[primary_root] = inventory
+            if source_root == primary_root:
+                return collection_inventories[primary_root]
+            return inventory_at(source_root, location.identity_adapter)
 
         discovered = discover_projects_from_inventory(inventory_for(source_dir))
         projects, added = merge_discovered_projects(registered, discovered, source_dir)
-        write_registry(memory_repo, projects, args.dry_run, quiet=args.report_json)
+        if not source_locations:
+            write_registry(memory_repo, projects, args.dry_run, quiet=args.report_json)
 
         runnable = enabled_projects(projects)
         runnable_streams = enabled_source_streams(source_streams)
@@ -1310,6 +1714,10 @@ def run_updates(
             inventory_for(Path(str(project.get("source_dir") or source_dir)))
         for stream in runnable_streams:
             inventory_for(Path(str(stream.get("source_dir") or source_dir)))
+        if source_locations:
+            enroll_source_identities(memory_repo, (record.source_identity for inventory in inventories.values()
+                for record in inventory if record.source_identity), dry_run=args.dry_run)
+            write_registry(memory_repo, projects, args.dry_run, quiet=args.report_json)
         if not args.report_json:
             print("Memory repo: configured")
             print("Source dir: configured")
@@ -1363,6 +1771,7 @@ def run_updates(
                 args.allow_redacted_secrets,
                 args.rewrite_existing,
                 args.report_json,
+                target_location(project_source_dir),
             )
             accepted, failure_reason = accept_child_result(result)
             if not accepted:
@@ -1402,6 +1811,7 @@ def run_updates(
                 args.allow_redacted_secrets,
                 args.rewrite_existing,
                 args.report_json,
+                target_location(stream_source_dir),
             )
             accepted, failure_reason = accept_child_result(result)
             if not accepted:
@@ -1457,7 +1867,19 @@ def main(argv: list[str] | None = None) -> int:
     patterns = tuple(args.pattern or DEFAULT_PATTERNS)
     if args.inventory_worker_manifest:
         try:
-            inventory = build_source_inventory(source_dir, patterns)
+            selection_args = {}
+            if args.inventory_selection_stdin:
+                selection = json.loads(sys.stdin.read())
+                if not isinstance(selection, dict) or set(selection) != {"discover_after", "required_identities", "include_existing"}:
+                    raise SourceInventoryError("source_inventory_selection_invalid")
+                cutoff = parse_source_timestamp(selection["discover_after"])
+                identities = selection["required_identities"]
+                if cutoff is None or not isinstance(identities, list) or type(selection["include_existing"]) is not bool or any(
+                    not isinstance(value, str) or not re.fullmatch(r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) for value in identities
+                ):
+                    raise SourceInventoryError("source_inventory_selection_invalid")
+                selection_args = dict(discover_after=cutoff, required_identities=frozenset(identities), include_existing=selection["include_existing"])
+            inventory = build_source_inventory(source_dir, patterns, args.source_identity_adapter, **selection_args)
             write_source_inventory_manifest(
                 Path(args.inventory_worker_manifest).expanduser(),
                 inventory,

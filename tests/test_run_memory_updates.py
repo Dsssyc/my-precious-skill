@@ -23,6 +23,294 @@ def load_runner_module():
 
 
 class RunMemoryUpdatesTests(unittest.TestCase):
+    def test_default_inventory_protocol_and_manifest_remain_unchanged(self):
+        module = load_runner_module()
+        record = module.SourceInventoryRecord(
+            "record.jsonl", "a" * 64, 3, 1, "2026-10-19T00:00:00Z", ()
+        )
+        self.assertIsNone(record.source_root)
+        self.assertEqual(record.source_identity, "")
+        ipc = json.loads(module.source_inventory_payload(iter([record])))
+        self.assertEqual(ipc["report_kind"], "memory_source_inventory")
+        self.assertEqual(ipc["report_version"], 2)
+        self.assertEqual(set(ipc["records"][0]), {
+            "relative_path", "sha256", "size", "mtime_ns", "source_updated_at"
+        })
+        self.assertEqual(json.loads(module.source_inventory_payload([]))["report_version"], 2)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest = Path(tmpdir) / "inventory.json"
+            module.write_source_inventory_manifest(manifest, iter([record]))
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(payload["report_version"], 1)
+            self.assertEqual(set(payload["records"][0]), set(ipc["records"][0]) | {"project_paths"})
+            self.assertEqual(module.load_source_inventory_manifest(manifest), [record])
+            legacy_record = module.SourceInventoryRecord(
+                "legacy\nname.jsonl", "a" * 64, 3, 1, "2026-10-19T00:00:00Z", ()
+            )
+            legacy_manifest = Path(tmpdir) / "legacy.json"
+            module.write_source_inventory_manifest(legacy_manifest, [legacy_record])
+            self.assertEqual(module.load_source_inventory_manifest(legacy_manifest), [legacy_record])
+
+    def test_extended_inventory_manifest_round_trips_roots_and_optional_identities(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            records = [
+                module.SourceInventoryRecord(
+                    "record.jsonl", "a" * 64, 3, 1, "2026-10-19T00:00:00Z", (root / "project",),
+                    source_root=root / "archived",
+                    source_identity="codex-session:12345678-1234-4234-9234-123456789abc",
+                ),
+                module.SourceInventoryRecord(
+                    "record.jsonl", "b" * 64, 4, 2, "2026-10-19T00:00:00Z", (),
+                    source_root=root / "sessions",
+                ),
+            ]
+            manifest = root / "inventory.json"
+            module.write_source_inventory_manifest(manifest, iter(records))
+            self.assertEqual(json.loads(manifest.read_text(encoding="utf-8"))["report_version"], 2)
+            self.assertEqual(module.load_source_inventory_manifest(manifest), records)
+            ipc = json.loads(module.source_inventory_payload(iter(records)))
+            self.assertEqual(ipc["report_version"], 3)
+            self.assertEqual(set(ipc["records"][0]), {
+                "relative_path", "sha256", "size", "mtime_ns", "source_updated_at",
+                "source_root", "source_identity",
+            })
+            self.assertEqual(ipc["records"][1]["source_identity"], "")
+            self.assertEqual(json.loads(module.source_inventory_payload([], extended=True))["report_version"], 3)
+
+    def test_extended_inventory_manifest_rejects_invalid_fields_and_root_escapes(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            source_dir = root / "sessions"
+            source_dir.mkdir()
+            (source_dir / "escape").symlink_to(root / "outside", target_is_directory=True)
+            record = module.SourceInventoryRecord(
+                "record.jsonl", "a" * 64, 3, 1, "2026-10-19T00:00:00Z", (),
+                source_root=source_dir,
+                source_identity="codex-session:12345678-1234-4234-9234-123456789abc",
+            )
+            valid = module.source_inventory_manifest_payload([record])
+            invalid_rows = [
+                {"source_root": "relative"}, {"source_root": None},
+                {"source_root": str(source_dir) + "\n"},
+                {"relative_path": "../escape.jsonl"}, {"relative_path": "escape/file.jsonl"},
+                {"relative_path": "/absolute.jsonl"}, {"relative_path": "./record.jsonl"},
+                {"source_identity": None}, {"source_identity": True},
+                {"source_identity": "codex-session:12345678-1234-4234-9234-123456789ABC"},
+                {"source_identity": "other:12345678-1234-4234-9234-123456789abc"},
+                {"size": True}, {"mtime_ns": False}, {"unknown": "field"},
+            ]
+            invalid_payloads = []
+            for patch in invalid_rows:
+                invalid_payloads.append({**valid, "records": [{**valid["records"][0], **patch}]})
+            missing_identity = dict(valid["records"][0])
+            del missing_identity["source_identity"]
+            invalid_payloads.extend([
+                {**valid, "report_version": True}, {**valid, "report_version": 2.0},
+                {**valid, "unknown": "field"},
+                {**valid, "records": [missing_identity]},
+                {**valid, "records": valid["records"] * 2},
+                {**valid, "records": [valid["records"][0], {
+                    **valid["records"][0], "relative_path": "other.jsonl",
+                    "source_root": str(root / "archived"),
+                }]},
+            ])
+            manifest = root / "invalid.json"
+            for index, payload in enumerate(invalid_payloads):
+                with self.subTest(index=index):
+                    manifest.write_text(json.dumps(payload), encoding="utf-8")
+                    manifest.chmod(0o600)
+                    with self.assertRaises(module.SourceInventoryError) as raised:
+                        module.load_source_inventory_manifest(manifest)
+                    self.assertNotIn(str(root), str(raised.exception))
+                    self.assertNotIn(record.source_identity, str(raised.exception))
+
+    def test_source_locations_validate_all_rows_and_ignore_disabled_collections(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            memory_repo = root / "memory"
+            config = memory_repo / "config"
+            config.mkdir(parents=True)
+            self.assertEqual(module.load_source_locations(memory_repo), {})
+            path = config / "source_locations.jsonl"
+            row = {
+                "source_dir": str(root / "sessions"),
+                "relocation_dirs": [str(root / "archived_sessions")],
+                "identity_adapter": "codex-session", "enabled": True,
+            }
+            disabled = {
+                **row, "source_dir": str(root / "disabled"),
+                "relocation_dirs": [str(root / "disabled_archive")], "enabled": False,
+            }
+            path.write_text(json.dumps(row) + "\n" + json.dumps(disabled) + "\n", encoding="utf-8")
+            locations = module.load_source_locations(memory_repo)
+            self.assertEqual(set(locations), {root / "sessions"})
+            self.assertEqual(locations[root / "sessions"].relocation_dirs, (root / "archived_sessions",))
+            invalid_rows = [
+                {**row, "source_dir": "relative"}, {**row, "source_dir": 1},
+                {**row, "source_dir": str(root / "sessions") + "\u0085"},
+                {**row, "relocation_dirs": str(root / "archive")},
+                {**row, "relocation_dirs": [False]},
+                {**row, "relocation_dirs": [str(root / "archived_sessions") + "\n"]},
+                {**row, "relocation_dirs": [str(root / "sessions/subdir")]},
+                {**row, "relocation_dirs": [str(root)]},
+                {**row, "relocation_dirs": row["relocation_dirs"] * 2},
+                {**row, "identity_adapter": "unknown"}, {**row, "identity_adapter": []},
+                *({**row, "enabled": value} for value in (0, 1, None, "false")),
+                {**row, "unexpected": True}, {**disabled, "relocation_dirs": None},
+            ]
+            invalid_texts = [json.dumps(value) + "\n" for value in invalid_rows]
+            invalid_texts.extend([
+                json.dumps(row) + "\n" + json.dumps(row) + "\n",
+                json.dumps(row) + "\n" + json.dumps({**disabled, "source_dir": row["source_dir"]}),
+                json.dumps(row) + "\n" + json.dumps({**disabled, "source_dir": str(root / "sessions/child")}),
+                json.dumps(row)[:-1] + ', "enabled": false}\n',
+                "{invalid-json}\n", "[]\n", "{}\n",
+            ])
+            for index, value in enumerate(invalid_texts):
+                with self.subTest(index=index):
+                    path.write_text(value, encoding="utf-8")
+                    with self.assertRaises(module.SourceInventoryError) as raised:
+                        module.load_source_locations(memory_repo)
+                    self.assertNotIn(str(root), str(raised.exception))
+
+    def test_source_locations_reject_symlinked_registry_and_overlapping_root_aliases(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            memory_repo = root / "memory"
+            config = memory_repo / "config"
+            config.mkdir(parents=True)
+            outside = root / "outside.jsonl"
+            outside.write_text("", encoding="utf-8")
+            path = config / "source_locations.jsonl"
+            path.symlink_to(outside)
+            with self.assertRaises(module.SourceInventoryError):
+                module.load_source_locations(memory_repo)
+            path.unlink()
+            source_dir = root / "sessions"
+            source_dir.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(source_dir, target_is_directory=True)
+            path.write_text(json.dumps({
+                "source_dir": str(source_dir), "relocation_dirs": [str(alias)],
+                "identity_adapter": "codex-session", "enabled": True,
+            }) + "\n", encoding="utf-8")
+            with self.assertRaises(module.SourceInventoryError):
+                module.load_source_locations(memory_repo)
+
+    def test_codex_identity_adapter_reads_only_top_level_jsonl_session_metadata(self):
+        module = load_runner_module()
+        identity = "12345678-1234-4234-9234-123456789abc"
+        metadata = {"type": "session_meta", "payload": {"id": identity.upper()}}
+        nested = {
+            "payload": {"type": "session_meta", "payload": {"id": "invalid"}},
+            "content": json.dumps(metadata),
+            "id": identity,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_dir = Path(tmpdir)
+            (source_dir / "renamed.jsonl").write_text(
+                "\n".join(json.dumps(row) for row in (metadata, nested, metadata)) + "\n",
+                encoding="utf-8",
+            )
+            (source_dir / f"{identity}.jsonl").write_text(
+                json.dumps(nested) + "\n" + json.dumps([metadata]) + "\n", encoding="utf-8"
+            )
+            (source_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+            inventory = module.build_source_inventory(
+                source_dir, ("*.jsonl", "*.json"), identity_adapter="codex-session"
+            )
+
+            records = {record.relative_path: record for record in inventory}
+            self.assertEqual(records["renamed.jsonl"].source_identity, f"codex-session:{identity}")
+            self.assertEqual(records[f"{identity}.jsonl"].source_identity, "")
+            self.assertEqual(records["metadata.json"].source_identity, "")
+            self.assertTrue(all(record.source_root == source_dir.resolve() for record in inventory))
+            default_inventory = module.build_source_inventory(source_dir, ("*.jsonl",))
+            self.assertTrue(all(record.source_root is None for record in default_inventory))
+            self.assertTrue(all(record.source_identity == "" for record in default_inventory))
+
+    def test_codex_identity_adapter_blocks_invalid_or_conflicting_metadata(self):
+        module = load_runner_module()
+        first_id = "12345678-1234-4234-9234-123456789abc"
+        second_id = "23456789-1234-4234-9234-123456789abc"
+        valid = {"type": "session_meta", "payload": {"id": first_id}}
+        invalid_rows = [
+            {"type": "session_meta"},
+            {"type": "session_meta", "payload": []},
+            *({"type": "session_meta", "payload": {"id": value}} for value in (
+                None, True, 7, "not-a-uuid", first_id + "\n"
+            )),
+            {"type": "session_meta", "payload": {"id": second_id}},
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_dir = Path(tmpdir)
+            source_path = source_dir / "record.jsonl"
+            for invalid in invalid_rows:
+                with self.subTest(invalid=invalid):
+                    source_path.write_text(
+                        json.dumps(valid) + "\n" + json.dumps(invalid) + "\n", encoding="utf-8"
+                    )
+                    with self.assertRaises(module.SourceInventoryError) as raised:
+                        module.build_source_inventory(
+                            source_dir, ("*.jsonl",), identity_adapter="codex-session"
+                        )
+                    self.assertNotIn(str(source_dir), str(raised.exception))
+                    self.assertNotIn(first_id, str(raised.exception))
+
+    def test_codex_identity_adapter_blocks_duplicate_json_fields_that_hide_conflicting_ids(self):
+        module = load_runner_module()
+        first_id = "12345678-1234-4234-9234-123456789abc"
+        second_id = "23456789-1234-4234-9234-123456789abc"
+        invalid_lines = [
+            '{"type":"session_meta","payload":{"id":"' + first_id + '","id":"' + second_id + '"}}',
+            '{"type":"session_meta","type":"message","payload":{"id":"' + first_id + '"}}',
+            '{"type":"session_meta","payload":{"id":"' + first_id + '"},"payload":{"id":"' + second_id + '"}}',
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_dir = Path(tmpdir)
+            path = source_dir / "record.jsonl"
+            for index, value in enumerate(invalid_lines):
+                with self.subTest(index=index):
+                    path.write_text(value + "\n", encoding="utf-8")
+                    with self.assertRaises(module.SourceInventoryError):
+                        module.build_source_inventory(source_dir, ("*.jsonl",), "codex-session")
+                    self.assertEqual(len(module.build_source_inventory(source_dir, ("*.jsonl",))), 1)
+            for adapter in ("unknown", [], None):
+                with self.subTest(adapter=adapter), self.assertRaises(module.SourceInventoryError):
+                    module.build_source_inventory(source_dir / "missing", ("*.jsonl",), adapter)
+
+    def test_isolated_inventory_rejects_worker_manifest_from_another_or_missing_root(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            expected_root = root / "sessions"
+            for index, (adapter, worker_root) in enumerate((
+                ("codex-session", root / "outside"), ("codex-session", None), ("", root / "outside"),
+            )):
+                with self.subTest(adapter=adapter, worker_root=worker_root):
+                    manifest = root / f"manifest-{index}.json"
+                    record = module.SourceInventoryRecord(
+                        "record.jsonl", "a" * 64, 3, 1, "2026-10-19T00:00:00Z", (),
+                        source_root=worker_root,
+                    )
+                    controller = mock.Mock()
+
+                    def worker(command, cwd):
+                        module.write_source_inventory_manifest(manifest, [record])
+                        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+                    controller.run.side_effect = worker
+                    with self.assertRaises(module.SourceInventoryError):
+                        module.build_source_inventory_isolated(
+                            controller, root, expected_root, ("*.jsonl",), manifest, adapter
+                        )
+
     def test_source_inventory_preserves_subsecond_source_timestamp(self):
         module = load_runner_module()
 
@@ -1030,6 +1318,7 @@ class RunMemoryUpdatesReliabilityTests(unittest.TestCase):
         config_dir.mkdir()
         source_dir.mkdir()
         shutil.copyfile(self.runner_source, tools_dir / "run_memory_updates.py")
+        shutil.copyfile(self.runner_source.with_name("source_record_io.py"), tools_dir / "source_record_io.py")
 
         projects = []
         for ordinal in range(project_count):
@@ -1270,6 +1559,299 @@ if finalization_failure:
 """,
             encoding="utf-8",
         )
+
+    @staticmethod
+    def inventory_dispatch_controller():
+        controller = mock.Mock()
+
+        def run(command, cwd, *, input_text=None):
+            if "--inventory-worker-manifest" in command:
+                return subprocess.run(
+                    command, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+            report = {
+                "report_kind": "memory_update_target_report", "report_version": 1,
+                "status": "updated", "reason": "updated", "source_batch_complete": True,
+                "metrics": {key: 0 for key in (
+                    "records_selected_count", "records_processed_count", "records_deferred_count",
+                    "records_skipped_count", "entries_removed_count",
+                )},
+                "privacy": {
+                    "aggregate_only": True, "paths_rendered": False, "source_content_rendered": False,
+                },
+            }
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(report), stderr="")
+
+        controller.run.side_effect = run
+        return controller
+
+    def test_source_collections_scan_each_root_once_and_dispatch_filtered_extended_inventories(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            memory_repo, source_dir = self.make_fake_repo(root, project_count=2, include_stream=True)
+            archived = root / "archived_sessions"
+            older = root / "older_sessions"
+            unknown = root / "unknown-source"
+            for path in (archived, older, unknown, root / "project-c", root / "project-d"):
+                path.mkdir()
+            registry = memory_repo / "config/projects.jsonl"
+            projects = [json.loads(line) for line in registry.read_text(encoding="utf-8").splitlines()]
+            projects[0].update(archive_scope="project:a", source_partition="partition:a")
+            projects.append({
+                "project_path": str(root / "project-d"), "source_dir": str(unknown), "enabled": True,
+            })
+            registry.write_text("".join(json.dumps(row) + "\n" for row in projects), encoding="utf-8")
+            stream_registry = memory_repo / "config/source_streams.jsonl"
+            stream = json.loads(stream_registry.read_text(encoding="utf-8"))
+            stream["project_path"] = str(root / "project-a")
+            stream_registry.write_text(json.dumps(stream) + "\n", encoding="utf-8")
+            original_streams = stream_registry.read_bytes()
+            (memory_repo / "config/source_locations.jsonl").write_text(json.dumps({
+                "source_dir": str(source_dir), "relocation_dirs": [str(archived), str(older)],
+                "identity_adapter": "codex-session", "enabled": True,
+            }) + "\n", encoding="utf-8")
+            fixtures = [
+                (source_dir / "live.jsonl", "project-a", "12345678-1234-4234-9234-123456789abc"),
+                (archived / "same.jsonl", "project-a", "23456789-1234-4234-9234-123456789abc"),
+                (source_dir / "same.jsonl", "project-b", "34567890-1234-4234-9234-123456789abc"),
+                (older / "renamed.jsonl", "project-c", "45678901-1234-4234-9234-123456789abc"),
+                (unknown / "default.jsonl", "project-d", "invalid-default-identity"),
+            ]
+            for path, project, identity in fixtures:
+                path.write_text(json.dumps({
+                    "type": "session_meta", "payload": {"id": identity, "cwd": str(root / project)},
+                    "content": "SYNTHETIC_PRIVATE_SOURCE_TEXT",
+                }) + "\n", encoding="utf-8")
+            (older / "generic.jsonl").write_text("{}\n", encoding="utf-8")
+            args = module.parse_args(["--source-dir", str(source_dir), "--report-json"])
+            controller = self.inventory_dispatch_controller()
+
+            exit_code, report = module.run_updates(
+                args, memory_repo, source_dir, ("*.jsonl",), controller
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["metrics"]["inventory_worker_count"], 4)
+            self.assertEqual(report["metrics"]["projects_updated_count"], 4)
+            self.assertEqual(report["metrics"]["source_streams_updated_count"], 1)
+            self.assertEqual(report["metrics"]["archive_finalization_count"], 1)
+            calls = controller.run.call_args_list
+            workers = [call.args[0] for call in calls if "--inventory-worker-manifest" in call.args[0]]
+            self.assertCountEqual(
+                [command[command.index("--source-dir") + 1] for command in workers],
+                [str(source_dir), str(archived), str(older), str(unknown)],
+            )
+            for command in workers:
+                if command[command.index("--source-dir") + 1] == str(unknown):
+                    self.assertNotIn("--source-identity-adapter", command)
+                else:
+                    self.assertEqual(command[command.index("--source-identity-adapter") + 1], "codex-session")
+            targets = [call for call in calls if "--source-inventory-stdin" in call.args[0]]
+            expected_paths = {
+                "project-a": {"live.jsonl", "same.jsonl"}, "project-b": {"same.jsonl"},
+                "project-c": {"renamed.jsonl"}, "project-d": {"default.jsonl"},
+            }
+            for call in targets:
+                command = call.args[0]
+                payload = json.loads(call.kwargs["input_text"])
+                project = Path(command[command.index("--project-path") + 1]).name
+                is_stream = "--project" in command and command[command.index("--project") + 1] == "synthetic-stream"
+                expected = expected_paths[project] | ({"generic.jsonl"} if is_stream else set())
+                self.assertEqual({row["relative_path"] for row in payload["records"]}, expected)
+                if project == "project-d":
+                    self.assertEqual(payload["report_version"], 2)
+                    self.assertNotIn("--source-relocation-dir", command)
+                    self.assertNotIn("--source-identity-adapter", command)
+                    continue
+                self.assertEqual(payload["report_version"], 3)
+                self.assertEqual(
+                    [command[index + 1] for index, value in enumerate(command) if value == "--source-relocation-dir"],
+                    [str(archived), str(older)],
+                )
+                self.assertEqual(command[command.index("--source-identity-adapter") + 1], "codex-session")
+                for row in payload["records"]:
+                    if row["relative_path"] == "generic.jsonl":
+                        self.assertEqual(row["source_identity"], "")
+                        self.assertEqual(row["source_root"], str(older))
+                    else:
+                        fixture = next(item for item in fixtures if (
+                            item[0].name == row["relative_path"] and item[1] == project
+                        ))
+                        self.assertEqual(row["source_root"], str(fixture[0].parent))
+                        self.assertEqual(row["source_identity"], f"codex-session:{fixture[2]}")
+                if is_stream:
+                    self.assertEqual(command[command.index("--archive-scope") + 1], "domain:synthetic")
+                    self.assertEqual(command[command.index("--source-partition") + 1], "source:synthetic")
+                elif project == "project-a":
+                    self.assertEqual(command[command.index("--archive-scope") + 1], "project:a")
+                    self.assertEqual(command[command.index("--source-partition") + 1], "partition:a")
+            discovered = [json.loads(line) for line in registry.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(next(row for row in discovered if row["project_path"] == str(root / "project-c"))["source_dir"], str(source_dir))
+            self.assertEqual(stream_registry.read_bytes(), original_streams)
+            self.assertNotIn(str(root), json.dumps(report))
+            self.assertNotIn(fixtures[0][2], json.dumps(report))
+            self.assertNotIn("SYNTHETIC_PRIVATE_SOURCE_TEXT", json.dumps(report))
+
+    def test_source_collection_keeps_embedded_identity_when_record_moves_and_is_renamed(self):
+        module = load_runner_module()
+        identity = "12345678-1234-4234-9234-123456789abc"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            memory_repo, source_dir = self.make_fake_repo(root)
+            archived = root / "archived_sessions"
+            archived.mkdir()
+            (memory_repo / "config/source_locations.jsonl").write_text(json.dumps({
+                "source_dir": str(source_dir), "relocation_dirs": [str(archived)],
+                "identity_adapter": "codex-session", "enabled": True,
+            }) + "\n", encoding="utf-8")
+            active_record = source_dir / "active-name.jsonl"
+            active_record.write_text(json.dumps({
+                "type": "session_meta", "payload": {"id": identity, "cwd": str(root / "project-a")},
+            }) + "\n", encoding="utf-8")
+            snapshots = []
+            for expected_root, expected_name in ((source_dir, "active-name.jsonl"), (archived, "new-name.jsonl")):
+                if expected_root == archived:
+                    active_record.rename(archived / expected_name)
+                controller = self.inventory_dispatch_controller()
+                args = module.parse_args(["--source-dir", str(source_dir), "--report-json"])
+                exit_code, report = module.run_updates(args, memory_repo, source_dir, ("*.jsonl",), controller)
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(report["metrics"]["inventory_worker_count"], 2)
+                call = next(call for call in controller.run.call_args_list if "--source-inventory-stdin" in call.args[0])
+                payload = json.loads(call.kwargs["input_text"])
+                self.assertEqual(payload["report_version"], 3)
+                self.assertEqual(len(payload["records"]), 1)
+                snapshot = payload["records"][0]
+                self.assertEqual(snapshot["relative_path"], expected_name)
+                self.assertEqual(snapshot["source_root"], str(expected_root))
+                self.assertEqual(snapshot["source_identity"], f"codex-session:{identity}")
+                snapshots.append(snapshot)
+            self.assertEqual(snapshots[0]["sha256"], snapshots[1]["sha256"])
+            self.assertEqual(snapshots[0]["source_updated_at"], snapshots[1]["source_updated_at"])
+            self.assertFalse(active_record.exists())
+
+    def test_disabled_and_unreferenced_source_collections_do_not_enable_extra_roots_or_flags(self):
+        module = load_runner_module()
+        for mode in ("missing", "disabled", "unreferenced"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir).resolve()
+                memory_repo, source_dir = self.make_fake_repo(root, include_stream=True)
+                archived = root / "archived_sessions"
+                archived.mkdir()
+                (archived / "malformed.jsonl").write_text("{invalid-json}\n", encoding="utf-8")
+                (source_dir / "generic.jsonl").write_text(json.dumps({
+                    "type": "session_meta", "payload": {"id": "invalid-default-id", "cwd": str(root / "project-a")},
+                }) + "\n", encoding="utf-8")
+                if mode != "missing":
+                    (memory_repo / "config/source_locations.jsonl").write_text(json.dumps({
+                        "source_dir": str(source_dir if mode == "disabled" else root / "unused-sessions"),
+                        "relocation_dirs": [str(archived)], "identity_adapter": "codex-session",
+                        "enabled": mode != "disabled",
+                    }) + "\n", encoding="utf-8")
+                args = module.parse_args(["--source-dir", str(source_dir), "--report-json"])
+                controller = self.inventory_dispatch_controller()
+
+                exit_code, report = module.run_updates(args, memory_repo, source_dir, ("*.jsonl",), controller)
+
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(report["metrics"]["inventory_worker_count"], 1)
+                for call in controller.run.call_args_list:
+                    command = call.args[0]
+                    self.assertNotIn("--source-relocation-dir", command)
+                    self.assertNotIn("--source-identity-adapter", command)
+                    if "--source-inventory-stdin" in command:
+                        self.assertEqual(json.loads(call.kwargs["input_text"])["report_version"], 2)
+
+    def test_empty_filtered_collection_still_sends_v3_and_only_enabled_targets_run(self):
+        module = load_runner_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            memory_repo, source_dir = self.make_fake_repo(root, project_count=2, include_stream=True)
+            archived = root / "archived_sessions"
+            archived.mkdir()
+            registry = memory_repo / "config/projects.jsonl"
+            projects = [json.loads(line) for line in registry.read_text(encoding="utf-8").splitlines()]
+            projects[1]["enabled"] = False
+            registry.write_text("".join(json.dumps(row) + "\n" for row in projects), encoding="utf-8")
+            stream_registry = memory_repo / "config/source_streams.jsonl"
+            stream = json.loads(stream_registry.read_text(encoding="utf-8"))
+            stream["enabled"] = False
+            stream_registry.write_text(json.dumps(stream) + "\n", encoding="utf-8")
+            (memory_repo / "config/source_locations.jsonl").write_text(json.dumps({
+                "source_dir": str(source_dir), "relocation_dirs": [str(archived)],
+                "identity_adapter": "codex-session", "enabled": True,
+            }) + "\n", encoding="utf-8")
+            (archived / "disabled-project.jsonl").write_text(json.dumps({
+                "type": "session_meta", "payload": {
+                    "id": "12345678-1234-4234-9234-123456789abc", "cwd": str(root / "project-b"),
+                },
+            }) + "\n", encoding="utf-8")
+            args = module.parse_args(["--source-dir", str(source_dir), "--report-json"])
+            controller = self.inventory_dispatch_controller()
+
+            exit_code, report = module.run_updates(args, memory_repo, source_dir, ("*.jsonl",), controller)
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["metrics"]["projects_updated_count"], 1)
+            self.assertEqual(report["metrics"]["source_streams_updated_count"], 0)
+            calls = [call for call in controller.run.call_args_list if "--source-inventory-stdin" in call.args[0]]
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(json.loads(calls[0].kwargs["input_text"]), {
+                "report_kind": "memory_source_inventory", "report_version": 3, "records": [],
+            })
+
+    def test_collection_conflicts_and_escapes_block_before_registry_or_updater_mutation(self):
+        identity = "12345678-1234-4234-9234-123456789abc"
+        for mode in ("different-projects", "disabled-project", "escape"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir).resolve()
+                memory_repo, source_dir = self.make_fake_repo(root, project_count=2)
+                archived = root / "archived_sessions"
+                collection_root = root / "other-sessions"
+                archived.mkdir()
+                collection_root.mkdir()
+                registry = memory_repo / "config/projects.jsonl"
+                projects = [json.loads(line) for line in registry.read_text(encoding="utf-8").splitlines()]
+                projects[0]["source_dir"] = str(collection_root)
+                projects[1]["enabled"] = mode != "disabled-project"
+                registry.write_text("".join(json.dumps(row) + "\n" for row in projects), encoding="utf-8")
+                original_registry = registry.read_bytes()
+                (source_dir / "discoverable.jsonl").write_text(
+                    json.dumps({"cwd": str(root / "would-be-discovered-project")}) + "\n", encoding="utf-8"
+                )
+                (collection_root / "one.jsonl").write_text(json.dumps({
+                    "type": "session_meta", "payload": {"id": identity, "cwd": str(root / "project-a")},
+                }) + "\n", encoding="utf-8")
+                if mode == "escape":
+                    outside = root / "outside.jsonl"
+                    outside.write_text("{}\n", encoding="utf-8")
+                    (archived / "escaped.jsonl").symlink_to(outside)
+                else:
+                    (archived / "two.jsonl").write_text(json.dumps({
+                        "type": "session_meta", "payload": {"id": identity, "cwd": str(root / "project-b")},
+                    }) + "\n", encoding="utf-8")
+                (memory_repo / "config/source_locations.jsonl").write_text(json.dumps({
+                    "source_dir": str(collection_root), "relocation_dirs": [str(archived)],
+                    "identity_adapter": "codex-session", "enabled": True,
+                }) + "\n", encoding="utf-8")
+                self.install_failing_fake_updater(memory_repo)
+                marker = root / "updater-started"
+
+                result = subprocess.run(
+                    [*self.runner_command(memory_repo, source_dir), "--report-json"], cwd=memory_repo,
+                    env={**os.environ, "MY_PRECIOUS_TEST_LAUNCH_MARKER": str(marker)}, text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                report = json.loads(result.stdout)
+                self.assertEqual(report["reason"], "source_inventory_invalid")
+                self.assertEqual(report["failure_stage"], "source_inventory")
+                self.assertFalse(marker.exists())
+                self.assertEqual(registry.read_bytes(), original_registry)
+                self.assertNotIn(str(root), result.stdout + result.stderr)
+                self.assertNotIn(identity, result.stdout + result.stderr)
 
     def test_report_json_aggregates_deferred_target_without_blocking(self):
         with tempfile.TemporaryDirectory() as tmpdir:
