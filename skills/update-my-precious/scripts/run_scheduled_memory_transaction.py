@@ -76,6 +76,9 @@ KNOWN_PHASES = {
     "complete",
 }
 SCP_STYLE_REMOTE = re.compile(r"^(?:[^/@:\s]+@)?[^/:\s]+:.+$")
+COMMIT_SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+DIAGNOSTIC_KIND = "scheduled_memory_transaction_sync_diagnostics"
+SYNC_OPERATIONS = {"sync_dry_run", "sync_commit", "candidate_validation", "sync_push"}
 _ACTIVE_TRANSACTION_LOCK_FD: int | None = None
 
 
@@ -88,6 +91,7 @@ class TransactionBlocked(Exception):
         failure_stage: str | None = None,
         metrics: dict[str, int] | None = None,
         source_batch_complete: bool | None = None,
+        diagnostics: dict[str, object] | None = None,
     ) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -95,6 +99,45 @@ class TransactionBlocked(Exception):
         self.failure_stage = failure_stage
         self.metrics = metrics
         self.source_batch_complete = source_batch_complete
+        self.diagnostics = diagnostics
+
+
+class ScopedPowerAssertion:
+    """Best-effort idle/AC sleep prevention, scoped to this adapter's PID."""
+
+    def __init__(self, *, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.process: subprocess.Popen[bytes] | None = None
+
+    def __enter__(self) -> "ScopedPowerAssertion":
+        if self.enabled and sys.platform == "darwin" and os.access("/usr/bin/caffeinate", os.X_OK):
+            try:
+                # This read-only helper must never inherit the transaction lock.
+                self.process = subprocess.Popen(
+                    ["/usr/bin/caffeinate", "-i", "-s", "-w", str(os.getpid())],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    close_fds=True,
+                )
+            except OSError:
+                pass
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+        if self.process is None:
+            return
+        try:
+            if self.process.poll() is None:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+        except OSError:
+            # -w also releases assertions when the adapter exits.
+            pass
 
 
 class TransactionLock:
@@ -154,6 +197,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--push", action="store_true")
     parser.add_argument("--include-reviewed-memory-nodes", action="store_true")
     parser.add_argument("--allow-redacted-secrets", action="store_true")
+    parser.add_argument("--no-power-assertion", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -163,7 +207,7 @@ def subprocess_lock_kwargs() -> dict[str, object]:
     return {"pass_fds": (_ACTIVE_TRANSACTION_LOCK_FD,)}
 
 
-def run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run_git(repo: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
         cwd=repo,
@@ -171,6 +215,7 @@ def run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        env=env,
         **subprocess_lock_kwargs(),
     )
 
@@ -399,8 +444,10 @@ def load_state(state_dir: Path) -> dict[str, object] | None:
         value = payload.get(key)
         if not isinstance(value, str) or not value:
             raise TransactionBlocked("malformed_state")
+    if COMMIT_SHA.fullmatch(str(payload["base_sha"])) is None:
+        raise TransactionBlocked("malformed_state")
     candidate = payload.get("candidate_sha")
-    if candidate is not None and (not isinstance(candidate, str) or not candidate):
+    if candidate is not None and (not isinstance(candidate, str) or COMMIT_SHA.fullmatch(candidate) is None):
         raise TransactionBlocked("malformed_state")
     for key in ("source_record_deferred_count", "source_target_deferred_count"):
         value = payload.get(key, 0)
@@ -497,7 +544,7 @@ def remote_main_head(remote_url: str, *, cwd: Path, reason: str) -> str:
     if result.returncode != 0 or len(lines) != 1:
         raise TransactionBlocked(reason)
     fields = lines[0].split()
-    if len(fields) != 2 or fields[1] != "refs/heads/main":
+    if len(fields) != 2 or fields[1] != "refs/heads/main" or COMMIT_SHA.fullmatch(fields[0]) is None:
         raise TransactionBlocked(reason)
     return fields[0]
 
@@ -775,6 +822,7 @@ def report(
     metrics: dict[str, int] | None = None,
     source_batch_complete: bool | None = None,
     failure_stage: str | None = None,
+    diagnostics: dict[str, object] | None = None,
 ) -> dict[str, object]:
     values = metrics or empty_metrics()
     if source_batch_complete is None:
@@ -782,7 +830,7 @@ def report(
             status in {"published", "no_op_current"}
             and values["source_record_deferred_count"] == 0
         )
-    return {
+    payload: dict[str, object] = {
         "report_kind": REPORT_KIND,
         "report_version": REPORT_VERSION,
         "status": status,
@@ -800,9 +848,14 @@ def report(
             "archive_content_rendered": False,
         },
     }
+    if diagnostics is not None:
+        payload["sync_diagnostics"] = diagnostics
+    return payload
 
 
-def run_command(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+def run_command(
+    command: list[str], *, cwd: Path, env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=cwd,
@@ -810,15 +863,91 @@ def run_command(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        env=env,
         **subprocess_lock_kwargs(),
     )
 
 
-def run_python_tool(staging: Path, name: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+def run_python_tool(
+    staging: Path, name: str, *arguments: str, env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     script = staging / "tools" / name
     if not script.is_file() or script.is_symlink():
         raise TransactionBlocked("runtime_tool_missing")
-    return run_command([sys.executable, str(script), *arguments], cwd=staging)
+    return run_command([sys.executable, str(script), *arguments], cwd=staging, env=env)
+
+
+def sync_error_category(output: str) -> str:
+    """Classify child text without returning any part of that untrusted text."""
+    value = output.lower()
+    if any(token in value for token in (
+        "authentication failed", "permission denied", "could not read username",
+        "terminal prompts disabled", "authorization failed",
+    )):
+        return "auth"
+    if any(token in value for token in (
+        "could not resolve", "connection reset", "connection timed out", "operation timed out",
+        "network is unreachable", "failed to connect", "connection refused",
+        "remote end hung up", "connection closed", "unable to access",
+    )):
+        return "network"
+    if any(token in value for token in ("rejected", "non-fast-forward", "stale info", "hook declined")):
+        return "rejected"
+    if "refusing to sync" in value:
+        return "policy"
+    return "unknown"
+
+
+def run_sync_step(
+    context: dict[str, object],
+    operation: str,
+    command: Callable[[], subprocess.CompletedProcess[str]],
+) -> subprocess.CompletedProcess[str]:
+    assert operation in SYNC_OPERATIONS
+    started = time.monotonic()
+    try:
+        result = command()
+    except OSError as exc:
+        result = None
+        error = exc
+    if result is None or result.returncode != 0:
+        context.setdefault("sync_diagnostics", {
+            "report_kind": DIAGNOSTIC_KIND,
+            "report_version": 1,
+            "primary_failure": {
+                "operation": operation,
+                "exit_code": result.returncode if result is not None else None,
+                "duration_ms": max(0, int((time.monotonic() - started) * 1000)),
+                "error_category": (
+                    sync_error_category(result.stderr + "\n" + result.stdout)
+                    if result is not None else "unknown"
+                ),
+            },
+            "remote_observation": "not_checked",
+        })
+    if result is None:
+        reason = "sync_live_failed" if operation in {"sync_commit", "sync_push"} else "sync_dry_run_failed"
+        raise TransactionBlocked(reason) from error
+    return result
+
+
+def observe_sync_remote(
+    remote_url: str, canonical: Path, base_sha: str, candidate_sha: str,
+    context: dict[str, object],
+) -> str:
+    diagnostic = context.get("sync_diagnostics")
+    try:
+        head = remote_main_head(remote_url, cwd=canonical, reason="remote_receipt_failed")
+    except (TransactionBlocked, OSError) as exc:
+        if isinstance(diagnostic, dict):
+            diagnostic["remote_observation"] = "unavailable"
+            raise TransactionBlocked("sync_live_failed", failure_stage="sync_live") from exc
+        raise
+    if isinstance(diagnostic, dict):
+        diagnostic["remote_observation"] = (
+            "base" if head == base_sha else "candidate" if head == candidate_sha else "other"
+        )
+    return head
 
 
 def parse_update_batch_report(result: subprocess.CompletedProcess[str]) -> dict[str, object] | None:
@@ -918,10 +1047,115 @@ def staging_head_if_owned(
     expected = expected_owner(repository_fingerprint, expected_remote_fingerprint)
     if load_owner(owner_path) != expected or not staging.is_dir():
         raise TransactionBlocked("unsafe_staging")
+    if (staging / ".git").is_symlink() or not (staging / ".git").is_dir():
+        raise TransactionBlocked("unsafe_staging")
     remote = run_git(staging, "remote", "get-url", "origin")
     if remote.returncode != 0 or remote_fingerprint(remote.stdout.strip(), staging) != expected_remote_fingerprint:
         raise TransactionBlocked("unexpected_remote")
     return git_value(staging, "rev-parse", "HEAD", reason="staging_status_failed")
+
+
+def ensure_candidate(staging: Path, base_sha: str, candidate_sha: str) -> None:
+    if candidate_sha == base_sha or COMMIT_SHA.fullmatch(candidate_sha) is None:
+        raise TransactionBlocked("sync_live_no_commit")
+    if git_value(staging, "rev-parse", "HEAD", reason="staging_status_failed") != candidate_sha:
+        raise TransactionBlocked("sync_live_candidate_mismatch")
+    if git_value(staging, "branch", "--show-current", reason="staging_status_failed") != "main":
+        raise TransactionBlocked("sync_live_candidate_mismatch")
+    parents = git_value(
+        staging, "rev-list", "--parents", "-n", "1", candidate_sha,
+        reason="sync_live_candidate_mismatch",
+    ).split()
+    if parents != [candidate_sha, base_sha]:
+        raise TransactionBlocked("sync_live_candidate_mismatch")
+    status = run_git(staging, "--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all")
+    if status.returncode != 0 or status.stdout:
+        raise TransactionBlocked("sync_live_candidate_dirty")
+    # Policy validation executes deployed helpers. Anchor that entire tool bundle
+    # to the known base before running anything from the retained commit.
+    base_tools = git_value(staging, "rev-parse", f"{base_sha}:tools", reason="runtime_tool_missing")
+    candidate_tools = git_value(staging, "rev-parse", f"{candidate_sha}:tools", reason="runtime_tool_missing")
+    if candidate_tools != base_tools:
+        raise TransactionBlocked("sync_live_candidate_tools_changed")
+    # The real index can hide worktree edits with skip-worktree, assume-unchanged
+    # or cached stat data. A fresh candidate index checks actual tracked bytes
+    # and modes before any deployed helper is executed, without refreshing or
+    # changing the real index.
+    with tempfile.TemporaryDirectory(prefix="candidate-worktree-") as temporary:
+        environment = {**os.environ, "GIT_INDEX_FILE": str(Path(temporary) / "index"), "GIT_OPTIONAL_LOCKS": "0"}
+        if run_git(staging, "-c", "core.sparseCheckout=false", "read-tree", candidate_sha, env=environment).returncode != 0:
+            raise TransactionBlocked("sync_live_candidate_dirty")
+        if run_git(staging, "update-index", "--really-refresh", env=environment).returncode != 0:
+            raise TransactionBlocked("sync_live_candidate_dirty")
+        if run_git(
+            staging, "diff-files", "--quiet", "--no-ext-diff", "--no-textconv",
+            "--ignore-submodules=none", env=environment,
+        ).returncode != 0:
+            raise TransactionBlocked("sync_live_candidate_dirty")
+
+
+def validate_committed_candidate(
+    args: argparse.Namespace, staging: Path, base_sha: str, candidate_sha: str,
+    context: dict[str, object],
+) -> None:
+    ensure_candidate(staging, base_sha, candidate_sha)
+    # Project the committed delta through the deployed policy, without changing
+    # HEAD, the real index or the worktree. Never duplicate its allowed paths.
+    with tempfile.TemporaryDirectory(prefix="candidate-validation-") as temporary:
+        environment = {**os.environ, "GIT_INDEX_FILE": str(Path(temporary) / "index"), "GIT_OPTIONAL_LOCKS": "0"}
+        if run_git(staging, "read-tree", base_sha, env=environment).returncode != 0:
+            raise TransactionBlocked("sync_live_candidate_validation_failed")
+        for tool, arguments, reason in (
+            ("audit_memory_archive.py", ["--memory-repo", str(staging)], "archive_audit_failed"),
+            ("audit_publish_readiness.py", ["--memory-repo", str(staging)], "publish_readiness_failed"),
+            ("search_memory.py", ["--repo", str(staging), "--health-check"], "search_health_failed"),
+            ("sync_memory_archive.py", sync_arguments(args, staging, dry_run=True), "sync_dry_run_failed"),
+        ):
+            result = run_sync_step(context, "candidate_validation", lambda: run_python_tool(
+                staging, tool, *arguments, env=environment,
+            ))
+            if result.returncode != 0:
+                raise TransactionBlocked(reason)
+        if "Would commit:" not in result.stdout or "No memory archive changes to sync." in result.stdout:
+            raise TransactionBlocked("sync_live_candidate_validation_failed")
+    ensure_candidate(staging, base_sha, candidate_sha)
+
+
+def publish_candidate_once(
+    args: argparse.Namespace, canonical: Path, staging: Path,
+    remote_url: str, expected_remote_fingerprint: str,
+    base_sha: str, candidate_sha: str, context: dict[str, object],
+) -> bool:
+    ensure_candidate(staging, base_sha, candidate_sha)
+    # An origin can have separate or multiple push URLs. A fixed refspec alone
+    # would not constrain those destinations to the receipted remote.
+    for arguments in (("remote", "get-url", "origin"), ("remote", "get-url", "--push", "--all", "origin")):
+        result = run_git(staging, *arguments)
+        urls = result.stdout.splitlines()
+        if result.returncode != 0 or len(urls) != 1 or remote_fingerprint(urls[0], staging) != expected_remote_fingerprint:
+            raise TransactionBlocked("unexpected_remote")
+    observed = observe_sync_remote(remote_url, canonical, base_sha, candidate_sha, context)
+    if observed == candidate_sha:
+        return False
+    if observed != base_sha:
+        raise TransactionBlocked("remote_race")
+    if not args.push:
+        raise TransactionBlocked("push_not_requested")
+    ensure_clean_canonical(canonical)
+    for revision in ("HEAD", "origin/main"):
+        if git_value(canonical, "rev-parse", revision, reason="canonical_unavailable") != base_sha:
+            raise TransactionBlocked("canonical_changed_during_transaction")
+    result = run_sync_step(context, "sync_push", lambda: run_git(
+        staging, "push", "--porcelain", "--no-follow-tags",
+        f"--force-with-lease=refs/heads/main:{base_sha}",
+        "origin", f"{candidate_sha}:refs/heads/main",
+    ))
+    observed = observe_sync_remote(remote_url, canonical, base_sha, candidate_sha, context)
+    if observed == candidate_sha:
+        return True
+    if observed != base_sha:
+        raise TransactionBlocked("remote_race")
+    raise TransactionBlocked("sync_live_failed" if result.returncode else "remote_receipt_failed")
 
 
 def reconcile_post_push(
@@ -931,13 +1165,28 @@ def reconcile_post_push(
     repository_fingerprint: str,
     expected_remote_fingerprint: str,
     remote_head: str,
+    *,
+    args: argparse.Namespace,
+    remote_url: str,
+    context: dict[str, object],
 ) -> dict[str, object] | None:
     phase = state.get("phase")
     if phase not in RECOVERABLE_PUBLISH_PHASES:
         return None
     base_sha = str(state["base_sha"])
     staging_head = staging_head_if_owned(state_dir, repository_fingerprint, expected_remote_fingerprint)
+    if staging_head is None:
+        raise TransactionBlocked("unsafe_staging")
+    staging = state_dir / "staging"
+    ensure_v238_update_idle(staging)
     candidate = str(state.get("candidate_sha") or staging_head or "")
+    metrics = empty_metrics()
+    metrics["recovery_count"] = 1
+    metrics["source_record_deferred_count"] = int(state.get("source_record_deferred_count", 0))
+    metrics["source_target_deferred_count"] = int(state.get("source_target_deferred_count", 0))
+    source_batch_complete = bool(state.get("source_batch_complete", True))
+    context["metrics"] = metrics
+    context["source_batch_complete"] = source_batch_complete
     if remote_head == base_sha:
         if phase == "complete" and candidate == base_sha and staging_head == base_sha:
             ensure_clean_canonical(canonical)
@@ -984,36 +1233,84 @@ def reconcile_post_push(
             )
         if phase in {"remote_receipt", "canonical_fast_forward", "complete"}:
             raise TransactionBlocked("remote_receipt_failed")
-        return None
-    if not candidate or remote_head != candidate or staging_head != candidate:
+        if phase == "sync_live" and "candidate_sha" not in state and staging_head == base_sha:
+            # No commit was created; the pre-commit updater replay remains valid.
+            return None
+    if remote_head not in {base_sha, candidate} or staging_head != candidate:
         raise TransactionBlocked("remote_race")
-    ancestor = run_git(state_dir / "staging", "merge-base", "--is-ancestor", base_sha, remote_head)
-    if ancestor.returncode != 0:
+    if remote_head == base_sha or phase == "sync_live":
+        if phase != "sync_live":
+            raise TransactionBlocked("remote_receipt_failed")
+        ensure_clean_canonical(canonical)
+        for revision in ("HEAD", "origin/main"):
+            if git_value(canonical, "rev-parse", revision, reason="canonical_unavailable") != base_sha:
+                raise TransactionBlocked("canonical_remote_mismatch")
+    ensure_candidate(staging, base_sha, candidate)
+    # Pin a legacy candidate before content validation, so a failed check cannot
+    # leave it eligible for replacement by a different direct child on replay.
+    if phase == "sync_live":
+        write_state(
+            state_dir, repository_fingerprint=repository_fingerprint,
+            expected_remote_fingerprint=expected_remote_fingerprint,
+            base_sha=base_sha, phase="sync_live", candidate_sha=candidate,
+        )
+    validate_committed_candidate(args, staging, base_sha, candidate, context)
+    pushed = False
+    if remote_head == base_sha:
+        pushed = publish_candidate_once(
+            args, canonical, staging, remote_url, expected_remote_fingerprint,
+            base_sha, candidate, context,
+        )
+    elif observe_sync_remote(remote_url, canonical, base_sha, candidate, context) != candidate:
         raise TransactionBlocked("remote_race")
+    metrics["remote_publish_count"] = int(pushed)
+    if phase == "sync_live":
+        write_state(
+            state_dir, repository_fingerprint=repository_fingerprint,
+            expected_remote_fingerprint=expected_remote_fingerprint,
+            base_sha=base_sha, phase="remote_receipt", candidate_sha=candidate,
+        )
     install_verified_candidate(
         canonical,
         state_dir / "staging",
         base_sha=base_sha,
-        candidate_sha=remote_head,
+        candidate_sha=candidate,
     )
+    write_state(
+        state_dir, repository_fingerprint=repository_fingerprint,
+        expected_remote_fingerprint=expected_remote_fingerprint,
+        base_sha=base_sha, phase="canonical_fast_forward", candidate_sha=candidate,
+    )
+
+    def checkpoint_canonical_checkout() -> None:
+        write_state(
+            state_dir, repository_fingerprint=repository_fingerprint,
+            expected_remote_fingerprint=expected_remote_fingerprint,
+            base_sha=base_sha, phase="canonical_checkout_applied", candidate_sha=candidate,
+        )
+
     apply_verified_canonical(
         canonical,
         base_sha=base_sha,
-        candidate_sha=remote_head,
+        candidate_sha=candidate,
         allow_interrupted_repair=phase
         in {"canonical_fast_forward", "canonical_checkout_applied", "complete"},
+        checkpoint=checkpoint_canonical_checkout,
     )
-    metrics = empty_metrics()
-    metrics["recovery_count"] = 1
     metrics["canonical_mutation_count"] = 1
-    metrics["source_record_deferred_count"] = int(state.get("source_record_deferred_count", 0))
-    metrics["source_target_deferred_count"] = int(state.get("source_target_deferred_count", 0))
-    source_batch_complete = bool(state.get("source_batch_complete", True))
+    write_state(
+        state_dir, repository_fingerprint=repository_fingerprint,
+        expected_remote_fingerprint=expected_remote_fingerprint,
+        base_sha=base_sha, phase="complete", candidate_sha=candidate,
+    )
     clear_state(state_dir)
     return report(
         "published",
         "published",
-        recovery_action="post_push_reconciled",
+        recovery_action=(
+            "stale_staging_replayed" if pushed and "candidate_sha" not in state else
+            "unpublished_candidate_resumed" if pushed else "post_push_reconciled"
+        ),
         metrics=metrics,
         source_batch_complete=source_batch_complete,
     )
@@ -1025,8 +1322,6 @@ def sync_arguments(args: argparse.Namespace, staging: Path, *, dry_run: bool) ->
         values.append("--include-reviewed-memory-nodes")
     if dry_run:
         values.append("--dry-run")
-    if args.push:
-        values.append("--push")
     return values
 
 
@@ -1063,6 +1358,9 @@ def _execute(
                 repository_fingerprint,
                 expected_remote_fingerprint,
                 remote_head,
+                args=args,
+                remote_url=resolved_remote_url,
+                context=update_context,
             )
             if state is not None
             else None
@@ -1208,11 +1506,9 @@ def _execute(
             base_sha=remote_head,
             phase="sync_dry_run",
         )
-        dry_sync = run_python_tool(
-            staging,
-            "sync_memory_archive.py",
-            *sync_arguments(args, staging, dry_run=True),
-        )
+        dry_sync = run_sync_step(update_context, "sync_dry_run", lambda: run_python_tool(
+            staging, "sync_memory_archive.py", *sync_arguments(args, staging, dry_run=True),
+        ))
         if dry_sync.returncode != 0:
             raise TransactionBlocked("sync_dry_run_failed")
         if "No memory archive changes to sync." in dry_sync.stdout:
@@ -1254,21 +1550,36 @@ def _execute(
             base_sha=remote_head,
             phase="sync_live",
         )
-        live_sync = run_python_tool(
-            staging,
-            "sync_memory_archive.py",
-            *sync_arguments(args, staging, dry_run=False),
-        )
-        if live_sync.returncode != 0:
-            observed_remote = remote_main_head(
-                resolved_remote_url,
-                cwd=memory_repo,
-                reason="canonical_fetch_failed",
-            )
-            raise TransactionBlocked("remote_race" if observed_remote != remote_head else "sync_live_failed")
+        live_sync = run_sync_step(update_context, "sync_commit", lambda: run_python_tool(
+            staging, "sync_memory_archive.py", *sync_arguments(args, staging, dry_run=False),
+        ))
         candidate_sha = git_value(staging, "rev-parse", "HEAD", reason="staging_status_failed")
         if candidate_sha == remote_head:
+            if live_sync.returncode != 0:
+                observe_sync_remote(resolved_remote_url, memory_repo, remote_head, candidate_sha, update_context)
+                raise TransactionBlocked("sync_live_failed")
             raise TransactionBlocked("sync_live_no_commit")
+        ensure_candidate(staging, remote_head, candidate_sha)
+        write_state(
+            state_dir,
+            repository_fingerprint=repository_fingerprint,
+            expected_remote_fingerprint=expected_remote_fingerprint,
+            base_sha=remote_head,
+            phase="sync_live",
+            candidate_sha=candidate_sha,
+        )
+        validate_committed_candidate(args, staging, remote_head, candidate_sha, update_context)
+        if live_sync.returncode != 0:
+            observed = observe_sync_remote(
+                resolved_remote_url, memory_repo, remote_head, candidate_sha, update_context,
+            )
+            if observed != candidate_sha:
+                raise TransactionBlocked("sync_live_failed" if observed == remote_head else "remote_race")
+        else:
+            publish_candidate_once(
+                args, memory_repo, staging, resolved_remote_url, expected_remote_fingerprint,
+                remote_head, candidate_sha, update_context,
+            )
         write_state(
             state_dir,
             repository_fingerprint=repository_fingerprint,
@@ -1277,10 +1588,8 @@ def _execute(
             phase="remote_receipt",
             candidate_sha=candidate_sha,
         )
-        if remote_main_head(
-            resolved_remote_url,
-            cwd=memory_repo,
-            reason="canonical_fetch_failed",
+        if observe_sync_remote(
+            resolved_remote_url, memory_repo, remote_head, candidate_sha, update_context,
         ) != candidate_sha:
             raise TransactionBlocked("remote_receipt_failed")
         install_verified_candidate(
@@ -1340,7 +1649,12 @@ def _execute(
 def execute(args: argparse.Namespace) -> dict[str, object]:
     update_context: dict[str, object] = {}
     try:
-        return _execute(args, update_context)
+        with ScopedPowerAssertion(enabled=not args.no_power_assertion):
+            payload = _execute(args, update_context)
+        diagnostics = update_context.get("sync_diagnostics")
+        if isinstance(diagnostics, dict):
+            payload["sync_diagnostics"] = diagnostics
+        return payload
     except TransactionBlocked as exc:
         metrics = update_context.get("metrics")
         if exc.metrics is None and isinstance(metrics, dict):
@@ -1348,6 +1662,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         source_batch_complete = update_context.get("source_batch_complete")
         if exc.source_batch_complete is None and isinstance(source_batch_complete, bool):
             exc.source_batch_complete = source_batch_complete
+        diagnostics = update_context.get("sync_diagnostics")
+        if exc.diagnostics is None and isinstance(diagnostics, dict):
+            exc.diagnostics = diagnostics
         raise
 
 
@@ -1363,6 +1680,7 @@ def main(argv: list[str] | None = None) -> int:
             metrics=exc.metrics,
             source_batch_complete=exc.source_batch_complete,
             failure_stage=exc.failure_stage,
+            diagnostics=exc.diagnostics,
         )
         exit_code = exc.exit_code
     except Exception:
