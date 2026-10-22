@@ -37,8 +37,28 @@ different state directories, and the adapter checks the deployed V2.38 updater
 lock before resetting staging so a surviving nested updater cannot race replay.
 It invokes the deployment repository's own update, audit, repair,
 search-health, and sync tools, and updates canonical only after verifying a
-matching remote receipt. An interrupted unpublished run is discarded and
-replayed from current `origin/main`. After exact owner and remote validation and
+matching remote receipt. The sync tool audits and commits without `--push`.
+The adapter validates its single direct child of the base, persists
+`candidate_sha` in `sync_live`, and makes at most one push of that fixed SHA to
+`origin`'s `refs/heads/main`, conditional on the exact remote base. Separate or
+multiple push destinations fail closed. An unpublished `sync_live` commit is
+retained across calls. Recovery requires the exact staging owner and remote
+fingerprints, canonical at the recorded base, a matching staging HEAD, and a
+clean index and worktree. A fresh temporary index also checks actual tracked
+bytes, including edits hidden by Git index flags. A legacy `sync_live` state without `candidate_sha`
+may adopt only that same unique direct child. The candidate's tool bundle must
+match the base; the adapter reruns deployed archive/readiness/search checks
+and the deployed sync dry-run against a temporary base index to enforce the
+existing privacy and publication policy without modifying the real index or
+worktree. Recovery runs no updater, repair or commit. If remote equals base,
+an explicit `--push` permits one fixed-candidate push; if it already equals the
+candidate, recovery checks the receipt without pushing. Other or unobservable
+remote states remain blocked and preserve the candidate. The historical
+`stale_staging_replayed` recovery action also covers legacy candidate adoption;
+an explicitly recorded candidate uses `unpublished_candidate_resumed`.
+
+Interrupted work that has not produced a publication candidate is replayed
+from current `origin/main`. After exact owner and remote validation and
 a successful fetch, validated adapter-owned staging is hard-reset and cleaned before
 `main` is checked out, so a receipted remote advance can replace overlapping
 abandoned tracked and untracked updater outputs. This destructive replay never
@@ -65,6 +85,29 @@ completion. The report exposes aggregate deferred-target/record counts only;
 `failure_stage` plus processed/child-failure counts identify a blocked update
 without forwarding arbitrary diagnostics. It never renders source paths,
 source content, or child output.
+
+A failed sync operation may add the optional `sync_diagnostics` object to the
+v1 report. Its fixed schema is `report_kind:
+scheduled_memory_transaction_sync_diagnostics`, `report_version: 1`,
+`primary_failure`, and `remote_observation`. `primary_failure` has exactly
+`operation` (`sync_dry_run`, `sync_commit`, `candidate_validation`, or
+`sync_push`), `exit_code` (integer, or null if launch failed), `duration_ms`
+(nonnegative integer), and `error_category` (`network`, `auth`, `rejected`,
+`policy`, or `unknown`). `remote_observation` is `not_checked`, `base`,
+`candidate`, `other`, or `unavailable`. Categories are bounded classifications,
+not proof of a precise network cause. A failed remote re-query preserves the
+primary sync failure. An exact candidate receipt can establish `published`
+even when the push process returned nonzero; diagnostics remain present and
+the adapter does not push again. Raw child output is never included.
+
+On macOS, an available `/usr/bin/caffeinate` optionally holds `-i -s -w` for
+the adapter PID during the transaction: `-i` prevents idle sleep, `-s`
+prevents system sleep only on AC power, and `-w` releases assertions when that
+PID exits. The helper inherits no transaction lock and is released on normal
+or exceptional exit. `--no-power-assertion` disables it; other platforms and
+an unavailable helper continue normally. This does not wake the display,
+change global settings, or guarantee completion through forced sleep or shutdown.
+
 Archive finalization preserves an exact prior lifecycle-review result when its
 decision was already consumed and either referenced node has since retired.
 If both nodes still exist, the current candidate and fingerprint remain

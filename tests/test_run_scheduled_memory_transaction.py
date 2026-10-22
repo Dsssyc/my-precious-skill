@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import signal
@@ -8,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path("skills/update-my-precious/scripts/run_scheduled_memory_transaction.py").resolve()
@@ -68,6 +70,7 @@ def invoke(
     state: Path,
     *,
     env: dict[str, str] | None = None,
+    push: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
     result = run(
         [
@@ -79,7 +82,7 @@ def invoke(
             str(source),
             "--state-dir",
             str(state),
-            "--push",
+            *(["--push"] if push else []),
         ],
         cwd=canonical,
         env=env,
@@ -90,7 +93,7 @@ def invoke(
     return result, json.loads(lines[0])
 
 
-def install_synthetic_runtime(canonical: Path) -> None:
+def install_synthetic_runtime(canonical: Path, *, real_sync: bool = False) -> None:
     tools = canonical / "tools"
     tools.mkdir()
     (tools / "run_memory_updates.py").write_text(
@@ -244,6 +247,11 @@ if '--push' in args:
 """,
         encoding="utf-8",
     )
+    if real_sync:
+        (tools / "sync_memory_archive.py").write_bytes(
+            Path("templates/agent-memory-repo/tools/sync_memory_archive.py").read_bytes()
+        )
+        (tools / "update_memory_archive.py").write_text("# Synthetic resolver marker.\n", encoding="utf-8")
     assert git(canonical, "add", "tools").returncode == 0
     assert git(canonical, "commit", "-m", "Install synthetic runtime").returncode == 0
     assert git(canonical, "push").returncode == 0
@@ -351,6 +359,544 @@ def interrupt_at_completed_deferred_no_publish(
     os.killpg(process.pid, signal.SIGKILL)
     process.communicate(timeout=10)
     return payload
+
+
+class ScheduledCandidateReliabilityTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.canonical, self.source, self.remote = setup_archive(self.root)
+        install_synthetic_runtime(self.canonical, real_sync=True)
+        self.state = self.root / "state"
+        self.base = git(self.canonical, "rev-parse", "HEAD").stdout.strip()
+        self.module = load_module()
+
+    def arguments(self, *, push=True):
+        return self.module.parse_args([
+            "--memory-repo", str(self.canonical),
+            "--source-dir", str(self.source),
+            "--state-dir", str(self.state),
+            *(["--push"] if push else []),
+        ])
+
+    def seed_candidate(self, *, explicit=False, relative="INDEX.md", content="computed once\n"):
+        module = self.module
+        state = module.prepare_state_dir(self.state)
+        remote_url = module.canonical_remote_url(self.canonical)
+        repository = module.path_fingerprint(self.canonical)
+        remote = module.remote_fingerprint(remote_url, self.canonical)
+        staging, _ = module.prepare_staging(self.canonical, state, remote_url, repository, remote)
+        target = staging / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        self.assertEqual(git(staging, "add", "--", relative).returncode, 0)
+        self.assertEqual(git(staging, "commit", "-m", "Synthetic retained candidate").returncode, 0)
+        candidate = git(staging, "rev-parse", "HEAD").stdout.strip()
+        module.write_state(
+            state, repository_fingerprint=repository, expected_remote_fingerprint=remote,
+            base_sha=self.base, phase="sync_live", candidate_sha=candidate if explicit else None,
+            source_record_deferred_count=1, source_target_deferred_count=1,
+            source_batch_complete=False,
+        )
+        return staging, candidate
+
+    def remote_head(self):
+        return git(self.remote, "rev-parse", "refs/heads/main").stdout.strip()
+
+    def test_failed_push_persists_candidate_then_resumes_same_sha_without_update_or_commit(self):
+        reject = self.remote / "hooks" / "pre-receive"
+        reject.write_text("#!/bin/sh\necho 'synthetic rejection' >&2\nexit 1\n", encoding="utf-8")
+        reject.chmod(0o700)
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["status"], "blocked")
+        staging = self.state / "staging"
+        candidate = git(staging, "rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(candidate, self.base)
+        state = json.loads((self.state / "transaction.json").read_text(encoding="utf-8"))
+        self.assertEqual(state.get("candidate_sha"), candidate)
+        self.assertEqual(self.remote_head(), self.base)
+        self.assertEqual(git(staging, "status", "--porcelain=v1").stdout, "")
+        reject.unlink()
+        with mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+            recovered = self.module.execute(self.arguments())
+        self.assertEqual(recovered["status"], "published")
+        self.assertEqual(self.remote_head(), candidate)
+        self.assertEqual(git(self.canonical, "rev-parse", "HEAD").stdout.strip(), candidate)
+        self.assertFalse(any(call.args[1] in {"run_memory_updates.py", "repair_publish_surfaces.py"}
+                             for call in tools.call_args_list))
+        self.assertTrue(all("--dry-run" in call.args for call in tools.call_args_list
+                            if call.args[1] == "sync_memory_archive.py"))
+
+    def test_legacy_sync_live_candidate_migrates_and_publishes_without_recommit(self):
+        staging, candidate = self.seed_candidate()
+        index = (staging / ".git" / "index").read_bytes()
+        with mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+            recovered = self.module.execute(self.arguments())
+        self.assertEqual(recovered["status"], "published")
+        self.assertEqual(self.remote_head(), candidate)
+        self.assertEqual(git(staging, "rev-parse", "HEAD").stdout.strip(), candidate)
+        self.assertFalse(recovered["source_batch_complete"])
+        self.assertEqual(recovered["metrics"]["source_record_deferred_count"], 1)
+        self.assertEqual((staging / ".git" / "index").read_bytes(), index)
+        self.assertFalse(any(call.args[1] in {"run_memory_updates.py", "repair_publish_surfaces.py"}
+                             for call in tools.call_args_list))
+
+    def test_legacy_candidate_without_push_authorization_is_preserved(self):
+        staging, candidate = self.seed_candidate()
+        result, report = invoke(self.canonical, self.source, self.state, push=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "push_not_requested")
+        self.assertEqual(self.remote_head(), self.base)
+        self.assertEqual(git(staging, "rev-parse", "HEAD").stdout.strip(), candidate)
+
+    def assert_preserved(self, staging, candidate):
+        self.assertEqual(git(staging, "rev-parse", "HEAD").stdout.strip(), candidate)
+        self.assertEqual(git(self.canonical, "rev-parse", "HEAD").stdout.strip(), self.base)
+        self.assertEqual(git(self.canonical, "rev-parse", "origin/main").stdout.strip(), self.base)
+        self.assertTrue((self.state / "transaction.json").is_file())
+
+    def test_commit_handoff_persists_sha_before_one_exact_leased_push(self):
+        original = self.module.run_git
+        pushes = []
+
+        def checked_git(repo, *arguments, **kwargs):
+            if arguments[0] == "push":
+                state = json.loads((self.state / "transaction.json").read_text(encoding="utf-8"))
+                candidate = git(repo, "rev-parse", "HEAD").stdout.strip()
+                self.assertEqual(state["phase"], "sync_live")
+                self.assertEqual(state["candidate_sha"], candidate)
+                self.assertEqual(arguments, (
+                    "push", "--porcelain", "--no-follow-tags",
+                    f"--force-with-lease=refs/heads/main:{self.base}",
+                    "origin", f"{candidate}:refs/heads/main",
+                ))
+                pushes.append(candidate)
+            return original(repo, *arguments, **kwargs)
+
+        with mock.patch.object(self.module, "run_git", side_effect=checked_git), \
+                mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+            report = self.module.execute(self.arguments())
+        self.assertEqual(report["status"], "published")
+        self.assertEqual(pushes, [self.remote_head()])
+        sync_calls = [call for call in tools.call_args_list if call.args[1] == "sync_memory_archive.py"]
+        self.assertTrue(sync_calls)
+        self.assertTrue(all("--push" not in call.args for call in sync_calls))
+        self.assertEqual(sum("--dry-run" not in call.args for call in sync_calls), 1)
+
+    def test_accepted_push_with_nonzero_exit_uses_receipt_without_second_push(self):
+        original = self.module.run_git
+        pushes = []
+
+        def accepted_nonzero(repo, *arguments, **kwargs):
+            result = original(repo, *arguments, **kwargs)
+            if arguments[0] == "push":
+                self.assertEqual(result.returncode, 0)
+                pushes.append(arguments[-1])
+                return subprocess.CompletedProcess(result.args, 23, result.stdout, "connection reset synthetic-secret")
+            return result
+
+        with mock.patch.object(self.module, "run_git", side_effect=accepted_nonzero):
+            report = self.module.execute(self.arguments())
+        self.assertEqual(report["status"], "published")
+        self.assertEqual(len(pushes), 1)
+        self.assertEqual(git(self.canonical, "rev-parse", "HEAD").stdout.strip(), self.remote_head())
+        diagnostic = report["sync_diagnostics"]
+        self.assertEqual(diagnostic["remote_observation"], "candidate")
+        self.assertEqual(diagnostic["primary_failure"]["exit_code"], 23)
+        self.assertEqual(diagnostic["primary_failure"]["operation"], "sync_push")
+        self.assertNotIn("synthetic-secret", json.dumps(report))
+
+    def test_failed_remote_requery_keeps_primary_diagnostic_then_recovers_receipt_only(self):
+        original_git = self.module.run_git
+        original_remote = self.module.remote_main_head
+        pushed = False
+        private_diagnostic = "connection reset https://synthetic.invalid/private?token=synthetic-secret /private/source"
+
+        def accepted_nonzero(repo, *arguments, **kwargs):
+            nonlocal pushed
+            result = original_git(repo, *arguments, **kwargs)
+            if arguments[0] == "push":
+                self.assertEqual(result.returncode, 0)
+                pushed = True
+                return subprocess.CompletedProcess(result.args, 31, result.stdout, private_diagnostic)
+            return result
+
+        def unavailable_after_push(*args, **kwargs):
+            if pushed:
+                raise self.module.TransactionBlocked("remote_receipt_failed")
+            return original_remote(*args, **kwargs)
+
+        output = io.StringIO()
+        argv = ["--memory-repo", str(self.canonical), "--source-dir", str(self.source),
+                "--state-dir", str(self.state), "--push"]
+        with mock.patch.object(self.module, "run_git", side_effect=accepted_nonzero), \
+                mock.patch.object(self.module, "remote_main_head", side_effect=unavailable_after_push), \
+                mock.patch("sys.stdout", output):
+            exit_code = self.module.main(argv)
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["reason"], "sync_live_failed")
+        self.assertEqual(report["failure_stage"], "sync_live")
+        diagnostic = report["sync_diagnostics"]
+        self.assertEqual(set(diagnostic), {"report_kind", "report_version", "primary_failure", "remote_observation"})
+        self.assertEqual(diagnostic["report_kind"], "scheduled_memory_transaction_sync_diagnostics")
+        self.assertEqual(diagnostic["report_version"], 1)
+        self.assertEqual(diagnostic["remote_observation"], "unavailable")
+        primary = diagnostic["primary_failure"]
+        self.assertEqual(set(primary), {"operation", "exit_code", "duration_ms", "error_category"})
+        self.assertEqual(primary["exit_code"], 31)
+        self.assertEqual(primary["operation"], "sync_push")
+        self.assertEqual(primary["error_category"], "network")
+        self.assertIsInstance(primary["duration_ms"], int)
+        self.assertGreaterEqual(primary["duration_ms"], 0)
+        for forbidden in (str(self.root), "synthetic-secret", "https://", "/private/source"):
+            self.assertNotIn(forbidden, output.getvalue())
+        state = json.loads((self.state / "transaction.json").read_text(encoding="utf-8"))
+        candidate = self.remote_head()
+        self.assertEqual(state["candidate_sha"], candidate)
+        self.assert_preserved(self.state / "staging", candidate)
+        with mock.patch.object(self.module, "run_git", wraps=original_git) as commands, \
+                mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+            recovered = self.module.execute(self.arguments(push=False))
+        self.assertEqual(recovered["status"], "published")
+        self.assertEqual(recovered["recovery_action"], "post_push_reconciled")
+        self.assertEqual(recovered["metrics"]["remote_publish_count"], 0)
+        self.assertFalse(any(call.args[1] == "push" for call in commands.call_args_list))
+        self.assertFalse(any(call.args[1] in {"run_memory_updates.py", "repair_publish_surfaces.py"}
+                             for call in tools.call_args_list))
+        self.assertTrue(all("--dry-run" in call.args for call in tools.call_args_list
+                            if call.args[1] == "sync_memory_archive.py"))
+
+    def test_nonzero_commit_child_retains_candidate_and_primary_on_query_failure(self):
+        original_tool = self.module.run_python_tool
+        original_remote = self.module.remote_main_head
+        failed_commit = False
+
+        def failed_after_commit(staging, name, *arguments, **kwargs):
+            nonlocal failed_commit
+            result = original_tool(staging, name, *arguments, **kwargs)
+            if name == "sync_memory_archive.py" and "--dry-run" not in arguments:
+                self.assertEqual(result.returncode, 0)
+                failed_commit = True
+                return subprocess.CompletedProcess(result.args, 19, result.stdout, "authentication failed synthetic-secret")
+            return result
+
+        def unavailable_after_commit(*args, **kwargs):
+            if failed_commit:
+                raise self.module.TransactionBlocked("remote_receipt_failed")
+            return original_remote(*args, **kwargs)
+
+        with mock.patch.object(self.module, "run_python_tool", side_effect=failed_after_commit), \
+                mock.patch.object(self.module, "remote_main_head", side_effect=unavailable_after_commit):
+            with self.assertRaises(self.module.TransactionBlocked) as blocked:
+                self.module.execute(self.arguments())
+        self.assertEqual(blocked.exception.reason, "sync_live_failed")
+        primary = blocked.exception.diagnostics["primary_failure"]
+        self.assertEqual(primary["operation"], "sync_commit")
+        self.assertEqual(primary["exit_code"], 19)
+        self.assertEqual(primary["error_category"], "auth")
+        self.assertEqual(blocked.exception.diagnostics["remote_observation"], "unavailable")
+        self.assertEqual(self.remote_head(), self.base)
+        candidate = git(self.state / "staging", "rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(json.loads((self.state / "transaction.json").read_text())["candidate_sha"], candidate)
+        with mock.patch.object(self.module, "run_python_tool", wraps=original_tool) as tools:
+            report = self.module.execute(self.arguments())
+        self.assertEqual(report["status"], "published")
+        self.assertEqual(self.remote_head(), candidate)
+        self.assertFalse(any(call.args[1] == "run_memory_updates.py" for call in tools.call_args_list))
+
+    def test_dirty_candidate_is_blocked_without_touching_index_or_worktree(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        for kind in ("unstaged", "staged", "untracked"):
+            with self.subTest(kind=kind):
+                target = staging / ("sentinel.txt" if kind == "untracked" else "INDEX.md")
+                target.write_text("preserve this edit\n", encoding="utf-8")
+                if kind == "staged":
+                    self.assertEqual(git(staging, "add", "INDEX.md").returncode, 0)
+                index = (staging / ".git" / "index").read_bytes()
+                result, report = invoke(self.canonical, self.source, self.state)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(report["reason"], "sync_live_candidate_dirty")
+                self.assertEqual(target.read_text(), "preserve this edit\n")
+                self.assertEqual((staging / ".git" / "index").read_bytes(), index)
+                self.assert_preserved(staging, candidate)
+                self.assertEqual(self.remote_head(), self.base)
+                target.unlink()
+                self.assertEqual(git(staging, "reset", "--hard", candidate).returncode, 0)
+
+    def test_unowned_candidate_is_blocked_without_discard(self):
+        staging, candidate = self.seed_candidate()
+        (self.state / "staging-owner.json").unlink()
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "unsafe_staging")
+        self.assert_preserved(staging, candidate)
+
+    def test_candidate_owner_and_state_fingerprints_must_still_match(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        for filename, key, reason in (
+            ("staging-owner.json", "repository_fingerprint", "unsafe_staging"),
+            ("staging-owner.json", "remote_fingerprint", "unsafe_staging"),
+            ("transaction.json", "repository_fingerprint", "state_identity_mismatch"),
+            ("transaction.json", "remote_fingerprint", "state_identity_mismatch"),
+        ):
+            with self.subTest(filename=filename, key=key):
+                path = self.state / filename
+                original = path.read_text()
+                payload = json.loads(original)
+                payload[key] = "0" * 64
+                path.write_text(json.dumps(payload))
+                result, report = invoke(self.canonical, self.source, self.state)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(report["reason"], reason)
+                self.assert_preserved(staging, candidate)
+                path.write_text(original)
+
+    def test_unpublished_candidate_requires_clean_canonical_at_the_recorded_base(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        target = self.canonical / "baseline.txt"
+        target.write_text("preserve canonical edit\n")
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "dirty_canonical")
+        self.assertEqual(target.read_text(), "preserve canonical edit\n")
+        self.assert_preserved(staging, candidate)
+        self.assertEqual(git(self.canonical, "commit", "-am", "Unexpected local advance").returncode, 0)
+        local_head = git(self.canonical, "rev-parse", "HEAD").stdout.strip()
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "canonical_remote_mismatch")
+        self.assertEqual(git(staging, "rev-parse", "HEAD").stdout.strip(), candidate)
+        self.assertEqual(git(self.canonical, "rev-parse", "HEAD").stdout.strip(), local_head)
+        self.assertEqual(self.remote_head(), self.base)
+
+    def test_reviewed_memory_node_policy_requires_explicit_current_option(self):
+        staging, candidate = self.seed_candidate(relative="memories/global.jsonl", content="{}\n")
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "sync_dry_run_failed")
+        self.assert_preserved(staging, candidate)
+        arguments = self.arguments()
+        arguments.include_reviewed_memory_nodes = True
+        recovered = self.module.execute(arguments)
+        self.assertEqual(recovered["status"], "published")
+        self.assertEqual(self.remote_head(), candidate)
+
+    def test_candidate_sha_mismatch_and_non_direct_child_are_blocked(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        state_path = self.state / "transaction.json"
+        state = json.loads(state_path.read_text())
+        state["candidate_sha"] = self.base
+        state_path.write_text(json.dumps(state))
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "remote_race")
+        self.assert_preserved(staging, candidate)
+        (staging / "INDEX.md").write_text("second commit\n")
+        self.assertEqual(git(staging, "commit", "-am", "Unexpected second candidate").returncode, 0)
+        candidate = git(staging, "rev-parse", "HEAD").stdout.strip()
+        del state["candidate_sha"]
+        state_path.write_text(json.dumps(state))
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "sync_live_candidate_mismatch")
+        self.assert_preserved(staging, candidate)
+
+    def test_unexpected_path_candidate_uses_deployed_sync_policy_and_is_retained(self):
+        staging, candidate = self.seed_candidate(relative="README.md")
+        with mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+            with self.assertRaises(self.module.TransactionBlocked) as blocked:
+                self.module.execute(self.arguments())
+        self.assertEqual(blocked.exception.reason, "sync_dry_run_failed")
+        self.assertEqual(blocked.exception.diagnostics["primary_failure"]["error_category"], "policy")
+        self.assertTrue(any(call.args[1] == "sync_memory_archive.py" and "--dry-run" in call.args
+                            for call in tools.call_args_list))
+        self.assert_preserved(staging, candidate)
+        self.assertEqual(self.remote_head(), self.base)
+        self.assertEqual(json.loads((self.state / "transaction.json").read_text())["candidate_sha"], candidate)
+
+    def test_new_commit_is_pinned_before_post_commit_policy_can_fail(self):
+        original = self.module.run_python_tool
+
+        def commit_hook(staging, name, *arguments, **kwargs):
+            if name == "sync_memory_archive.py" and "--dry-run" not in arguments:
+                hook = staging / ".git" / "hooks" / "pre-commit"
+                hook.write_text("#!/bin/sh\nprintf 'outside scope\\n' > README.md\ngit add README.md\n")
+                hook.chmod(0o700)
+            return original(staging, name, *arguments, **kwargs)
+
+        with mock.patch.object(self.module, "run_python_tool", side_effect=commit_hook):
+            with self.assertRaisesRegex(self.module.TransactionBlocked, "sync_dry_run_failed"):
+                self.module.execute(self.arguments())
+        staging = self.state / "staging"
+        candidate = git(staging, "rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(candidate, self.base)
+        state = json.loads((self.state / "transaction.json").read_text())
+        self.assertEqual(state["candidate_sha"], candidate)
+        self.assert_preserved(staging, candidate)
+        self.assertEqual(self.remote_head(), self.base)
+
+    def test_secret_candidate_is_refused_by_deployed_scanner_without_rendering_secret(self):
+        secret = "sk-" + "SyntheticSecretValue" * 3
+        staging, candidate = self.seed_candidate(content=secret + "\n")
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(report["reason"], "sync_dry_run_failed")
+        self.assertNotIn(secret, result.stdout + result.stderr)
+        self.assert_preserved(staging, candidate)
+
+    def test_candidate_cannot_replace_the_tools_that_validate_it(self):
+        staging, candidate = self.seed_candidate(relative="tools/audit_memory_archive.py", content="raise AssertionError('must not execute')\n")
+        with mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+            with self.assertRaisesRegex(self.module.TransactionBlocked, "sync_live_candidate_tools_changed"):
+                self.module.execute(self.arguments())
+        tools.assert_not_called()
+        self.assert_preserved(staging, candidate)
+
+    def test_hidden_worktree_tool_edits_cannot_bypass_candidate_validation(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        for flag in ("skip-worktree", "assume-unchanged"):
+            with self.subTest(flag=flag):
+                relative = "tools/sync_memory_archive.py"
+                original = (staging / relative).read_bytes()
+                self.assertEqual(git(staging, "update-index", f"--{flag}", relative).returncode, 0)
+                (staging / relative).write_text("raise AssertionError('must not execute hidden edit')\n")
+                self.assertEqual(git(staging, "status", "--porcelain=v1").stdout, "")
+                index = (staging / ".git" / "index").read_bytes()
+                with mock.patch.object(self.module, "run_python_tool", wraps=self.module.run_python_tool) as tools:
+                    with self.assertRaisesRegex(self.module.TransactionBlocked, "sync_live_candidate_dirty"):
+                        self.module.execute(self.arguments())
+                tools.assert_not_called()
+                self.assertEqual((staging / ".git" / "index").read_bytes(), index)
+                self.assert_preserved(staging, candidate)
+                (staging / relative).write_bytes(original)
+                self.assertEqual(git(staging, "update-index", f"--no-{flag}", relative).returncode, 0)
+
+    def test_candidate_origin_and_push_destination_mismatches_fail_closed(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        self.assertEqual(git(staging, "remote", "set-url", "origin", str(self.root / "other.git")).returncode, 0)
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertEqual(report["reason"], "unexpected_remote")
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_preserved(staging, candidate)
+        self.assertEqual(git(staging, "remote", "set-url", "origin", str(self.remote)).returncode, 0)
+        self.assertEqual(git(staging, "remote", "set-url", "--push", "origin", str(self.root / "other.git")).returncode, 0)
+        result, report = invoke(self.canonical, self.source, self.state)
+        self.assertEqual(report["reason"], "unexpected_remote")
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_preserved(staging, candidate)
+
+    def test_remote_race_at_push_is_rejected_by_exact_base_lease_and_retains_candidate(self):
+        staging, candidate = self.seed_candidate(explicit=True)
+        racer = self.root / "racer"
+        self.assertEqual(git(self.root, "clone", str(self.remote), str(racer)).returncode, 0)
+        self.assertEqual(git(racer, "config", "user.email", "racer@example.invalid").returncode, 0)
+        self.assertEqual(git(racer, "config", "user.name", "Synthetic Racer").returncode, 0)
+        (racer / "INDEX.md").write_text("competing publication\n")
+        self.assertEqual(git(racer, "add", "INDEX.md").returncode, 0)
+        self.assertEqual(git(racer, "commit", "-m", "Competing synthetic publication").returncode, 0)
+        original = self.module.run_git
+        pushes = []
+
+        def race_at_push(repo, *arguments, **kwargs):
+            if arguments[0] == "push":
+                pushes.append(arguments)
+                self.assertEqual(git(racer, "push", "origin", "main").returncode, 0)
+            return original(repo, *arguments, **kwargs)
+
+        with mock.patch.object(self.module, "run_git", side_effect=race_at_push):
+            with self.assertRaises(self.module.TransactionBlocked) as blocked:
+                self.module.execute(self.arguments())
+        self.assertEqual(blocked.exception.reason, "remote_race")
+        self.assertEqual(blocked.exception.diagnostics["primary_failure"]["error_category"], "rejected")
+        self.assertEqual(blocked.exception.diagnostics["remote_observation"], "other")
+        self.assertEqual(len(pushes), 1)
+        self.assert_preserved(staging, candidate)
+
+    def test_candidate_readiness_and_search_are_checked_again_without_repair(self):
+        staging, candidate = self.seed_candidate()
+        original = self.module.run_python_tool
+        for failing_tool, reason in (("audit_memory_archive.py", "archive_audit_failed"),
+                                     ("audit_publish_readiness.py", "publish_readiness_failed"),
+                                     ("search_memory.py", "search_health_failed")):
+            with self.subTest(tool=failing_tool):
+                def reject_tool(repo, name, *arguments, **kwargs):
+                    if name == failing_tool:
+                        return subprocess.CompletedProcess([name], 1, "", "synthetic failure")
+                    return original(repo, name, *arguments, **kwargs)
+
+                with mock.patch.object(self.module, "run_python_tool", side_effect=reject_tool) as tools:
+                    with self.assertRaises(self.module.TransactionBlocked) as blocked:
+                        self.module.execute(self.arguments())
+                self.assertEqual(blocked.exception.reason, reason)
+                self.assertFalse(any(call.args[1] == "repair_publish_surfaces.py" for call in tools.call_args_list))
+                self.assert_preserved(staging, candidate)
+
+
+class ScheduledPowerAssertionTests(unittest.TestCase):
+    def test_darwin_assertion_uses_parent_pid_without_lock_inheritance_and_releases(self):
+        module = load_module()
+        process = mock.Mock()
+        process.poll.return_value = None
+        with mock.patch.object(module.sys, "platform", "darwin"), \
+                mock.patch.object(module.os, "access", return_value=True), \
+                mock.patch.object(module, "_ACTIVE_TRANSACTION_LOCK_FD", 123), \
+                mock.patch.object(module.subprocess, "Popen", return_value=process) as popen:
+            with module.ScopedPowerAssertion():
+                process.terminate.assert_not_called()
+        self.assertEqual(popen.call_args.args[0], ["/usr/bin/caffeinate", "-i", "-s", "-w", str(os.getpid())])
+        self.assertTrue(popen.call_args.kwargs["close_fds"])
+        self.assertNotIn("pass_fds", popen.call_args.kwargs)
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(timeout=5)
+
+    def test_assertion_releases_on_exception_or_interruption(self):
+        for error in (RuntimeError, KeyboardInterrupt):
+            with self.subTest(error=error.__name__):
+                module = load_module()
+                process = mock.Mock()
+                process.poll.return_value = None
+                with mock.patch.object(module.sys, "platform", "darwin"), \
+                        mock.patch.object(module.os, "access", return_value=True), \
+                        mock.patch.object(module.subprocess, "Popen", return_value=process):
+                    with self.assertRaises(error):
+                        with module.ScopedPowerAssertion():
+                            raise error()
+                process.terminate.assert_called_once()
+                process.wait.assert_called_once()
+
+    def test_other_platform_missing_tool_or_disabled_assertion_does_not_launch(self):
+        for platform, available, enabled in (("linux", True, True), ("win32", True, True),
+                                              ("darwin", False, True), ("darwin", True, False)):
+            with self.subTest(platform=platform, available=available, enabled=enabled):
+                module = load_module()
+                with mock.patch.object(module.sys, "platform", platform), \
+                        mock.patch.object(module.os, "access", return_value=available), \
+                        mock.patch.object(module.subprocess, "Popen") as popen:
+                    with module.ScopedPowerAssertion(enabled=enabled):
+                        pass
+                popen.assert_not_called()
+
+    def test_unavailable_assertion_can_never_block_transaction_and_exit_reaps_it(self):
+        module = load_module()
+        with mock.patch.object(module.sys, "platform", "darwin"), \
+                mock.patch.object(module.os, "access", return_value=True), \
+                mock.patch.object(module.subprocess, "Popen", side_effect=OSError):
+            with module.ScopedPowerAssertion():
+                pass
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.wait.side_effect = [subprocess.TimeoutExpired("caffeinate", 5), 0]
+        with mock.patch.object(module.sys, "platform", "darwin"), \
+                mock.patch.object(module.os, "access", return_value=True), \
+                mock.patch.object(module.subprocess, "Popen", return_value=process):
+            with module.ScopedPowerAssertion():
+                pass
+        process.kill.assert_called_once()
+        self.assertEqual(process.wait.call_count, 2)
 
 
 class ScheduledMemoryTransactionTests(unittest.TestCase):
