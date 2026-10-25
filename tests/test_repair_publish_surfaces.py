@@ -123,6 +123,37 @@ def repair(repo: Path, *, apply: bool = False) -> subprocess.CompletedProcess[st
 
 
 class RepairPublishSurfacesTests(unittest.TestCase):
+    def test_repaired_title_preserves_literal_escapes_and_passes_git_whitespace_check(self):
+        for title in (
+            r"\nRoute catalog cache",
+            r"\1Relay token refresh",
+            r"\g<0>Source boundary",
+        ):
+            with self.subTest(title=title), tempfile.TemporaryDirectory() as tmpdir:
+                repo = setup_archive(Path(tmpdir))
+                meta_path = write_session(repo, summary="Durable route catalog binding remains current.")
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                meta["title"] = title
+                write_json(meta_path, meta)
+                summary_path = repo / meta["summary_path"]
+                original = "# Session: Previous title\n\nDurable route catalog binding remains current.\n"
+                summary_path.write_text(original, encoding="utf-8")
+
+                dry = repair(repo)
+                self.assertEqual(dry.returncode, 0, dry.stderr)
+                self.assertEqual(summary_path.read_text(encoding="utf-8"), original)
+                applied = repair(repo, apply=True)
+                self.assertEqual(applied.returncode, 0, applied.stderr)
+                rendered = summary_path.read_text(encoding="utf-8")
+                self.assertEqual(rendered.splitlines()[0], f"# Session: {title}")
+                self.assertIn("Durable route catalog binding remains current.", rendered)
+                self.assertEqual(json.loads(meta_path.read_text(encoding="utf-8"))["title"], title)
+
+                run(["git", "init", "--quiet"], cwd=repo)
+                run(["git", "add", "--", meta["summary_path"]], cwd=repo)
+                whitespace = run(["git", "diff", "--cached", "--check"], cwd=repo, check=False)
+                self.assertEqual(whitespace.returncode, 0, whitespace.stdout + whitespace.stderr)
+
     def test_dry_run_is_aggregate_and_apply_repairs_derived_publish_surfaces(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = setup_archive(Path(tmpdir))
