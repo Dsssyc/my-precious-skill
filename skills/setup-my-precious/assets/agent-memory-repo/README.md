@@ -667,3 +667,22 @@ activation time as a UTC timestamp. Older moved/compressed records are located
 by pending or persisted identity; records modified after activation are also
 discovered when first seen after a move. The boundary stays fixed. Omit it to
 scan all declared history.
+
+Verified same-owner paginated JSONL chains keep separate physical-page archives,
+raw hashes, and local evidence anchors. A successor inherits only its declared
+ordinal/byte prefix; the parent's later tail does not contribute facts or project
+discovery. Page dependencies are selected across all declared roots even below
+`discover_after`. Unknown mappings, missing references, cycles, and competing
+pages fail closed. Declared cross-owner reference forks verify the parent's raw
+metadata and inherited prefix within its current own view; they do not truncate
+the parent's own chain. Other-project dependencies reach target validation but
+are not archived in the child project. Changed snapshot dependencies defer their
+owner and dependent owners, and each page clears only its own retry state.
+Collection validation can verify an uncompressed page's unchanged inventory-size
+raw prefix after an append; the target still defers that changed source until a
+fresh inventory. Compressed pages require their complete original raw fingerprint.
+Copied paginated forks can retain declared ancestor headers inside their local
+inherited prefix while the first child header remains the owner. Cutoff-excluded
+history is scanned as bounded header hints; only seeds, transitive bases, and
+known page mappings activate full records. Unrelated old branches stay inactive;
+selected or referenced ambiguity still blocks the batch.

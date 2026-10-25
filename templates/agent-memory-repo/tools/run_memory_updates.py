@@ -31,6 +31,24 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
+try:
+    from source_record_io import (
+        SourceRecordDecodeError, archived_fragment_mappings, codex_source_fragment,
+        decompress_source_bytes, fragment_prefix, resolve_source_fragments,
+        restore_fragment_locator, validate_source_fragment, validate_rollout_locators, INVENTORY_DIAGNOSTICS,
+        codex_pagination_header, validate_pagination_header, codex_rollout_locator,
+        pagination_header_is_known, fragment_descriptor_matches, fragment_reference_prefixes,
+        validated_fragment_prefix, source_fragment_dependencies, read_source_snapshot_bytes,
+    )
+    SOURCE_ADAPTER_AVAILABLE = True
+except ImportError:
+    # Standalone generic runners retain their existing dependency-free behavior.
+    SOURCE_ADAPTER_AVAILABLE = False
+    INVENTORY_DIAGNOSTICS = frozenset()
+
+    class SourceRecordDecodeError(ValueError):
+        pass
+
 
 if os.name == "posix":
     import fcntl
@@ -84,6 +102,7 @@ class SourceInventoryRecord:
     project_paths: tuple[Path, ...]
     source_root: Path | None = None
     source_identity: str = ""
+    source_fragment: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +110,7 @@ class SourceIdentityHeader:
     source_root: Path
     relative_path: str
     source_identity: str
+    pagination: dict | None = None
 
 
 class SourceInventory(list):
@@ -529,6 +549,14 @@ def source_value_is_automation(value: object) -> bool:
     return str(payload.get("thread_source") or "").strip().lower() == "automation"
 
 
+def source_project_paths(value: object) -> Iterable[Path]:
+    for key, child in walk_json_values(value):
+        if key in PROJECT_PATH_KEYS and isinstance(child, str) and child.strip():
+            candidate = Path(child).expanduser()
+            if candidate.is_absolute():
+                yield candidate.resolve()
+
+
 def parse_source_timestamp(value: object) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -597,18 +625,54 @@ def codex_session_identity(values: Iterable[object]) -> str:
 
 
 def validate_inventory_identities(inventory: Iterable[SourceInventoryRecord]) -> None:
-    seen: set[str] = set()
-    for record in inventory:
-        if not record.source_identity:
-            continue
-        if record.source_identity in seen:
-            raise SourceInventoryError("source_inventory_identity_conflict")
-        seen.add(record.source_identity)
+    inventory = list(inventory)
+    if not any(record.source_identity or record.source_fragment for record in inventory):
+        return
+    if not SOURCE_ADAPTER_AVAILABLE:
+        raise SourceInventoryError('source_identity_adapter_unavailable')
+    if any(record.source_fragment and not record.source_identity for record in inventory):
+        raise SourceInventoryError('source_inventory_extension_invalid')
+    try:
+        resolve_source_fragments(((record.source_identity, record.source_fragment) for record in inventory), require_closure=False)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
 
 
-def combine_source_collection(root_inventories: Iterable[SourceInventory]) -> list[SourceInventoryRecord]:
+def combine_source_collection(root_inventories: Iterable[SourceInventory], *, fragment_mappings: Iterable[dict] = ()) -> list[SourceInventoryRecord]:
     root_inventories = list(root_inventories)
+    fragment_mappings = tuple(fragment_mappings)
     inventory = [record for records in root_inventories for record in records]
+    headers = [header for records in root_inventories for header in getattr(records, 'source_headers', ())]
+    inventory = expand_paginated_dependencies(inventory, headers, fragment_mappings)
+    # Manifest descriptors are hints until raw bytes and canonical ownership
+    # have been checked. Upgrade v1 fork metadata before closing the graph.
+    expected_ranges = {}
+    try:
+        verified = []
+        for record in inventory:
+            fragment = validate_source_fragment(record.source_fragment) if record.source_fragment is not None else None
+            if fragment:
+                if not isinstance(record.source_root, Path):
+                    raise SourceInventoryError('source_inventory_extension_invalid')
+                path = record.source_root / record.relative_path
+                raw = read_source_snapshot_bytes(path, record.size, record.sha256)
+                logical = decompress_source_bytes(path, raw)
+                actual = codex_source_fragment(path, logical)
+                identity = codex_session_identity(iter_json_values(path, logical.decode('utf-8'), strict_objects=True))
+                if actual:
+                    actual = restore_fragment_locator(actual, logical, identity, record.sha256, fragment_mappings)
+                physical = {**fragment, 'end_ordinal_exclusive': fragment['physical_end_ordinal_exclusive'],
+                            'end_byte_offset': fragment['physical_end_byte_offset']}
+                if identity != record.source_identity or not fragment_descriptor_matches(actual, physical):
+                    raise SourceInventoryError('source_inventory_changed')
+                expected_ranges[path] = (fragment['end_ordinal_exclusive'], fragment['end_byte_offset'])
+                fragment = actual
+            verified.append(replace(record, source_fragment=fragment))
+        inventory = verified
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+    except OSError as exc:
+        raise SourceInventoryError('source_inventory_unavailable') from exc
     validate_inventory_identities(inventory)
     locations: dict[str, set[Path]] = {}
     selected = {record.source_identity for record in inventory if record.source_identity}
@@ -620,9 +684,129 @@ def combine_source_collection(root_inventories: Iterable[SourceInventory]) -> li
     for records in root_inventories:
         for header in getattr(records, "source_headers", ()):
             locations.setdefault(header.source_identity, set()).add(header.source_root / header.relative_path)
-    if any(len(paths) > 1 for identity, paths in locations.items() if identity in selected):
+    paginated = {record.source_identity for record in inventory if record.source_fragment}
+    selected_paths = {record.source_root / record.relative_path for record in inventory if record.source_root}
+    if any(header.pagination is None and header.source_identity in paginated and header.source_root / header.relative_path not in selected_paths
+           for records in root_inventories for header in getattr(records, 'source_headers', ())):
+        raise SourceInventoryError('source_inventory_identity_conflict')
+    if any(len(paths) > 1 for identity, paths in locations.items() if identity in selected and identity not in paginated):
         raise SourceInventoryError("source_inventory_identity_conflict")
-    return inventory
+    if not paginated:
+        return inventory
+    try:
+        validate_rollout_locators((record.source_root / record.relative_path, record.source_fragment) for record in inventory)
+        fragments = resolve_source_fragments(((record.source_identity, record.source_fragment) for record in inventory),
+                                             fragment_mappings=fragment_mappings)
+        references = fragment_reference_prefixes((record.source_identity, fragment) for record, fragment in zip(inventory, fragments))
+        resolved_inventory = []
+        for i, (record, fragment) in enumerate(zip(inventory, fragments)):
+            if fragment:
+                path = record.source_root / record.relative_path
+                if expected_ranges[path] not in (
+                    (fragment['physical_end_ordinal_exclusive'], fragment['physical_end_byte_offset']),
+                    (fragment['end_ordinal_exclusive'], fragment['end_byte_offset']),
+                ):
+                    raise SourceInventoryError('source_pagination_boundary_invalid')
+                raw = read_source_snapshot_bytes(path, record.size, record.sha256)
+                logical = decompress_source_bytes(path, raw)
+                effective = validated_fragment_prefix(logical, fragment, references.get(i, ())).decode('utf-8')
+                projects = {project for value in iter_json_values(path, effective, strict_objects=True)
+                            for project in source_project_paths(value)}
+                record = replace(record, project_paths=tuple(sorted(projects, key=lambda item: item.as_posix())))
+            resolved_inventory.append(replace(record, source_fragment=fragment))
+        return resolved_inventory
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+    except OSError as exc:
+        raise SourceInventoryError('source_inventory_unavailable') from exc
+
+
+def expand_paginated_dependencies(inventory: list[SourceInventoryRecord], headers: list[SourceIdentityHeader],
+                                  mappings: tuple[dict, ...]) -> list[SourceInventoryRecord]:
+    """Activate only seed dependencies and previously known pages, never arbitrary old heads.
+
+    Inactive headers are lookup hints. Materialization reuses the same inventory
+    reader and verifies the header and logical owner before graph validation.
+    """
+    selected_paths = {record.source_root / record.relative_path for record in inventory if record.source_root}
+    candidates = {header.source_root / header.relative_path: header for header in headers
+                  if header.source_root / header.relative_path not in selected_paths}
+    while True:
+        pages = [record for record in inventory if record.source_fragment]
+        if not pages:
+            return inventory
+        owners = {record.source_identity for record in pages}
+        own_locators = {owner: {record.source_fragment['rollout_id'] for record in pages
+                               if record.source_identity == owner and record.source_fragment['rollout_id']}
+                        for owner in owners}
+        locators = {record.source_fragment['rollout_id'] for record in pages if record.source_fragment['rollout_id']}
+        locators.update(record.source_fragment['history_base']['thread_id'] for record in pages
+                        if record.source_fragment['history_base'])
+        known = [row for row in mappings if (row.get('source_identity') in owners
+                 or (not row.get('identity_verified', True) and codex_rollout_locator(row.get('source_record', '')) in locators))]
+        known_ids = {row['source_fragment']['fragment_id'] for row in known if row.get('source_fragment')}
+        locators.update(row['source_fragment']['rollout_id'] if row.get('source_fragment')
+                        else codex_rollout_locator(row.get('source_record', '')) for row in known)
+        locators.discard('')
+        needed = []
+        materialized = {}
+        checked_legacy = []
+        for path, header in candidates.items():
+            pagination = header.pagination
+            locator = pagination['rollout_id'] if pagination else codex_rollout_locator(str(path))
+            aliases = {row['source_fragment']['rollout_id'] for row in known
+                       if pagination and row.get('source_fragment') and pagination['fragment_id'] == row['source_fragment']['fragment_id']
+                       and header.source_identity == row['source_identity']
+                       and (not locator or locator == row['source_fragment']['rollout_id'])}
+            # A different canonical locator is an inactive branch, even if its
+            # first header happens to match. Unknown aliases need stored proof.
+            same_known_page = bool(pagination and header.source_identity in owners
+                                   and pagination['fragment_id'] in known_ids and (not locator or locator in locators))
+            own_successor = bool(pagination and pagination['history_base'] and
+                                 pagination['history_base']['thread_id'] in own_locators.get(header.source_identity, set()))
+            if (locator and locator in locators) or (aliases & locators) or same_known_page or own_successor:
+                needed.append((path, header))
+            elif pagination and not locator:
+                legacy_hashes = frozenset(row['source_record_sha256'] for row in known
+                    if not row.get('source_fragment') and (row.get('source_identity') == header.source_identity
+                        or not row.get('identity_verified', True))
+                    and codex_rollout_locator(row.get('source_record', '')) in locators
+                    and isinstance(row.get('source_record_sha256'), str)
+                    and re.fullmatch(r'[0-9a-f]{64}', row['source_record_sha256']))
+                if legacy_hashes:
+                    # Legacy archives have no immutable header fingerprint. Probe
+                    # exact raw equality through the same guarded snapshot reader;
+                    # a nonmatching inactive candidate is never parsed or activated.
+                    records = build_source_inventory(header.source_root, DEFAULT_PATTERNS, 'codex-session',
+                        fragment_mappings=mappings, only_paths=(header.relative_path,), matching_raw_hashes=legacy_hashes)
+                    checked_legacy.append(path)
+                    if records:
+                        materialized[path] = records[0]
+                        needed.append((path, header))
+        for path in checked_legacy:
+            candidates.pop(path)
+        if not needed:
+            return inventory
+        by_root: dict[Path, list[str]] = {}
+        for path, header in needed:
+            if path not in materialized:
+                by_root.setdefault(header.source_root, []).append(header.relative_path)
+        for root, relative_paths in by_root.items():
+            for record in build_source_inventory(root, DEFAULT_PATTERNS, 'codex-session',
+                                                 fragment_mappings=mappings, only_paths=tuple(relative_paths)):
+                materialized[record.source_root / record.relative_path] = record
+        for path, header in needed:
+            record = materialized.get(path)
+            if record is None:
+                raise SourceInventoryError('source_inventory_unavailable')
+            if (record.source_identity != header.source_identity
+                or (header.pagination and (not record.source_fragment or not fragment_descriptor_matches(
+                    {key: value for key, value in record.source_fragment.items()
+                     if key in header.pagination or key == 'forked_from_id'},
+                    {**header.pagination, 'rollout_id': record.source_fragment['rollout_id']})))):
+                raise SourceInventoryError('source_inventory_changed')
+            inventory.append(record)
+            candidates.pop(path, None)
 
 
 def build_source_inventory(
@@ -633,18 +817,25 @@ def build_source_inventory(
     discover_after: datetime | None = None,
     required_identities: frozenset[str] = frozenset(),
     include_existing: bool = True,
+    fragment_mappings: Iterable[dict] = (),
+    only_paths: tuple[str, ...] | None = None,
+    matching_raw_hashes: frozenset[str] | None = None,
 ) -> list[SourceInventoryRecord]:
     if identity_adapter not in ("", "codex-session"):
         raise SourceInventoryError("source_inventory_identity_adapter_invalid")
+    if identity_adapter and not SOURCE_ADAPTER_AVAILABLE:
+        raise SourceInventoryError('source_identity_adapter_unavailable')
     if not source_dir.exists() or not source_dir.is_dir():
         return []
     if identity_adapter == "codex-session":
         patterns = tuple(dict.fromkeys((*patterns, "*.jsonl.zst")))
     source_root = source_dir.resolve()
+    fragment_mappings = tuple(fragment_mappings)
     inventory: list[SourceInventoryRecord] = []
     source_headers: list[SourceIdentityHeader] = []
     seen: set[Path] = set()
-    for path in iter_candidate_files(source_root, patterns):
+    paths = (source_root / relative for relative in only_paths) if only_paths is not None else iter_candidate_files(source_root, patterns)
+    for path in paths:
         resolved = path.resolve()
         try:
             resolved.relative_to(source_root)
@@ -654,17 +845,20 @@ def build_source_inventory(
             continue
         seen.add(resolved)
         if discover_after is not None and (not include_existing or resolved.name.endswith(".jsonl.zst")):
-            from source_record_io import source_header_identity, SourceRecordDecodeError
+            from source_record_io import source_header_value
             try:
                 probe_stat = resolved.stat()
                 if datetime.fromtimestamp(probe_stat.st_mtime, tz=UTC) < discover_after:
-                    identity = source_header_identity(resolved) if source_format(resolved) == ".jsonl" else ""
+                    header = source_header_value(resolved) if source_format(resolved) == '.jsonl' else None
+                    identity = codex_session_identity([header])
+                    pagination = codex_pagination_header(resolved, header)
                     final_probe_stat = resolved.stat()
                     if (probe_stat.st_size, probe_stat.st_mtime_ns) != (final_probe_stat.st_size, final_probe_stat.st_mtime_ns):
                         raise SourceInventoryError("source_inventory_changed")
                     if identity:
-                        source_headers.append(SourceIdentityHeader(source_root, resolved.relative_to(source_root).as_posix(), identity))
-                    if identity not in required_identities:
+                        source_headers.append(SourceIdentityHeader(source_root, resolved.relative_to(source_root).as_posix(), identity, pagination))
+                    if (identity not in required_identities or (pagination and
+                        pagination_header_is_known(identity, pagination, fragment_mappings) is False)):
                         continue
             except (OSError, SourceRecordDecodeError) as exc:
                 raise SourceInventoryError("source_inventory_header_unavailable") from exc
@@ -681,9 +875,12 @@ def build_source_inventory(
             or initial_stat.st_mtime_ns != final_stat.st_mtime_ns
         ):
             raise SourceInventoryError("source_inventory_changed")
+        if matching_raw_hashes is not None and hashlib.sha256(raw).hexdigest() not in matching_raw_hashes:
+            continue
         if resolved.name.lower().endswith(".jsonl.zst"):
             try:
-                from source_record_io import SourceRecordDecodeError, decompress_source_bytes
+                if not SOURCE_ADAPTER_AVAILABLE:
+                    raise SourceInventoryError('source_compression_unavailable')
                 raw_text = decompress_source_bytes(resolved, raw)
             except ImportError as exc:
                 raise SourceInventoryError("source_compression_unavailable") from exc
@@ -712,14 +909,18 @@ def build_source_inventory(
             for timestamp in direct_source_timestamps(value):
                 if latest_source_timestamp is None or timestamp > latest_source_timestamp:
                     latest_source_timestamp = timestamp
-            for key, child in walk_json_values(value):
-                if key not in PROJECT_PATH_KEYS or not isinstance(child, str) or not child.strip():
-                    continue
-                candidate = Path(child).expanduser()
-                if candidate.is_absolute():
-                    project_paths.add(candidate.resolve())
+            project_paths.update(source_project_paths(value))
         if identity_records:
             source_identity = codex_session_identity(identity_metadata)
+        fragment = None
+        if identity_records:
+            try:
+                fragment = codex_source_fragment(resolved, raw_text)
+                if fragment:
+                    fragment = restore_fragment_locator(fragment, raw_text, source_identity,
+                                                        hashlib.sha256(raw).hexdigest(), fragment_mappings)
+            except SourceRecordDecodeError as exc:
+                raise SourceInventoryError(str(exc)) from exc
         if automation_source:
             continue
         filename_timestamp = timestamp_from_source_filename(resolved)
@@ -739,6 +940,7 @@ def build_source_inventory(
                 project_paths=tuple(sorted(project_paths, key=lambda item: item.as_posix())),
                 source_root=source_root if identity_adapter else None,
                 source_identity=source_identity,
+                source_fragment=fragment,
             )
         )
     if identity_adapter:
@@ -758,12 +960,18 @@ def inventory_records_for_target(
     require_project_metadata: bool,
 ) -> list[SourceInventoryRecord]:
     project_key = project_path.resolve()
-    return [
+    inventory = list(inventory)
+    selected = [
         record
         for record in inventory
         if project_key in record.project_paths
         or (not record.project_paths and not require_project_metadata)
     ]
+    if not any(record.source_fragment for record in inventory):
+        return selected
+    dependencies = source_fragment_dependencies((record.source_identity, record.source_fragment) for record in inventory)
+    needed = {index for i, record in enumerate(inventory) if record in selected for index in dependencies[i]}
+    return [record for i, record in enumerate(inventory) if i in needed]
 
 
 def source_inventory_record_payload(
@@ -789,6 +997,11 @@ def source_inventory_record_payload(
         ):
             raise SourceInventoryError("source_inventory_extension_invalid")
         row.update(source_root=str(record.source_root), source_identity=record.source_identity)
+    if record.source_fragment is not None:
+        try:
+            row['source_fragment'] = validate_source_fragment(record.source_fragment)
+        except SourceRecordDecodeError as exc:
+            raise SourceInventoryError(str(exc)) from exc
     return row
 
 
@@ -799,12 +1012,14 @@ def source_inventory_payload(
     extended = extended or any(
         record.source_root is not None or record.source_identity for record in inventory
     )
+    paginated = any(record.source_fragment for record in inventory)
     return json.dumps(
         {
             "report_kind": SOURCE_INVENTORY_REPORT_KIND,
-            "report_version": 3 if extended else SOURCE_INVENTORY_REPORT_VERSION,
+            "report_version": 4 if paginated else 3 if extended else SOURCE_INVENTORY_REPORT_VERSION,
             "records": [
-                source_inventory_record_payload(record, extended=extended)
+                {**source_inventory_record_payload(record, extended=extended),
+                 **({'project_paths': [str(path) for path in record.project_paths]} if paginated else {})}
                 for record in inventory
             ],
         },
@@ -819,7 +1034,7 @@ def source_inventory_manifest_payload(inventory: Iterable[SourceInventoryRecord]
     extended = any(record.source_root is not None or record.source_identity for record in inventory)
     return {
         "report_kind": SOURCE_INVENTORY_MANIFEST_KIND,
-        "report_version": 3 if headers else 2 if extended else SOURCE_INVENTORY_MANIFEST_VERSION,
+        "report_version": 5 if any(header.pagination for header in headers) else 4 if any(record.source_fragment for record in inventory) else 3 if headers else 2 if extended else SOURCE_INVENTORY_MANIFEST_VERSION,
         "records": [
             {
                 **source_inventory_record_payload(record, extended=extended),
@@ -828,7 +1043,9 @@ def source_inventory_manifest_payload(inventory: Iterable[SourceInventoryRecord]
             for record in inventory
         ],
         **({"source_headers": [{"source_root": str(header.source_root), "relative_path": header.relative_path,
-                                "source_identity": header.source_identity} for header in headers]} if headers else {}),
+                                "source_identity": header.source_identity,
+                                **({'pagination': header.pagination} if header.pagination else {})} for header in headers]}
+           if headers or any(record.source_fragment for record in inventory) else {}),
     }
 
 
@@ -873,7 +1090,7 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
             raise SourceInventoryError("source_inventory_manifest_invalid")
         text = path.read_text(encoding="utf-8")
         payload = json.loads(text)
-        if isinstance(payload, dict) and payload.get("report_version") in (2, 3):
+        if isinstance(payload, dict) and payload.get("report_version") in (2, 3, 4, 5):
             payload = json.loads(text, object_pairs_hook=unique_json_object)
     except SourceInventoryError:
         raise
@@ -882,16 +1099,16 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
     if (
         not isinstance(payload, dict)
         or payload.get("report_kind") != SOURCE_INVENTORY_MANIFEST_KIND
-        or payload.get("report_version") not in (SOURCE_INVENTORY_MANIFEST_VERSION, 2, 3)
+        or payload.get("report_version") not in (SOURCE_INVENTORY_MANIFEST_VERSION, 2, 3, 4, 5)
         or not isinstance(payload.get("records"), list)
     ):
         raise SourceInventoryError("source_inventory_manifest_invalid")
     inventory: list[SourceInventoryRecord] = []
-    extended = payload["report_version"] in (2, 3)
+    extended = payload["report_version"] in (2, 3, 4, 5)
     if extended and (
         type(payload["report_version"]) is not int
         or set(payload) != ({"report_kind", "report_version", "records", "source_headers"}
-                            if payload["report_version"] == 3 else {"report_kind", "report_version", "records"})
+                            if payload["report_version"] in (3, 4, 5) else {"report_kind", "report_version", "records"})
     ):
         raise SourceInventoryError("source_inventory_manifest_invalid")
     seen: set[tuple[Path | None, str]] = set()
@@ -901,7 +1118,8 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
     if extended:
         fields.update({"source_root", "source_identity"})
     for row in payload["records"]:
-        if not isinstance(row, dict) or set(row) != fields:
+        row_fields = fields | ({'source_fragment'} if isinstance(row, dict) and 'source_fragment' in row and payload['report_version'] in (4, 5) else set())
+        if not isinstance(row, dict) or set(row) != row_fields:
             raise SourceInventoryError("source_inventory_manifest_invalid")
         relative_path = row["relative_path"]
         digest = row["sha256"]
@@ -967,6 +1185,7 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
                 project_paths=tuple(Path(value).resolve() for value in project_paths),
                 source_root=source_root,
                 source_identity=source_identity,
+                source_fragment=validate_inventory_fragment(row.get('source_fragment')),
             )
         )
     validate_inventory_identities(inventory)
@@ -976,7 +1195,10 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
         raise SourceInventoryError("source_inventory_manifest_invalid")
     seen_headers = set()
     for row in raw_headers:
-        if not isinstance(row, dict) or set(row) != {"source_root", "relative_path", "source_identity"}:
+        header_fields = {'source_root', 'relative_path', 'source_identity'}
+        if isinstance(row, dict) and 'pagination' in row and payload['report_version'] == 5:
+            header_fields.add('pagination')
+        if not isinstance(row, dict) or set(row) != header_fields:
             raise SourceInventoryError("source_inventory_manifest_invalid")
         root = source_location_root(row["source_root"])
         relative = row["relative_path"]
@@ -992,8 +1214,25 @@ def load_source_inventory_manifest(path: Path) -> list[SourceInventoryRecord]:
         except (OSError, ValueError, RuntimeError) as exc:
             raise SourceInventoryError("source_inventory_manifest_invalid") from exc
         seen_headers.add((root, relative))
-        headers.append(SourceIdentityHeader(root, relative, identity))
+        if row.get('pagination') is not None and not SOURCE_ADAPTER_AVAILABLE:
+            raise SourceInventoryError('source_identity_adapter_unavailable')
+        try:
+            pagination = validate_pagination_header(row['pagination']) if row.get('pagination') is not None else None
+        except SourceRecordDecodeError as exc:
+            raise SourceInventoryError(str(exc)) from exc
+        headers.append(SourceIdentityHeader(root, relative, identity, pagination))
     return SourceInventory(sorted(inventory, key=lambda record: (str(record.source_root or ""), record.relative_path)), headers)
+
+
+def validate_inventory_fragment(fragment: object) -> dict | None:
+    if fragment is None:
+        return None
+    if not SOURCE_ADAPTER_AVAILABLE:
+        raise SourceInventoryError('source_identity_adapter_unavailable')
+    try:
+        return validate_source_fragment(fragment)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
 
 
 def build_source_inventory_isolated(
@@ -1023,7 +1262,8 @@ def build_source_inventory_isolated(
     else:
         result = controller.run(command, memory_repo)
     if result.returncode != 0:
-        raise SourceInventoryError("source_inventory_worker_failed")
+        diagnostic = result.stderr.strip().removeprefix('update_status=blocked reason=source_inventory_invalid diagnostic=')
+        raise SourceInventoryError(diagnostic if diagnostic in INVENTORY_DIAGNOSTICS else "source_inventory_worker_failed")
     inventory = load_source_inventory_manifest(manifest_path)
     source_root = source_dir.resolve()
     if any(
@@ -1651,14 +1891,21 @@ def run_updates(
     registered = load_registry(memory_repo)
     source_streams = load_source_stream_registry(memory_repo)
     source_locations = load_source_locations(memory_repo)
+    if source_locations and not SOURCE_ADAPTER_AVAILABLE:
+        raise SourceInventoryError('source_identity_adapter_unavailable')
     locations_by_root = {root: location for location in source_locations.values()
                          for root in (location.source_dir, *location.relocation_dirs)}
     required_identities = tracked_source_identities(memory_repo) if any(location.discover_after for location in source_locations.values()) else frozenset()
+    try:
+        fragment_mappings = archived_fragment_mappings(memory_repo, is_safe_repo_path) if source_locations else []
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
 
     def target_location(root: Path) -> SourceLocation | None:
         location = locations_by_root.get(root)
         if location is not None and location.source_dir != root:
-            return SourceLocation(root, (), location.identity_adapter, location.discover_after)
+            return SourceLocation(root, tuple(path for path in (location.source_dir, *location.relocation_dirs) if path != root),
+                                  location.identity_adapter, location.discover_after)
         return location
 
     inventories: dict[tuple[Path, str], list[SourceInventoryRecord]] = {}
@@ -1682,9 +1929,11 @@ def run_updates(
                     patterns,
                     manifest_path,
                     identity_adapter,
-                    *([{"discover_after": location.discover_after.isoformat(),
+                    *([{"discover_after": location.discover_after.isoformat() if location.discover_after else None,
                         "required_identities": sorted(required_identities),
-                        "include_existing": source_root == location.source_dir}] if location and location.discover_after else []),
+                        "include_existing": source_root == location.source_dir,
+                        **({'fragment_mappings': fragment_mappings} if fragment_mappings else {})}]
+                       if location and (location.discover_after or fragment_mappings) else []),
                 )
             return inventories[key]
 
@@ -1697,11 +1946,9 @@ def run_updates(
             if primary_root not in collection_inventories:
                 root_inventories = [inventory_at(root, location.identity_adapter)
                                     for root in (primary_root, *location.relocation_dirs)]
-                inventory = combine_source_collection(root_inventories)
+                inventory = combine_source_collection(root_inventories, fragment_mappings=fragment_mappings)
                 collection_inventories[primary_root] = inventory
-            if source_root == primary_root:
-                return collection_inventories[primary_root]
-            return inventory_at(source_root, location.identity_adapter)
+            return collection_inventories[primary_root]
 
         discovered = discover_projects_from_inventory(inventory_for(source_dir))
         projects, added = merge_discovered_projects(registered, discovered, source_dir)
@@ -1870,22 +2117,28 @@ def main(argv: list[str] | None = None) -> int:
             selection_args = {}
             if args.inventory_selection_stdin:
                 selection = json.loads(sys.stdin.read())
-                if not isinstance(selection, dict) or set(selection) != {"discover_after", "required_identities", "include_existing"}:
+                if not isinstance(selection, dict) or set(selection) - {'fragment_mappings'} != {"discover_after", "required_identities", "include_existing"}:
                     raise SourceInventoryError("source_inventory_selection_invalid")
                 cutoff = parse_source_timestamp(selection["discover_after"])
                 identities = selection["required_identities"]
-                if cutoff is None or not isinstance(identities, list) or type(selection["include_existing"]) is not bool or any(
+                if (cutoff is None and selection['discover_after'] is not None) or not isinstance(identities, list) or type(selection["include_existing"]) is not bool or any(
                     not isinstance(value, str) or not re.fullmatch(r"codex-session:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) for value in identities
                 ):
                     raise SourceInventoryError("source_inventory_selection_invalid")
                 selection_args = dict(discover_after=cutoff, required_identities=frozenset(identities), include_existing=selection["include_existing"])
+                if 'fragment_mappings' in selection:
+                    mappings = selection['fragment_mappings']
+                    if not isinstance(mappings, list) or any(not isinstance(row, dict) for row in mappings):
+                        raise SourceInventoryError('source_inventory_selection_invalid')
+                    selection_args['fragment_mappings'] = mappings
             inventory = build_source_inventory(source_dir, patterns, args.source_identity_adapter, **selection_args)
             write_source_inventory_manifest(
                 Path(args.inventory_worker_manifest).expanduser(),
                 inventory,
             )
-        except SourceInventoryError:
-            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+        except SourceInventoryError as exc:
+            diagnostic = ' diagnostic=' + str(exc) if str(exc) in INVENTORY_DIAGNOSTICS else ''
+            print('update_status=blocked reason=source_inventory_invalid' + diagnostic, file=sys.stderr)
             return 1
         except Exception:
             print("update_status=failed reason=inventory_worker_internal_error", file=sys.stderr)
@@ -1937,14 +2190,15 @@ def main(argv: list[str] | None = None) -> int:
         if not args.report_json:
             print("update_status=blocked reason=interrupted", file=sys.stderr)
         exit_code = 128 + exc.signum
-    except SourceInventoryError:
+    except SourceInventoryError as exc:
         payload = update_batch_report(
             "blocked",
             "source_inventory_invalid",
             failure_stage="source_inventory",
         )
-        if not args.report_json:
-            print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
+        diagnostic = ' diagnostic=' + str(exc) if str(exc) in INVENTORY_DIAGNOSTICS else ''
+        if diagnostic or not args.report_json:
+            print('update_status=blocked reason=source_inventory_invalid' + diagnostic, file=sys.stderr)
         exit_code = 1
     except Exception:
         payload = update_batch_report("blocked", "runner_internal_error", failure_stage="runner")

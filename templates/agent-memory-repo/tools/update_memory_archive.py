@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -27,7 +27,16 @@ TOOLS_DIR = Path(__file__).resolve().parent
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from source_record_io import SourceRecordDecodeError, codex_session_identity as read_codex_session_identity, decompress_source_bytes, source_format
+from source_record_io import (
+    SourceRecordDecodeError, codex_session_identity as read_codex_session_identity,
+    decompress_source_bytes, source_format, codex_source_fragment,
+    resolve_source_fragments, validate_source_fragment, fragment_prefix,
+    restore_fragment_locator, archived_fragment_mappings, codex_rollout_locator,
+    legacy_codex_source_identity as read_legacy_codex_source_identity,
+    validate_rollout_locators, INVENTORY_DIAGNOSTICS,
+    fragment_descriptor_matches, fragment_reference_prefixes,
+    validated_fragment_prefix, source_fragment_dependencies,
+)
 
 from memory_consolidation import (
     add_contradiction_link,
@@ -428,10 +437,20 @@ class SourceRecord:
     identity_adapter: str = ""
     prior_source_paths: tuple[str, ...] = ()
     pending_source_paths: tuple[str, ...] = ()
+    source_fragment: dict | None = None
+    deferred: bool = False
+    archive_eligible: bool = True
+    target_metadata_known: bool = True
+    dependencies: tuple[SourceRecord, ...] = field(default=(), repr=False, compare=False)
 
 
 class SourceInventoryError(ValueError):
     pass
+
+
+def emit_inventory_diagnostic(exc: SourceInventoryError) -> None:
+    if str(exc) in INVENTORY_DIAGNOSTICS:
+        print('update_status=blocked reason=source_inventory_invalid diagnostic=' + str(exc), file=sys.stderr)
 
 
 CODEX_SESSION_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -451,11 +470,7 @@ def codex_session_identity(values: Iterable[object]) -> str:
 def legacy_codex_source_identity(path: str) -> str:
     # Legacy pending rows only had a path. A rollout UUID is a lookup hint;
     # the selected file's embedded session metadata must independently verify it.
-    match = re.fullmatch(
-        r"rollout-\d{4}-\d{2}-\d{2}t\d{2}-\d{2}-\d{2}-(" + CODEX_SESSION_UUID + r")\.jsonl",
-        Path(path).name.lower(),
-    )
-    return "codex-session:" + match[1] if match else ""
+    return read_legacy_codex_source_identity(path)
 
 
 def select_source_records(
@@ -465,35 +480,72 @@ def select_source_records(
     archived_source_hashes: dict[str, set[str]],
     pending_source_paths: set[str],
     known_source_identities: dict[str, str],
+    known_source_fragments: dict[str, dict] | None = None,
+    identity_hint_paths: frozenset[str] = frozenset(),
+    archived_source_fragments: dict[str, dict] | None = None,
 ) -> list[SourceRecord]:
     by_identity: dict[str, set[str]] = {}
     for path, identity in known_source_identities.items():
         if identity:
             by_identity.setdefault(identity, set()).add(path)
-    seen_identities: set[str] = set()
+    known_source_fragments = known_source_fragments or {}
+    archived_source_fragments = archived_source_fragments or {}
     selected = []
     for record in records:
         path = str(record.path)
         identity = record.source_identity
-        if identity:
-            if identity in seen_identities:
-                raise SourceInventoryError("source inventory contains duplicate identities")
-            seen_identities.add(identity)
-        if path in known_source_identities and known_source_identities[path] != identity:
+        if (path in known_source_identities and known_source_identities[path] != identity
+            and not (record.source_fragment and path in identity_hint_paths
+                     and record.sha256 in archived_source_hashes.get(path, set()))):
             raise SourceInventoryError("source path identity mismatch")
         lineage = by_identity.get(identity, set()) if identity else set()
-        prior_paths = (lineage | {path}) & archived_source_hashes.keys()
+        page = record.source_fragment
+        if page:
+            def same_page(old: str, previous: dict | None) -> bool:
+                if previous:
+                    return previous['fragment_id'] == page['fragment_id'] and (
+                        old == path or not previous['rollout_id'] or previous['rollout_id'] == page['rollout_id'])
+                locator = codex_rollout_locator(old)
+                return bool((locator and locator == page['rollout_id'] and known_source_identities.get(old) == identity)
+                            or record.sha256 in archived_source_hashes.get(old, set()))
+
+            # A session's sibling pages are independent replacement and retry units.
+            candidates = lineage | {path} | {
+                old for old, hashes in archived_source_hashes.items() if record.sha256 in hashes
+            } | set(identity_hint_paths)
+            lineage = set()
+            for old in candidates:
+                previous = known_source_fragments.get(old)
+                if same_page(old, previous):
+                    lineage.add(old)
+            previous = known_source_fragments.get(path)
+            if previous and previous['fragment_id'] != page['fragment_id']:
+                raise SourceInventoryError('source path fragment mismatch')
+        prior_paths = (lineage if page else lineage | {path}) & archived_source_hashes.keys()
+        if page:
+            # Retry snapshots describe pending work, not the provenance of a
+            # descriptor-less archive that predates that work.
+            prior_paths = {old for old in prior_paths if same_page(old, archived_source_fragments.get(old))}
+        if page and path in archived_source_hashes and path not in prior_paths:
+            # A legacy arbitrary path with changed bytes provides no page mapping.
+            # Retain its archive and retry state until a mapping can be verified.
+            record.deferred = True
         pending_paths = (lineage | {path}) & pending_source_paths
         record.prior_source_paths = tuple(sorted(prior_paths))
         record.pending_source_paths = tuple(sorted(pending_paths))
         prior_hashes = set().union(*(archived_source_hashes[value] for value in prior_paths))
-        changed = bool(prior_hashes) and record.sha256 not in prior_hashes
+        range_changed = bool(page and prior_paths and any(
+            old not in archived_source_fragments or any(
+                archived_source_fragments[old][field] != page[field]
+                for field in ('start_ordinal', 'end_ordinal_exclusive', 'end_byte_offset'))
+            for old in prior_paths))
+        changed = bool(prior_hashes) and record.sha256 not in prior_hashes or range_changed
         relocated = bool(prior_paths - {path})
-        unseen_identity = bool(identity) and not (lineage & archived_source_hashes.keys())
-        if after is not None and not (pending_paths or relocated or unseen_identity):
+        unseen_identity = bool(identity) and not prior_paths
+        if after is not None and not (pending_paths or relocated or unseen_identity or record.deferred):
             if record.updated_at < after and not changed:
                 continue
-            if record.updated_at == after and record.sha256 in archived_hashes:
+            if record.updated_at == after and record.sha256 in archived_hashes and not changed:
                 continue
         selected.append(record)
     return sorted(selected, key=lambda item: (item.updated_at, item.path.as_posix()))
@@ -1061,6 +1113,7 @@ def archived_project_state(
     *,
     include_generated_index: bool = True,
     source_identities: dict[str, str] | None = None,
+    source_fragments: dict[str, dict] | None = None,
 ) -> tuple[datetime | None, set[str], dict[str, set[str]]]:
     scope_key = archive_scope or str(project_path.resolve())
     partition_key = source_partition or str(project_path.resolve())
@@ -1098,6 +1151,14 @@ def archived_project_state(
                 if not valid_source_identity(identity) or source_identities.get(source_key, identity) != identity:
                     raise SourceInventoryError("archived source identity is invalid")
                 source_identities[source_key] = identity
+        if source_fragments is not None and source_key and meta.get('source_fragment') is not None:
+            try:
+                fragment = validate_source_fragment(meta['source_fragment'])
+            except SourceRecordDecodeError as exc:
+                raise SourceInventoryError(str(exc)) from exc
+            if source_key in source_fragments and source_fragments[source_key] != fragment:
+                raise SourceInventoryError('archived source fragment is invalid')
+            source_fragments[source_key] = fragment
         source_hash = meta.get("source_record_sha256")
         if isinstance(source_hash, str) and source_hash:
             archived_hashes.add(source_hash)
@@ -1129,7 +1190,7 @@ def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
             row = json.loads(raw_line)
         except json.JSONDecodeError as exc:
             raise SourceInventoryError("deferred source state is malformed") from exc
-        if not isinstance(row, dict) or set(row) not in ({
+        if not isinstance(row, dict) or set(row) - {'source_fragment'} not in ({
             "archive_scope",
             "source_partition",
             "source_record",
@@ -1149,12 +1210,19 @@ def load_deferred_source_rows(memory_repo: Path) -> list[dict[str, str]]:
             or ("source_identity" in row and not valid_source_identity(row["source_identity"]))
         ):
             raise SourceInventoryError("deferred source state is malformed")
+        try:
+            fragment = validate_source_fragment(row.get('source_fragment'))
+        except SourceRecordDecodeError as exc:
+            raise SourceInventoryError(str(exc)) from exc
+        if fragment and not row.get('source_identity'):
+            raise SourceInventoryError('deferred source state is malformed')
         rows.append(
             {
                 "archive_scope": archive_scope,
                 "source_partition": source_partition,
                 "source_record": str(Path(source_record).expanduser().resolve()),
                 **({"source_identity": row["source_identity"]} if "source_identity" in row else {}),
+                **({'source_fragment': fragment} if fragment else {}),
             }
         )
     return rows
@@ -1180,6 +1248,7 @@ def update_deferred_source_paths(
     add: Iterable[str] = (),
     remove: Iterable[str] = (),
     source_identities: dict[str, str] | None = None,
+    source_fragments: dict[str, dict] | None = None,
 ) -> None:
     rows = load_deferred_source_rows(memory_repo)
     keyed = {
@@ -1200,6 +1269,8 @@ def update_deferred_source_paths(
             "source_partition": source_partition,
             "source_record": source_record,
             **({"source_identity": identity} if identity else {}),
+            **({'source_fragment': fragment} if (fragment := (source_fragments or {}).get(source_record)
+                or keyed.get(key, {}).get('source_fragment')) else {}),
         }
     path = memory_repo / DEFERRED_SOURCE_STATE_REL_PATH
     if not keyed:
@@ -1413,10 +1484,13 @@ def discover_records(
     known_source_identities: dict[str, str] | None = None,
     source_roots: tuple[Path, ...] = (),
     source_identity_adapter: str = "",
+    known_source_fragments: dict[str, dict] | None = None,
+    fragment_mappings: Iterable[dict] = (),
+    archived_source_fragments: dict[str, dict] | None = None,
 ) -> list[SourceRecord]:
     records: list[SourceRecord] = []
     eligible_paths: set[Path] = set()
-    seen_identities: set[str] = set()
+    fragment_mappings = tuple(fragment_mappings)
     seen: set[Path] = set()
     archived_hashes = archived_hashes or set()
     archived_source_hashes = archived_source_hashes or {}
@@ -1428,23 +1502,40 @@ def discover_records(
         if path in seen:
             continue
         seen.add(path)
-        text = read_record_text(path)
+        initial_stat = path.stat()
+        raw = path.read_bytes()
+        final_stat = path.stat()
+        if (initial_stat.st_size, initial_stat.st_mtime_ns) != (final_stat.st_size, final_stat.st_mtime_ns):
+            raise SourceInventoryError('source inventory record changed')
+        text = decompress_source_bytes(path, raw).decode('utf-8', errors='replace')
         if is_codex_automation_thread_source(path, text):
             continue
         if record_matches_project(path, text, project_path, require_project_metadata):
             eligible_paths.add(path)
         updated_at = source_timestamp(path, text)
-        source_hash = sha256_file(path)
+        source_hash = hashlib.sha256(raw).hexdigest()
         identity = codex_session_identity(iter_source_json_values(path, text)) if source_identity_adapter and source_format(path) == ".jsonl" else ""
-        if identity and identity in seen_identities:
-            raise SourceInventoryError("source inventory contains duplicate identities")
+        fragment = None
         if identity:
-            seen_identities.add(identity)
+            try:
+                fragment = codex_source_fragment(path, text.encode('utf-8'))
+                if fragment:
+                    fragment = restore_fragment_locator(fragment, text.encode('utf-8'), identity, source_hash, fragment_mappings)
+            except SourceRecordDecodeError as exc:
+                raise SourceInventoryError(str(exc)) from exc
         records.append(SourceRecord(path=path, updated_at=updated_at, sha256=source_hash,
-                                    source_identity=identity, identity_adapter=source_identity_adapter))
+                                    expected_size=len(raw), expected_mtime_ns=final_stat.st_mtime_ns,
+                                    source_identity=identity, identity_adapter=source_identity_adapter,
+                                    source_fragment=fragment, archive_eligible=path in eligible_paths))
+    if source_identity_adapter:
+        validate_record_collection(records, fragment_mappings, target_project=project_path,
+                                   require_project_metadata=require_project_metadata)
     return select_source_records(
-        [record for record in records if record.path in eligible_paths], after, archived_hashes,
+        [record for record in records if (record.archive_eligible if record.source_fragment else record.path in eligible_paths)], after, archived_hashes,
         archived_source_hashes, pending_source_paths, known_source_identities or {},
+        known_source_fragments,
+        frozenset(row['source_record'] for row in fragment_mappings if not row.get('identity_verified', True)),
+        archived_source_fragments,
     )
 
 
@@ -1460,6 +1551,9 @@ def discover_records_from_inventory(
     known_source_identities: dict[str, str] | None = None,
     source_roots: tuple[Path, ...] = (),
     source_identity_adapter: str = "",
+    known_source_fragments: dict[str, dict] | None = None,
+    fragment_mappings: Iterable[dict] = (),
+    archived_source_fragments: dict[str, dict] | None = None,
 ) -> list[SourceRecord]:
     try:
         payload = json.loads(payload_text)
@@ -1468,7 +1562,8 @@ def discover_records_from_inventory(
     if (
         not isinstance(payload, dict)
         or payload.get("report_kind") != SOURCE_INVENTORY_REPORT_KIND
-        or payload.get("report_version") not in (SOURCE_INVENTORY_REPORT_VERSION, 3)
+        or type(payload.get('report_version')) is not int
+        or payload.get("report_version") not in (SOURCE_INVENTORY_REPORT_VERSION, 3, 4)
         or not isinstance(payload.get("records"), list)
     ):
         raise SourceInventoryError("source inventory contract is invalid")
@@ -1484,7 +1579,7 @@ def discover_records_from_inventory(
             raise SourceInventoryError("source inventory row is invalid")
         source_root = source_dir.resolve()
         identity = ""
-        if payload["report_version"] == 3:
+        if payload["report_version"] in (3, 4):
             root_value = row.get("source_root")
             identity = row.get("source_identity", "")
             if (
@@ -1510,12 +1605,16 @@ def discover_records_from_inventory(
             not isinstance(relative_path, str)
             or not relative_path
             or Path(relative_path).is_absolute()
+            or (payload['report_version'] == 4 and (Path(relative_path).as_posix() != relative_path
+                or any(ord(char) < 32 or ord(char) == 127 for char in relative_path)))
             or any(part in {"", ".", ".."} for part in Path(relative_path).parts)
             or not isinstance(expected_hash, str)
             or not SHA256_HEX_PATTERN.fullmatch(expected_hash)
             or not isinstance(expected_size, int)
+            or (payload['report_version'] == 4 and type(expected_size) is not int)
             or expected_size < 0
             or not isinstance(expected_mtime_ns, int)
+            or (payload['report_version'] == 4 and type(expected_mtime_ns) is not int)
             or expected_mtime_ns < 0
             or updated_at is None
         ):
@@ -1530,6 +1629,13 @@ def discover_records_from_inventory(
         if path in seen:
             raise SourceInventoryError("source inventory contains duplicate paths")
         seen.add(path)
+        archive_eligible = True
+        if payload['report_version'] == 4 and 'project_paths' in row:
+            projects = row['project_paths']
+            if not isinstance(projects, list) or any(not isinstance(value, str) or not Path(value).is_absolute()
+                or any(ord(char) < 32 or ord(char) == 127 for char in value) for value in projects):
+                raise SourceInventoryError('source inventory target metadata is invalid')
+            archive_eligible = str(project_path.resolve()) in projects or (not projects and not require_project_metadata)
         records.append(
             SourceRecord(
                 path=path,
@@ -1539,11 +1645,130 @@ def discover_records_from_inventory(
                 expected_mtime_ns=expected_mtime_ns,
                 source_identity=identity,
                 identity_adapter=source_identity_adapter,
+                source_fragment=read_inventory_fragment(row.get('source_fragment')) if payload['report_version'] == 4 else None,
+                archive_eligible=archive_eligible,
+                target_metadata_known=payload['report_version'] != 4 or 'project_paths' in row,
             )
         )
+    if source_identity_adapter:
+        validate_record_collection(records, fragment_mappings, verify_descriptors=payload['report_version'] == 4,
+                                   target_project=project_path, require_project_metadata=require_project_metadata)
     return select_source_records(
-        records, after, archived_hashes, archived_source_hashes, pending_source_paths, known_source_identities or {},
+        [record for record in records if record.archive_eligible], after, archived_hashes, archived_source_hashes, pending_source_paths, known_source_identities or {},
+        known_source_fragments,
+        frozenset(row['source_record'] for row in fragment_mappings if not row.get('identity_verified', True)),
+        archived_source_fragments,
     )
+
+
+def read_inventory_fragment(value: object) -> dict | None:
+    try:
+        return validate_source_fragment(value)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+
+
+def validate_record_collection(records: list[SourceRecord], mappings: Iterable[dict], *, verify_descriptors: bool = False,
+                               target_project: Path | None = None, require_project_metadata: bool = False) -> None:
+    """Verify all claimed page identities and graph closure before selecting or mutating.
+
+    Changing dependencies defer their owners and transitive dependent owners.
+    Nonmatching project dependencies authorize validation only, never archiving.
+    """
+    expected_by_path = {}
+    mappings = tuple(mappings)
+    unavailable = set()
+    try:
+        for record in records:
+            if source_format(record.path) != '.jsonl':
+                continue
+            expected_by_path[record.path] = record.source_fragment
+            try:
+                text, _ = read_validated_inventory_record(record)
+            except SourceInventoryError as exc:
+                if str(exc) not in DEFERABLE_SOURCE_INVENTORY_ERRORS:
+                    raise
+                if not record.target_metadata_known:
+                    # Without either physical metadata or a target hint, a
+                    # dependency cannot be enrolled in this target's pending set.
+                    raise SourceInventoryError('source inventory target metadata is unavailable') from exc
+                record.deferred = True
+                unavailable.add(record.source_identity or str(record.path))
+                continue
+            logical = text.encode('utf-8')
+            identity = codex_session_identity(iter_source_json_values(record.path, text))
+            if identity != record.source_identity:
+                raise SourceInventoryError('source inventory identity mismatch')
+            fragment = codex_source_fragment(record.path, logical)
+            if fragment:
+                fragment = restore_fragment_locator(fragment, logical, identity, record.sha256, mappings)
+            if verify_descriptors:
+                expected = expected_by_path[record.path]
+                physical = {**expected, 'end_ordinal_exclusive': expected['physical_end_ordinal_exclusive'],
+                            'end_byte_offset': expected['physical_end_byte_offset']} if expected else None
+                if not fragment_descriptor_matches(fragment, physical):
+                    raise SourceInventoryError('source inventory fragment mismatch')
+            record.source_fragment = fragment
+        dependencies = source_fragment_dependencies((record.source_identity, record.source_fragment) for record in records)
+        for i, record in enumerate(records):
+            record.dependencies = tuple(records[j] for j in sorted(dependencies[i]) if j != i)
+        propagate_source_dependency_deferrals(records)
+        unavailable.update(record.source_identity or str(record.path) for record in records if record.deferred)
+        stable = [record for record in records if (record.source_identity or str(record.path)) not in unavailable]
+        validate_rollout_locators((record.path, record.source_fragment) for record in records)
+        fragments = resolve_source_fragments(((record.source_identity, record.source_fragment) for record in stable),
+                                             fragment_mappings=mappings)
+        references = fragment_reference_prefixes((record.source_identity, fragment) for record, fragment in zip(stable, fragments))
+        for i, (record, fragment) in enumerate(zip(stable, fragments)):
+            if verify_descriptors and not fragment_descriptor_matches(fragment, expected_by_path.get(record.path)):
+                raise SourceInventoryError('source inventory fragment mismatch')
+            record.source_fragment = fragment
+            if fragment:
+                try:
+                    text, _ = read_validated_inventory_record(record)
+                    effective = validated_fragment_prefix(text.encode('utf-8'), fragment, references.get(i, ()))
+                    if target_project is not None:
+                        record.archive_eligible = record_matches_project(record.path, effective.decode('utf-8'),
+                                                                         target_project, require_project_metadata)
+                        record.target_metadata_known = True
+                except SourceInventoryError as exc:
+                    if str(exc) not in DEFERABLE_SOURCE_INVENTORY_ERRORS:
+                        raise
+                    if not record.target_metadata_known:
+                        raise SourceInventoryError('source inventory target metadata is unavailable') from exc
+                    record.deferred = True
+                    unavailable.add(record.source_identity or str(record.path))
+        for record in records:
+            if (record.source_identity or str(record.path)) in unavailable:
+                record.deferred = True
+        propagate_source_dependency_deferrals(records)
+    except SourceRecordDecodeError as exc:
+        raise SourceInventoryError(str(exc)) from exc
+
+
+def propagate_source_dependency_deferrals(records: Iterable[SourceRecord]) -> None:
+    """Dependencies already include whole owner views and their transitive parents."""
+    records = list(records)
+    unavailable = {record.source_identity for record in records if record.deferred and record.source_identity}
+    for record in records:
+        if any(dependency.deferred or dependency.source_identity in unavailable for dependency in record.dependencies):
+            record.deferred = True
+
+
+def revalidate_source_dependencies(records: Iterable[SourceRecord]) -> None:
+    """Recheck physical dependency snapshots after preparation and before any writes."""
+    records = list(records)
+    dependencies = {dependency.path: dependency for record in records for dependency in record.dependencies}
+    for dependency in dependencies.values():
+        if dependency.deferred:
+            continue
+        try:
+            read_validated_inventory_record(dependency)
+        except SourceInventoryError as exc:
+            if str(exc) not in DEFERABLE_SOURCE_INVENTORY_ERRORS:
+                raise
+            dependency.deferred = True
+    propagate_source_dependency_deferrals(records)
 
 
 def read_validated_inventory_record(record: SourceRecord) -> tuple[str, float]:
@@ -3895,6 +4120,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
         **({"source_identity": record.source_identity} if record.source_identity else {}),
+        **({'source_fragment': record.source_fragment} if record.source_fragment else {}),
         "source_updated_at": isoformat(record.updated_at),
         "archived_at": isoformat(archived_at),
         "summary_path": str(rel_summary),
@@ -3922,6 +4148,7 @@ See `evidence.md` for short redacted snippets that support the summary.
         "source_record": str(record.path),
         "source_record_sha256": record.sha256,
         **({"source_identity": record.source_identity} if record.source_identity else {}),
+        **({'source_fragment': record.source_fragment} if record.source_fragment else {}),
         "source_updated_at": isoformat(record.updated_at),
         "project_path": str(project_path),
         "archive_scope": archive_scope,
@@ -3968,7 +4195,21 @@ def prepare_inventory_record(
     record: SourceRecord,
     require_project_metadata: bool,
 ) -> PreparedArchiveRecord:
+    if record.deferred:
+        raise SourceInventoryError('source inventory record changed')
     source_text, source_mtime = read_validated_inventory_record(record)
+    if record.source_fragment:
+        # Validate owner and inventory timestamp on the original physical page,
+        # then summarize only its inherited effective prefix. Line numbers stay local.
+        full_values = list(iter_source_json_values(record.path, source_text))
+        if codex_session_identity(full_values) != record.source_identity:
+            raise SourceInventoryError('source inventory identity mismatch')
+        if source_timestamp_from_values(record.path, full_values, fallback_mtime=source_mtime) != record.updated_at:
+            raise SourceInventoryError('source inventory timestamp mismatch')
+        try:
+            source_text = fragment_prefix(source_text.encode('utf-8'), record.source_fragment).decode('utf-8')
+        except SourceRecordDecodeError as exc:
+            raise SourceInventoryError(str(exc)) from exc
     redacted_text, redaction_counts = redact_source_text(record.path, source_text)
     if source_format(record.path) == ".jsonl":
         source_events, source_values = analyze_selected_jsonl(source_text, redacted_text)
@@ -3981,7 +4222,7 @@ def prepare_inventory_record(
         raise SourceInventoryError("source inventory contains an automation record")
     if not record_matches_project_values(source_values, project_path, require_project_metadata):
         raise SourceInventoryError("source inventory target mismatch")
-    if source_timestamp_from_values(record.path, source_values, fallback_mtime=source_mtime) != record.updated_at:
+    if not record.source_fragment and source_timestamp_from_values(record.path, source_values, fallback_mtime=source_mtime) != record.updated_at:
         raise SourceInventoryError("source inventory timestamp mismatch")
     del source_values, source_text, redacted_text
     return prepare_record(
@@ -6305,6 +6546,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     known_source_identities = {}
+    known_source_fragments = {}
+    fragment_mappings = []
     try:
         latest, archived_hashes, archived_source_hashes = archived_project_state(
             memory_repo,
@@ -6313,7 +6556,9 @@ def main(argv: list[str] | None = None) -> int:
             source_partition,
             include_generated_index=not args.defer_global_rebuild,
             source_identities=known_source_identities if args.source_identity_adapter else None,
+            source_fragments=known_source_fragments if args.source_identity_adapter else None,
         )
+        archived_source_fragments = dict(known_source_fragments)
         pending_source_paths = deferred_source_paths(memory_repo, archive_scope, source_partition)
         if args.source_identity_adapter:
             for row in load_deferred_source_rows(memory_repo):
@@ -6323,12 +6568,19 @@ def main(argv: list[str] | None = None) -> int:
                         if known_source_identities.get(row["source_record"], identity) != identity:
                             raise SourceInventoryError("source path identity mismatch")
                         known_source_identities[row["source_record"]] = identity
+                    if row.get('source_fragment'):
+                        known_source_fragments[row['source_record']] = row['source_fragment']
+            try:
+                fragment_mappings = archived_fragment_mappings(memory_repo, is_safe_repo_path)
+            except SourceRecordDecodeError as exc:
+                raise SourceInventoryError(str(exc)) from exc
         source_roots = tuple(Path(value).expanduser().resolve() for value in args.source_relocation_dir)
         all_roots = (source_dir, *source_roots)
         if any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
                for index, a in enumerate(all_roots) for b in all_roots[index + 1:]):
             raise SourceInventoryError("source inventory roots overlap")
-    except SourceInventoryError:
+    except SourceInventoryError as exc:
+        emit_inventory_diagnostic(exc)
         if args.report_json:
             emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
         else:
@@ -6351,6 +6603,9 @@ def main(argv: list[str] | None = None) -> int:
                 known_source_identities=known_source_identities,
                 source_roots=source_roots,
                 source_identity_adapter=args.source_identity_adapter,
+                known_source_fragments=known_source_fragments,
+                fragment_mappings=fragment_mappings,
+                archived_source_fragments=archived_source_fragments,
             )
         else:
             records = discover_records(
@@ -6362,24 +6617,38 @@ def main(argv: list[str] | None = None) -> int:
                 known_source_identities=known_source_identities,
                 source_roots=source_roots,
                 source_identity_adapter=args.source_identity_adapter,
+                known_source_fragments=known_source_fragments,
+                fragment_mappings=fragment_mappings,
+                archived_source_fragments=archived_source_fragments,
             )
-    except SourceInventoryError:
+    except SourceInventoryError as exc:
+        emit_inventory_diagnostic(exc)
         if args.report_json:
             emit_update_target_report(update_target_report("blocked", "source_inventory_invalid"))
         else:
             print("update_status=blocked reason=source_inventory_invalid", file=sys.stderr)
         return 2
+    limited_records = []
     if args.max_records >= 0:
+        limited_records = [record for record in records[args.max_records:] if record.source_fragment]
         records = records[: args.max_records]
 
     selected_source_paths = {path for record in records for path in (*record.pending_source_paths, str(record.path))}
     deferred_identities = dict(known_source_identities)
+    deferred_fragments = dict(known_source_fragments)
+    for record in [*records, *limited_records]:
+        for path in (*record.pending_source_paths, str(record.path)):
+            if record.source_identity:
+                deferred_identities[path] = record.source_identity
+            if record.source_fragment:
+                deferred_fragments[path] = record.source_fragment
     unresolved_pending_paths = pending_source_paths - selected_source_paths
+    unresolved_pending_paths.update(str(record.path) for record in limited_records)
     selected_record_count = len(records) + len(unresolved_pending_paths)
     deferred_record_count = len(unresolved_pending_paths)
     deferred_source_records = set(unresolved_pending_paths)
     prepared_records: list[PreparedArchiveRecord] | None = None
-    if args.source_inventory_stdin and not args.dry_run:
+    if (args.source_inventory_stdin or args.source_identity_adapter) and not args.dry_run:
         prepared_records = []
         stable_records: list[SourceRecord] = []
         for record in records:
@@ -6396,6 +6665,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except SourceInventoryError as exc:
                 if str(exc) in DEFERABLE_SOURCE_INVENTORY_ERRORS:
+                    record.deferred = True
                     deferred_record_count += 1
                     retry_paths = record.pending_source_paths or (str(record.path),)
                     deferred_source_records.update(retry_paths)
@@ -6415,6 +6685,26 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             stable_records.append(record)
             prepared_records.append(prepared)
+        try:
+            revalidate_source_dependencies(records)
+        except SourceInventoryError:
+            if args.report_json:
+                emit_update_target_report(update_target_report('blocked', 'source_inventory_invalid',
+                                          records_selected_count=selected_record_count))
+            else:
+                print('update_status=blocked reason=source_inventory_invalid', file=sys.stderr)
+            return 2
+        deferred_owners = {record.source_identity for record in records if record.deferred and record.source_fragment}
+        kept = []
+        kept_prepared = []
+        for record, prepared in zip(stable_records, prepared_records):
+            if record.source_identity in deferred_owners:
+                deferred_record_count += 1
+                deferred_source_records.update(record.pending_source_paths or (str(record.path),))
+            else:
+                kept.append(record)
+                kept_prepared.append(prepared)
+        stable_records, prepared_records = kept, kept_prepared
         records = stable_records
 
     if not args.report_json:
@@ -6484,6 +6774,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_partition,
                 add=deferred_source_records,
                 source_identities=deferred_identities,
+                source_fragments=deferred_fragments,
             )
         except SourceInventoryError:
             if args.report_json:
