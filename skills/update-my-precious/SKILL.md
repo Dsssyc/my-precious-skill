@@ -143,6 +143,19 @@ Review and publish this deployment configuration before running the scheduled
 adapter. Do not copy source records into their former locations or clear pending
 rows to repair a migration. Other source runtimes retain the existing behavior.
 
+Verified same-owner paginated JSONL chains archive each physical page separately.
+Inherited prefixes exclude obsolete tails while preserving physical raw hashes
+and local evidence line anchors. Missing references, competing pages, and
+unproven rename mappings fail closed; changing snapshot dependencies defer their
+owner and dependent owner groups. Page completion never clears a sibling or
+foreign child's pending work. Declared cross-owner reference forks validate the
+parent's physical bytes and current own range without truncating its own chain;
+other-project dependencies authorize closure validation only.
+Self-contained copied forks keep the child owner and validate ancestor headers
+inside the declared copied prefix. Cutoff-excluded historical pages stay as
+header hints until needed by a seed or a known page mapping; pagination alone
+does not activate unrelated old history.
+
 ## Required Inputs
 
 Resolve or ask for:
