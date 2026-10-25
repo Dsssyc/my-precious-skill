@@ -345,7 +345,12 @@ def repair_summary_surface(
     repaired = text
     title = payload.get("title")
     if isinstance(title, str) and title.strip() and repaired.startswith("# Session: "):
-        repaired = re.sub(r"\A# Session: [^\n]*", f"# Session: {title.strip()}", repaired, count=1)
+        repaired = re.sub(
+            r"\A# Session: [^\n]*",
+            lambda _match: f"# Session: {title.strip()}",
+            repaired,
+            count=1,
+        )
     tags = payload.get("tags")
     if isinstance(tags, list) and "## Search Tags\n" in repaired:
         rendered_tags = ", ".join(str(tag) for tag in tags if isinstance(tag, str) and tag.strip())
